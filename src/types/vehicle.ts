@@ -53,6 +53,55 @@ export interface VehiclePositionItem {
   rawIo?: Record<string, unknown>;
 }
 
+export type VehicleGeoEventType =
+  | "ignition_on"
+  | "ignition_off"
+  | "moving"
+  | "stop"
+  | "overspeed"
+  | "tracker_event";
+
+export interface VehicleGeoEvent {
+  id: string;
+  type: VehicleGeoEventType;
+  timestamp: number;
+  label: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface VehicleStopItem {
+  id: string;
+  start: VehiclePositionItem;
+  end: VehiclePositionItem;
+  durationMs: number;
+  lat: number;
+  lng: number;
+}
+
+export interface VehicleTrackerEventItem {
+  id: string;
+  type: string;
+  timestamp: number;
+  lat?: number;
+  lng?: number;
+  speedKmh?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export type VehicleCommandType = "allow_start" | "block_start";
+export type VehicleCommandStatus = "requested" | "pending" | "completed" | "failed";
+
+export interface VehicleCommandItem {
+  id: string;
+  type: VehicleCommandType;
+  status: VehicleCommandStatus;
+  requestedBy: string;
+  requestedAt: number;
+  completedAt?: number | null;
+  providerMessage?: string;
+  result?: string;
+}
+
 export interface VehicleItem {
   id: string;
   plateNumber: string;

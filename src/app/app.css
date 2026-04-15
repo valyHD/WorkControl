@@ -2305,11 +2305,42 @@ input[type="file"] {
   align-items: flex-start;
 }
 
-.vehicle-gps-live-badges {
+.vehicle-live-route-card__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.vehicle-range-toolbar {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.vehicle-filter-chip {
+  border: 1px solid var(--line-mid);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vehicle-filter-chip.active {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 45%, white);
+  color: var(--primary-deep);
+}
+
+.vehicle-threshold-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 700;
 }
 
 .vehicle-gps-chip {
@@ -2325,16 +2356,24 @@ input[type="file"] {
   font-weight: 700;
 }
 
+.vehicle-gps-chip.control-allowed,
 .vehicle-gps-chip.is-online {
   background: var(--success-soft);
   border-color: var(--success-line);
   color: var(--success);
 }
 
+.vehicle-gps-chip.control-unavailable,
 .vehicle-gps-chip.is-offline {
   background: var(--danger-soft);
   border-color: var(--danger-line);
   color: var(--danger);
+}
+
+.vehicle-gps-chip.control-pending {
+  background: var(--warning-soft);
+  border-color: var(--warning-line);
+  color: var(--warning);
 }
 
 .vehicle-live-route-card__mapWrap {
@@ -2375,6 +2414,8 @@ input[type="file"] {
 }
 
 .vehicle-map-pin--start { background: #15803d; }
+.vehicle-map-pin--end { background: #0f172a; }
+.vehicle-map-pin--current { background: #1d4ed8; }
 .vehicle-map-pin--stop { background: #ea580c; }
 .vehicle-map-pin--overspeed { background: #b91c1c; }
 
@@ -2408,6 +2449,65 @@ input[type="file"] {
   gap: 16px;
 }
 
+.vehicle-info-card {
+  display: grid;
+  gap: 12px;
+}
+
+.vehicle-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vehicle-info-item {
+  border: 1px solid var(--line-mid);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-soft);
+  background: var(--surface);
+}
+
+.vehicle-info-item span { color: var(--text-muted); font-size: 12px; }
+
+.vehicle-timeline-card { display: grid; gap: 12px; }
+
+.vehicle-timeline-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.vehicle-timeline-item {
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-alt);
+}
+
+.vehicle-timeline-item__icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+}
+
+.vehicle-timeline-item__title { font-weight: 700; color: var(--text); }
+.vehicle-timeline-item__meta { font-size: 12px; color: var(--text-muted); }
+
+.vehicle-control-card { display: grid; gap: 12px; }
+.vehicle-control-card__header { display: flex; justify-content: space-between; align-items: center; }
+
 .vehicle-engine-warning {
   border-radius: var(--radius-sm);
   padding: 14px 16px;
@@ -2425,6 +2525,10 @@ input[type="file"] {
 
   .vehicle-gps-stats-grid,
   .vehicle-gps-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vehicle-info-grid {
     grid-template-columns: 1fr;
   }
 }
