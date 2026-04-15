@@ -6,6 +6,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -24,6 +25,7 @@ import type {
   VehicleFormValues,
   VehicleImageItem,
   VehicleItem,
+  VehiclePositionItem,
 } from "../../../types/vehicle";
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
@@ -60,6 +62,30 @@ currentDriverThemeKey: data.currentDriverThemeKey ?? null,
     coverImageUrl: data.coverImageUrl ?? "",
     coverThumbUrl: data.coverThumbUrl ?? "",
     images: Array.isArray(data.images) ? data.images : [],
+
+    gpsSnapshot: data.gpsSnapshot
+      ? {
+          lat: Number(data.gpsSnapshot.lat ?? 0),
+          lng: Number(data.gpsSnapshot.lng ?? 0),
+          speedKmh: Number(data.gpsSnapshot.speedKmh ?? 0),
+          altitude: Number(data.gpsSnapshot.altitude ?? 0),
+          angle: Number(data.gpsSnapshot.angle ?? 0),
+          satellites: Number(data.gpsSnapshot.satellites ?? 0),
+          gpsTimestamp: Number(data.gpsSnapshot.gpsTimestamp ?? 0),
+          serverTimestamp: Number(data.gpsSnapshot.serverTimestamp ?? 0),
+          ignitionOn: Boolean(data.gpsSnapshot.ignitionOn ?? false),
+          odometerKm: Number(data.gpsSnapshot.odometerKm ?? 0),
+          imei: data.gpsSnapshot.imei ?? "",
+          online: Boolean(data.gpsSnapshot.online ?? false),
+        }
+      : null,
+    tracker: data.tracker
+      ? {
+          imei: data.tracker.imei ?? "",
+          lastSeenAt: Number(data.tracker.lastSeenAt ?? 0),
+          protocol: data.tracker.protocol ?? "",
+        }
+      : null,
 
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),
@@ -465,4 +491,44 @@ updatedAtServer: serverTimestamp(),
 
 export async function deleteVehicle(vehicleId: string): Promise<void> {
   await deleteDoc(doc(db, "vehicles", vehicleId));
+}
+function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePositionItem {
+  return {
+    id,
+    vehicleId: data.vehicleId ?? "",
+    imei: data.imei ?? "",
+    lat: Number(data.lat ?? 0),
+    lng: Number(data.lng ?? 0),
+    speedKmh: Number(data.speedKmh ?? 0),
+    altitude: Number(data.altitude ?? 0),
+    angle: Number(data.angle ?? 0),
+    satellites: Number(data.satellites ?? 0),
+    gpsTimestamp: Number(data.gpsTimestamp ?? 0),
+    serverTimestamp: Number(data.serverTimestamp ?? 0),
+    eventIoId: Number(data.eventIoId ?? 0),
+    ignitionOn: Boolean(data.ignitionOn ?? false),
+    odometerKm: Number(data.odometerKm ?? 0),
+    rawIo: typeof data.rawIo === "object" && data.rawIo ? data.rawIo : {},
+  };
+}
+
+export function subscribeVehiclePositions(
+  vehicleId: string,
+  onData: (items: VehiclePositionItem[]) => void,
+  maxItems = 300
+): () => void {
+  const positionsQuery = query(
+    collection(db, "vehicles", vehicleId, "positions"),
+    orderBy("gpsTimestamp", "desc"),
+    limit(maxItems)
+  );
+
+  return onSnapshot(positionsQuery, (snap) => {
+    const items = snap.docs
+      .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+      .filter((item) => !(item.lat === 0 && item.lng === 0))
+      .sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+
+    onData(items);
+  });
 }

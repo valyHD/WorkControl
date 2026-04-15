@@ -2292,3 +2292,139 @@ input[type="file"] {
     max-width: 56px;
   }
 }
+.vehicle-live-route-card {
+  display: grid;
+  gap: 18px;
+}
+
+.vehicle-live-route-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.vehicle-gps-live-badges {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.vehicle-gps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  border: 1px solid var(--line-mid);
+  color: var(--text-soft);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.vehicle-gps-chip.is-online {
+  background: var(--success-soft);
+  border-color: var(--success-line);
+  color: var(--success);
+}
+
+.vehicle-gps-chip.is-offline {
+  background: var(--danger-soft);
+  border-color: var(--danger-line);
+  color: var(--danger);
+}
+
+.vehicle-live-route-card__mapWrap {
+  height: 520px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--line-mid);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+  background: var(--surface-alt);
+}
+
+.vehicle-live-route-card__map,
+.vehicle-live-route-card__map .leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+.vehicle-live-route-card__empty {
+  min-height: 520px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.vehicle-map-pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  border: 2px solid rgba(255,255,255,.92);
+}
+
+.vehicle-map-pin--start { background: #15803d; }
+.vehicle-map-pin--stop { background: #ea580c; }
+.vehicle-map-pin--overspeed { background: #b91c1c; }
+
+.vehicle-gps-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vehicle-gps-stat-card {
+  padding: 16px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-mid);
+  background: linear-gradient(180deg, var(--surface), var(--surface-alt));
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 6px;
+}
+
+.vehicle-gps-stat-card__label {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.vehicle-gps-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.vehicle-engine-warning {
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  border: 1px solid var(--warning-line);
+  background: var(--warning-soft);
+  color: var(--text-soft);
+}
+
+@media (max-width: 1024px) {
+  .vehicle-live-route-card__mapWrap,
+  .vehicle-live-route-card__empty {
+    min-height: 420px;
+    height: 420px;
+  }
+
+  .vehicle-gps-stats-grid,
+  .vehicle-gps-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

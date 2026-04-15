@@ -5,6 +5,7 @@ import type { VehicleEventItem, VehicleItem } from "../../../types/vehicle";
 import { useAuth } from "../../../providers/AuthProvider";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
+import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
 import {
   claimVehicleForCurrentUser,
   getVehicleById,
@@ -210,6 +211,23 @@ await claimVehicleForCurrentUser(
       {isOwner && (
         <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={load} />
       )}
+
+      {vehicle.gpsSnapshot && (
+        <VehicleLiveRouteCard vehicle={vehicle} />
+      )}
+
+      <div className="panel">
+        <h3 className="panel-title">Control motor / imobilizare</h3>
+        <p className="tools-subtitle" style={{ marginBottom: 16 }}>
+          FTC880 poate fi folosit pentru control de iesire digitala si scenarii de imobilizare doar dupa montaj electric corect.
+          Pentru “pornire motor din web” nu este suficient trackerul singur si nu este suficient un cablu OBD-C.
+        </p>
+
+        <div className="vehicle-engine-warning">
+          <strong>Recomandare produs:</strong> transforma actiunea in “Permite pornirea / Blocheaza pornirea” pe releu de imobilizare,
+          nu “Porneste motorul”. Pentru pornire reala la distanta ai nevoie de modul dedicat de remote start + montaj auto-electrician.
+        </div>
+      </div>
 
       <div className="panel">
         <h3 className="panel-title">Galerie poze</h3>

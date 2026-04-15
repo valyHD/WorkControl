@@ -14,6 +14,45 @@ export interface VehicleImageItem {
   thumbPath?: string;
 }
 
+export interface VehicleGpsSnapshot {
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  altitude?: number;
+  angle?: number;
+  satellites?: number;
+  gpsTimestamp: number;
+  serverTimestamp: number;
+  ignitionOn?: boolean;
+  odometerKm?: number;
+  imei?: string;
+  online?: boolean;
+}
+
+export interface VehicleTrackerMeta {
+  imei?: string;
+  lastSeenAt?: number;
+  protocol?: string;
+}
+
+export interface VehiclePositionItem {
+  id: string;
+  vehicleId: string;
+  imei?: string;
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  altitude?: number;
+  angle?: number;
+  satellites?: number;
+  gpsTimestamp: number;
+  serverTimestamp: number;
+  eventIoId?: number;
+  ignitionOn?: boolean;
+  odometerKm?: number;
+  rawIo?: Record<string, unknown>;
+}
+
 export interface VehicleItem {
   id: string;
   plateNumber: string;
@@ -42,6 +81,9 @@ export interface VehicleItem {
   coverImageUrl: string;
   coverThumbUrl: string;
   images: VehicleImageItem[];
+
+  gpsSnapshot?: VehicleGpsSnapshot | null;
+  tracker?: VehicleTrackerMeta | null;
 
   createdAt: number;
   updatedAt: number;
