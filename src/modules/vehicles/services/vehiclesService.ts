@@ -21,8 +21,10 @@ import {
 } from "firebase/storage";
 import { db, storage } from "../../../lib/firebase/firebase";
 import type {
+  VehicleCommandItem,
   VehicleEventItem,
   VehicleFormValues,
+  VehicleTrackerEventItem,
   VehicleImageItem,
   VehicleItem,
   VehiclePositionItem,
@@ -512,6 +514,39 @@ function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePo
   };
 }
 
+function mapVehicleTrackerEventDoc(
+  id: string,
+  data: Record<string, any>
+): VehicleTrackerEventItem {
+  return {
+    id,
+    type: String(data.type ?? "tracker_event"),
+    timestamp: Number(data.timestamp ?? data.gpsTimestamp ?? data.createdAt ?? Date.now()),
+    lat: Number(data.lat ?? 0) || undefined,
+    lng: Number(data.lng ?? 0) || undefined,
+    speedKmh: Number(data.speedKmh ?? 0) || undefined,
+    metadata:
+      typeof data.metadata === "object" && data.metadata
+        ? data.metadata
+        : {},
+  };
+}
+
+function mapVehicleCommandDoc(id: string, data: Record<string, any>): VehicleCommandItem {
+  return {
+    id,
+    type: data.type === "block_start" ? "block_start" : "allow_start",
+    status: ["requested", "pending", "completed", "failed"].includes(data.status)
+      ? data.status
+      : "requested",
+    requestedBy: String(data.requestedBy ?? "system"),
+    requestedAt: Number(data.requestedAt ?? Date.now()),
+    completedAt: data.completedAt ? Number(data.completedAt) : null,
+    providerMessage: String(data.providerMessage ?? ""),
+    result: String(data.result ?? ""),
+  };
+}
+
 export function subscribeVehiclePositions(
   vehicleId: string,
   onData: (items: VehiclePositionItem[]) => void,
@@ -531,4 +566,74 @@ export function subscribeVehiclePositions(
 
     onData(items);
   });
+}
+
+export async function getVehiclePositionsRange(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  maxItems = 1500
+): Promise<VehiclePositionItem[]> {
+  const positionsQuery = query(
+    collection(db, "vehicles", vehicleId, "positions"),
+    where("gpsTimestamp", ">=", fromTs),
+    where("gpsTimestamp", "<=", toTs),
+    orderBy("gpsTimestamp", "asc"),
+    limit(maxItems)
+  );
+
+  const snap = await getDocs(positionsQuery);
+  return snap.docs
+    .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+    .filter((item) => !(item.lat === 0 && item.lng === 0));
+}
+
+export async function getVehicleTrackerEvents(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  maxItems = 500
+): Promise<VehicleTrackerEventItem[]> {
+  const eventsQuery = query(
+    collection(db, "vehicles", vehicleId, "events"),
+    where("timestamp", ">=", fromTs),
+    where("timestamp", "<=", toTs),
+    orderBy("timestamp", "asc"),
+    limit(maxItems)
+  );
+
+  const snap = await getDocs(eventsQuery);
+  return snap.docs.map((docItem) => mapVehicleTrackerEventDoc(docItem.id, docItem.data()));
+}
+
+export async function getVehicleCommands(vehicleId: string, maxItems = 20): Promise<VehicleCommandItem[]> {
+  const commandsQuery = query(
+    collection(db, "vehicles", vehicleId, "commands"),
+    orderBy("requestedAt", "desc"),
+    limit(maxItems)
+  );
+
+  const snap = await getDocs(commandsQuery);
+  return snap.docs.map((docItem) => mapVehicleCommandDoc(docItem.id, docItem.data()));
+}
+
+export async function requestVehicleCommand(
+  vehicleId: string,
+  payload: {
+    type: "allow_start" | "block_start";
+    requestedBy: string;
+  }
+): Promise<string> {
+  const created = await addDoc(collection(db, "vehicles", vehicleId, "commands"), {
+    type: payload.type,
+    status: "requested",
+    requestedBy: payload.requestedBy,
+    requestedAt: Date.now(),
+    completedAt: null,
+    providerMessage: "",
+    result: "queued",
+    createdAtServer: serverTimestamp(),
+  });
+
+  return created.id;
 }
