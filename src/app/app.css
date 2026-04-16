@@ -1902,6 +1902,30 @@ select.tool-input {
   margin: 0;
 }
 
+/* extra breathing room for forms/actions rendered directly in cards */
+.panel > .tool-form {
+  padding: 0 20px 20px;
+}
+
+.panel > .tool-form .tool-form-block {
+  padding: 0;
+}
+
+.panel > .tool-form .tool-form-actions {
+  padding: 6px 0 0;
+}
+
+.panel > .tool-message {
+  margin: 0 20px 14px;
+}
+
+/* keep buttons aligned in compact card areas */
+.tool-card-actions .secondary-btn,
+.tool-form-actions .secondary-btn,
+.tools-header-actions .secondary-btn {
+  margin: 0;
+}
+
 .tool-input {
   width: 100%;
   min-width: 0;
