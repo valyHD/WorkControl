@@ -5,6 +5,8 @@ type Props = {
   vehicle: VehicleItem;
 };
 
+const TRACKER_ONLINE_WINDOW_MS = 10 * 60 * 1000;
+
 function formatDate(ts?: number) {
   if (!ts) return "-";
   return new Date(ts).toLocaleString("ro-RO");
@@ -17,6 +19,10 @@ function formatCoords(lat?: number, lng?: number) {
 
 export default function VehicleGpsStatsCard({ vehicle }: Props) {
   const snapshot = vehicle.gpsSnapshot;
+  const lastTrackerUpdateAt =
+    snapshot?.serverTimestamp || vehicle.tracker?.lastSeenAt || snapshot?.gpsTimestamp || 0;
+  const isFreshPing = lastTrackerUpdateAt > 0 && Date.now() - lastTrackerUpdateAt <= TRACKER_ONLINE_WINDOW_MS;
+  const isTrackerOnline = Boolean(snapshot?.online) && isFreshPing;
   const mapsHref =
     typeof snapshot?.lat === "number" && typeof snapshot?.lng === "number"
       ? `https://www.google.com/maps?q=${snapshot.lat},${snapshot.lng}`
@@ -28,7 +34,7 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
       <div className="vehicle-info-grid">
         <div className="vehicle-info-item">
           <Radio size={16} />
-          <strong>{snapshot?.online ? "Online" : "Offline"}</strong>
+          <strong>{isTrackerOnline ? "Online" : "Offline"}</strong>
           <span>Status tracker</span>
         </div>
         <div className="vehicle-info-item">
@@ -68,7 +74,7 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
         </div>
       </div>
 
-      <div className="tool-detail-line"><strong>Ultima actualizare:</strong> {formatDate(snapshot?.serverTimestamp || vehicle.tracker?.lastSeenAt)}</div>
+      <div className="tool-detail-line"><strong>Ultima actualizare:</strong> {formatDate(lastTrackerUpdateAt)}</div>
       <div className="tool-detail-line"><strong>Altitudine:</strong> {snapshot?.altitude ?? 0} m</div>
 
       <div className="tool-form-actions" style={{ marginTop: 14 }}>
