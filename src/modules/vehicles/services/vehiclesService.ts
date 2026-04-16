@@ -568,6 +568,30 @@ export function subscribeVehiclePositions(
   });
 }
 
+export function subscribeVehiclePositionsRange(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  onData: (items: VehiclePositionItem[]) => void,
+  maxItems = 2000
+): () => void {
+  const positionsQuery = query(
+    collection(db, "vehicles", vehicleId, "positions"),
+    where("gpsTimestamp", ">=", fromTs),
+    where("gpsTimestamp", "<=", toTs),
+    orderBy("gpsTimestamp", "asc"),
+    limit(maxItems)
+  );
+
+  return onSnapshot(positionsQuery, (snap) => {
+    const items = snap.docs
+      .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+      .filter((item) => !(item.lat === 0 && item.lng === 0));
+
+    onData(items);
+  });
+}
+
 export async function getVehiclePositionsRange(
   vehicleId: string,
   fromTs: number,
