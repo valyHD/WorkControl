@@ -10,6 +10,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -121,6 +122,12 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const gpsSnapshotRaw = data.gpsSnapshot ? toSafeObject(data.gpsSnapshot) : null;
   const trackerRaw = data.tracker ? toSafeObject(data.tracker) : null;
   const imagesRaw = Array.isArray(data.images) ? data.images : [];
+  const gpsOdometerKm = gpsSnapshotRaw ? toOptionalNumber(gpsSnapshotRaw.odometerKm) : undefined;
+  const storedCurrentKm = toSafeNumber(data.currentKm, 0);
+  const currentKm = Math.max(storedCurrentKm, gpsOdometerKm ?? 0);
+  const initialRecordedKm = toSafeNumber(data.initialRecordedKm, storedCurrentKm || currentKm);
+  const serviceStrategy = data.serviceStrategy === "absolute" ? "absolute" : "interval";
+  const serviceIntervalKm = toSafeNumber(data.serviceIntervalKm, 15000);
 
   return {
     id,
@@ -133,7 +140,8 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     ownerThemeKey: data.ownerThemeKey ?? null,
     currentDriverThemeKey: data.currentDriverThemeKey ?? null,
     status: toVehicleStatus(data.status),
-    currentKm: toSafeNumber(data.currentKm, 0),
+    currentKm,
+    initialRecordedKm,
 
     ownerUserId: toSafeString(data.ownerUserId),
     ownerUserName: toSafeString(data.ownerUserName),
@@ -142,9 +150,12 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     currentDriverUserName: toSafeString(data.currentDriverUserName),
 
     maintenanceNotes: toSafeString(data.maintenanceNotes),
+    serviceStrategy,
+    serviceIntervalKm,
     nextServiceKm: toSafeNumber(data.nextServiceKm, 0),
     nextItpDate: toSafeString(data.nextItpDate),
     nextRcaDate: toSafeString(data.nextRcaDate),
+    nextCascoDate: toSafeString(data.nextCascoDate),
 
     coverImageUrl: toSafeString(data.coverImageUrl),
     coverThumbUrl: toSafeString(data.coverThumbUrl),
@@ -354,6 +365,7 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
   const refDoc = await addDoc(vehiclesCollection, {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
+    initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -395,6 +407,7 @@ const previousStatus = toVehicleStatus(existingData?.status);
   await updateDoc(doc(db, "vehicles", vehicleId), {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
+    initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -952,4 +965,96 @@ export async function requestVehicleCommand(
   });
 
   return created.id;
+}
+
+function parseDateToStartTs(dateString?: string): number | null {
+  if (!dateString) return null;
+  const ts = new Date(`${dateString}T00:00:00`).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function diffDaysFromToday(targetTs: number): number {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.ceil((targetTs - todayStart) / 86_400_000);
+}
+
+export async function runVehicleMaintenanceAlerts(
+  actor?: { userId?: string; userName?: string; userThemeKey?: string | null }
+): Promise<void> {
+  const vehicles = await getVehiclesList();
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  for (const vehicle of vehicles) {
+    const ownerUserId = vehicle.ownerUserId || "";
+    const directUserId = vehicle.currentDriverUserId || ownerUserId;
+
+    if (vehicle.nextServiceKm > 0) {
+      const remainingKm = vehicle.nextServiceKm - vehicle.currentKm;
+      if (remainingKm <= 500) {
+        const markerId = `${vehicle.id}_service_${todayKey}`;
+        const markerRef = doc(db, "vehicleMaintenanceAlerts", markerId);
+        const marker = await getDoc(markerRef);
+
+        if (!marker.exists()) {
+          await dispatchNotificationEvent({
+            module: "vehicles",
+            eventType: "vehicle_service_due_soon",
+            entityId: vehicle.id,
+            title: "Service aproape scadent",
+            message: `Mașina ${vehicle.plateNumber} se apropie de revizie (mai sunt ${Math.max(remainingKm, 0)} km).`,
+            directUserId,
+            ownerUserId,
+            actorUserId: actor?.userId ?? "",
+            actorUserName: actor?.userName ?? "WorkControl",
+            actorUserThemeKey: actor?.userThemeKey ?? null,
+          });
+          await setDoc(markerRef, {
+            createdAt: Date.now(),
+            type: "service",
+            vehicleId: vehicle.id,
+          });
+        }
+      }
+    }
+
+    const expiringDocs: Array<{ label: "ITP" | "RCA" | "CASCO"; value: string; key: string }> = [
+      { label: "ITP", value: vehicle.nextItpDate, key: "itp" },
+      { label: "RCA", value: vehicle.nextRcaDate, key: "rca" },
+      { label: "CASCO", value: vehicle.nextCascoDate, key: "casco" },
+    ];
+
+    for (const docInfo of expiringDocs) {
+      const expiryTs = parseDateToStartTs(docInfo.value);
+      if (!expiryTs) continue;
+
+      const daysLeft = diffDaysFromToday(expiryTs);
+      if (daysLeft > 10) continue;
+
+      const markerId = `${vehicle.id}_${docInfo.key}_${todayKey}`;
+      const markerRef = doc(db, "vehicleMaintenanceAlerts", markerId);
+      const marker = await getDoc(markerRef);
+
+      if (marker.exists()) continue;
+
+      await dispatchNotificationEvent({
+        module: "vehicles",
+        eventType: "vehicle_document_due_soon",
+        entityId: vehicle.id,
+        title: `${docInfo.label} aproape de expirare`,
+        message: `Mașina ${vehicle.plateNumber}: ${docInfo.label} expiră în ${Math.max(daysLeft, 0)} zile (${docInfo.value}).`,
+        directUserId,
+        ownerUserId,
+        actorUserId: actor?.userId ?? "",
+        actorUserName: actor?.userName ?? "WorkControl",
+        actorUserThemeKey: actor?.userThemeKey ?? null,
+      });
+
+      await setDoc(markerRef, {
+        createdAt: Date.now(),
+        type: docInfo.key,
+        vehicleId: vehicle.id,
+      });
+    }
+  }
 }

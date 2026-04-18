@@ -114,6 +114,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     fuelType: data.fuelType ?? "",
     status: data.status ?? "activa",
     currentKm: Number(data.currentKm ?? 0),
+    initialRecordedKm: Number(data.initialRecordedKm ?? data.currentKm ?? 0),
 
     ownerUserId: data.ownerUserId ?? "",
     ownerUserName: data.ownerUserName ?? "",
@@ -122,9 +123,12 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     currentDriverUserName: data.currentDriverUserName ?? "",
 
     maintenanceNotes: data.maintenanceNotes ?? "",
+    serviceStrategy: data.serviceStrategy === "absolute" ? "absolute" : "interval",
+    serviceIntervalKm: Number(data.serviceIntervalKm ?? 15000),
     nextServiceKm: Number(data.nextServiceKm ?? 0),
     nextItpDate: data.nextItpDate ?? "",
     nextRcaDate: data.nextRcaDate ?? "",
+    nextCascoDate: data.nextCascoDate ?? "",
 
     coverImageUrl: data.coverImageUrl ?? "",
     coverThumbUrl: data.coverThumbUrl ?? "",

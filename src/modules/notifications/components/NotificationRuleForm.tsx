@@ -53,6 +53,8 @@ const eventOptionsByModule: Record<
     { value: "vehicle_block_start_requested", label: "Comandă blocare pornire", description: "A fost trimisă comandă de blocare start." },
     { value: "vehicle_command_requested", label: "Comandă vehicul", description: "Alt tip de comandă trimisă către tracker." },
     { value: "vehicle_command_result", label: "Rezultat comandă", description: "Comanda mașinii a primit răspuns (success/fail)." },
+    { value: "vehicle_service_due_soon", label: "Service în 500 km", description: "Se apropie revizia tehnică a mașinii." },
+    { value: "vehicle_document_due_soon", label: "Document expiră în 10 zile", description: "ITP/RCA/CASCO se apropie de expirare." },
   ],
   timesheets: [
     { value: "timesheet_started", label: "Pontaj pornit", description: "Utilizatorul a pornit pontajul." },

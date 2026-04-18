@@ -132,6 +132,7 @@ export interface VehicleItem {
 
   status: VehicleStatus;
   currentKm: number;
+  initialRecordedKm: number;
 
   ownerUserId: string;
   ownerUserName: string;
@@ -142,9 +143,12 @@ export interface VehicleItem {
   currentDriverThemeKey?: string | null;
 
   maintenanceNotes: string;
+  serviceStrategy: "interval" | "absolute";
+  serviceIntervalKm: number;
   nextServiceKm: number;
   nextItpDate: string;
   nextRcaDate: string;
+  nextCascoDate: string;
 
   coverImageUrl: string;
   coverThumbUrl: string;
@@ -167,6 +171,7 @@ export interface VehicleFormValues {
 
   status: VehicleStatus;
   currentKm: number;
+  initialRecordedKm: number;
 
   ownerUserId: string;
   ownerUserName: string;
@@ -177,9 +182,12 @@ export interface VehicleFormValues {
   currentDriverThemeKey?: string | null;
 
   maintenanceNotes: string;
+  serviceStrategy: "interval" | "absolute";
+  serviceIntervalKm: number;
   nextServiceKm: number;
   nextItpDate: string;
   nextRcaDate: string;
+  nextCascoDate: string;
 
   coverImageUrl: string;
   coverThumbUrl: string;

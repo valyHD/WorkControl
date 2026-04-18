@@ -33,7 +33,7 @@ function prettyBytes(value: number) {
   return `${size.toFixed(size > 100 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
-export default function ReportsPage() {
+export default function ControlPanelPage() {
   const { role } = useAuth();
   const [settings, setSettings] = useState<ControlPanelSettings>(FALLBACK_SETTINGS);
   const [counters, setCounters] = useState<Record<string, number>>({});
@@ -82,6 +82,9 @@ export default function ReportsPage() {
       setMessage("");
 
       await saveControlPanelSettings(settings);
+      document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
+      document.documentElement.dataset.uiDensity = settings.uiDensity;
+      document.documentElement.dataset.uiPalette = settings.uiPalette;
       setMessage("Setările au fost salvate.");
     } catch (err) {
       console.error(err);
