@@ -32,6 +32,38 @@ export type BackupExportSummary = {
   sizeBytes: number;
 };
 
+function formatBackupPrettyText(
+  exportedAt: number,
+  data: Record<string, Array<Record<string, unknown>>>,
+  counts: Record<string, number>
+): string {
+  const lines: string[] = [
+    "WORKCONTROL BACKUP - RAPORT TEXT",
+    `Generat la: ${new Date(exportedAt).toLocaleString("ro-RO")}`,
+    "",
+  ];
+
+  for (const collectionName of BACKUP_COLLECTIONS) {
+    const items = data[collectionName] ?? [];
+    lines.push(`=== ${collectionName.toUpperCase()} (${counts[collectionName] ?? 0}) ===`);
+    if (items.length === 0) {
+      lines.push("Fără înregistrări.", "");
+      continue;
+    }
+
+    items.forEach((item, index) => {
+      lines.push(`${index + 1}. ID: ${String(item.id ?? "-")}`);
+      for (const [key, value] of Object.entries(item)) {
+        if (key === "id") continue;
+        lines.push(`   - ${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
+      }
+      lines.push("");
+    });
+  }
+
+  return lines.join("\n");
+}
+
 const DEFAULT_SETTINGS: ControlPanelSettings = {
   retentionMonths: 2,
   autoBackupEnabled: false,
@@ -84,7 +116,7 @@ export async function saveControlPanelSettings(values: ControlPanelSettings): Pr
   );
 }
 
-export async function exportBackupDataset(): Promise<{ payload: string; summary: BackupExportSummary }> {
+export async function exportBackupDataset(): Promise<{ payload: string; prettyPayload: string; summary: BackupExportSummary }> {
   const exportedAt = Date.now();
   const counts: Record<string, number> = {};
   const data: Record<string, Array<Record<string, unknown>>> = {};
@@ -114,6 +146,7 @@ export async function exportBackupDataset(): Promise<{ payload: string; summary:
     };
 
     const payload = JSON.stringify(payloadObject, null, 2);
+    const prettyPayload = formatBackupPrettyText(exportedAt, data, counts);
     const sizeBytes = new Blob([payload]).size;
 
     await setDoc(
@@ -137,6 +170,7 @@ export async function exportBackupDataset(): Promise<{ payload: string; summary:
 
     return {
       payload,
+      prettyPayload,
       summary: {
         generatedAt: exportedAt,
         counts,

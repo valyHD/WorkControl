@@ -75,6 +75,12 @@ export default function ControlPanelPage() {
     });
   }, []);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
+    document.documentElement.dataset.uiDensity = settings.uiDensity;
+    document.documentElement.dataset.uiPalette = settings.uiPalette;
+  }, [settings.uiDensity, settings.uiFontScale, settings.uiPalette]);
+
   async function handleSaveSettings() {
     try {
       setBusyMessage("Se salvează setările...");
@@ -100,7 +106,7 @@ export default function ControlPanelPage() {
       setError("");
       setMessage("");
 
-      const { payload, summary } = await exportBackupDataset();
+      const { payload, prettyPayload, summary } = await exportBackupDataset();
 
       const blob = new Blob([payload], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -111,6 +117,16 @@ export default function ControlPanelPage() {
         .replace(/[:.]/g, "-")}.json`;
       link.click();
       URL.revokeObjectURL(url);
+
+      const prettyBlob = new Blob([prettyPayload], { type: "text/plain;charset=utf-8" });
+      const prettyUrl = URL.createObjectURL(prettyBlob);
+      const prettyLink = document.createElement("a");
+      prettyLink.href = prettyUrl;
+      prettyLink.download = `workcontrol-backup-raport-${new Date(summary.generatedAt)
+        .toISOString()
+        .replace(/[:.]/g, "-")}.txt`;
+      prettyLink.click();
+      URL.revokeObjectURL(prettyUrl);
 
       setMessage(
         `Backup descărcat: ${summary.totalRecords} înregistrări, ${prettyBytes(summary.sizeBytes)}.`
@@ -195,7 +211,7 @@ export default function ControlPanelPage() {
 
       <div className="panel">
         <h3 className="panel-subtitle">Export profesional backup</h3>
-        <p className="tools-subtitle">Backup JSON integral pentru utilizatori, pontaje, scule, mașini, reguli, notificări.</p>
+        <p className="tools-subtitle">Backup JSON integral + raport text frumos pe categorii, per user și module.</p>
 
         <div className="collection-grid">
           {Object.entries(counters).map(([name, count]) => {
@@ -328,6 +344,12 @@ export default function ControlPanelPage() {
               <option value="emerald">Emerald</option>
             </select>
           </div>
+        </div>
+
+        <div className="tool-form-actions" style={{ marginTop: 14 }}>
+          <button className="secondary-btn" type="button" onClick={() => void handleSaveSettings()}>
+            Salvează personalizarea
+          </button>
         </div>
       </div>
     </section>

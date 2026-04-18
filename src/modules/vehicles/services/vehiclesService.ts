@@ -281,6 +281,19 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
   return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
 }
 
+export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
+  return onSnapshot(
+    query(vehiclesCollection, orderBy("updatedAt", "desc")),
+    (snap) => {
+      onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
+    },
+    (error) => {
+      console.error("[subscribeVehiclesList]", error);
+      onData([]);
+    }
+  );
+}
+
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
   if (!vehicleId) return null;
 
@@ -1039,7 +1052,12 @@ export async function runVehicleMaintenanceAlerts(
 
       await dispatchNotificationEvent({
         module: "vehicles",
-        eventType: "vehicle_document_due_soon",
+        eventType:
+          docInfo.key === "itp"
+            ? "vehicle_document_itp_due_soon"
+            : docInfo.key === "rca"
+            ? "vehicle_document_rca_due_soon"
+            : "vehicle_document_casco_due_soon",
         entityId: vehicle.id,
         title: `${docInfo.label} aproape de expirare`,
         message: `Mașina ${vehicle.plateNumber}: ${docInfo.label} expiră în ${Math.max(daysLeft, 0)} zile (${docInfo.value}).`,

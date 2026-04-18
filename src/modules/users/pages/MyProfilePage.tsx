@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import { useAuth } from "../../../providers/AuthProvider";
-import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
+import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import {
   getToolsHeldByUserFromOthers,
@@ -61,119 +61,142 @@ export default function MyProfilePage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
+  async function load(): Promise<(() => void) | undefined> {
     if (!user?.uid) return;
 
     setLoading(true);
     try {
-      const [owned, borrowed, given, usersData, vehiclesSnap, timesheetsSnap, notificationsSnap] = await Promise.all([
+      const [owned, borrowed, given, usersData] = await Promise.all([
         getToolsOwnedByUser(user.uid),
         getToolsHeldByUserFromOthers(user.uid),
         getToolsOwnedByUserButHeldByOthers(user.uid),
         getUsersList(),
-        getDocs(
-          query(
-            collection(db, "vehicles"),
-            where("ownerUserId", "==", user.uid),
-            orderBy("updatedAt", "desc"),
-            limit(20)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, "timesheets"),
-            where("userId", "==", user.uid),
-            orderBy("startAt", "desc"),
-            limit(20)
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, "notifications"),
-            where("userId", "==", user.uid),
-            orderBy("createdAt", "desc"),
-            limit(30)
-          )
-        ),
       ]);
 
       setOwnedTools(owned);
       setBorrowedTools(borrowed);
       setGivenTools(given);
       setUsers(usersData);
-      setMyVehicles(
-        vehiclesSnap.docs.map((docItem) => ({
-          id: docItem.id,
-          plateNumber: docItem.data().plateNumber ?? "",
-          brand: docItem.data().brand ?? "",
-          model: docItem.data().model ?? "",
-          year: docItem.data().year ?? "",
-          vin: docItem.data().vin ?? "",
-          fuelType: docItem.data().fuelType ?? "",
-          status: docItem.data().status ?? "activa",
-          currentKm: Number(docItem.data().currentKm ?? 0),
-          initialRecordedKm: Number(docItem.data().initialRecordedKm ?? docItem.data().currentKm ?? 0),
-          ownerUserId: docItem.data().ownerUserId ?? "",
-          ownerUserName: docItem.data().ownerUserName ?? "",
-          ownerThemeKey: docItem.data().ownerThemeKey ?? null,
-          currentDriverUserId: docItem.data().currentDriverUserId ?? "",
-          currentDriverUserName: docItem.data().currentDriverUserName ?? "",
-          currentDriverThemeKey: docItem.data().currentDriverThemeKey ?? null,
-          maintenanceNotes: docItem.data().maintenanceNotes ?? "",
-          serviceStrategy: docItem.data().serviceStrategy === "absolute" ? "absolute" : "interval",
-          serviceIntervalKm: Number(docItem.data().serviceIntervalKm ?? 15000),
-          nextServiceKm: Number(docItem.data().nextServiceKm ?? 0),
-          nextItpDate: docItem.data().nextItpDate ?? "",
-          nextRcaDate: docItem.data().nextRcaDate ?? "",
-          nextCascoDate: docItem.data().nextCascoDate ?? "",
-          coverImageUrl: docItem.data().coverImageUrl ?? "",
-          coverThumbUrl: docItem.data().coverThumbUrl ?? "",
-          images: Array.isArray(docItem.data().images) ? docItem.data().images : [],
-          createdAt: docItem.data().createdAt ?? Date.now(),
-          updatedAt: docItem.data().updatedAt ?? Date.now(),
-        }))
+      const vehiclesUnsubscribe = onSnapshot(
+        query(
+          collection(db, "vehicles"),
+          orderBy("updatedAt", "desc"),
+          limit(50)
+        ),
+        (vehiclesSnap) => {
+          setMyVehicles(
+            vehiclesSnap.docs
+              .filter((docItem) => {
+                const data = docItem.data();
+                return data.ownerUserId === user.uid || data.currentDriverUserId === user.uid;
+              })
+              .map((docItem) => ({
+              id: docItem.id,
+              plateNumber: docItem.data().plateNumber ?? "",
+              brand: docItem.data().brand ?? "",
+              model: docItem.data().model ?? "",
+              year: docItem.data().year ?? "",
+              vin: docItem.data().vin ?? "",
+              fuelType: docItem.data().fuelType ?? "",
+              status: docItem.data().status ?? "activa",
+              currentKm: Number(docItem.data().currentKm ?? docItem.data().gpsSnapshot?.odometerKm ?? 0),
+              initialRecordedKm: Number(docItem.data().initialRecordedKm ?? docItem.data().currentKm ?? 0),
+              ownerUserId: docItem.data().ownerUserId ?? "",
+              ownerUserName: docItem.data().ownerUserName ?? "",
+              ownerThemeKey: docItem.data().ownerThemeKey ?? null,
+              currentDriverUserId: docItem.data().currentDriverUserId ?? "",
+              currentDriverUserName: docItem.data().currentDriverUserName ?? "",
+              currentDriverThemeKey: docItem.data().currentDriverThemeKey ?? null,
+              maintenanceNotes: docItem.data().maintenanceNotes ?? "",
+              serviceStrategy: docItem.data().serviceStrategy === "absolute" ? "absolute" : "interval",
+              serviceIntervalKm: Number(docItem.data().serviceIntervalKm ?? 15000),
+              nextServiceKm: Number(docItem.data().nextServiceKm ?? 0),
+              nextItpDate: docItem.data().nextItpDate ?? "",
+              nextRcaDate: docItem.data().nextRcaDate ?? "",
+              nextCascoDate: docItem.data().nextCascoDate ?? "",
+              coverImageUrl: docItem.data().coverImageUrl ?? "",
+              coverThumbUrl: docItem.data().coverThumbUrl ?? "",
+              images: Array.isArray(docItem.data().images) ? docItem.data().images : [],
+              createdAt: docItem.data().createdAt ?? Date.now(),
+              updatedAt: docItem.data().updatedAt ?? Date.now(),
+            }))
+          );
+        }
       );
-      setMyTimesheets(
-        timesheetsSnap.docs.map((docItem) => ({
-          id: docItem.id,
-          userId: docItem.data().userId ?? "",
-          userName: docItem.data().userName ?? "",
-          userThemeKey: docItem.data().userThemeKey ?? null,
-          projectId: docItem.data().projectId ?? "",
-          projectCode: docItem.data().projectCode ?? "",
-          projectName: docItem.data().projectName ?? "",
-          status: docItem.data().status ?? "activ",
-          explanation: docItem.data().explanation ?? "",
-          startAt: docItem.data().startAt ?? Date.now(),
-          stopAt: docItem.data().stopAt ?? null,
-          workedMinutes: Number(docItem.data().workedMinutes ?? 0),
-          startLocation: docItem.data().startLocation ?? { lat: null, lng: null, label: "" },
-          stopLocation: docItem.data().stopLocation ?? null,
-          startSource: docItem.data().startSource ?? "web",
-          stopSource: docItem.data().stopSource ?? "",
-          workDate: docItem.data().workDate ?? "",
-          yearMonth: docItem.data().yearMonth ?? "",
-          weekKey: docItem.data().weekKey ?? "",
-          createdAt: docItem.data().createdAt ?? Date.now(),
-          updatedAt: docItem.data().updatedAt ?? Date.now(),
-        }))
+      const timesheetsUnsubscribe = onSnapshot(
+        query(
+          collection(db, "timesheets"),
+          where("userId", "==", user.uid),
+          orderBy("startAt", "desc"),
+          limit(20)
+        ),
+        (timesheetsSnap) => {
+          setMyTimesheets(
+            timesheetsSnap.docs.map((docItem) => ({
+              id: docItem.id,
+              userId: docItem.data().userId ?? "",
+              userName: docItem.data().userName ?? "",
+              userThemeKey: docItem.data().userThemeKey ?? null,
+              projectId: docItem.data().projectId ?? "",
+              projectCode: docItem.data().projectCode ?? "",
+              projectName: docItem.data().projectName ?? "",
+              status: docItem.data().status ?? "activ",
+              explanation: docItem.data().explanation ?? "",
+              startAt: docItem.data().startAt ?? Date.now(),
+              stopAt: docItem.data().stopAt ?? null,
+              workedMinutes: Number(docItem.data().workedMinutes ?? 0),
+              startLocation: docItem.data().startLocation ?? { lat: null, lng: null, label: "" },
+              stopLocation: docItem.data().stopLocation ?? null,
+              startSource: docItem.data().startSource ?? "web",
+              stopSource: docItem.data().stopSource ?? "",
+              workDate: docItem.data().workDate ?? "",
+              yearMonth: docItem.data().yearMonth ?? "",
+              weekKey: docItem.data().weekKey ?? "",
+              createdAt: docItem.data().createdAt ?? Date.now(),
+              updatedAt: docItem.data().updatedAt ?? Date.now(),
+            }))
+          );
+        }
       );
-      setMyNotifications(
-        notificationsSnap.docs.map((docItem) => ({
-          id: docItem.id,
-          title: docItem.data().title ?? "Notificare",
-          message: docItem.data().message ?? "",
-          createdAt: docItem.data().createdAt ?? Date.now(),
-          read: Boolean(docItem.data().read ?? false),
-        }))
+      const notificationsUnsubscribe = onSnapshot(
+        query(
+          collection(db, "notifications"),
+          where("userId", "==", user.uid),
+          orderBy("createdAt", "desc"),
+          limit(30)
+        ),
+        (notificationsSnap) => {
+          setMyNotifications(
+            notificationsSnap.docs.map((docItem) => ({
+              id: docItem.id,
+              title: docItem.data().title ?? "Notificare",
+              message: docItem.data().message ?? "",
+              createdAt: docItem.data().createdAt ?? Date.now(),
+              read: Boolean(docItem.data().read ?? false),
+            }))
+          );
+        }
       );
+      return () => {
+        vehiclesUnsubscribe();
+        timesheetsUnsubscribe();
+        notificationsUnsubscribe();
+      };
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void load();
+    let unsubscribeLive: (() => void) | undefined;
+    void load().then((cleanup) => {
+      if (cleanup) {
+        unsubscribeLive = cleanup;
+      }
+    });
+    return () => {
+      unsubscribeLive?.();
+    };
   }, [user?.uid]);
 
   const timesheetPreview = useMemo(
@@ -214,7 +237,6 @@ export default function MyProfilePage() {
       <CompactSection
         title="Pontajele mele"
         subtitle="Preview compact (2 randuri), apoi dropdown pentru istoric complet."
-        defaultOpen
         preview={
           timesheetPreview.length === 0 ? (
             <p className="tools-subtitle">Nu ai pontaje salvate.</p>

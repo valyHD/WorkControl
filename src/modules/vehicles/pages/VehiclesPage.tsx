@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { VehicleItem } from "../../../types/vehicle";
-import { getVehiclesList } from "../services/vehiclesService";
+import { subscribeVehiclesList } from "../services/vehiclesService";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 
@@ -12,23 +12,14 @@ export default function VehiclesPage() {
   const [statusFilter, setStatusFilter] = useState("toate");
   const [error, setError] = useState("");
 
-  async function load() {
+  useEffect(() => {
     setLoading(true);
     setError("");
-
-    try {
-      const data = await getVehiclesList();
+    const unsubscribe = subscribeVehiclesList((data) => {
       setVehicles(data);
-    } catch (err) {
-      console.error(err);
-      setError("Nu am putut incarca masinile.");
-    } finally {
       setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void load();
+    });
+    return () => unsubscribe();
   }, []);
 
   const filteredVehicles = useMemo(() => {
