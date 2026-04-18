@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -44,6 +45,22 @@ function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem
 export async function getNotificationRules(): Promise<NotificationRuleItem[]> {
   const snap = await getDocs(query(notificationRulesCollection, orderBy("updatedAt", "desc")));
   return snap.docs.map((docItem) => mapRuleDoc(docItem.id, docItem.data()));
+}
+
+export function subscribeNotificationRules(
+  onData: (rules: NotificationRuleItem[]) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const rulesQuery = query(notificationRulesCollection, orderBy("updatedAt", "desc"));
+  return onSnapshot(
+    rulesQuery,
+    (snap) => {
+      onData(snap.docs.map((docItem) => mapRuleDoc(docItem.id, docItem.data())));
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
 }
 
 export async function getNotificationRuleById(

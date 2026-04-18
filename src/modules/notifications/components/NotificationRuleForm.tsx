@@ -54,7 +54,9 @@ const eventOptionsByModule: Record<
     { value: "vehicle_command_requested", label: "Comandă vehicul", description: "Alt tip de comandă trimisă către tracker." },
     { value: "vehicle_command_result", label: "Rezultat comandă", description: "Comanda mașinii a primit răspuns (success/fail)." },
     { value: "vehicle_service_due_soon", label: "Service în 500 km", description: "Se apropie revizia tehnică a mașinii." },
-    { value: "vehicle_document_due_soon", label: "Document expiră în 10 zile", description: "ITP/RCA/CASCO se apropie de expirare." },
+    { value: "vehicle_document_itp_due_soon", label: "ITP expiră în 10 zile", description: "Se apropie expirarea ITP." },
+    { value: "vehicle_document_rca_due_soon", label: "RCA expiră în 10 zile", description: "Se apropie expirarea RCA." },
+    { value: "vehicle_document_casco_due_soon", label: "CASCO expiră în 10 zile", description: "Se apropie expirarea CASCO." },
   ],
   timesheets: [
     { value: "timesheet_started", label: "Pontaj pornit", description: "Utilizatorul a pornit pontajul." },

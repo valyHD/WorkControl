@@ -9,6 +9,7 @@ import NotificationRuleForm from "../components/NotificationRuleForm";
 import {
   createNotificationRule,
   getNotificationRules,
+  subscribeNotificationRules,
   updateNotificationRule,
 } from "../services/notificationRulesService";
 import { getVehiclesList } from "../../vehicles/services/vehiclesService";
@@ -73,6 +74,18 @@ export default function NotificationRulesPage() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNotificationRules(
+      (rulesData) => {
+        setRules(rulesData);
+      },
+      (err) => {
+        console.error(err);
+      }
+    );
+    return () => unsubscribe();
   }, []);
 
   async function handleCreate(values: NotificationRuleFormValues) {
@@ -218,11 +231,11 @@ export default function NotificationRulesPage() {
                         </div>
                       )}
                       <div className="simple-list-subtitle">
-                        direct: {rule.recipients.notifyDirectUser ? "da" : "nu"} ·
-                        owner: {rule.recipients.notifyOwner ? "da" : "nu"} ·
-                        admini: {rule.recipients.notifyAdmins ? "da" : "nu"} ·
-                        manageri: {rule.recipients.notifyManagers ? "da" : "nu"} ·
-                        useri specifici: {rule.recipients.specificUserIds.length}
+                        <span className="inline-setting-chip">direct: {rule.recipients.notifyDirectUser ? "da" : "nu"}</span>
+                        <span className="inline-setting-chip">owner: {rule.recipients.notifyOwner ? "da" : "nu"}</span>
+                        <span className="inline-setting-chip">admini: {rule.recipients.notifyAdmins ? "da" : "nu"}</span>
+                        <span className="inline-setting-chip">manageri: {rule.recipients.notifyManagers ? "da" : "nu"}</span>
+                        <span className="inline-setting-chip">useri specifici: {rule.recipients.specificUserIds.length}</span>
                       </div>
                     </div>
 
