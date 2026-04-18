@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AppUser } from "../../../types/tool";
+import type { AppUser, ToolItem } from "../../../types/tool";
+import type { VehicleItem } from "../../../types/vehicle";
+import type { ProjectItem } from "../../../types/timesheet";
 import type {
   NotificationRuleEventType,
   NotificationRuleFormValues,
@@ -9,6 +11,9 @@ import type {
 type Props = {
   initialValues: NotificationRuleFormValues;
   users: AppUser[];
+  tools: ToolItem[];
+  vehicles: VehicleItem[];
+  projects: ProjectItem[];
   submitting: boolean;
   onSubmit: (values: NotificationRuleFormValues) => Promise<void>;
 };
@@ -26,7 +31,14 @@ const moduleOptions: NotificationRuleModule[] = [
 
 const eventOptionsByModule: Record<NotificationRuleModule, NotificationRuleEventType[]> = {
   tools: ["tool_holder_changed", "tool_status_changed"],
-  vehicles: ["vehicle_driver_changed", "vehicle_status_changed", "vehicle_command_requested", "vehicle_command_result"],
+  vehicles: [
+    "vehicle_driver_changed",
+    "vehicle_status_changed",
+    "vehicle_started",
+    "vehicle_block_start_requested",
+    "vehicle_command_requested",
+    "vehicle_command_result",
+  ],
   timesheets: ["timesheet_started", "timesheet_stopped", "timesheet_updated"],
   users: ["user_created", "user_role_changed"],
   web: ["web_change_detected", "any_change"],
@@ -38,6 +50,9 @@ const eventOptionsByModule: Record<NotificationRuleModule, NotificationRuleEvent
 export default function NotificationRuleForm({
   initialValues,
   users,
+  tools,
+  vehicles,
+  projects,
   submitting,
   onSubmit,
 }: Props) {
@@ -68,6 +83,29 @@ export default function NotificationRuleForm({
   }
 
   const currentEvents = eventOptionsByModule[values.module];
+  const canSelectEntity = values.module === "vehicles" || values.module === "tools" || values.module === "timesheets" || values.module === "users";
+
+  const moduleEntityOptions = values.module === "vehicles"
+    ? vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        label: `${vehicle.plateNumber} · ${vehicle.brand} ${vehicle.model}`.trim(),
+      }))
+    : values.module === "tools"
+    ? tools.map((tool) => ({
+        id: tool.id,
+        label: `${tool.internalCode} · ${tool.name}`.trim(),
+      }))
+    : values.module === "timesheets"
+    ? projects.map((project) => ({
+        id: project.id,
+        label: `${project.code} · ${project.name}`.trim(),
+      }))
+    : values.module === "users"
+    ? users.map((entry) => ({
+        id: entry.id,
+        label: entry.fullName,
+      }))
+    : [];
 
   return (
     <form className="tool-form" onSubmit={handleSubmit}>
@@ -96,6 +134,8 @@ export default function NotificationRuleForm({
                 ...prev,
                 module: nextModule,
                 eventType: nextEvents[0],
+                entityId: "",
+                entityLabel: "",
               }));
             }}
           >
@@ -106,6 +146,33 @@ export default function NotificationRuleForm({
             ))}
           </select>
         </div>
+
+        {canSelectEntity && (
+          <div className="tool-form-block">
+            <label className="tool-form-label">Entitate specifica (optional)</label>
+            <select
+              className="tool-input"
+              value={values.entityId}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                const selectedLabel =
+                  moduleEntityOptions.find((option) => option.id === selectedId)?.label ?? "";
+                setValues((prev) => ({
+                  ...prev,
+                  entityId: selectedId,
+                  entityLabel: selectedLabel,
+                }));
+              }}
+            >
+              <option value="">Toate entitatile ({values.module})</option>
+              {moduleEntityOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="tool-form-block">
           <label className="tool-form-label">Eveniment</label>

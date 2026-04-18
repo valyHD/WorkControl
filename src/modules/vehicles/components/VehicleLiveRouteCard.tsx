@@ -389,6 +389,14 @@ export default function VehicleLiveRouteCard({
     setToTs(range.to);
   }
 
+  function updateCustomRange(nextFrom: number, nextTo: number) {
+    if (nextFrom >= nextTo) return;
+    const maxRangeMs = 31 * 24 * 60 * 60 * 1000;
+    if (nextTo - nextFrom > maxRangeMs) return;
+    setFromTs(nextFrom);
+    setToTs(nextTo);
+  }
+
   async function handleRequestCommand(type: "pulse_dout1" | "block_start") {
     await requestVehicleCommand(vehicle.id, {
       type,
@@ -463,7 +471,7 @@ export default function VehicleLiveRouteCard({
           onChange={(event) => {
             setPreset("custom");
             const parsed = fromDateTimeLocalValue(event.target.value);
-            if (parsed) setFromTs(parsed);
+            if (parsed) updateCustomRange(parsed, toTs);
           }}
         />
 
@@ -473,7 +481,7 @@ export default function VehicleLiveRouteCard({
           onChange={(event) => {
             setPreset("custom");
             const parsed = fromDateTimeLocalValue(event.target.value);
-            if (parsed) setToTs(parsed);
+            if (parsed) updateCustomRange(fromTs, parsed);
           }}
         />
 
@@ -577,7 +585,7 @@ export default function VehicleLiveRouteCard({
 
               {overspeedItems.map((point) => (
                 <Marker
-                  key={`overspeed-${point.id}`}
+                  key={`overspeed-${point.id || point.gpsTimestamp}`}
                   position={[point.lat, point.lng]}
                   icon={overspeedIcon}
                 >
@@ -591,7 +599,7 @@ export default function VehicleLiveRouteCard({
               <Pane name="crumbs" style={{ zIndex: 390 }}>
                 {positions.map((item) => (
                   <CircleMarker
-                    key={item.id}
+                    key={`crumb-${item.id || item.gpsTimestamp}`}
                     center={[item.lat, item.lng]}
                     radius={2.5}
                     pathOptions={{

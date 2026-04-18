@@ -10,12 +10,50 @@ type Props = {
 
 type AuthMethod = "face" | "fingerprint" | "pin";
 
+type WebAuthnCredential = {
+  id: string;
+  createdAt: number;
+};
+
+function storagePinKey(vehicleId: string) {
+  return `wc_vehicle_pin_${vehicleId}`;
+}
+
+function storageCredentialKey(vehicleId: string) {
+  return `wc_vehicle_webauthn_${vehicleId}`;
+}
+
+function toBase64Url(bytes: ArrayBuffer): string {
+  const uint8 = new Uint8Array(bytes);
+  let str = "";
+  uint8.forEach((item) => {
+    str += String.fromCharCode(item);
+  });
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(input: string): Uint8Array {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const str = atob(padded);
+  const bytes = new Uint8Array(str.length);
+
+  for (let i = 0; i < str.length; i += 1) {
+    bytes[i] = str.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
 export default function VehicleControlCard({ vehicle, commands, onRequestCommand, loading }: Props) {
   const [busyType, setBusyType] = useState<"pulse_dout1" | "block_start" | null>(null);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [pinValue, setPinValue] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
   const [authMethod, setAuthMethod] = useState<AuthMethod>("face");
   const [authMessage, setAuthMessage] = useState("");
+  const [settingUp, setSettingUp] = useState(false);
 
   const supportStatus = useMemo(() => {
     const protocol = (vehicle.tracker?.protocol || "").toLowerCase();
@@ -25,40 +63,32 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
     return "pending";
   }, [vehicle.tracker?.protocol]);
 
-  async function verifyByFace(): Promise<boolean> {
+  const hasPin = Boolean(localStorage.getItem(storagePinKey(vehicle.id)));
+
+  function readStoredCredential(): WebAuthnCredential | null {
+    const raw = localStorage.getItem(storageCredentialKey(vehicle.id));
+    if (!raw) return null;
+
     try {
-      const FaceDetectorCtor = (window as any).FaceDetector;
-      if (!FaceDetectorCtor || !navigator.mediaDevices?.getUserMedia) {
-        setAuthMessage("Face unlock indisponibil pe acest browser. Folosește PIN sau amprentă.");
-        return false;
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-      const track = stream.getVideoTracks()[0];
-      const imageCapture = new (window as any).ImageCapture(track);
-      const bitmap = await imageCapture.grabFrame();
-      const detector = new FaceDetectorCtor({ fastMode: true, maxDetectedFaces: 1 });
-      const faces = await detector.detect(bitmap);
-      track.stop();
-
-      if (faces.length > 0) {
-        setAuthMessage("Fața a fost detectată. Pornim mașina.");
-        return true;
-      }
-
-      setAuthMessage("Nu am detectat fața. Încearcă din nou sau folosește altă metodă.");
-      return false;
-    } catch (error) {
-      console.error(error);
-      setAuthMessage("Verificarea facială a eșuat. Poți continua cu PIN sau amprentă.");
-      return false;
+      const parsed = JSON.parse(raw) as WebAuthnCredential;
+      if (!parsed?.id) return null;
+      return parsed;
+    } catch {
+      return null;
     }
   }
 
-  async function verifyByFingerprint(): Promise<boolean> {
+  async function verifyWithDeviceBiometric(): Promise<boolean> {
     try {
       if (!window.PublicKeyCredential || !navigator.credentials?.get) {
-        setAuthMessage("Amprenta nu este disponibilă pe acest dispozitiv/browser.");
+        setAuthMessage("Biometria din blocarea ecranului nu e disponibila pe acest dispozitiv/browser.");
+        return false;
+      }
+
+      const stored = readStoredCredential();
+      if (!stored?.id) {
+        setAuthMessage("Nu exista biometrie configurata pentru aceasta masina. Apasa " +
+          "«Seteaza biometrie din telefon». ");
         return false;
       }
 
@@ -67,22 +97,104 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
           challenge: crypto.getRandomValues(new Uint8Array(32)),
           timeout: 60_000,
           userVerification: "required",
-          allowCredentials: [],
+          allowCredentials: [
+            {
+              id: fromBase64Url(stored.id),
+              type: "public-key",
+              transports: ["internal"],
+            },
+          ],
         },
       } as CredentialRequestOptions);
 
-      setAuthMessage("Autentificare biometrică confirmată.");
+      setAuthMessage("Autentificare biometrica reusita.");
       return true;
     } catch (error) {
       console.error(error);
-      setAuthMessage("Amprenta a fost anulată sau respinsă.");
+      setAuthMessage("Biometria a fost anulata sau respinsa.");
       return false;
     }
   }
 
+  async function setupBiometric(): Promise<void> {
+    try {
+      setSettingUp(true);
+
+      if (!window.PublicKeyCredential || !navigator.credentials?.create) {
+        setAuthMessage("Acest browser nu permite configurarea biometriei WebAuthn.");
+        return;
+      }
+
+      const userIdSeed = `${vehicle.id}_${Date.now()}`;
+      const userId = new TextEncoder().encode(userIdSeed.slice(0, 32));
+
+      const credential = (await navigator.credentials.create({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { name: "WorkControl Vehicle Unlock" },
+          user: {
+            id: userId,
+            name: `vehicle-${vehicle.id}`,
+            displayName: `Vehicle ${vehicle.plateNumber}`,
+          },
+          pubKeyCredParams: [
+            { type: "public-key", alg: -7 },
+            { type: "public-key", alg: -257 },
+          ],
+          timeout: 60_000,
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            residentKey: "preferred",
+            userVerification: "required",
+          },
+          attestation: "none",
+        },
+      } as CredentialCreationOptions)) as PublicKeyCredential | null;
+
+      if (!credential?.rawId) {
+        setAuthMessage("Configurarea biometriei nu a returnat credential valid.");
+        return;
+      }
+
+      const payload: WebAuthnCredential = {
+        id: toBase64Url(credential.rawId),
+        createdAt: Date.now(),
+      };
+
+      localStorage.setItem(storageCredentialKey(vehicle.id), JSON.stringify(payload));
+      setAuthMessage("Biometria telefonului e configurata. Acum poti porni masina cu Face/Amprenta.");
+    } catch (error) {
+      console.error(error);
+      setAuthMessage("Nu am putut configura biometria. Verifica blocarea ecranului pe telefon.");
+    } finally {
+      setSettingUp(false);
+    }
+  }
+
+  function savePin(): void {
+    if (newPin.length < 4) {
+      setAuthMessage("PIN-ul trebuie sa aiba minim 4 cifre.");
+      return;
+    }
+
+    if (newPin !== confirmPin) {
+      setAuthMessage("PIN-ul confirmat nu coincide.");
+      return;
+    }
+
+    localStorage.setItem(storagePinKey(vehicle.id), newPin);
+    setNewPin("");
+    setConfirmPin("");
+    setAuthMessage("PIN salvat cu succes pentru aceasta masina.");
+  }
+
   function verifyByPin(): boolean {
-    const storageKey = `wc_vehicle_pin_${vehicle.id}`;
-    const savedPin = localStorage.getItem(storageKey) || "0000";
+    const savedPin = localStorage.getItem(storagePinKey(vehicle.id));
+
+    if (!savedPin) {
+      setAuthMessage("Nu exista PIN setat. Configureaza PIN-ul inainte sa pornesti masina.");
+      return false;
+    }
 
     if (pinValue.length < 4) {
       setAuthMessage("Introdu minim 4 cifre pentru PIN.");
@@ -101,12 +213,8 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
   async function requestWithAuth(type: "pulse_dout1" | "block_start") {
     let authorized = false;
 
-    if (authMethod === "face") {
-      authorized = await verifyByFace();
-    }
-
-    if (!authorized && authMethod === "fingerprint") {
-      authorized = await verifyByFingerprint();
+    if (authMethod === "face" || authMethod === "fingerprint") {
+      authorized = await verifyWithDeviceBiometric();
     }
 
     if (!authorized && authMethod === "pin") {
@@ -138,7 +246,7 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
       </div>
 
       <p className="tools-subtitle" style={{ marginBottom: 12 }}>
-        Pentru comanda „Porneste masina” este nevoie de autentificare: față / amprentă / PIN.
+        Pentru „Porneste masina” este nevoie de autentificare (Face / Amprenta / PIN) configurata per masina.
       </p>
 
       <div className="tool-form-actions">
@@ -164,28 +272,64 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
       {showAuthPrompt && (
         <div className="panel" style={{ marginTop: 12, borderStyle: "dashed" }}>
           <h5 className="panel-title" style={{ marginBottom: 8 }}>Verificare identitate</h5>
+
           <div className="tool-form-actions">
             <button type="button" className={`secondary-btn ${authMethod === "face" ? "active" : ""}`} onClick={() => setAuthMethod("face")}>
-              Recunoaștere facială
+              Face ID telefon
             </button>
             <button type="button" className={`secondary-btn ${authMethod === "fingerprint" ? "active" : ""}`} onClick={() => setAuthMethod("fingerprint")}>
-              Amprentă
+              Amprenta telefon
             </button>
             <button type="button" className={`secondary-btn ${authMethod === "pin" ? "active" : ""}`} onClick={() => setAuthMethod("pin")}>
-              PIN
+              PIN masina
             </button>
           </div>
 
+          {(authMethod === "face" || authMethod === "fingerprint") && (
+            <div className="tool-form-actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="secondary-btn"
+                disabled={settingUp}
+                onClick={() => void setupBiometric()}
+              >
+                {settingUp ? "Configuram..." : "Seteaza biometrie din telefon"}
+              </button>
+            </div>
+          )}
+
           {authMethod === "pin" && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
               <input
                 className="tool-input"
                 type="password"
                 inputMode="numeric"
-                placeholder="PIN (implicit 0000)"
+                placeholder={hasPin ? "PIN existent" : "Seteaza PIN nou"}
                 value={pinValue}
                 onChange={(event) => setPinValue(event.target.value.replace(/\D/g, "").slice(0, 8))}
               />
+
+              <div className="tool-form-actions" style={{ gap: 8 }}>
+                <input
+                  className="tool-input"
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="PIN nou"
+                  value={newPin}
+                  onChange={(event) => setNewPin(event.target.value.replace(/\D/g, "").slice(0, 8))}
+                />
+                <input
+                  className="tool-input"
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="Confirma PIN"
+                  value={confirmPin}
+                  onChange={(event) => setConfirmPin(event.target.value.replace(/\D/g, "").slice(0, 8))}
+                />
+                <button type="button" className="secondary-btn" onClick={savePin}>
+                  Salveaza PIN
+                </button>
+              </div>
             </div>
           )}
 
@@ -200,10 +344,10 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
               onClick={() => void requestWithAuth("pulse_dout1")}
               disabled={loading || busyType !== null}
             >
-              Confirmă și pornește
+              Confirma si porneste
             </button>
             <button type="button" className="secondary-btn" onClick={() => setShowAuthPrompt(false)}>
-              Renunță
+              Renunta
             </button>
           </div>
         </div>
@@ -213,39 +357,42 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
         <strong>Tracker:</strong> {vehicle.tracker?.imei || "-"}
       </div>
 
-      <div className="simple-list" style={{ marginTop: 12 }}>
-        {commands.length === 0 ? (
-          <div className="simple-list-item">
-            <div className="simple-list-text">
-              <div className="simple-list-label">Nu exista cereri trimise inca.</div>
-              <div className="simple-list-subtitle">
-                La apasare se creeaza un document in subcolectia commands.
-              </div>
-            </div>
-          </div>
-        ) : (
-          commands.slice(0, 5).map((cmd) => (
-            <div className="simple-list-item" key={cmd.id}>
+      <details className="vehicle-control-history" open={false}>
+        <summary>Istoric comenzi DOUT1 ({commands.length})</summary>
+        <div className="simple-list" style={{ marginTop: 12 }}>
+          {commands.length === 0 ? (
+            <div className="simple-list-item">
               <div className="simple-list-text">
-                <div className="simple-list-label">
-                  {cmd.type === "pulse_dout1"
-                    ? "Porneste masina"
-                    : cmd.type === "block_start"
-                    ? "Blocheaza pornirea"
-                    : "Comanda"}{" "}
-                  · {cmd.status}
-                </div>
+                <div className="simple-list-label">Nu exista cereri trimise inca.</div>
                 <div className="simple-list-subtitle">
-                  {new Date(cmd.requestedAt).toLocaleString("ro-RO")}
-                  {" · "}
-                  {cmd.requestedBy}
-                  {cmd.durationSec ? ` · ${cmd.durationSec}s` : ""}
+                  La apasare se creeaza un document in subcolectia commands.
                 </div>
               </div>
             </div>
-          ))
-        )}
-      </div>
+          ) : (
+            commands.slice(0, 15).map((cmd) => (
+              <div className="simple-list-item" key={cmd.id}>
+                <div className="simple-list-text">
+                  <div className="simple-list-label">
+                    {cmd.type === "pulse_dout1"
+                      ? "Porneste masina"
+                      : cmd.type === "block_start"
+                      ? "Blocheaza pornirea"
+                      : "Comanda"}{" "}
+                    · {cmd.status}
+                  </div>
+                  <div className="simple-list-subtitle">
+                    {new Date(cmd.requestedAt).toLocaleString("ro-RO")}
+                    {" · "}
+                    {cmd.requestedBy}
+                    {cmd.durationSec ? ` · ${cmd.durationSec}s` : ""}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </details>
     </div>
   );
 }

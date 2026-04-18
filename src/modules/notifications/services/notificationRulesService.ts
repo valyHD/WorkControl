@@ -24,6 +24,8 @@ function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem
     name: data.name ?? "",
     module: data.module ?? "general",
     eventType: data.eventType ?? "user_created",
+    entityId: data.entityId ?? "",
+    entityLabel: data.entityLabel ?? "",
     enabled: data.enabled ?? true,
     recipients: {
       notifyDirectUser: data.recipients?.notifyDirectUser ?? false,

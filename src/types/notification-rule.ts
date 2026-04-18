@@ -13,6 +13,8 @@ export type NotificationRuleEventType =
   | "tool_status_changed"
   | "vehicle_driver_changed"
   | "vehicle_status_changed"
+  | "vehicle_started"
+  | "vehicle_block_start_requested"
   | "timesheet_started"
   | "timesheet_stopped"
   | "timesheet_updated"
@@ -39,6 +41,8 @@ export interface NotificationRuleItem {
   name: string;
   module: NotificationRuleModule;
   eventType: NotificationRuleEventType;
+  entityId: string;
+  entityLabel: string;
   enabled: boolean;
   recipients: NotificationRuleRecipients;
   createdAt: number;
@@ -49,6 +53,8 @@ export interface NotificationRuleFormValues {
   name: string;
   module: NotificationRuleModule;
   eventType: NotificationRuleEventType;
+  entityId: string;
+  entityLabel: string;
   enabled: boolean;
   recipients: NotificationRuleRecipients;
 }
