@@ -51,7 +51,7 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
   const [pinValue, setPinValue] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [authMethod, setAuthMethod] = useState<AuthMethod>("face");
+  const [authMethod, setAuthMethod] = useState<AuthMethod>("fingerprint");
   const [authMessage, setAuthMessage] = useState("");
   const [settingUp, setSettingUp] = useState(false);
 
@@ -210,25 +210,38 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
     return true;
   }
 
-  async function requestWithAuth(type: "pulse_dout1" | "block_start") {
+  async function requestWithAuth(
+    type: "pulse_dout1" | "block_start",
+    methodOverride?: AuthMethod
+  ): Promise<boolean> {
+    const selectedMethod = methodOverride ?? authMethod;
     let authorized = false;
 
-    if (authMethod === "face" || authMethod === "fingerprint") {
+    if (selectedMethod === "face" || selectedMethod === "fingerprint") {
       authorized = await verifyWithDeviceBiometric();
     }
 
-    if (!authorized && authMethod === "pin") {
+    if (!authorized && selectedMethod === "pin") {
       authorized = verifyByPin();
     }
 
-    if (!authorized) return;
+    if (!authorized) return false;
 
     setShowAuthPrompt(false);
     setBusyType(type);
     try {
       await onRequestCommand(type);
+      return true;
     } finally {
       setBusyType(null);
+    }
+  }
+
+  async function handleQuickStart(): Promise<void> {
+    setAuthMethod("fingerprint");
+    const started = await requestWithAuth("pulse_dout1", "fingerprint");
+    if (!started) {
+      setShowAuthPrompt(true);
     }
   }
 
@@ -246,7 +259,7 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
       </div>
 
       <p className="tools-subtitle" style={{ marginBottom: 12 }}>
-        Pentru „Porneste masina” este nevoie de autentificare (Face / Amprenta / PIN) configurata per masina.
+        Pentru „Porneste masina”, aplicatia cere direct amprenta telefonului (fara pas de confirmare).
       </p>
 
       <div className="tool-form-actions">
@@ -254,7 +267,7 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
           type="button"
           className="primary-btn"
           disabled={loading || busyType !== null}
-          onClick={() => setShowAuthPrompt(true)}
+          onClick={() => void handleQuickStart()}
         >
           {busyType === "pulse_dout1" ? "Se trimite..." : "Porneste masina (1 min)"}
         </button>
