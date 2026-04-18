@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
+import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
+import { runVehicleMaintenanceAlerts } from "../modules/vehicles/services/vehiclesService";
 
 type MenuItem = {
   label: string;
@@ -70,9 +72,9 @@ const menuSections: { label: string; items: MenuItem[] }[] = [
     ],
   },
   {
-    label: "Rapoarte",
+    label: "Administrare",
     items: [
-      { label: "Rapoarte", path: "/reports", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Rapoarte" },
+      { label: "Control Panel", path: "/control-panel", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Administrare" },
     ],
   },
 ];
@@ -156,6 +158,30 @@ export default function AppShell() {
       () => setUnreadCount(0)
     );
   }, [user?.uid]);
+
+  useEffect(() => {
+    async function loadUiPreferences() {
+      const settings = await getControlPanelSettings();
+      document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
+      document.documentElement.dataset.uiDensity = settings.uiDensity;
+      document.documentElement.dataset.uiPalette = settings.uiPalette;
+    }
+
+    void loadUiPreferences().catch((error) => {
+      console.error("[AppShell][loadUiPreferences]", error);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    void runVehicleMaintenanceAlerts({
+      userId: user.uid,
+      userName: user.displayName || user.email || "WorkControl",
+      userThemeKey: user.themeKey ?? null,
+    }).catch((error) => {
+      console.error("[AppShell][runVehicleMaintenanceAlerts]", error);
+    });
+  }, [user?.uid, user?.displayName, user?.email, user?.themeKey]);
 
   const currentItem =
     allItems.find((item) => location.pathname.startsWith(item.path)) || null;

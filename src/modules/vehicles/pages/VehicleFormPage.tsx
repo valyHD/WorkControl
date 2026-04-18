@@ -23,6 +23,7 @@ const emptyValues: VehicleFormValues = {
   fuelType: "",
   status: "activa",
   currentKm: 0,
+  initialRecordedKm: 0,
 
   ownerUserId: "",
   ownerUserName: "",
@@ -33,9 +34,12 @@ const emptyValues: VehicleFormValues = {
   currentDriverThemeKey: null,
 
   maintenanceNotes: "",
+  serviceStrategy: "interval",
+  serviceIntervalKm: 15000,
   nextServiceKm: 0,
   nextItpDate: "",
   nextRcaDate: "",
+  nextCascoDate: "",
 
   coverImageUrl: "",
   coverThumbUrl: "",
@@ -83,6 +87,7 @@ export default function VehicleFormPage() {
               fuelType: vehicle.fuelType,
               status: vehicle.status,
               currentKm: vehicle.currentKm,
+              initialRecordedKm: vehicle.initialRecordedKm,
 
               ownerUserId: vehicle.ownerUserId,
               ownerUserName: vehicle.ownerUserName,
@@ -93,9 +98,12 @@ export default function VehicleFormPage() {
               currentDriverThemeKey: vehicle.currentDriverThemeKey ?? null,
 
               maintenanceNotes: vehicle.maintenanceNotes,
+              serviceStrategy: vehicle.serviceStrategy,
+              serviceIntervalKm: vehicle.serviceIntervalKm,
               nextServiceKm: vehicle.nextServiceKm,
               nextItpDate: vehicle.nextItpDate,
               nextRcaDate: vehicle.nextRcaDate,
+              nextCascoDate: vehicle.nextCascoDate,
 
               coverImageUrl: vehicle.coverImageUrl,
               coverThumbUrl: vehicle.coverThumbUrl,
@@ -164,6 +172,12 @@ export default function VehicleFormPage() {
         vin: values.vin.trim(),
         fuelType: values.fuelType.trim(),
         maintenanceNotes: values.maintenanceNotes.trim(),
+        initialRecordedKm: Number(values.initialRecordedKm || values.currentKm || 0),
+        serviceIntervalKm: Number(values.serviceIntervalKm || 15000),
+        nextServiceKm:
+          values.serviceStrategy === "interval"
+            ? Number(values.currentKm || 0) + Number(values.serviceIntervalKm || 15000)
+            : Number(values.nextServiceKm || 0),
 
         ownerUserName:
           selectedOwner?.fullName || values.ownerUserName || "",

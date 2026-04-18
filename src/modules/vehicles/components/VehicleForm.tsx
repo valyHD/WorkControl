@@ -165,7 +165,17 @@ export default function VehicleForm({
         </div>
 
         <div className="tool-form-block">
-          <label className="tool-form-label">Km curenti</label>
+          <label className="tool-form-label">Km reali la înregistrare</label>
+          <input
+            className="tool-input"
+            type="number"
+            value={values.initialRecordedKm}
+            onChange={(e) => updateField("initialRecordedKm", Number(e.target.value || 0))}
+          />
+        </div>
+
+        <div className="tool-form-block">
+          <label className="tool-form-label">Km curenți</label>
           <input
             className="tool-input"
             type="number"
@@ -211,12 +221,50 @@ export default function VehicleForm({
         </div>
 
         <div className="tool-form-block">
-          <label className="tool-form-label">Urmator service la km</label>
+          <label className="tool-form-label">Tip prag service</label>
+          <select
+            className="tool-input"
+            value={values.serviceStrategy}
+            onChange={(e) => updateField("serviceStrategy", e.target.value as VehicleFormValues["serviceStrategy"])}
+          >
+            <option value="interval">Interval km (ex: la 15.000 km)</option>
+            <option value="absolute">Kilometraj fix pentru revizie</option>
+          </select>
+        </div>
+
+        {values.serviceStrategy === "interval" ? (
+          <div className="tool-form-block">
+            <label className="tool-form-label">Revizie la fiecare (km)</label>
+            <input
+              className="tool-input"
+              type="number"
+              value={values.serviceIntervalKm}
+              onChange={(e) => updateField("serviceIntervalKm", Number(e.target.value || 0))}
+            />
+          </div>
+        ) : (
+          <div className="tool-form-block">
+            <label className="tool-form-label">Prag service (km total)</label>
+            <input
+              className="tool-input"
+              type="number"
+              value={values.nextServiceKm}
+              onChange={(e) => updateField("nextServiceKm", Number(e.target.value || 0))}
+            />
+          </div>
+        )}
+
+        <div className="tool-form-block">
+          <label className="tool-form-label">Următor service calculat</label>
           <input
             className="tool-input"
             type="number"
-            value={values.nextServiceKm}
-            onChange={(e) => updateField("nextServiceKm", Number(e.target.value || 0))}
+            disabled
+            value={
+              values.serviceStrategy === "interval"
+                ? Number(values.currentKm || 0) + Number(values.serviceIntervalKm || 0)
+                : Number(values.nextServiceKm || 0)
+            }
           />
         </div>
 
@@ -237,6 +285,16 @@ export default function VehicleForm({
             type="date"
             value={values.nextRcaDate}
             onChange={(e) => updateField("nextRcaDate", e.target.value)}
+          />
+        </div>
+
+        <div className="tool-form-block">
+          <label className="tool-form-label">CASCO până la</label>
+          <input
+            className="tool-input"
+            type="date"
+            value={values.nextCascoDate}
+            onChange={(e) => updateField("nextCascoDate", e.target.value)}
           />
         </div>
 

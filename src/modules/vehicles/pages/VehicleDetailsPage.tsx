@@ -246,6 +246,9 @@ export default function VehicleDetailsPage() {
             <div className="tool-detail-line">
               <strong>Km curenti:</strong> {vehicle.currentKm || 0}
             </div>
+            <div className="tool-detail-line">
+              <strong>Km reali la înregistrare:</strong> {vehicle.initialRecordedKm || 0}
+            </div>
           </div>
 
           <div className="panel tool-inner-panel">
@@ -262,6 +265,10 @@ export default function VehicleDetailsPage() {
 
             <div className="tool-detail-line">
               <strong>RCA pana la:</strong> {vehicle.nextRcaDate || "-"}
+            </div>
+
+            <div className="tool-detail-line">
+              <strong>CASCO până la:</strong> {vehicle.nextCascoDate || "-"}
             </div>
 
             <div className="tool-detail-line">

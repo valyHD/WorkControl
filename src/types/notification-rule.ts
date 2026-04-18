@@ -37,6 +37,8 @@ export type NotificationRuleEventType =
   | "notification_read"
   | "vehicle_command_requested"
   | "vehicle_command_result"
+  | "vehicle_service_due_soon"
+  | "vehicle_document_due_soon"
   | "notification_rule_changed"
   | "backup_requested"
   | "backup_completed"

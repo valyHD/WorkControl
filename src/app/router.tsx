@@ -19,7 +19,7 @@ import TimesheetDetailsPage from "../modules/timesheets/pages/TimesheetDetailsPa
 import MyTimesheetsPage from "../modules/timesheets/pages/MyTimesheetsPage";
 import ProjectsPage from "../modules/timesheets/pages/ProjectsPage";
 import NotificationsPage from "../modules/notifications/pages/NotificationsPage";
-import ReportsPage from "../modules/reports/pages/ReportsPage";
+import ControlPanelPage from "../modules/reports/pages/ReportsPage";
 import NotificationRulesPage from "../modules/notifications/pages/NotificationRulesPage";
 function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -78,7 +78,8 @@ export const router = createBrowserRouter([
       { path: "/timesheets/:timesheetId", element: <TimesheetDetailsPage /> },
 
       { path: "/notifications", element: <NotificationsPage /> },
-      { path: "/reports", element: <ReportsPage /> },
+      { path: "/control-panel", element: <ControlPanelPage /> },
+      { path: "/reports", element: <Navigate to="/control-panel" replace /> },
     ],
   },
 ]);
