@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem } from "../../../types/timesheet";
@@ -18,33 +18,81 @@ type Props = {
   onSubmit: (values: NotificationRuleFormValues) => Promise<void>;
 };
 
-const moduleOptions: NotificationRuleModule[] = [
-  "tools",
-  "vehicles",
-  "timesheets",
-  "users",
-  "web",
-  "server",
-  "system",
-  "general",
+const moduleOptions: Array<{ value: NotificationRuleModule; label: string; description: string }> = [
+  { value: "tools", label: "Scule", description: "Inventar, stare, responsabil, poze." },
+  { value: "vehicles", label: "Mașini", description: "Stare mașini, șofer, comenzi GPS." },
+  { value: "timesheets", label: "Pontaje", description: "Pornire/oprire pontaj și ajustări." },
+  { value: "projects", label: "Proiecte", description: "Schimbări pe proiecte active/inactive." },
+  { value: "users", label: "Utilizatori", description: "Creare cont, rol, activare/dezactivare." },
+  { value: "notifications", label: "Notificări", description: "Fluxul notificărilor interne." },
+  { value: "backup", label: "Backup", description: "Export, eșec/succes backup, curățare date." },
+  { value: "web", label: "Website", description: "Schimbări detectate în aplicația web." },
+  { value: "server", label: "Server", description: "Evenimente backend/infrastructură." },
+  { value: "system", label: "Sistem", description: "Reguli și modificări administrative." },
+  { value: "general", label: "General", description: "Prinde orice modificare importantă." },
 ];
 
-const eventOptionsByModule: Record<NotificationRuleModule, NotificationRuleEventType[]> = {
-  tools: ["tool_holder_changed", "tool_status_changed"],
-  vehicles: [
-    "vehicle_driver_changed",
-    "vehicle_status_changed",
-    "vehicle_started",
-    "vehicle_block_start_requested",
-    "vehicle_command_requested",
-    "vehicle_command_result",
+const eventOptionsByModule: Record<
+  NotificationRuleModule,
+  Array<{ value: NotificationRuleEventType; label: string; description: string }>
+> = {
+  tools: [
+    { value: "tool_created", label: "Sculă creată", description: "A fost adăugată o sculă nouă." },
+    { value: "tool_updated", label: "Sculă actualizată", description: "Detalii sculă editate (date, imagini, locație)." },
+    { value: "tool_deleted", label: "Sculă ștearsă", description: "Scula a fost eliminată din inventar." },
+    { value: "tool_holder_changed", label: "Responsabil schimbat", description: "Scula a trecut la alt utilizator sau în depozit." },
+    { value: "tool_status_changed", label: "Status sculă schimbat", description: "S-a modificat starea operațională a sculei." },
   ],
-  timesheets: ["timesheet_started", "timesheet_stopped", "timesheet_updated"],
-  users: ["user_created", "user_role_changed"],
-  web: ["web_change_detected", "any_change"],
-  server: ["server_change_detected", "any_change"],
-  system: ["system_change_detected", "notification_rule_changed", "any_change"],
-  general: ["any_change"],
+  vehicles: [
+    { value: "vehicle_created", label: "Mașină adăugată", description: "A fost înregistrată o mașină nouă." },
+    { value: "vehicle_updated", label: "Mașină actualizată", description: "Date mașină editate (ITP, RCA, date tehnice)." },
+    { value: "vehicle_deleted", label: "Mașină ștearsă", description: "Mașina a fost scoasă din sistem." },
+    { value: "vehicle_driver_changed", label: "Șofer schimbat", description: "S-a schimbat șoferul curent." },
+    { value: "vehicle_status_changed", label: "Status mașină schimbat", description: "S-a schimbat statusul (activă/service/avariată)." },
+    { value: "vehicle_started", label: "Comandă pornire", description: "A fost trimisă comandă de pornire." },
+    { value: "vehicle_block_start_requested", label: "Comandă blocare pornire", description: "A fost trimisă comandă de blocare start." },
+    { value: "vehicle_command_requested", label: "Comandă vehicul", description: "Alt tip de comandă trimisă către tracker." },
+    { value: "vehicle_command_result", label: "Rezultat comandă", description: "Comanda mașinii a primit răspuns (success/fail)." },
+  ],
+  timesheets: [
+    { value: "timesheet_started", label: "Pontaj pornit", description: "Utilizatorul a pornit pontajul." },
+    { value: "timesheet_stopped", label: "Pontaj oprit", description: "Utilizatorul a închis pontajul." },
+    { value: "timesheet_updated", label: "Pontaj editat", description: "Pontaj modificat după înregistrare." },
+  ],
+  projects: [
+    { value: "project_created", label: "Proiect creat", description: "A fost adăugat un proiect." },
+    { value: "project_updated", label: "Proiect actualizat", description: "Date/status proiect modificate." },
+  ],
+  users: [
+    { value: "user_created", label: "Utilizator creat", description: "A fost creat un cont nou." },
+    { value: "user_updated", label: "Utilizator actualizat", description: "Date profil utilizator modificate." },
+    { value: "user_role_changed", label: "Rol schimbat", description: "Rolul utilizatorului s-a modificat." },
+    { value: "user_activation_changed", label: "Activare/dezactivare", description: "Statusul activ/inactiv a fost schimbat." },
+  ],
+  notifications: [
+    { value: "notification_created", label: "Notificare nouă", description: "A fost generată o notificare internă." },
+    { value: "notification_read", label: "Notificare citită", description: "O notificare a fost marcată ca citită." },
+  ],
+  backup: [
+    { value: "backup_requested", label: "Backup pornit", description: "S-a pornit un export de date." },
+    { value: "backup_completed", label: "Backup finalizat", description: "Backup-ul s-a încheiat cu succes." },
+    { value: "backup_failed", label: "Backup eșuat", description: "Exportul de date a eșuat." },
+    { value: "data_retention_cleanup", label: "Curățare istoric", description: "Date istorice șterse pe regula de retenție." },
+  ],
+  web: [
+    { value: "web_change_detected", label: "Schimbare web", description: "Schimbare detectată în aplicația web." },
+    { value: "any_change", label: "Orice schimbare", description: "Prinde toate schimbările disponibile." },
+  ],
+  server: [
+    { value: "server_change_detected", label: "Schimbare server", description: "Schimbare detectată pe server/infrastructură." },
+    { value: "any_change", label: "Orice schimbare", description: "Prinde toate schimbările disponibile." },
+  ],
+  system: [
+    { value: "system_change_detected", label: "Schimbare sistem", description: "Schimbare administrativă în sistem." },
+    { value: "notification_rule_changed", label: "Regulă notificări schimbată", description: "O regulă a fost creată sau editată." },
+    { value: "any_change", label: "Orice schimbare", description: "Prinde toate schimbările disponibile." },
+  ],
+  general: [{ value: "any_change", label: "Orice schimbare", description: "Regulă globală pentru toate modulele." }],
 };
 
 export default function NotificationRuleForm({
@@ -61,6 +109,49 @@ export default function NotificationRuleForm({
   useEffect(() => {
     setValues(initialValues);
   }, [initialValues]);
+
+  const currentEvents = eventOptionsByModule[values.module];
+  const activeModule = moduleOptions.find((item) => item.value === values.module);
+  const activeEvent = currentEvents.find((item) => item.value === values.eventType);
+
+  const canSelectEntity =
+    values.module === "vehicles" ||
+    values.module === "tools" ||
+    values.module === "timesheets" ||
+    values.module === "users" ||
+    values.module === "projects";
+
+  const moduleEntityOptions = useMemo(() => {
+    if (values.module === "vehicles") {
+      return vehicles.map((vehicle) => ({
+        id: vehicle.id,
+        label: `${vehicle.plateNumber} · ${vehicle.brand} ${vehicle.model}`.trim(),
+      }));
+    }
+
+    if (values.module === "tools") {
+      return tools.map((tool) => ({
+        id: tool.id,
+        label: `${tool.internalCode} · ${tool.name}`.trim(),
+      }));
+    }
+
+    if (values.module === "timesheets" || values.module === "projects") {
+      return projects.map((project) => ({
+        id: project.id,
+        label: `${project.code} · ${project.name}`.trim(),
+      }));
+    }
+
+    if (values.module === "users") {
+      return users.map((entry) => ({
+        id: entry.id,
+        label: entry.fullName,
+      }));
+    }
+
+    return [];
+  }, [projects, tools, users, values.module, vehicles]);
 
   function toggleSpecificUser(userId: string) {
     setValues((prev) => {
@@ -82,43 +173,24 @@ export default function NotificationRuleForm({
     await onSubmit(values);
   }
 
-  const currentEvents = eventOptionsByModule[values.module];
-  const canSelectEntity = values.module === "vehicles" || values.module === "tools" || values.module === "timesheets" || values.module === "users";
-
-  const moduleEntityOptions = values.module === "vehicles"
-    ? vehicles.map((vehicle) => ({
-        id: vehicle.id,
-        label: `${vehicle.plateNumber} · ${vehicle.brand} ${vehicle.model}`.trim(),
-      }))
-    : values.module === "tools"
-    ? tools.map((tool) => ({
-        id: tool.id,
-        label: `${tool.internalCode} · ${tool.name}`.trim(),
-      }))
-    : values.module === "timesheets"
-    ? projects.map((project) => ({
-        id: project.id,
-        label: `${project.code} · ${project.name}`.trim(),
-      }))
-    : values.module === "users"
-    ? users.map((entry) => ({
-        id: entry.id,
-        label: entry.fullName,
-      }))
-    : [];
-
   return (
     <form className="tool-form" onSubmit={handleSubmit}>
+      <div className="rule-hint-card">
+        <strong>{activeModule?.label}</strong>
+        <span>{activeModule?.description}</span>
+        <span>
+          Eveniment selectat: <strong>{activeEvent?.label}</strong> — {activeEvent?.description}
+        </span>
+      </div>
+
       <div className="tool-form-grid">
         <div className="tool-form-block">
-          <label className="tool-form-label">Nume regula</label>
+          <label className="tool-form-label">Nume regulă</label>
           <input
             className="tool-input"
             value={values.name}
-            onChange={(e) =>
-              setValues((prev) => ({ ...prev, name: e.target.value }))
-            }
-            placeholder="Ex: Notifica admin la schimbare scula"
+            onChange={(e) => setValues((prev) => ({ ...prev, name: e.target.value }))}
+            placeholder="Ex: Notifică admin când se schimbă statusul unei mașini"
           />
         </div>
 
@@ -133,15 +205,15 @@ export default function NotificationRuleForm({
               setValues((prev) => ({
                 ...prev,
                 module: nextModule,
-                eventType: nextEvents[0],
+                eventType: nextEvents[0].value,
                 entityId: "",
                 entityLabel: "",
               }));
             }}
           >
             {moduleOptions.map((module) => (
-              <option key={module} value={module}>
-                {module}
+              <option key={module.value} value={module.value}>
+                {module.label}
               </option>
             ))}
           </select>
@@ -149,7 +221,7 @@ export default function NotificationRuleForm({
 
         {canSelectEntity && (
           <div className="tool-form-block">
-            <label className="tool-form-label">Entitate specifica (optional)</label>
+            <label className="tool-form-label">Entitate specifică (opțional)</label>
             <select
               className="tool-input"
               value={values.entityId}
@@ -164,7 +236,7 @@ export default function NotificationRuleForm({
                 }));
               }}
             >
-              <option value="">Toate entitatile ({values.module})</option>
+              <option value="">Toate entitățile ({activeModule?.label || values.module})</option>
               {moduleEntityOptions.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -187,15 +259,15 @@ export default function NotificationRuleForm({
             }
           >
             {currentEvents.map((eventType) => (
-              <option key={eventType} value={eventType}>
-                {eventType}
+              <option key={eventType.value} value={eventType.value}>
+                {eventType.label}
               </option>
             ))}
           </select>
         </div>
 
         <div className="tool-form-block">
-          <label className="tool-form-label">Status regula</label>
+          <label className="tool-form-label">Status regulă</label>
           <select
             className="tool-input"
             value={values.enabled ? "true" : "false"}
@@ -206,14 +278,13 @@ export default function NotificationRuleForm({
               }))
             }
           >
-            <option value="true">activa</option>
-            <option value="false">inactiva</option>
+            <option value="true">Activă</option>
+            <option value="false">Inactivă</option>
           </select>
         </div>
 
         <div className="tool-form-block tool-form-block-full">
           <label className="tool-form-label">Destinatari</label>
-
           <div className="checkbox-grid">
             <label className="checkbox-line">
               <input
@@ -263,7 +334,7 @@ export default function NotificationRuleForm({
                   }))
                 }
               />
-              <span>Toti adminii</span>
+              <span>Toți adminii</span>
             </label>
 
             <label className="checkbox-line">
@@ -280,7 +351,7 @@ export default function NotificationRuleForm({
                   }))
                 }
               />
-              <span>Toti managerii</span>
+              <span>Toți managerii</span>
             </label>
           </div>
         </div>
@@ -306,7 +377,7 @@ export default function NotificationRuleForm({
 
       <div className="tool-form-actions">
         <button className="primary-btn" type="submit" disabled={submitting}>
-          {submitting ? "Se salveaza..." : "Salveaza regula"}
+          {submitting ? "Se salvează..." : "Salvează regula"}
         </button>
       </div>
     </form>

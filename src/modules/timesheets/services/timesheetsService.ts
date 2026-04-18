@@ -126,6 +126,14 @@ export async function createProject(values: ProjectFormValues): Promise<string> 
     updatedAtServer: serverTimestamp(),
   });
 
+  await dispatchNotificationEvent({
+    module: "projects",
+    eventType: "project_created",
+    entityId: refDoc.id,
+    title: "Proiect creat",
+    message: `Proiect nou: ${values.code.trim()} - ${values.name.trim()}.`,
+  });
+
   return refDoc.id;
 }
 
@@ -139,6 +147,14 @@ export async function updateProject(
     status: values.status,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
+  });
+
+  await dispatchNotificationEvent({
+    module: "projects",
+    eventType: "project_updated",
+    entityId: projectId,
+    title: "Proiect actualizat",
+    message: `Proiect actualizat: ${values.code.trim()} - ${values.name.trim()} (${values.status}).`,
   });
 }
 

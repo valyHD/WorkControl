@@ -221,6 +221,20 @@ export async function createTool(values: ToolFormValues): Promise<string> {
   });
 
   await addToolEvent(docRef.id, "created", `Scula "${values.name}" a fost creata.`);
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_created",
+    entityId: docRef.id,
+    title: "Sculă nouă",
+    message: `A fost adăugată scula ${values.name}.`,
+    directUserId: values.currentHolderUserId || "",
+    ownerUserId: values.ownerUserId || "",
+    actorUserId: values.ownerUserId || "",
+    actorUserName: values.ownerUserName || "Responsabil",
+    actorUserThemeKey: values.ownerThemeKey ?? null,
+  });
+
   return docRef.id;
 }
 
@@ -238,6 +252,19 @@ export async function updateTool(toolId: string, values: ToolFormValues): Promis
   });
 
   await addToolEvent(toolId, "updated", `Scula "${values.name}" a fost actualizata.`);
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_updated",
+    entityId: toolId,
+    title: "Sculă actualizată",
+    message: `Datele sculei ${values.name} au fost actualizate.`,
+    directUserId: values.currentHolderUserId || "",
+    ownerUserId: values.ownerUserId || previousOwnerUserId || "",
+    actorUserId: values.ownerUserId || "",
+    actorUserName: values.ownerUserName || "Responsabil",
+    actorUserThemeKey: values.ownerThemeKey ?? null,
+  });
 
   if (previousStatus !== values.status) {
     await addToolEvent(
@@ -419,7 +446,19 @@ export async function removeToolImage(
 }
 
 export async function deleteTool(toolId: string): Promise<void> {
+  const snap = await getDoc(doc(db, "tools", toolId));
+  const data = snap.exists() ? snap.data() : null;
+
   await deleteDoc(doc(db, "tools", toolId));
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_deleted",
+    entityId: toolId,
+    title: "Sculă ștearsă",
+    message: `Scula ${data?.name ?? toolId} a fost ștearsă din sistem.`,
+    ownerUserId: data?.ownerUserId ?? "",
+  });
 }
 
 export async function changeToolHolder(
