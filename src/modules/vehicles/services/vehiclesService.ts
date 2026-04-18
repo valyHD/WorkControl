@@ -85,6 +85,7 @@ currentDriverThemeKey: data.currentDriverThemeKey ?? null,
       ? {
           imei: data.tracker.imei ?? "",
           lastSeenAt: Number(data.tracker.lastSeenAt ?? 0),
+          updatedAt: Number(data.tracker.updatedAt ?? 0),
           protocol: data.tracker.protocol ?? "",
         }
       : null,
@@ -174,7 +175,19 @@ export async function getVehicleById(vehicleId: string): Promise<VehicleItem | n
   if (!snap.exists()) return null;
   return mapVehicleDoc(snap.id, snap.data());
 }
+export function subscribeVehicleById(
+  vehicleId: string,
+  onData: (item: VehicleItem | null) => void
+): () => void {
+  return onSnapshot(doc(db, "vehicles", vehicleId), (snap) => {
+    if (!snap.exists()) {
+      onData(null);
+      return;
+    }
 
+    onData(mapVehicleDoc(snap.id, snap.data()));
+  });
+}
 export async function isPlateNumberUsed(
   plateNumber: string,
   excludeVehicleId?: string
@@ -644,8 +657,9 @@ export async function getVehicleCommands(vehicleId: string, maxItems = 20): Prom
 export async function requestVehicleCommand(
   vehicleId: string,
   payload: {
-    type: "allow_start" | "block_start";
+    type: "pulse_dout1" | "allow_start" | "block_start";
     requestedBy: string;
+    durationSec?: number | null;
   }
 ): Promise<string> {
   const created = await addDoc(collection(db, "vehicles", vehicleId, "commands"), {
@@ -656,6 +670,7 @@ export async function requestVehicleCommand(
     completedAt: null,
     providerMessage: "",
     result: "queued",
+    durationSec: payload.durationSec ?? null,
     createdAtServer: serverTimestamp(),
   });
 

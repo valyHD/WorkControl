@@ -189,14 +189,16 @@ export default function VehicleLiveRouteCard({ vehicle }: Props) {
     setToTs(range.to);
   }
 
-  async function handleRequestCommand(type: "allow_start" | "block_start") {
-    await requestVehicleCommand(vehicle.id, {
-      type,
-      requestedBy: vehicle.currentDriverUserName || vehicle.ownerUserName || "dashboard_user",
-    });
-    const latestCommands = await getVehicleCommands(vehicle.id).catch(() => []);
-    setCommands(latestCommands);
-  }
+async function handleRequestCommand(type: "pulse_dout1" | "block_start") {
+  await requestVehicleCommand(vehicle.id, {
+    type,
+    requestedBy: vehicle.currentDriverUserName || vehicle.ownerUserName || "dashboard_user",
+    durationSec: type === "pulse_dout1" ? 60 : null,
+  });
+
+  const latestCommands = await getVehicleCommands(vehicle.id).catch(() => []);
+  setCommands(latestCommands);
+}
 
   return (
     <div className="panel vehicle-live-route-card">

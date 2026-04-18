@@ -770,6 +770,7 @@ h3.panel-title {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding:10px;
 }
 
 /* icon next to panel title */
@@ -2319,6 +2320,7 @@ input[type="file"] {
 .vehicle-live-route-card {
   display: grid;
   gap: 18px;
+  padding:10px;
 }
 
 .vehicle-live-route-card__header {
@@ -2476,6 +2478,7 @@ input[type="file"] {
 .vehicle-info-card {
   display: grid;
   gap: 12px;
+  padding:10px;
 }
 
 .vehicle-info-grid {
@@ -2529,7 +2532,7 @@ input[type="file"] {
 .vehicle-timeline-item__title { font-weight: 700; color: var(--text); }
 .vehicle-timeline-item__meta { font-size: 12px; color: var(--text-muted); }
 
-.vehicle-control-card { display: grid; gap: 12px; }
+.vehicle-control-card { display: grid; gap: 12px; padding:10px;}
 .vehicle-control-card__header { display: flex; justify-content: space-between; align-items: center; }
 
 .vehicle-engine-warning {
@@ -2555,4 +2558,9 @@ input[type="file"] {
   .vehicle-info-grid {
     grid-template-columns: 1fr;
   }
+}
+.vehicle-gps-chip.is-recent {
+  background: var(--warning-soft);
+  border-color: rgba(234, 88, 12, 0.22);
+  color: var(--warning);
 }

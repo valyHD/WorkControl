@@ -32,6 +32,7 @@ export interface VehicleGpsSnapshot {
 export interface VehicleTrackerMeta {
   imei?: string;
   lastSeenAt?: number;
+  updatedAt?: number;
   protocol?: string;
 }
 
@@ -88,7 +89,7 @@ export interface VehicleTrackerEventItem {
   metadata?: Record<string, unknown>;
 }
 
-export type VehicleCommandType = "allow_start" | "block_start";
+export type VehicleCommandType = "pulse_dout1" | "allow_start" | "block_start";
 export type VehicleCommandStatus = "requested" | "pending" | "completed" | "failed";
 
 export interface VehicleCommandItem {
@@ -100,6 +101,7 @@ export interface VehicleCommandItem {
   completedAt?: number | null;
   providerMessage?: string;
   result?: string;
+  durationSec?: number | null;
 }
 
 export interface VehicleItem {

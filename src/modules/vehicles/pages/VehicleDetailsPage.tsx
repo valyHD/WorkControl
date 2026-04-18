@@ -8,11 +8,11 @@ import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
 import {
   claimVehicleForCurrentUser,
-  getVehicleById,
   getVehicleEvents,
   getVehicleUsers,
   removeVehicleImage,
   setVehicleCoverImage,
+  subscribeVehicleById,
 } from "../services/vehiclesService";
 
 function formatDate(ts: number) {
@@ -28,57 +28,71 @@ export default function VehicleDetailsPage() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
+  useEffect(() => {
+    if (!vehicleId) return;
+
     setLoading(true);
-    try {
-      const vehicleData = await getVehicleById(vehicleId);
+
+    const unsubscribe = subscribeVehicleById(vehicleId, (vehicleData) => {
       setVehicle(vehicleData);
-
-      try {
-        const eventsData = await getVehicleEvents(vehicleId);
-        setEvents(eventsData);
-      } catch (err) {
-        console.error(err);
-        setEvents([]);
-      }
-
-      try {
-        const usersData = await getVehicleUsers();
-        setUsers(usersData);
-      } catch (err) {
-        console.error(err);
-        setUsers([]);
-      }
-    } finally {
       setLoading(false);
-    }
-  }
+    });
+
+    return unsubscribe;
+  }, [vehicleId]);
 
   useEffect(() => {
-    void load();
+    async function loadMeta() {
+      try {
+        const [eventsData, usersData] = await Promise.all([
+          getVehicleEvents(vehicleId).catch(() => []),
+          getVehicleUsers().catch(() => []),
+        ]);
+
+        setEvents(eventsData);
+        setUsers(usersData);
+      } catch (error) {
+        console.error(error);
+        setEvents([]);
+        setUsers([]);
+      }
+    }
+
+    if (vehicleId) {
+      void loadMeta();
+    }
   }, [vehicleId]);
 
   async function handleClaimVehicle() {
     if (!vehicle || !user?.uid) return;
-await claimVehicleForCurrentUser(
-  vehicle.id,
-  user.uid,
-  user.displayName || user.email || "Utilizator",
-  user.themeKey ?? null
-);
-    await load();
+
+    await claimVehicleForCurrentUser(
+      vehicle.id,
+      user.uid,
+      user.displayName || user.email || "Utilizator",
+      user.themeKey ?? null
+    );
+
+    const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
+    setEvents(eventsData);
   }
 
   async function handleSetCover(url: string) {
     if (!vehicle || !user || vehicle.ownerUserId !== user.uid) return;
+
     await setVehicleCoverImage(vehicle.id, url);
-    await load();
+
+    const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
+    setEvents(eventsData);
   }
 
   async function handleDeleteImage(imageId: string) {
     if (!vehicle || !user || vehicle.ownerUserId !== user.uid) return;
+
     await removeVehicleImage(vehicle.id, vehicle.images, imageId);
-    await load();
+
+    const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
+    setEvents(eventsData);
   }
 
   const isOwner = useMemo(() => {
@@ -133,7 +147,10 @@ await claimVehicleForCurrentUser(
                 <strong>Marca / model:</strong> {vehicle.brand} {vehicle.model}
               </div>
               <div className="tool-detail-line">
-                <strong>Status:</strong> <VehicleStatusBadge status={vehicle.status} />
+                <strong>Status masina:</strong> <VehicleStatusBadge status={vehicle.status} />
+              </div>
+              <div className="tool-detail-line">
+                <strong>Ultima actualizare document:</strong> {formatDate(vehicle.updatedAt)}
               </div>
             </div>
           </div>
@@ -209,7 +226,14 @@ await claimVehicleForCurrentUser(
       )}
 
       {isOwner && (
-        <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={load} />
+        <VehicleChangeDriverCard
+  vehicle={vehicle}
+  users={users}
+  onChanged={async () => {
+    const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
+    setEvents(eventsData);
+  }}
+/>
       )}
 
       <VehicleLiveRouteCard vehicle={vehicle} />
@@ -258,14 +282,16 @@ await claimVehicleForCurrentUser(
         <h3 className="panel-title">Istoric</h3>
 
         {events.length === 0 ? (
-          <p className="tools-subtitle">Nu exista actiuni inregistrate.</p>
+          <p className="tools-subtitle">Nu exista evenimente salvate.</p>
         ) : (
           <div className="simple-list">
             {events.map((event) => (
               <div key={event.id} className="simple-list-item">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{event.message}</div>
-                  <div className="simple-list-subtitle">{formatDate(event.createdAt)}</div>
+                  <div className="simple-list-subtitle">
+                    {event.actorUserName || "Sistem"} · {formatDate(event.createdAt)}
+                  </div>
                 </div>
               </div>
             ))}
