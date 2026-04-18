@@ -2534,6 +2534,46 @@ input[type="file"] {
 
 .vehicle-control-card { display: grid; gap: 12px; padding:10px;}
 .vehicle-control-card__header { display: flex; justify-content: space-between; align-items: center; }
+.vehicle-control-history {
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--surface-alt);
+}
+.vehicle-control-history summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.profile-collapsible {
+  padding: 0;
+  overflow: hidden;
+}
+.profile-collapsible__summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+.profile-collapsible__summary::-webkit-details-marker {
+  display: none;
+}
+.profile-collapsible__preview {
+  margin-top: 8px;
+}
+.profile-collapsible__body {
+  border-top: 1px solid var(--line-mid);
+  padding: 12px 14px 14px;
+  background: var(--surface-alt);
+}
+.compact-rows .simple-list-item {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
 
 .vehicle-engine-warning {
   border-radius: var(--radius-sm);

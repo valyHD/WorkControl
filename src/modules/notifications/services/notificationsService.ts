@@ -38,7 +38,8 @@ type AppUserLite = {
 
 async function getMatchingRules(
   module: NotificationRuleModule,
-  eventType: NotificationRuleEventType
+  eventType: NotificationRuleEventType,
+  inputEntityId?: string
 ): Promise<NotificationRuleItem[]> {
   const snap = await getDocs(
     query(collection(db, "notificationRules"), where("enabled", "==", true))
@@ -52,6 +53,8 @@ async function getMatchingRules(
       name: data.name ?? "",
       module: data.module ?? "general",
       eventType: data.eventType ?? "user_created",
+      entityId: data.entityId ?? "",
+      entityLabel: data.entityLabel ?? "",
       enabled: data.enabled ?? true,
       recipients: {
         notifyDirectUser: data.recipients?.notifyDirectUser ?? false,
@@ -70,7 +73,9 @@ async function getMatchingRules(
       rule.module === module || rule.module === "general" || rule.module === "system";
     const eventMatches =
       rule.eventType === eventType || rule.eventType === "any_change";
-    return moduleMatches && eventMatches;
+    const entityMatches =
+      !rule.entityId || !inputEntityId || rule.entityId === inputEntityId;
+    return moduleMatches && eventMatches && entityMatches;
   });
 }
 
@@ -116,7 +121,7 @@ async function createNotificationForUser(params: {
 export async function dispatchNotificationEvent(
   input: DispatchNotificationEventInput
 ): Promise<void> {
-  const rules = await getMatchingRules(input.module, input.eventType);
+  const rules = await getMatchingRules(input.module, input.eventType, input.entityId);
   if (rules.length === 0) return;
 
   const users = await getAllUsersLite();

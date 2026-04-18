@@ -891,10 +891,25 @@ export async function requestVehicleCommand(
 
   await dispatchNotificationEvent({
     module: "vehicles",
-    eventType: "vehicle_command_requested",
+    eventType:
+      payload.type === "pulse_dout1"
+        ? "vehicle_started"
+        : payload.type === "block_start"
+        ? "vehicle_block_start_requested"
+        : "vehicle_command_requested",
     entityId: vehicleId,
-    title: "Comanda vehicul noua",
-    message: `S-a trimis comanda ${payload.type} pentru vehicul.`,
+    title:
+      payload.type === "pulse_dout1"
+        ? "Cerere pornire masina"
+        : payload.type === "block_start"
+        ? "Cerere blocare pornire"
+        : "Comanda vehicul noua",
+    message:
+      payload.type === "pulse_dout1"
+        ? "S-a trimis comanda de pornire a masinii (DOUT1)."
+        : payload.type === "block_start"
+        ? "S-a trimis comanda de blocare a pornirii."
+        : `S-a trimis comanda ${payload.type} pentru vehicul.`,
     actorUserName: payload.requestedBy,
   });
 

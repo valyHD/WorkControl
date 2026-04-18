@@ -1,19 +1,25 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../../providers/AuthProvider";
-import type { AppUser } from "../../../types/tool";
+import type { AppUser, ToolItem } from "../../../types/tool";
+import type { VehicleItem } from "../../../types/vehicle";
+import type { ProjectItem } from "../../../types/timesheet";
 import type { NotificationRuleFormValues, NotificationRuleItem } from "../../../types/notification-rule";
-import { getUsersList } from "../../tools/services/toolsService";
+import { getToolsList, getUsersList } from "../../tools/services/toolsService";
 import NotificationRuleForm from "../components/NotificationRuleForm";
 import {
   createNotificationRule,
   getNotificationRules,
   updateNotificationRule,
 } from "../services/notificationRulesService";
+import { getVehiclesList } from "../../vehicles/services/vehiclesService";
+import { getProjectsList } from "../../timesheets/services/timesheetsService";
 
 const emptyValues: NotificationRuleFormValues = {
   name: "",
   module: "general",
   eventType: "any_change",
+  entityId: "",
+  entityLabel: "",
   enabled: true,
   recipients: {
     notifyDirectUser: true,
@@ -29,6 +35,9 @@ export default function NotificationRulesPage() {
 
   const [rules, setRules] = useState<NotificationRuleItem[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
+  const [tools, setTools] = useState<ToolItem[]>([]);
+  const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -41,13 +50,19 @@ export default function NotificationRulesPage() {
     setError("");
 
     try {
-      const [rulesData, usersData] = await Promise.all([
+      const [rulesData, usersData, toolsData, vehiclesData, projectsData] = await Promise.all([
         getNotificationRules(),
         getUsersList(),
+        getToolsList(),
+        getVehiclesList(),
+        getProjectsList(),
       ]);
 
       setRules(rulesData);
       setUsers(usersData);
+      setTools(toolsData);
+      setVehicles(vehiclesData);
+      setProjects(projectsData);
     } catch (err) {
       console.error(err);
       setError("Nu am putut incarca regulile.");
@@ -144,6 +159,9 @@ export default function NotificationRulesPage() {
           <NotificationRuleForm
             initialValues={emptyValues}
             users={users}
+            tools={tools}
+            vehicles={vehicles}
+            projects={projects}
             submitting={submitting}
             onSubmit={handleCreate}
           />
@@ -164,6 +182,9 @@ export default function NotificationRulesPage() {
                     <NotificationRuleForm
                       initialValues={editingValues}
                       users={users}
+                      tools={tools}
+                      vehicles={vehicles}
+                      projects={projects}
                       submitting={submitting}
                       onSubmit={async () => {
                         await handleSaveEdit();
@@ -191,6 +212,11 @@ export default function NotificationRulesPage() {
                         modul: {rule.module} · eveniment: {rule.eventType} · status:{" "}
                         {rule.enabled ? "activa" : "inactiva"}
                       </div>
+                      {rule.entityId && (
+                        <div className="simple-list-subtitle">
+                          entitate: {rule.entityLabel || rule.entityId}
+                        </div>
+                      )}
                       <div className="simple-list-subtitle">
                         direct: {rule.recipients.notifyDirectUser ? "da" : "nu"} ·
                         owner: {rule.recipients.notifyOwner ? "da" : "nu"} ·
@@ -209,6 +235,8 @@ export default function NotificationRulesPage() {
                           name: rule.name,
                           module: rule.module,
                           eventType: rule.eventType,
+                          entityId: rule.entityId,
+                          entityLabel: rule.entityLabel,
                           enabled: rule.enabled,
                           recipients: {
                             ...rule.recipients,

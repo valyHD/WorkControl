@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import { useAuth } from "../../../providers/AuthProvider";
 import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
@@ -20,6 +20,34 @@ type MyNotificationItem = {
   createdAt: number;
   read: boolean;
 };
+
+function CompactSection({
+  title,
+  subtitle,
+  preview,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  subtitle?: string;
+  preview?: ReactNode;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details className="panel profile-collapsible" open={defaultOpen}>
+      <summary className="profile-collapsible__summary">
+        <div>
+          <h3 className="panel-title">{title}</h3>
+          {subtitle && <p className="tools-subtitle">{subtitle}</p>}
+          {preview && <div className="profile-collapsible__preview">{preview}</div>}
+        </div>
+        <span className="badge">Detalii</span>
+      </summary>
+      <div className="profile-collapsible__body">{children}</div>
+    </details>
+  );
+}
 
 export default function MyProfilePage() {
   const { user } = useAuth();
@@ -144,6 +172,11 @@ export default function MyProfilePage() {
     void load();
   }, [user?.uid]);
 
+  const timesheetPreview = useMemo(
+    () => myTimesheets.slice(0, 2),
+    [myTimesheets]
+  );
+
   if (!user) {
     return (
       <div className="placeholder-page">
@@ -174,50 +207,72 @@ export default function MyProfilePage() {
         </div>
       </div>
 
-      <div className="panel">
-        <h3 className="panel-title">Sculele mele</h3>
-        {ownedTools.length === 0 ? (
-          <p className="tools-subtitle">Nu ai scule in responsabilitate.</p>
+      <CompactSection
+        title="Pontajele mele"
+        subtitle="Preview compact (2 randuri), apoi dropdown pentru istoric complet."
+        defaultOpen
+        preview={
+          timesheetPreview.length === 0 ? (
+            <p className="tools-subtitle">Nu ai pontaje salvate.</p>
+          ) : (
+            <div className="simple-list compact-rows">
+              {timesheetPreview.map((timesheet) => (
+                <div key={timesheet.id} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">
+                      {timesheet.projectCode} - {timesheet.projectName}
+                    </div>
+                    <div className="simple-list-subtitle">
+                      {new Date(timesheet.startAt).toLocaleString("ro-RO")} · {timesheet.status}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        }
+      >
+        {myTimesheets.length === 0 ? (
+          <p className="tools-subtitle">Nu ai pontaje salvate.</p>
         ) : (
-          <div className="tools-grid">
-            {ownedTools.map((tool) => (
-              <MyToolCard
-                key={tool.id}
-                tool={tool}
-                users={users}
-                onChanged={load}
-                showOwner={false}
-                canManage={true}
-              />
+          <div className="simple-list">
+            {myTimesheets.map((timesheet) => (
+              <div key={timesheet.id} className="simple-list-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">
+                    {timesheet.projectCode} - {timesheet.projectName}
+                  </div>
+                  <div className="simple-list-subtitle">
+                    {new Date(timesheet.startAt).toLocaleString("ro-RO")} · {timesheet.status} · {timesheet.workedMinutes} min
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         )}
-      </div>
+      </CompactSection>
 
-      <div className="panel">
-        <h3 className="panel-title">Scule primite de la altii</h3>
-        {borrowedTools.length === 0 ? (
-          <p className="tools-subtitle">Nu ai scule primite de la alti utilizatori.</p>
-        ) : (
-          <div className="tools-grid">
-            {borrowedTools.map((tool) => (
-              <MyToolCard
-                key={tool.id}
-                tool={tool}
-                users={users}
-                onChanged={load}
-                canManage={false}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">Mașinile mele</h3>
-        {myVehicles.length === 0 ? (
-          <p className="tools-subtitle">Nu ai mașini pe profil momentan.</p>
-        ) : (
+      {myVehicles.length > 0 && (
+        <CompactSection
+          title="Masinile mele"
+          subtitle="Sectiunea apare doar daca ai cel putin o masina."
+          preview={
+            <div className="simple-list compact-rows">
+              {myVehicles.slice(0, 2).map((vehicle) => (
+                <div key={vehicle.id} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">
+                      {vehicle.plateNumber} · {vehicle.brand} {vehicle.model}
+                    </div>
+                    <div className="simple-list-subtitle">
+                      status: {vehicle.status} · km: {vehicle.currentKm}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
+        >
           <div className="simple-list">
             {myVehicles.map((vehicle) => (
               <div key={vehicle.id} className="simple-list-item">
@@ -232,71 +287,97 @@ export default function MyProfilePage() {
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </CompactSection>
+      )}
 
-      <div className="panel">
-        <h3 className="panel-title">Pontajele mele recente</h3>
-        {myTimesheets.length === 0 ? (
-          <p className="tools-subtitle">Nu ai pontaje salvate.</p>
-        ) : (
-          <div className="simple-list">
-            {myTimesheets.slice(0, 10).map((timesheet) => (
-              <div key={timesheet.id} className="simple-list-item">
-                <div className="simple-list-text">
-                  <div className="simple-list-label">
-                    {timesheet.projectCode} - {timesheet.projectName}
-                  </div>
-                  <div className="simple-list-subtitle">
-                    {new Date(timesheet.startAt).toLocaleString("ro-RO")} · {timesheet.status} · {timesheet.workedMinutes} min
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      <CompactSection
+        title="Sculele mele"
+        subtitle="Sculele proprii, scule primite si scule date altora."
+        preview={<p className="tools-subtitle">Total: {ownedTools.length + borrowedTools.length + givenTools.length} scule in istoric.</p>}
+      >
+        <div className="panel" style={{ marginBottom: 12 }}>
+          <h4 className="panel-title">Scule in responsabilitate</h4>
+          {ownedTools.length === 0 ? (
+            <p className="tools-subtitle">Nu ai scule in responsabilitate.</p>
+          ) : (
+            <div className="tools-grid">
+              {ownedTools.map((tool) => (
+                <MyToolCard
+                  key={tool.id}
+                  tool={tool}
+                  users={users}
+                  onChanged={load}
+                  showOwner={false}
+                  canManage={true}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
-      <div className="panel">
-        <h3 className="panel-title">Notificările mele</h3>
+        <div className="panel" style={{ marginBottom: 12 }}>
+          <h4 className="panel-title">Scule primite de la altii</h4>
+          {borrowedTools.length === 0 ? (
+            <p className="tools-subtitle">Nu ai scule primite de la alti utilizatori.</p>
+          ) : (
+            <div className="tools-grid">
+              {borrowedTools.map((tool) => (
+                <MyToolCard
+                  key={tool.id}
+                  tool={tool}
+                  users={users}
+                  onChanged={load}
+                  canManage={false}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h4 className="panel-title">Scule date altora</h4>
+          {givenTools.length === 0 ? (
+            <p className="tools-subtitle">Nu ai scule date altor utilizatori.</p>
+          ) : (
+            <div className="tools-grid">
+              {givenTools.map((tool) => (
+                <MyToolCard
+                  key={tool.id}
+                  tool={tool}
+                  users={users}
+                  onChanged={load}
+                  showOwner={false}
+                  canManage={true}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </CompactSection>
+
+      <CompactSection
+        title="Istoric notificari"
+        subtitle="Log notificari personale cu dropdown."
+        preview={<p className="tools-subtitle">{myNotifications.length} notificari in total.</p>}
+      >
         {myNotifications.length === 0 ? (
-          <p className="tools-subtitle">Nu ai notificări momentan.</p>
+          <p className="tools-subtitle">Nu ai notificari momentan.</p>
         ) : (
           <div className="simple-list">
-            {myNotifications.slice(0, 15).map((notification) => (
+            {myNotifications.map((notification) => (
               <div key={notification.id} className="simple-list-item">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{notification.title}</div>
                   <div className="simple-list-subtitle">{notification.message}</div>
                   <div className="simple-list-subtitle">
-                    {new Date(notification.createdAt).toLocaleString("ro-RO")} · {notification.read ? "citită" : "nouă"}
+                    {new Date(notification.createdAt).toLocaleString("ro-RO")} · {notification.read ? "citita" : "noua"}
                   </div>
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
-
-      <div className="panel">
-        <h3 className="panel-title">Scule date altora</h3>
-        {givenTools.length === 0 ? (
-          <p className="tools-subtitle">Nu ai scule date altor utilizatori.</p>
-        ) : (
-          <div className="tools-grid">
-            {givenTools.map((tool) => (
-              <MyToolCard
-                key={tool.id}
-                tool={tool}
-                users={users}
-                onChanged={load}
-                showOwner={false}
-                canManage={true}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      </CompactSection>
     </section>
   );
 }

@@ -127,7 +127,39 @@ export function sanitizePositions(positions: VehiclePositionItem[]): VehiclePosi
     deduped.push(item);
   }
 
-  return deduped;
+  const filtered: VehiclePositionItem[] = [];
+
+  for (const point of deduped) {
+    const prev = filtered[filtered.length - 1];
+
+    if (!prev) {
+      filtered.push(point);
+      continue;
+    }
+
+    const deltaMs = point.gpsTimestamp - prev.gpsTimestamp;
+    if (deltaMs <= 0) continue;
+    if (deltaMs > MAX_REASONABLE_GAP_MS) {
+      filtered.push(point);
+      continue;
+    }
+
+    const geoStepKm = haversineKm(prev.lat, prev.lng, point.lat, point.lng);
+    if (geoStepKm > MAX_REASONABLE_POINT_JUMP_KM) continue;
+
+    const prevOdo = toSafeOdometer(prev.odometerKm);
+    const nextOdo = toSafeOdometer(point.odometerKm);
+    const odometerStepKm =
+      prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+
+    if (odometerStepKm !== undefined && odometerStepKm > MAX_REASONABLE_ODOMETER_STEP_KM) {
+      continue;
+    }
+
+    filtered.push(point);
+  }
+
+  return filtered;
 }
 
 export function samplePositions(
