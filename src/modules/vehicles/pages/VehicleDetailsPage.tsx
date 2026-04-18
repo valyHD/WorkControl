@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
-import type { VehicleEventItem, VehicleItem } from "../../../types/vehicle";
+import type { VehicleCommandItem, VehicleEventItem, VehicleItem } from "../../../types/vehicle";
 import { useAuth } from "../../../providers/AuthProvider";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
+import VehicleControlCard from "../components/VehicleControlCard";
 import {
   claimVehicleForCurrentUser,
+  getVehicleCommands,
   getVehicleEvents,
   getVehicleUsers,
   removeVehicleImage,
+  requestVehicleCommand,
   setVehicleCoverImage,
   subscribeVehicleById,
 } from "../services/vehiclesService";
@@ -25,6 +28,7 @@ export default function VehicleDetailsPage() {
 
   const [vehicle, setVehicle] = useState<VehicleItem | null>(null);
   const [events, setEvents] = useState<VehicleEventItem[]>([]);
+  const [commands, setCommands] = useState<VehicleCommandItem[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -44,17 +48,20 @@ export default function VehicleDetailsPage() {
   useEffect(() => {
     async function loadMeta() {
       try {
-        const [eventsData, usersData] = await Promise.all([
+        const [eventsData, usersData, commandsData] = await Promise.all([
           getVehicleEvents(vehicleId).catch(() => []),
           getVehicleUsers().catch(() => []),
+          getVehicleCommands(vehicleId).catch(() => []),
         ]);
 
         setEvents(eventsData);
         setUsers(usersData);
+        setCommands(commandsData);
       } catch (error) {
         console.error(error);
         setEvents([]);
         setUsers([]);
+        setCommands([]);
       }
     }
 
@@ -93,6 +100,17 @@ export default function VehicleDetailsPage() {
 
     const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
     setEvents(eventsData);
+  }
+
+  async function handleRequestCommand(type: "pulse_dout1" | "block_start") {
+    if (!vehicle) return;
+    await requestVehicleCommand(vehicle.id, {
+      type,
+      requestedBy: user?.displayName || user?.email || vehicle.currentDriverUserName || "dashboard_user",
+      durationSec: type === "pulse_dout1" ? 60 : null,
+    });
+    const latestCommands = await getVehicleCommands(vehicle.id).catch(() => []);
+    setCommands(latestCommands);
   }
 
   const isOwner = useMemo(() => {
@@ -169,6 +187,14 @@ export default function VehicleDetailsPage() {
 
         <div className="tool-details-grid">
           <div className="panel tool-inner-panel">
+            <VehicleControlCard
+              vehicle={vehicle}
+              commands={commands}
+              onRequestCommand={handleRequestCommand}
+              loading={loading}
+            />
+          </div>
+          <div className="panel tool-inner-panel">
             <h3 className="panel-title">Date generale</h3>
 
             <div className="tool-detail-line">
@@ -236,7 +262,7 @@ export default function VehicleDetailsPage() {
 />
       )}
 
-      <VehicleLiveRouteCard vehicle={vehicle} />
+      <VehicleLiveRouteCard vehicle={vehicle} showControlCard={false} />
 
       <div className="panel">
         <h3 className="panel-title">Galerie poze</h3>

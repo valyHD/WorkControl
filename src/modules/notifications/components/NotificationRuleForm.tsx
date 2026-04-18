@@ -18,15 +18,21 @@ const moduleOptions: NotificationRuleModule[] = [
   "vehicles",
   "timesheets",
   "users",
+  "web",
+  "server",
+  "system",
   "general",
 ];
 
 const eventOptionsByModule: Record<NotificationRuleModule, NotificationRuleEventType[]> = {
   tools: ["tool_holder_changed", "tool_status_changed"],
-  vehicles: ["vehicle_driver_changed", "vehicle_status_changed"],
-  timesheets: ["timesheet_started", "timesheet_stopped"],
+  vehicles: ["vehicle_driver_changed", "vehicle_status_changed", "vehicle_command_requested", "vehicle_command_result"],
+  timesheets: ["timesheet_started", "timesheet_stopped", "timesheet_updated"],
   users: ["user_created", "user_role_changed"],
-  general: ["user_created"],
+  web: ["web_change_detected", "any_change"],
+  server: ["server_change_detected", "any_change"],
+  system: ["system_change_detected", "notification_rule_changed", "any_change"],
+  general: ["any_change"],
 };
 
 export default function NotificationRuleForm({

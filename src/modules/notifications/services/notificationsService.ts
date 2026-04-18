@@ -41,12 +41,7 @@ async function getMatchingRules(
   eventType: NotificationRuleEventType
 ): Promise<NotificationRuleItem[]> {
   const snap = await getDocs(
-    query(
-      collection(db, "notificationRules"),
-      where("module", "==", module),
-      where("eventType", "==", eventType),
-      where("enabled", "==", true)
-    )
+    query(collection(db, "notificationRules"), where("enabled", "==", true))
   );
 
   return snap.docs.map((docItem) => {
@@ -70,6 +65,12 @@ async function getMatchingRules(
       createdAt: data.createdAt ?? Date.now(),
       updatedAt: data.updatedAt ?? Date.now(),
     };
+  }).filter((rule) => {
+    const moduleMatches =
+      rule.module === module || rule.module === "general" || rule.module === "system";
+    const eventMatches =
+      rule.eventType === eventType || rule.eventType === "any_change";
+    return moduleMatches && eventMatches;
   });
 }
 

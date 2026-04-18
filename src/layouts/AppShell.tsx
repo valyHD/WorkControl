@@ -20,6 +20,8 @@ import {
   X,
   ChevronRight,
 } from "lucide-react";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { db } from "../lib/firebase/firebase";
 
 type MenuItem = {
   label: string;
@@ -49,6 +51,7 @@ const menuSections: { label: string; items: MenuItem[] }[] = [
     items: [
       { label: "Scule", path: "/tools", Icon: Wrench, colorClass: "menu-icon-orange", section: "Operațional" },
       { label: "Mașini", path: "/vehicles", Icon: CarFront, colorClass: "menu-icon-green", section: "Operațional" },
+      { label: "Mașina mea", path: "/my-vehicle", Icon: CarFront, colorClass: "menu-icon-blue", section: "Operațional" },
     ],
   },
   {
@@ -132,21 +135,27 @@ export default function AppShell() {
     return () => clearInterval(timer);
   }, []);
 
-  // Citim unread din localStorage (setat de useNotificationsListener)
   useEffect(() => {
-    function syncBadge() {
-      const raw = localStorage.getItem("wc_unread_count");
-      setUnreadCount(raw ? parseInt(raw, 10) : 0);
+    if (!user?.uid) {
+      setUnreadCount(0);
+      return;
     }
-    syncBadge();
-    window.addEventListener("storage", syncBadge);
-    // poll la fiecare 10s ca fallback
-    const poll = setInterval(syncBadge, 10_000);
-    return () => {
-      window.removeEventListener("storage", syncBadge);
-      clearInterval(poll);
-    };
-  }, []);
+
+    const unreadQuery = query(
+      collection(db, "notifications"),
+      where("userId", "==", user.uid),
+      where("read", "==", false)
+    );
+
+    return onSnapshot(
+      unreadQuery,
+      (snap) => {
+        setUnreadCount(snap.size);
+        localStorage.setItem("wc_unread_count", String(snap.size));
+      },
+      () => setUnreadCount(0)
+    );
+  }, [user?.uid]);
 
   const currentItem =
     allItems.find((item) => location.pathname.startsWith(item.path)) || null;

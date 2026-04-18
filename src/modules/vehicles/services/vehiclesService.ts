@@ -175,6 +175,33 @@ export async function getVehicleById(vehicleId: string): Promise<VehicleItem | n
   if (!snap.exists()) return null;
   return mapVehicleDoc(snap.id, snap.data());
 }
+
+export async function getMyVehicleForUser(userId: string): Promise<VehicleItem | null> {
+  if (!userId) return null;
+
+  const [driverSnap, ownerSnap] = await Promise.all([
+    getDocs(
+      query(
+        vehiclesCollection,
+        where("currentDriverUserId", "==", userId),
+        orderBy("updatedAt", "desc"),
+        limit(1)
+      )
+    ),
+    getDocs(
+      query(
+        vehiclesCollection,
+        where("ownerUserId", "==", userId),
+        orderBy("updatedAt", "desc"),
+        limit(1)
+      )
+    ),
+  ]);
+
+  const preferredDoc = driverSnap.docs[0] || ownerSnap.docs[0];
+  if (!preferredDoc) return null;
+  return mapVehicleDoc(preferredDoc.id, preferredDoc.data());
+}
 export function subscribeVehicleById(
   vehicleId: string,
   onData: (item: VehicleItem | null) => void
@@ -672,6 +699,15 @@ export async function requestVehicleCommand(
     result: "queued",
     durationSec: payload.durationSec ?? null,
     createdAtServer: serverTimestamp(),
+  });
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_command_requested",
+    entityId: vehicleId,
+    title: "Comanda vehicul noua",
+    message: `S-a trimis comanda ${payload.type} pentru vehicul.`,
+    actorUserName: payload.requestedBy,
   });
 
   return created.id;

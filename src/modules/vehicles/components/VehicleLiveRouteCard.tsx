@@ -70,9 +70,9 @@ function FitRouteBounds({ points, trigger }: { points: VehiclePositionItem[]; tr
   return null;
 }
 
-type Props = { vehicle: VehicleItem };
+type Props = { vehicle: VehicleItem; showControlCard?: boolean };
 
-export default function VehicleLiveRouteCard({ vehicle }: Props) {
+export default function VehicleLiveRouteCard({ vehicle, showControlCard = true }: Props) {
   const [preset, setPreset] = useState<DateRangePreset>("today");
   const initialRange = getPresetRange("today");
   const [fromTs, setFromTs] = useState<number>(initialRange.from);
@@ -382,7 +382,16 @@ async function handleRequestCommand(type: "pulse_dout1" | "block_start") {
 
       <div className="vehicle-gps-detail-grid">
         <VehicleTripTimeline items={timeline} />
-        <VehicleControlCard vehicle={vehicle} commands={commands} onRequestCommand={handleRequestCommand} loading={loading} />
+        {showControlCard ? (
+          <VehicleControlCard vehicle={vehicle} commands={commands} onRequestCommand={handleRequestCommand} loading={loading} />
+        ) : (
+          <div className="panel vehicle-info-card">
+            <h4 className="panel-title">Control vehicul mutat sus</h4>
+            <p className="tools-subtitle">
+              Comenzile DOUT1 au fost mutate deasupra secțiunii „Date generale”.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

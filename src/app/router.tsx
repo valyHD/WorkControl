@@ -13,6 +13,7 @@ import UserFormPage from "../modules/users/pages/UserFormPage";
 import VehiclesPage from "../modules/vehicles/pages/VehiclesPage";
 import VehicleFormPage from "../modules/vehicles/pages/VehicleFormPage";
 import VehicleDetailsPage from "../modules/vehicles/pages/VehicleDetailsPage";
+import MyVehiclePage from "../modules/vehicles/pages/MyVehiclePage";
 import TimesheetsPage from "../modules/timesheets/pages/TimesheetsPage";
 import TimesheetDetailsPage from "../modules/timesheets/pages/TimesheetDetailsPage";
 import MyTimesheetsPage from "../modules/timesheets/pages/MyTimesheetsPage";
@@ -66,6 +67,7 @@ export const router = createBrowserRouter([
       { path: "/tools/:toolId/edit", element: <ToolFormPage /> },
 
       { path: "/vehicles", element: <VehiclesPage /> },
+      { path: "/my-vehicle", element: <MyVehiclePage /> },
       { path: "/vehicles/new", element: <VehicleFormPage /> },
       { path: "/vehicles/:vehicleId", element: <VehicleDetailsPage /> },
       { path: "/vehicles/:vehicleId/edit", element: <VehicleFormPage /> },
