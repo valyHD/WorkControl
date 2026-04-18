@@ -230,7 +230,7 @@ export default function NotificationRulesPage() {
                           entitate: {rule.entityLabel || rule.entityId}
                         </div>
                       )}
-                      <div className="simple-list-subtitle">
+                      <div className="simple-list-subtitle chip-list">
                         <span className="inline-setting-chip">direct: {rule.recipients.notifyDirectUser ? "da" : "nu"}</span>
                         <span className="inline-setting-chip">owner: {rule.recipients.notifyOwner ? "da" : "nu"}</span>
                         <span className="inline-setting-chip">admini: {rule.recipients.notifyAdmins ? "da" : "nu"}</span>

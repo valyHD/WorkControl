@@ -20,8 +20,12 @@ export type ControlPanelSettings = {
   autoBackupIntervalDays: number;
   notifyBeforeCleanupDays: number;
   uiFontScale: number;
+  uiFontFamily: "dm-sans" | "inter" | "poppins" | "roboto-slab";
   uiDensity: "compact" | "comfortable" | "spacious";
-  uiPalette: "blue" | "slate" | "emerald";
+  uiPalette: "blue" | "slate" | "emerald" | "sunset" | "violet";
+  uiCardStyle: "flat" | "elevated" | "glass";
+  uiContrast: "normal" | "high";
+  uiAnimations: "full" | "reduced" | "none";
   updatedAt: number;
 };
 
@@ -37,13 +41,150 @@ function formatBackupPrettyText(
   data: Record<string, Array<Record<string, unknown>>>,
   counts: Record<string, number>
 ): string {
+  function formatTs(value: unknown) {
+    const ts = Number(value ?? 0);
+    if (!Number.isFinite(ts) || ts <= 0) return "-";
+    return new Date(ts).toLocaleString("ro-RO");
+  }
+
+  function toDayKey(value: unknown) {
+    const ts = Number(value ?? 0);
+    if (!Number.isFinite(ts) || ts <= 0) return "fara_data";
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function readableDay(dayKey: string) {
+    if (dayKey === "fara_data") return "Fără dată";
+    const [year, month, day] = dayKey.split("-");
+    return `${day}.${month}.${year}`;
+  }
+
+  function sortDescByCreatedAt<T extends Record<string, unknown>>(items: T[]) {
+    return [...items].sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0));
+  }
+
+  function groupByUserAndDay(
+    items: Array<Record<string, unknown>>,
+    userResolver: (item: Record<string, unknown>) => string
+  ) {
+    const grouped = new Map<string, Map<string, Array<Record<string, unknown>>>>();
+    for (const item of sortDescByCreatedAt(items)) {
+      const user = userResolver(item) || "Utilizator necunoscut";
+      const day = toDayKey(item.createdAt);
+      if (!grouped.has(user)) grouped.set(user, new Map<string, Array<Record<string, unknown>>>());
+      const userDays = grouped.get(user)!;
+      if (!userDays.has(day)) userDays.set(day, []);
+      userDays.get(day)!.push(item);
+    }
+    return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, "ro"));
+  }
+
   const lines: string[] = [
     "WORKCONTROL BACKUP - RAPORT TEXT",
     `Generat la: ${new Date(exportedAt).toLocaleString("ro-RO")}`,
     "",
   ];
 
+  const notifications = (data.notifications ?? []).map((item) => ({ ...item }));
+  lines.push(`=== NOTIFICARI (${counts.notifications ?? notifications.length}) ===`);
+  if (notifications.length === 0) {
+    lines.push("Fără înregistrări.", "");
+  } else {
+    const grouped = groupByUserAndDay(notifications, (item) => String(item.actorUserName || item.userId || "Sistem"));
+    grouped.forEach(([userName, byDay]) => {
+      lines.push(`## ${userName}`);
+      [...byDay.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .forEach(([dayKey, dayItems]) => {
+          lines.push(`  ${readableDay(dayKey)}`);
+          dayItems.forEach((item) => {
+            lines.push(`  ${String(item.title ?? "Eveniment")}`);
+            lines.push(`  ${String(item.message ?? "-")}`);
+            lines.push(`  ${formatTs(item.createdAt)}`);
+            lines.push(`  ${item.read ? "citita" : "noua"}`);
+            lines.push("");
+          });
+        });
+      lines.push("");
+    });
+  }
+
+  const timesheets = (data.timesheets ?? []).map((item) => ({ ...item }));
+  lines.push(`=== PONTAJE (${counts.timesheets ?? timesheets.length}) ===`);
+  if (timesheets.length === 0) {
+    lines.push("Fără înregistrări.", "");
+  } else {
+    const grouped = groupByUserAndDay(timesheets, (item) => String(item.userName || item.userId || "Utilizator"));
+    grouped.forEach(([userName, byDay]) => {
+      lines.push(`## ${userName}`);
+      [...byDay.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .forEach(([dayKey, dayItems]) => {
+          lines.push(`  ${readableDay(dayKey)}`);
+          dayItems.forEach((item) => {
+            lines.push(
+              `  ${String(item.userName || userName)} · ${String(item.projectCode ?? "-")} - ${String(item.projectName ?? "-")}`
+            );
+            lines.push(
+              `  Start: ${formatTs(item.startAt)} · Stop: ${formatTs(item.stopAt)} · Durata: ${String(
+                Math.floor(Number(item.workedMinutes ?? 0) / 60)
+              )}h ${String(Number(item.workedMinutes ?? 0) % 60).padStart(2, "0")}m · Status: ${String(
+                item.status ?? "-"
+              )}`
+            );
+            lines.push(`  ${String(item.status ?? "-")}`);
+            lines.push("");
+          });
+        });
+      lines.push("");
+    });
+  }
+
+  const vehicleEvents = (data.vehicleEvents ?? []).map((item) => ({ ...item }));
+  lines.push(`=== ISTORIC MASINI (${counts.vehicleEvents ?? vehicleEvents.length}) ===`);
+  if (vehicleEvents.length === 0) {
+    lines.push("Fără înregistrări.", "");
+  } else {
+    const grouped = groupByUserAndDay(vehicleEvents, () => "Sistem");
+    grouped.forEach(([, byDay]) => {
+      [...byDay.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .forEach(([dayKey, dayItems]) => {
+          lines.push(`  ${readableDay(dayKey)}`);
+          dayItems.forEach((item) => {
+            lines.push(`  ${String(item.message ?? "-")}`);
+            lines.push(`  Sistem · ${formatTs(item.createdAt)}`);
+          });
+        });
+      lines.push("");
+    });
+  }
+
+  const toolEvents = (data.toolEvents ?? []).map((item) => ({ ...item }));
+  lines.push(`=== ISTORIC SCULE (${counts.toolEvents ?? toolEvents.length}) ===`);
+  if (toolEvents.length === 0) {
+    lines.push("Fără înregistrări.", "");
+  } else {
+    const grouped = groupByUserAndDay(toolEvents, () => "Sistem");
+    grouped.forEach(([, byDay]) => {
+      [...byDay.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .forEach(([dayKey, dayItems]) => {
+          lines.push(`  ${readableDay(dayKey)}`);
+          dayItems.forEach((item) => {
+            lines.push(`  ${String(item.message ?? "-")}`);
+            lines.push(`  Sistem · ${formatTs(item.createdAt)}`);
+          });
+        });
+      lines.push("");
+    });
+  }
+
   for (const collectionName of BACKUP_COLLECTIONS) {
+    if (["notifications", "timesheets", "vehicleEvents", "toolEvents"].includes(collectionName)) {
+      continue;
+    }
     const items = data[collectionName] ?? [];
     lines.push(`=== ${collectionName.toUpperCase()} (${counts[collectionName] ?? 0}) ===`);
     if (items.length === 0) {
@@ -70,8 +211,12 @@ const DEFAULT_SETTINGS: ControlPanelSettings = {
   autoBackupIntervalDays: 7,
   notifyBeforeCleanupDays: 3,
   uiFontScale: 1,
+  uiFontFamily: "dm-sans",
   uiDensity: "comfortable",
   uiPalette: "blue",
+  uiCardStyle: "elevated",
+  uiContrast: "normal",
+  uiAnimations: "full",
   updatedAt: Date.now(),
 };
 
@@ -98,8 +243,12 @@ export async function getControlPanelSettings(): Promise<ControlPanelSettings> {
     autoBackupIntervalDays: Number(data.autoBackupIntervalDays ?? DEFAULT_SETTINGS.autoBackupIntervalDays),
     notifyBeforeCleanupDays: Number(data.notifyBeforeCleanupDays ?? DEFAULT_SETTINGS.notifyBeforeCleanupDays),
     uiFontScale: Number(data.uiFontScale ?? DEFAULT_SETTINGS.uiFontScale),
+    uiFontFamily: data.uiFontFamily ?? DEFAULT_SETTINGS.uiFontFamily,
     uiDensity: data.uiDensity ?? DEFAULT_SETTINGS.uiDensity,
     uiPalette: data.uiPalette ?? DEFAULT_SETTINGS.uiPalette,
+    uiCardStyle: data.uiCardStyle ?? DEFAULT_SETTINGS.uiCardStyle,
+    uiContrast: data.uiContrast ?? DEFAULT_SETTINGS.uiContrast,
+    uiAnimations: data.uiAnimations ?? DEFAULT_SETTINGS.uiAnimations,
     updatedAt: Number(data.updatedAt ?? Date.now()),
   };
 }
@@ -200,6 +349,7 @@ export async function getCollectionCounters(): Promise<Record<string, number>> {
 
 export async function cleanupHistory(params: {
   retentionMonths: number;
+  cleanupMode: "retention_only" | "delete_all_selected";
   cleanNotifications: boolean;
   cleanToolEvents: boolean;
   cleanVehicleEvents: boolean;
@@ -212,24 +362,29 @@ export async function cleanupHistory(params: {
   const deleteTargets: Array<Promise<void>> = [];
   let deletedCount = 0;
 
-  async function purge(collectionName: string) {
-    const snap = await getDocs(
-      query(collection(db, collectionName), where("createdAt", "<", cutoffTs), limit(500))
-    );
+  async function purge(collectionName: string, dateField: string) {
+    const baseCollection = collection(db, collectionName);
+    const snap =
+      params.cleanupMode === "delete_all_selected"
+        ? await getDocs(query(baseCollection, limit(2000)))
+        : await getDocs(query(baseCollection, where(dateField, "<", cutoffTs), limit(2000)));
     snap.docs.forEach((item) => {
       deletedCount += 1;
       deleteTargets.push(deleteDoc(doc(db, collectionName, item.id)));
     });
   }
 
-  if (params.cleanNotifications) await purge("notifications");
-  if (params.cleanToolEvents) await purge("toolEvents");
-  if (params.cleanVehicleEvents) await purge("vehicleEvents");
+  if (params.cleanNotifications) await purge("notifications", "createdAt");
+  if (params.cleanToolEvents) await purge("toolEvents", "createdAt");
+  if (params.cleanVehicleEvents) await purge("vehicleEvents", "createdAt");
 
   if (params.cleanTimesheets) {
-    const timesheetsSnap = await getDocs(
-      query(collection(db, "timesheets"), where("startAt", "<", cutoffTs), orderBy("startAt", "asc"), limit(500))
-    );
+    const timesheetsSnap =
+      params.cleanupMode === "delete_all_selected"
+        ? await getDocs(query(collection(db, "timesheets"), orderBy("startAt", "desc"), limit(2000)))
+        : await getDocs(
+            query(collection(db, "timesheets"), where("startAt", "<", cutoffTs), orderBy("startAt", "asc"), limit(2000))
+          );
     timesheetsSnap.docs.forEach((item) => {
       deletedCount += 1;
       deleteTargets.push(deleteDoc(doc(db, "timesheets", item.id)));

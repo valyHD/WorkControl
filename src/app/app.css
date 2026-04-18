@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=Roboto+Slab:wght@400;500;700&display=swap');
 
 /* ================================================================
    WORKCONTROL — app.css v4
@@ -325,7 +325,7 @@
 html, body, #root {
   margin: 0;
   min-height: 100%;
-  font-family: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--app-font-family, 'DM Sans'), ui-sans-serif, system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -2637,6 +2637,58 @@ html {
   --primary-soft: #d1fae5;
 }
 
+:root[data-ui-palette="sunset"] {
+  --primary: #ea580c;
+  --primary-deep: #c2410c;
+  --primary-soft: #ffedd5;
+}
+
+:root[data-ui-palette="violet"] {
+  --primary: #7c3aed;
+  --primary-deep: #6d28d9;
+  --primary-soft: #ede9fe;
+}
+
+:root[data-ui-font-family="inter"] { --app-font-family: "Inter"; }
+:root[data-ui-font-family="poppins"] { --app-font-family: "Poppins"; }
+:root[data-ui-font-family="roboto-slab"] { --app-font-family: "Roboto Slab"; }
+
+:root[data-ui-card-style="flat"] .panel,
+:root[data-ui-card-style="flat"] .kpi-card,
+:root[data-ui-card-style="flat"] .quick-action-card,
+:root[data-ui-card-style="flat"] .simple-list-item,
+:root[data-ui-card-style="flat"] .collection-card {
+  box-shadow: none;
+  border-width: 1px;
+}
+
+:root[data-ui-card-style="glass"] .panel,
+:root[data-ui-card-style="glass"] .kpi-card,
+:root[data-ui-card-style="glass"] .quick-action-card,
+:root[data-ui-card-style="glass"] .simple-list-item,
+:root[data-ui-card-style="glass"] .collection-card {
+  backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+}
+
+:root[data-ui-contrast="high"] {
+  --text: #08101d;
+  --text-soft: #1a2a42;
+  --line: rgba(74, 101, 145, 0.34);
+  --line-mid: rgba(74, 101, 145, 0.5);
+}
+
+:root[data-ui-animations="none"] *,
+:root[data-ui-animations="none"] *::before,
+:root[data-ui-animations="none"] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+:root[data-ui-animations="reduced"] * {
+  transition-duration: 0.08s !important;
+}
+
 .panel-subtitle {
   font-size: 1.1rem;
   margin: 0 0 6px;
@@ -2752,8 +2804,19 @@ html {
 }
 
 @media (max-width: 760px) {
+  .simple-list-item {
+    align-items: flex-start;
+  }
+
+  .chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
   .inline-setting-chip {
     font-size: 11px;
+    margin-right: 0;
   }
 
   .simple-list-subtitle {

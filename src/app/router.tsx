@@ -21,6 +21,7 @@ import ProjectsPage from "../modules/timesheets/pages/ProjectsPage";
 import NotificationsPage from "../modules/notifications/pages/NotificationsPage";
 import ControlPanelPage from "../modules/reports/pages/ReportsPage";
 import NotificationRulesPage from "../modules/notifications/pages/NotificationRulesPage";
+import MaintenancePage from "../modules/maintenance/pages/MaintenancePage";
 function ProtectedLayout() {
   const { user, loading } = useAuth();
 
@@ -79,6 +80,7 @@ export const router = createBrowserRouter([
 
       { path: "/notifications", element: <NotificationsPage /> },
       { path: "/control-panel", element: <ControlPanelPage /> },
+      { path: "/maintenance", element: <MaintenancePage /> },
       { path: "/reports", element: <Navigate to="/control-panel" replace /> },
     ],
   },

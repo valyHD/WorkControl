@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  Building2,
 } from "lucide-react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
@@ -75,6 +76,7 @@ const menuSections: { label: string; items: MenuItem[] }[] = [
     label: "Administrare",
     items: [
       { label: "Control Panel", path: "/control-panel", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Administrare" },
+      { label: "Mentenanță", path: "/maintenance", Icon: Building2, colorClass: "menu-icon-violet", section: "Administrare" },
     ],
   },
 ];
@@ -163,8 +165,12 @@ export default function AppShell() {
     async function loadUiPreferences() {
       const settings = await getControlPanelSettings();
       document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
+      document.documentElement.dataset.uiFontFamily = settings.uiFontFamily;
       document.documentElement.dataset.uiDensity = settings.uiDensity;
       document.documentElement.dataset.uiPalette = settings.uiPalette;
+      document.documentElement.dataset.uiCardStyle = settings.uiCardStyle;
+      document.documentElement.dataset.uiContrast = settings.uiContrast;
+      document.documentElement.dataset.uiAnimations = settings.uiAnimations;
     }
 
     void loadUiPreferences().catch((error) => {
