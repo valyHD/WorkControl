@@ -2604,3 +2604,120 @@ input[type="file"] {
   border-color: rgba(234, 88, 12, 0.22);
   color: var(--warning);
 }
+
+:root {
+  --ui-font-scale: 1;
+}
+
+html {
+  font-size: calc(16px * var(--ui-font-scale));
+}
+
+:root[data-ui-density="compact"] .panel,
+:root[data-ui-density="compact"] .card,
+:root[data-ui-density="compact"] .simple-list-item {
+  padding: 12px;
+}
+
+:root[data-ui-density="spacious"] .panel,
+:root[data-ui-density="spacious"] .card,
+:root[data-ui-density="spacious"] .simple-list-item {
+  padding: 22px;
+}
+
+:root[data-ui-palette="slate"] {
+  --primary: #334155;
+  --primary-deep: #1e293b;
+  --primary-soft: #e2e8f0;
+}
+
+:root[data-ui-palette="emerald"] {
+  --primary: #059669;
+  --primary-deep: #047857;
+  --primary-soft: #d1fae5;
+}
+
+.panel-subtitle {
+  font-size: 1.1rem;
+  margin: 0 0 6px;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.rule-hint-card {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, var(--primary-soft), #fff);
+}
+
+.control-panel-hero {
+  border: 1px solid var(--line-mid);
+}
+
+.control-panel-kpis {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.kpi-card {
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--surface-alt);
+}
+
+.kpi-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.kpi-value {
+  color: var(--text);
+  font-size: 1.06rem;
+}
+
+.collection-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.collection-card {
+  border: 1px solid var(--line);
+  background: var(--surface-alt);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.collection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.collection-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.collection-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--primary-deep));
+}
+
+.success-message {
+  border: 1px solid var(--success-line);
+  background: var(--success-soft);
+  color: var(--success);
+}

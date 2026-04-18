@@ -45,6 +45,7 @@ export async function updateUserProfile(
   const existingSnap = await getDoc(doc(db, "users", userId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
   const previousRole = existingData?.role ?? "";
+  const previousActive = existingData?.active ?? true;
 
   await updateDoc(doc(db, "users", userId), {
     fullName: values.fullName,
@@ -54,6 +55,20 @@ export async function updateUserProfile(
     updatedAtServer: serverTimestamp(),
   });
 
+
+  await dispatchNotificationEvent({
+    module: "users",
+    eventType: "user_updated",
+    entityId: userId,
+    title: "Profil utilizator actualizat",
+    message: `Datele utilizatorului ${values.fullName} au fost actualizate.`,
+    directUserId: userId,
+    ownerUserId: userId,
+    actorUserId: userId,
+    actorUserName: values.fullName,
+    actorUserThemeKey: existingData?.themeKey ?? null,
+  });
+
   if (previousRole !== values.role) {
     await dispatchNotificationEvent({
       module: "users",
@@ -61,6 +76,21 @@ export async function updateUserProfile(
       entityId: userId,
       title: "Rol utilizator schimbat",
       message: `${values.fullName} are acum rolul ${values.role}.`,
+      directUserId: userId,
+      ownerUserId: userId,
+      actorUserId: userId,
+      actorUserName: values.fullName,
+      actorUserThemeKey: existingData?.themeKey ?? null,
+    });
+  }
+
+  if (previousActive !== values.active) {
+    await dispatchNotificationEvent({
+      module: "users",
+      eventType: "user_activation_changed",
+      entityId: userId,
+      title: "Status utilizator modificat",
+      message: `${values.fullName} este acum ${values.active ? "activ" : "inactiv"}.`,
       directUserId: userId,
       ownerUserId: userId,
       actorUserId: userId,

@@ -366,6 +366,19 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
     `Masina ${values.plateNumber} a fost creata.`
   );
 
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_created",
+    entityId: refDoc.id,
+    title: "Mașină adăugată",
+    message: `A fost adăugată mașina ${normalizePlateNumber(values.plateNumber)}.`,
+    directUserId: values.currentDriverUserId || "",
+    ownerUserId: values.ownerUserId || "",
+    actorUserId: values.ownerUserId || "",
+    actorUserName: values.ownerUserName || "Responsabil",
+    actorUserThemeKey: values.ownerThemeKey ?? null,
+  });
+
   return refDoc.id;
 }
 
@@ -391,6 +404,19 @@ const previousStatus = toVehicleStatus(existingData?.status);
     "updated",
     `Masina ${values.plateNumber} a fost actualizata.`
   );
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_updated",
+    entityId: vehicleId,
+    title: "Mașină actualizată",
+    message: `Datele mașinii ${normalizePlateNumber(values.plateNumber)} au fost actualizate.`,
+    directUserId: values.currentDriverUserId || "",
+    ownerUserId: values.ownerUserId || previousOwnerUserId || "",
+    actorUserId: values.ownerUserId || "",
+    actorUserName: values.ownerUserName || "Responsabil",
+    actorUserThemeKey: values.ownerThemeKey ?? null,
+  });
 
   if (previousStatus !== values.status) {
     await addVehicleEvent(
@@ -662,7 +688,19 @@ export async function claimVehicleForCurrentUser(
 }
 
 export async function deleteVehicle(vehicleId: string): Promise<void> {
+  const snap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = snap.exists() ? snap.data() : null;
+
   await deleteDoc(doc(db, "vehicles", vehicleId));
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_deleted",
+    entityId: vehicleId,
+    title: "Mașină ștearsă",
+    message: `Mașina ${data?.plateNumber ?? vehicleId} a fost ștearsă din sistem.`,
+    ownerUserId: data?.ownerUserId ?? "",
+  });
 }
 
 function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePositionItem {
