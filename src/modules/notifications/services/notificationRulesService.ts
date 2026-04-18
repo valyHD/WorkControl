@@ -14,6 +14,7 @@ import type {
   NotificationRuleFormValues,
   NotificationRuleItem,
 } from "../../../types/notification-rule";
+import { dispatchNotificationEvent } from "./notificationsService";
 
 const notificationRulesCollection = collection(db, "notificationRules");
 
@@ -64,6 +65,14 @@ export async function createNotificationRule(
     updatedAtServer: serverTimestamp(),
   });
 
+  await dispatchNotificationEvent({
+    module: "system",
+    eventType: "notification_rule_changed",
+    entityId: refDoc.id,
+    title: "Regulă notificări creată",
+    message: `Regula "${values.name}" a fost creată.`,
+  });
+
   return refDoc.id;
 }
 
@@ -75,5 +84,13 @@ export async function updateNotificationRule(
     ...values,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
+  });
+
+  await dispatchNotificationEvent({
+    module: "system",
+    eventType: "notification_rule_changed",
+    entityId: ruleId,
+    title: "Regulă notificări actualizată",
+    message: `Regula "${values.name}" a fost actualizată.`,
   });
 }

@@ -3,6 +3,9 @@ export type NotificationRuleModule =
   | "vehicles"
   | "timesheets"
   | "users"
+  | "web"
+  | "server"
+  | "system"
   | "general";
 
 export type NotificationRuleEventType =
@@ -12,8 +15,16 @@ export type NotificationRuleEventType =
   | "vehicle_status_changed"
   | "timesheet_started"
   | "timesheet_stopped"
+  | "timesheet_updated"
   | "user_created"
-  | "user_role_changed";
+  | "user_role_changed"
+  | "vehicle_command_requested"
+  | "vehicle_command_result"
+  | "notification_rule_changed"
+  | "server_change_detected"
+  | "web_change_detected"
+  | "system_change_detected"
+  | "any_change";
 
 export interface NotificationRuleRecipients {
   notifyDirectUser: boolean;

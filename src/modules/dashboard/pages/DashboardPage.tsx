@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getDashboardData } from "../services/dashboardService";
 import type { AppUserItem } from "../../../types/user";
@@ -11,6 +11,7 @@ import VehicleStatusBadge from "../../vehicles/components/VehicleStatusBadge";
 import { formatMinutes } from "../../timesheets/services/timesheetsService";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { backfillUserThemeSnapshots } from "../../../scripts/backfillUserThemeSnapshots";
+import { getMyVehicleForUser } from "../../vehicles/services/vehiclesService";
 import {
   Users,
   Wrench,
@@ -176,6 +177,7 @@ function DashboardSkeleton() {
 /* ── Main component ── */
 export default function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -215,9 +217,6 @@ export default function DashboardPage() {
       setNotifications(data.notifications);
       setStats(data.stats);
       setLastRefreshed(new Date());
-      // sync badge
-      localStorage.setItem("wc_unread_count", String(data.stats.unreadNotifications));
-      window.dispatchEvent(new Event("storage"));
     } catch (error) {
       console.error("Eroare dashboard:", error);
     } finally {
@@ -268,6 +267,16 @@ export default function DashboardPage() {
 
   if (loading) return <DashboardSkeleton />;
 
+  async function openMyVehicle() {
+    if (!user?.uid) {
+      navigate("/vehicles");
+      return;
+    }
+
+    const myVehicle = await getMyVehicleForUser(user.uid);
+    navigate(myVehicle ? `/vehicles/${myVehicle.id}` : "/vehicles");
+  }
+
   const refreshedStr = lastRefreshed.toLocaleTimeString("ro-RO", {
     hour: "2-digit",
     minute: "2-digit",
@@ -292,6 +301,18 @@ export default function DashboardPage() {
           {refreshing && <RefreshCw size={11} style={{ animation: "spin 1s linear infinite" }} />}
           actualizat {refreshedStr}
         </span>
+      </div>
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <SectionTitle icon={Activity}>Shortcut-uri rapide</SectionTitle>
+        <div className="tool-form-actions" style={{ marginTop: 12 }}>
+          <button type="button" className="primary-btn" onClick={() => void openMyVehicle()}>
+            Mașina mea
+          </button>
+          <Link to="/my-timesheets" className="secondary-btn">
+            Pontajul meu
+          </Link>
+        </div>
       </div>
 
       {/* ── KPI GRID ── */}

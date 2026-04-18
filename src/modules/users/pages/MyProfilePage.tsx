@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import { useAuth } from "../../../providers/AuthProvider";
+import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
+import { db } from "../../../lib/firebase/firebase";
 import {
   getToolsHeldByUserFromOthers,
   getToolsOwnedByUser,
@@ -8,6 +10,16 @@ import {
   getUsersList,
 } from "../../tools/services/toolsService";
 import MyToolCard from "../components/MyToolCard";
+import type { VehicleItem } from "../../../types/vehicle";
+import type { TimesheetItem } from "../../../types/timesheet";
+
+type MyNotificationItem = {
+  id: string;
+  title: string;
+  message: string;
+  createdAt: number;
+  read: boolean;
+};
 
 export default function MyProfilePage() {
   const { user } = useAuth();
@@ -15,6 +27,9 @@ export default function MyProfilePage() {
   const [ownedTools, setOwnedTools] = useState<ToolItem[]>([]);
   const [borrowedTools, setBorrowedTools] = useState<ToolItem[]>([]);
   const [givenTools, setGivenTools] = useState<ToolItem[]>([]);
+  const [myVehicles, setMyVehicles] = useState<VehicleItem[]>([]);
+  const [myTimesheets, setMyTimesheets] = useState<TimesheetItem[]>([]);
+  const [myNotifications, setMyNotifications] = useState<MyNotificationItem[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -23,17 +38,103 @@ export default function MyProfilePage() {
 
     setLoading(true);
     try {
-      const [owned, borrowed, given, usersData] = await Promise.all([
+      const [owned, borrowed, given, usersData, vehiclesSnap, timesheetsSnap, notificationsSnap] = await Promise.all([
         getToolsOwnedByUser(user.uid),
         getToolsHeldByUserFromOthers(user.uid),
         getToolsOwnedByUserButHeldByOthers(user.uid),
         getUsersList(),
+        getDocs(
+          query(
+            collection(db, "vehicles"),
+            where("ownerUserId", "==", user.uid),
+            orderBy("updatedAt", "desc"),
+            limit(20)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "timesheets"),
+            where("userId", "==", user.uid),
+            orderBy("startAt", "desc"),
+            limit(20)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "notifications"),
+            where("userId", "==", user.uid),
+            orderBy("createdAt", "desc"),
+            limit(30)
+          )
+        ),
       ]);
 
       setOwnedTools(owned);
       setBorrowedTools(borrowed);
       setGivenTools(given);
       setUsers(usersData);
+      setMyVehicles(
+        vehiclesSnap.docs.map((docItem) => ({
+          id: docItem.id,
+          plateNumber: docItem.data().plateNumber ?? "",
+          brand: docItem.data().brand ?? "",
+          model: docItem.data().model ?? "",
+          year: docItem.data().year ?? "",
+          vin: docItem.data().vin ?? "",
+          fuelType: docItem.data().fuelType ?? "",
+          status: docItem.data().status ?? "activa",
+          currentKm: Number(docItem.data().currentKm ?? 0),
+          ownerUserId: docItem.data().ownerUserId ?? "",
+          ownerUserName: docItem.data().ownerUserName ?? "",
+          ownerThemeKey: docItem.data().ownerThemeKey ?? null,
+          currentDriverUserId: docItem.data().currentDriverUserId ?? "",
+          currentDriverUserName: docItem.data().currentDriverUserName ?? "",
+          currentDriverThemeKey: docItem.data().currentDriverThemeKey ?? null,
+          maintenanceNotes: docItem.data().maintenanceNotes ?? "",
+          nextServiceKm: Number(docItem.data().nextServiceKm ?? 0),
+          nextItpDate: docItem.data().nextItpDate ?? "",
+          nextRcaDate: docItem.data().nextRcaDate ?? "",
+          coverImageUrl: docItem.data().coverImageUrl ?? "",
+          coverThumbUrl: docItem.data().coverThumbUrl ?? "",
+          images: Array.isArray(docItem.data().images) ? docItem.data().images : [],
+          createdAt: docItem.data().createdAt ?? Date.now(),
+          updatedAt: docItem.data().updatedAt ?? Date.now(),
+        }))
+      );
+      setMyTimesheets(
+        timesheetsSnap.docs.map((docItem) => ({
+          id: docItem.id,
+          userId: docItem.data().userId ?? "",
+          userName: docItem.data().userName ?? "",
+          userThemeKey: docItem.data().userThemeKey ?? null,
+          projectId: docItem.data().projectId ?? "",
+          projectCode: docItem.data().projectCode ?? "",
+          projectName: docItem.data().projectName ?? "",
+          status: docItem.data().status ?? "activ",
+          explanation: docItem.data().explanation ?? "",
+          startAt: docItem.data().startAt ?? Date.now(),
+          stopAt: docItem.data().stopAt ?? null,
+          workedMinutes: Number(docItem.data().workedMinutes ?? 0),
+          startLocation: docItem.data().startLocation ?? { lat: null, lng: null, label: "" },
+          stopLocation: docItem.data().stopLocation ?? null,
+          startSource: docItem.data().startSource ?? "web",
+          stopSource: docItem.data().stopSource ?? "",
+          workDate: docItem.data().workDate ?? "",
+          yearMonth: docItem.data().yearMonth ?? "",
+          weekKey: docItem.data().weekKey ?? "",
+          createdAt: docItem.data().createdAt ?? Date.now(),
+          updatedAt: docItem.data().updatedAt ?? Date.now(),
+        }))
+      );
+      setMyNotifications(
+        notificationsSnap.docs.map((docItem) => ({
+          id: docItem.id,
+          title: docItem.data().title ?? "Notificare",
+          message: docItem.data().message ?? "",
+          createdAt: docItem.data().createdAt ?? Date.now(),
+          read: Boolean(docItem.data().read ?? false),
+        }))
+      );
     } finally {
       setLoading(false);
     }
@@ -107,6 +208,71 @@ export default function MyProfilePage() {
                 onChanged={load}
                 canManage={false}
               />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3 className="panel-title">Mașinile mele</h3>
+        {myVehicles.length === 0 ? (
+          <p className="tools-subtitle">Nu ai mașini pe profil momentan.</p>
+        ) : (
+          <div className="simple-list">
+            {myVehicles.map((vehicle) => (
+              <div key={vehicle.id} className="simple-list-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">
+                    {vehicle.plateNumber} · {vehicle.brand} {vehicle.model}
+                  </div>
+                  <div className="simple-list-subtitle">
+                    status: {vehicle.status} · km: {vehicle.currentKm}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3 className="panel-title">Pontajele mele recente</h3>
+        {myTimesheets.length === 0 ? (
+          <p className="tools-subtitle">Nu ai pontaje salvate.</p>
+        ) : (
+          <div className="simple-list">
+            {myTimesheets.slice(0, 10).map((timesheet) => (
+              <div key={timesheet.id} className="simple-list-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">
+                    {timesheet.projectCode} - {timesheet.projectName}
+                  </div>
+                  <div className="simple-list-subtitle">
+                    {new Date(timesheet.startAt).toLocaleString("ro-RO")} · {timesheet.status} · {timesheet.workedMinutes} min
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h3 className="panel-title">Notificările mele</h3>
+        {myNotifications.length === 0 ? (
+          <p className="tools-subtitle">Nu ai notificări momentan.</p>
+        ) : (
+          <div className="simple-list">
+            {myNotifications.slice(0, 15).map((notification) => (
+              <div key={notification.id} className="simple-list-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">{notification.title}</div>
+                  <div className="simple-list-subtitle">{notification.message}</div>
+                  <div className="simple-list-subtitle">
+                    {new Date(notification.createdAt).toLocaleString("ro-RO")} · {notification.read ? "citită" : "nouă"}
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         )}

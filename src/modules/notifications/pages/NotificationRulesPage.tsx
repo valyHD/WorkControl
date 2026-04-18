@@ -12,8 +12,8 @@ import {
 
 const emptyValues: NotificationRuleFormValues = {
   name: "",
-  module: "tools",
-  eventType: "tool_holder_changed",
+  module: "general",
+  eventType: "any_change",
   enabled: true,
   recipients: {
     notifyDirectUser: true,
