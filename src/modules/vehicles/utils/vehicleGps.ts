@@ -9,6 +9,11 @@ const DEFAULT_STOP_SPEED_KMH = 4;
 const DEFAULT_STOP_MIN_MS = 4 * 60 * 1000;
 const DEFAULT_OVERSPEED_COOLDOWN_MS = 5 * 60 * 1000;
 
+const MAX_REASONABLE_GAP_MS = 12 * 60 * 60 * 1000; // 12h
+const MAX_REASONABLE_POINT_JUMP_KM = 20; // evita salturi GPS false
+const MAX_REASONABLE_ODOMETER_STEP_KM = 20; // evita odometru corupt
+const MIN_MOVING_SPEED_KMH = 6;
+
 export type DateRangePreset = "today" | "last24h" | "last7d" | "custom";
 export type VehicleDistanceBucketType = "day" | "week" | "month";
 
@@ -18,6 +23,44 @@ export interface VehicleDistanceBucket {
   startTs: number;
   endTs: number;
   distanceKm: number;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isValidTimestamp(value: unknown): value is number {
+  return isFiniteNumber(value) && value > 946684800000 && value < 4102444800000; // 2000 -> 2100
+}
+
+function isValidLatLng(lat: unknown, lng: unknown): lat is number {
+  return (
+    isFiniteNumber(lat) &&
+    isFiniteNumber(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+function toSafeSpeed(value: unknown): number {
+  if (!isFiniteNumber(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 400) return 400;
+  return value;
+}
+
+function toSafeOdometer(value: unknown): number | undefined {
+  if (!isFiniteNumber(value)) return undefined;
+  if (value < 0) return undefined;
+  if (value > 10_000_000) return undefined;
+  return value;
+}
+
+function localDayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
 }
 
 export function getPresetRange(preset: DateRangePreset): { from: number; to: number } {
@@ -41,41 +84,93 @@ export function getPresetRange(preset: DateRangePreset): { from: number; to: num
 }
 
 export function toDateTimeLocalValue(ts: number): string {
+  if (!isValidTimestamp(ts)) return "";
+
   const date = new Date(ts);
   const pad = (value: number) => String(value).padStart(2, "0");
 
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
 }
 
 export function fromDateTimeLocalValue(value: string): number | null {
   if (!value) return null;
   const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
+  return isValidTimestamp(parsed) ? parsed : null;
 }
 
 export function sanitizePositions(positions: VehiclePositionItem[]): VehiclePositionItem[] {
-  return [...positions]
-    .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
-    .filter((item) => !(item.lat === 0 && item.lng === 0))
+  if (!Array.isArray(positions) || positions.length === 0) return [];
+
+  const cleaned: VehiclePositionItem[] = positions
+    .filter((item) => item && isValidLatLng(item.lat, item.lng))
+    .filter((item) => isValidTimestamp(item.gpsTimestamp))
+    .map((item) => ({
+      ...item,
+      speedKmh: toSafeSpeed(item.speedKmh),
+      odometerKm: toSafeOdometer(item.odometerKm),
+      satellites: isFiniteNumber(item.satellites) && item.satellites >= 0 ? item.satellites : 0,
+      altitude: isFiniteNumber(item.altitude) ? item.altitude : 0,
+      angle: isFiniteNumber(item.angle) ? item.angle : 0,
+      ignitionOn: Boolean(item.ignitionOn),
+    }))
     .sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+
+  const deduped: VehiclePositionItem[] = [];
+  const seen = new Set<string>();
+
+  for (const item of cleaned) {
+    const key = `${item.gpsTimestamp}_${item.lat}_${item.lng}_${item.speedKmh ?? 0}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
 }
 
 export function samplePositions(
   positions: VehiclePositionItem[],
   maxPoints = 800
 ): VehiclePositionItem[] {
-  if (positions.length <= maxPoints) return positions;
+  if (!Array.isArray(positions) || positions.length <= maxPoints) return positions ?? [];
+  if (maxPoints <= 2) return positions.slice(0, Math.max(1, maxPoints));
 
-  const bucket = Math.ceil(positions.length / maxPoints);
-  return positions.filter((_, index) => index % bucket === 0);
+  const sampled: VehiclePositionItem[] = [];
+  const lastIndex = positions.length - 1;
+
+  sampled.push(positions[0]);
+
+  const step = (positions.length - 2) / (maxPoints - 2);
+  for (let i = 1; i < maxPoints - 1; i += 1) {
+    const index = Math.min(lastIndex - 1, Math.max(1, Math.round(i * step)));
+    sampled.push(positions[index]);
+  }
+
+  sampled.push(positions[lastIndex]);
+
+  const unique: VehiclePositionItem[] = [];
+  const seen = new Set<string>();
+
+  for (const item of sampled) {
+    const key = item.id || `${item.gpsTimestamp}_${item.lat}_${item.lng}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+
+  return unique.sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
 }
 
 export function detectStops(
   positions: VehiclePositionItem[],
   options?: { minStopMs?: number; speedThresholdKmh?: number }
 ): VehicleStopItem[] {
-  const minStopMs = options?.minStopMs ?? DEFAULT_STOP_MIN_MS;
-  const speedThresholdKmh = options?.speedThresholdKmh ?? DEFAULT_STOP_SPEED_KMH;
+  const minStopMs = Math.max(60_000, options?.minStopMs ?? DEFAULT_STOP_MIN_MS);
+  const speedThresholdKmh = Math.max(0, options?.speedThresholdKmh ?? DEFAULT_STOP_SPEED_KMH);
+
+  if (!positions.length) return [];
 
   const stops: VehicleStopItem[] = [];
   let run: VehiclePositionItem[] = [];
@@ -92,7 +187,7 @@ export function detectStops(
       const avgLng = run.reduce((sum, point) => sum + point.lng, 0) / run.length;
 
       stops.push({
-        id: `stop-${start.id}-${end.id}`,
+        id: `stop-${start.id}-${end.id}-${start.gpsTimestamp}`,
         start,
         end,
         durationMs,
@@ -104,8 +199,21 @@ export function detectStops(
     run = [];
   };
 
-  for (const point of positions) {
-    if ((point.speedKmh ?? 0) <= speedThresholdKmh) {
+  for (let index = 0; index < positions.length; index += 1) {
+    const point = positions[index];
+    const prev = index > 0 ? positions[index - 1] : null;
+
+    if (prev && point.gpsTimestamp < prev.gpsTimestamp) {
+      flush();
+      continue;
+    }
+
+    if (prev && point.gpsTimestamp - prev.gpsTimestamp > MAX_REASONABLE_GAP_MS) {
+      flush();
+    }
+
+    const speed = toSafeSpeed(point.speedKmh);
+    if (speed <= speedThresholdKmh) {
       run.push(point);
     } else {
       flush();
@@ -121,12 +229,19 @@ export function detectOverspeed(
   thresholdKmh: number,
   cooldownMs = DEFAULT_OVERSPEED_COOLDOWN_MS
 ): VehiclePositionItem[] {
+  const safeThreshold = Math.max(1, Math.min(400, thresholdKmh || 0));
+  const safeCooldownMs = Math.max(0, cooldownMs);
+
+  if (!positions.length) return [];
+
   const markers: VehiclePositionItem[] = [];
   let lastMarkerAt = 0;
 
   for (const point of positions) {
-    if ((point.speedKmh ?? 0) < thresholdKmh) continue;
-    if (!lastMarkerAt || point.gpsTimestamp - lastMarkerAt >= cooldownMs) {
+    const speed = toSafeSpeed(point.speedKmh);
+    if (speed < safeThreshold) continue;
+
+    if (!lastMarkerAt || point.gpsTimestamp - lastMarkerAt >= safeCooldownMs) {
       markers.push(point);
       lastMarkerAt = point.gpsTimestamp;
     }
@@ -148,6 +263,8 @@ export function buildTimelineEvents(
     label: string,
     metadata?: Record<string, unknown>
   ) => {
+    if (!isValidTimestamp(timestamp)) return;
+
     events.push({
       id: `${type}-${timestamp}-${events.length}`,
       type,
@@ -157,22 +274,18 @@ export function buildTimelineEvents(
     });
   };
 
-  for (const point of positions) {
-    if (point.ignitionOn) {
-      add("ignition_on", point.gpsTimestamp, "Contact pornit", {
-        speedKmh: point.speedKmh,
-      });
-      break;
-    }
+  const firstIgnitionOn = positions.find((point) => point.ignitionOn);
+  if (firstIgnitionOn) {
+    add("ignition_on", firstIgnitionOn.gpsTimestamp, "Contact pornit", {
+      speedKmh: firstIgnitionOn.speedKmh,
+    });
   }
 
-  for (const point of positions) {
-    if ((point.speedKmh ?? 0) > 6) {
-      add("moving", point.gpsTimestamp, "Vehicul in miscare", {
-        speedKmh: point.speedKmh,
-      });
-      break;
-    }
+  const firstMoving = positions.find((point) => toSafeSpeed(point.speedKmh) > MIN_MOVING_SPEED_KMH);
+  if (firstMoving) {
+    add("moving", firstMoving.gpsTimestamp, "Vehicul in miscare", {
+      speedKmh: firstMoving.speedKmh,
+    });
   }
 
   for (const stop of stops) {
@@ -201,15 +314,24 @@ export function buildTimelineEvents(
     }
   }
 
-  return events.sort((a, b) => a.timestamp - b.timestamp);
+  const unique = new Map<string, VehicleGeoEvent>();
+  for (const event of events) {
+    const key = `${event.type}_${event.timestamp}_${JSON.stringify(event.metadata ?? {})}`;
+    if (!unique.has(key)) unique.set(key, event);
+  }
+
+  return [...unique.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 export function formatDuration(ms: number): string {
-  if (ms <= 0) return "0 min";
+  if (!isFiniteNumber(ms) || ms <= 0) return "0 min";
+
   const totalMinutes = Math.round(ms / 60000);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
+
   if (!hours) return `${minutes} min`;
+  if (!minutes) return `${hours}h`;
   return `${hours}h ${minutes}m`;
 }
 
@@ -226,30 +348,50 @@ function haversineKm(
   const earthRadiusKm = 6371;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadiusKm * c;
 }
 
 export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): number {
-  if (positions.length <= 1) return 0;
+  if (!Array.isArray(positions) || positions.length <= 1) return 0;
+
   let total = 0;
 
   for (let index = 1; index < positions.length; index += 1) {
     const prev = positions[index - 1];
     const next = positions[index];
 
-    const odometerDelta = (next.odometerKm ?? 0) - (prev.odometerKm ?? 0);
-    if (odometerDelta > 0 && odometerDelta < 20) {
+    if (!prev || !next) continue;
+
+    const timeDeltaMs = next.gpsTimestamp - prev.gpsTimestamp;
+    if (timeDeltaMs <= 0) continue;
+    if (timeDeltaMs > MAX_REASONABLE_GAP_MS) continue;
+
+const prevOdo = toSafeOdometer(prev.odometerKm);
+const nextOdo = toSafeOdometer(next.odometerKm);
+const odometerDelta =
+  prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+
+if (
+  odometerDelta !== undefined &&
+  odometerDelta > 0 &&
+  odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
+) {
       total += odometerDelta;
       continue;
     }
 
     const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
-    if (geoDelta > 0 && geoDelta < 20) {
-      total += geoDelta;
-    }
+
+    if (geoDelta <= 0) continue;
+    if (geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
+
+    total += geoDelta;
   }
 
   return Number(total.toFixed(2));
@@ -268,16 +410,22 @@ export function buildDistanceHistory(
   positions: VehiclePositionItem[],
   type: VehicleDistanceBucketType
 ): VehicleDistanceBucket[] {
-  if (positions.length <= 1) return [];
+  if (!Array.isArray(positions) || positions.length <= 1) return [];
 
-  const buckets = new Map<string, {
-    label: string;
-    startTs: number;
-    endTs: number;
-    points: VehiclePositionItem[];
-  }>();
+  const clean = sanitizePositions(positions);
+  if (clean.length <= 1) return [];
 
-  for (const point of positions) {
+  const buckets = new Map<
+    string,
+    {
+      label: string;
+      startTs: number;
+      endTs: number;
+      points: VehiclePositionItem[];
+    }
+  >();
+
+  for (const point of clean) {
     const date = new Date(point.gpsTimestamp);
     let key = "";
     let startTs = 0;
@@ -288,43 +436,69 @@ export function buildDistanceHistory(
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       const end = new Date(start.getTime());
       end.setDate(end.getDate() + 1);
-      key = start.toISOString().slice(0, 10);
+
+      key = localDayKey(start);
       startTs = start.getTime();
       endTs = end.getTime();
-      label = start.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" });
+      label = start.toLocaleDateString("ro-RO", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
     } else if (type === "week") {
       const start = getWeekStart(date);
       const end = new Date(start.getTime());
       end.setDate(end.getDate() + 7);
-      key = `wk-${start.toISOString().slice(0, 10)}`;
+
+      key = `wk-${localDayKey(start)}`;
       startTs = start.getTime();
       endTs = end.getTime();
-      label = `${start.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit" })} - ${new Date(end.getTime() - 1).toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" })}`;
+      label = `${start.toLocaleDateString("ro-RO", {
+        day: "2-digit",
+        month: "2-digit",
+      })} - ${new Date(end.getTime() - 1).toLocaleDateString("ro-RO", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      })}`;
     } else {
       const start = new Date(date.getFullYear(), date.getMonth(), 1);
       const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+
       key = `mo-${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
       startTs = start.getTime();
       endTs = end.getTime();
-      label = start.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
+      label = start.toLocaleDateString("ro-RO", {
+        month: "long",
+        year: "numeric",
+      });
     }
 
     const existing = buckets.get(key);
     if (!existing) {
-      buckets.set(key, { label, startTs, endTs, points: [point] });
+      buckets.set(key, {
+        label,
+        startTs,
+        endTs,
+        points: [point],
+      });
     } else {
-      existing.label = label;
       existing.points.push(point);
     }
   }
 
   return [...buckets.entries()]
-    .map(([id, value]) => ({
-      id,
-      label: value.label,
-      startTs: value.startTs,
-      endTs: value.endTs,
-      distanceKm: calculateRouteDistanceKm(value.points),
-    }))
+    .map(([id, value]) => {
+      const bucketPoints = value.points.sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+
+      return {
+        id,
+        label: value.label,
+        startTs: value.startTs,
+        endTs: value.endTs,
+        distanceKm: calculateRouteDistanceKm(bucketPoints),
+      };
+    })
+    .filter((item) => item.distanceKm >= 0)
     .sort((a, b) => b.startTs - a.startTs);
 }

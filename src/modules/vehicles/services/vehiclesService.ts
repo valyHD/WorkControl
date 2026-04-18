@@ -22,12 +22,15 @@ import {
 import { db, storage } from "../../../lib/firebase/firebase";
 import type {
   VehicleCommandItem,
+  VehicleCommandStatus,
+  VehicleCommandType,
   VehicleEventItem,
   VehicleFormValues,
-  VehicleTrackerEventItem,
   VehicleImageItem,
   VehicleItem,
   VehiclePositionItem,
+  VehicleStatus,
+  VehicleTrackerEventItem,
 } from "../../../types/vehicle";
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
@@ -36,62 +39,153 @@ const vehiclesCollection = collection(db, "vehicles");
 const vehicleEventsCollection = collection(db, "vehicleEvents");
 const usersCollection = collection(db, "users");
 
+const VEHICLE_STATUSES = ["activa", "in_service", "indisponibila", "avariata"] as const;
+const VEHICLE_COMMAND_TYPES = ["pulse_dout1", "allow_start", "block_start"] as const;
+const VEHICLE_COMMAND_STATUSES = ["requested", "pending", "completed", "failed"] as const;
+
+function toSafeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function toSafeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function toSafeBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function toSafeObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function isValidLatLng(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+function normalizePlateNumber(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function toVehicleStatus(value: unknown): VehicleStatus {
+  return VEHICLE_STATUSES.includes(value as VehicleStatus)
+    ? (value as VehicleStatus)
+    : "activa";
+}
+
+function toVehicleCommandType(value: unknown): VehicleCommandType {
+  return VEHICLE_COMMAND_TYPES.includes(value as VehicleCommandType)
+    ? (value as VehicleCommandType)
+    : "allow_start";
+}
+
+function toVehicleCommandStatus(value: unknown): VehicleCommandStatus {
+  return VEHICLE_COMMAND_STATUSES.includes(value as VehicleCommandStatus)
+    ? (value as VehicleCommandStatus)
+    : "requested";
+}
+
+function sortPositionsAsc(items: VehiclePositionItem[]): VehiclePositionItem[] {
+  return [...items].sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+}
+
+function dedupePositions(items: VehiclePositionItem[]): VehiclePositionItem[] {
+  const result: VehiclePositionItem[] = [];
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    const key = item.id || `${item.gpsTimestamp}_${item.lat}_${item.lng}_${item.speedKmh ?? 0}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
 function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
+  const gpsSnapshotRaw = data.gpsSnapshot ? toSafeObject(data.gpsSnapshot) : null;
+  const trackerRaw = data.tracker ? toSafeObject(data.tracker) : null;
+  const imagesRaw = Array.isArray(data.images) ? data.images : [];
+
   return {
     id,
-    plateNumber: data.plateNumber ?? "",
-    brand: data.brand ?? "",
-    model: data.model ?? "",
-    year: data.year ?? "",
-    vin: data.vin ?? "",
-    fuelType: data.fuelType ?? "",
+    plateNumber: toSafeString(data.plateNumber),
+    brand: toSafeString(data.brand),
+    model: toSafeString(data.model),
+    year: toSafeString(data.year),
+    vin: toSafeString(data.vin),
+    fuelType: toSafeString(data.fuelType),
     ownerThemeKey: data.ownerThemeKey ?? null,
-currentDriverThemeKey: data.currentDriverThemeKey ?? null,
-    status: data.status ?? "activa",
-    currentKm: Number(data.currentKm ?? 0),
+    currentDriverThemeKey: data.currentDriverThemeKey ?? null,
+    status: toVehicleStatus(data.status),
+    currentKm: toSafeNumber(data.currentKm, 0),
 
-    ownerUserId: data.ownerUserId ?? "",
-    ownerUserName: data.ownerUserName ?? "",
+    ownerUserId: toSafeString(data.ownerUserId),
+    ownerUserName: toSafeString(data.ownerUserName),
 
-    currentDriverUserId: data.currentDriverUserId ?? "",
-    currentDriverUserName: data.currentDriverUserName ?? "",
+    currentDriverUserId: toSafeString(data.currentDriverUserId),
+    currentDriverUserName: toSafeString(data.currentDriverUserName),
 
-    maintenanceNotes: data.maintenanceNotes ?? "",
-    nextServiceKm: Number(data.nextServiceKm ?? 0),
-    nextItpDate: data.nextItpDate ?? "",
-    nextRcaDate: data.nextRcaDate ?? "",
+    maintenanceNotes: toSafeString(data.maintenanceNotes),
+    nextServiceKm: toSafeNumber(data.nextServiceKm, 0),
+    nextItpDate: toSafeString(data.nextItpDate),
+    nextRcaDate: toSafeString(data.nextRcaDate),
 
-    coverImageUrl: data.coverImageUrl ?? "",
-    coverThumbUrl: data.coverThumbUrl ?? "",
-    images: Array.isArray(data.images) ? data.images : [],
+    coverImageUrl: toSafeString(data.coverImageUrl),
+    coverThumbUrl: toSafeString(data.coverThumbUrl),
+    images: imagesRaw.map((item: any) => ({
+      id: toSafeString(item?.id, `${Date.now()}_${Math.random().toString(36).slice(2)}`),
+      url: toSafeString(item?.url),
+      path: toSafeString(item?.path),
+      fileName: toSafeString(item?.fileName),
+      createdAt: toSafeNumber(item?.createdAt, Date.now()),
+      thumbUrl: toSafeString(item?.thumbUrl),
+      thumbPath: toSafeString(item?.thumbPath),
+    })),
 
-    gpsSnapshot: data.gpsSnapshot
+gpsSnapshot: gpsSnapshotRaw
+  ? {
+      lat: toSafeNumber(gpsSnapshotRaw.lat, 0),
+      lng: toSafeNumber(gpsSnapshotRaw.lng, 0),
+      speedKmh: toSafeNumber(gpsSnapshotRaw.speedKmh, 0),
+      altitude: toOptionalNumber(gpsSnapshotRaw.altitude),
+      angle: toOptionalNumber(gpsSnapshotRaw.angle),
+      satellites: toOptionalNumber(gpsSnapshotRaw.satellites),
+      gpsTimestamp: toSafeNumber(gpsSnapshotRaw.gpsTimestamp, 0),
+      serverTimestamp: toSafeNumber(gpsSnapshotRaw.serverTimestamp, 0),
+      ignitionOn: toSafeBoolean(gpsSnapshotRaw.ignitionOn, false),
+      odometerKm: toOptionalNumber(gpsSnapshotRaw.odometerKm),
+      imei: toSafeString(gpsSnapshotRaw.imei),
+      online: toSafeBoolean(gpsSnapshotRaw.online, false),
+    }
+  : null,
+
+    tracker: trackerRaw
       ? {
-          lat: Number(data.gpsSnapshot.lat ?? 0),
-          lng: Number(data.gpsSnapshot.lng ?? 0),
-          speedKmh: Number(data.gpsSnapshot.speedKmh ?? 0),
-          altitude: Number(data.gpsSnapshot.altitude ?? 0),
-          angle: Number(data.gpsSnapshot.angle ?? 0),
-          satellites: Number(data.gpsSnapshot.satellites ?? 0),
-          gpsTimestamp: Number(data.gpsSnapshot.gpsTimestamp ?? 0),
-          serverTimestamp: Number(data.gpsSnapshot.serverTimestamp ?? 0),
-          ignitionOn: Boolean(data.gpsSnapshot.ignitionOn ?? false),
-          odometerKm: Number(data.gpsSnapshot.odometerKm ?? 0),
-          imei: data.gpsSnapshot.imei ?? "",
-          online: Boolean(data.gpsSnapshot.online ?? false),
+          imei: toSafeString(trackerRaw.imei),
+          lastSeenAt: toSafeNumber(trackerRaw.lastSeenAt, 0),
+          updatedAt: toSafeNumber(trackerRaw.updatedAt, 0),
+          protocol: toSafeString(trackerRaw.protocol),
         }
       : null,
-    tracker: data.tracker
-      ? {
-          imei: data.tracker.imei ?? "",
-          lastSeenAt: Number(data.tracker.lastSeenAt ?? 0),
-          updatedAt: Number(data.tracker.updatedAt ?? 0),
-          protocol: data.tracker.protocol ?? "",
-        }
-      : null,
 
-    createdAt: data.createdAt ?? Date.now(),
-    updatedAt: data.updatedAt ?? Date.now(),
+    createdAt: toSafeNumber(data.createdAt, Date.now()),
+    updatedAt: toSafeNumber(data.updatedAt, Date.now()),
   };
 }
 
@@ -107,10 +201,16 @@ async function resizeImage(
       image.src = String(reader.result);
     };
 
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error("Nu am putut citi fisierul."));
+    image.onerror = () => reject(new Error("Nu am putut incarca imaginea."));
 
     image.onload = () => {
       let { width, height } = image;
+
+      if (width <= 0 || height <= 0) {
+        reject(new Error("Dimensiuni imagine invalide."));
+        return;
+      }
 
       if (width > options.maxWidth) {
         height = Math.round((height * options.maxWidth) / width);
@@ -147,21 +247,21 @@ async function resizeImage(
       );
     };
 
-    image.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
 export async function getVehicleUsers(): Promise<AppUser[]> {
   const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc")));
+
   return snap.docs.map((docItem) => ({
     id: docItem.id,
-    uid: docItem.data().uid ?? "",
+    uid: toSafeString(docItem.data().uid),
     themeKey: docItem.data().themeKey ?? null,
-    fullName: docItem.data().fullName ?? "Utilizator fara nume",
-    email: docItem.data().email ?? "",
+    fullName: toSafeString(docItem.data().fullName, "Utilizator fara nume"),
+    email: toSafeString(docItem.data().email),
     active: docItem.data().active ?? true,
-    role: docItem.data().role ?? "",
+    role: toSafeString(docItem.data().role),
   }));
 }
 
@@ -171,8 +271,11 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
 }
 
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
+  if (!vehicleId) return null;
+
   const snap = await getDoc(doc(db, "vehicles", vehicleId));
   if (!snap.exists()) return null;
+
   return mapVehicleDoc(snap.id, snap.data());
 }
 
@@ -200,26 +303,41 @@ export async function getMyVehicleForUser(userId: string): Promise<VehicleItem |
 
   const preferredDoc = driverSnap.docs[0] || ownerSnap.docs[0];
   if (!preferredDoc) return null;
+
   return mapVehicleDoc(preferredDoc.id, preferredDoc.data());
 }
+
 export function subscribeVehicleById(
   vehicleId: string,
   onData: (item: VehicleItem | null) => void
 ): () => void {
-  return onSnapshot(doc(db, "vehicles", vehicleId), (snap) => {
-    if (!snap.exists()) {
-      onData(null);
-      return;
-    }
+  if (!vehicleId) {
+    onData(null);
+    return () => undefined;
+  }
 
-    onData(mapVehicleDoc(snap.id, snap.data()));
-  });
+  return onSnapshot(
+    doc(db, "vehicles", vehicleId),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+
+      onData(mapVehicleDoc(snap.id, snap.data()));
+    },
+    (error) => {
+      console.error("[subscribeVehicleById]", error);
+      onData(null);
+    }
+  );
 }
+
 export async function isPlateNumberUsed(
   plateNumber: string,
   excludeVehicleId?: string
 ): Promise<boolean> {
-  const clean = plateNumber.trim().toUpperCase();
+  const clean = normalizePlateNumber(plateNumber);
   if (!clean) return false;
 
   const snap = await getDocs(
@@ -235,7 +353,7 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
 
   const refDoc = await addDoc(vehiclesCollection, {
     ...values,
-    plateNumber: values.plateNumber.trim().toUpperCase(),
+    plateNumber: normalizePlateNumber(values.plateNumber),
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -258,12 +376,12 @@ export async function updateVehicle(
   const existingSnap = await getDoc(doc(db, "vehicles", vehicleId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
 
-  const previousStatus = existingData?.status ?? "";
-  const previousOwnerUserId = existingData?.ownerUserId ?? "";
+const previousStatus = toVehicleStatus(existingData?.status);
+  const previousOwnerUserId = toSafeString(existingData?.ownerUserId);
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
     ...values,
-    plateNumber: values.plateNumber.trim().toUpperCase(),
+    plateNumber: normalizePlateNumber(values.plateNumber),
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -317,19 +435,30 @@ export async function addVehicleEvent(
     createdAtServer: serverTimestamp(),
   });
 }
+function toVehicleEventType(value: unknown): VehicleEventItem["type"] {
+  return value === "created" ||
+    value === "updated" ||
+    value === "driver_changed" ||
+    value === "images_updated" ||
+    value === "claimed"
+    ? value
+    : "updated";
+}
 export async function getVehicleEvents(vehicleId: string): Promise<VehicleEventItem[]> {
+  if (!vehicleId) return [];
+
   const snap = await getDocs(
     query(vehicleEventsCollection, where("vehicleId", "==", vehicleId))
   );
 
   const events = snap.docs.map((docItem) => ({
     id: docItem.id,
-    vehicleId: docItem.data().vehicleId,
-    type: docItem.data().type,
-    message: docItem.data().message,
-    createdAt: docItem.data().createdAt ?? Date.now(),
-    actorUserId: docItem.data().actorUserId ?? "",
-    actorUserName: docItem.data().actorUserName ?? "",
+    vehicleId: toSafeString(docItem.data().vehicleId),
+    type: toVehicleEventType(docItem.data().type),
+    message: toSafeString(docItem.data().message),
+    createdAt: toSafeNumber(docItem.data().createdAt, Date.now()),
+    actorUserId: toSafeString(docItem.data().actorUserId),
+    actorUserName: toSafeString(docItem.data().actorUserName),
     actorUserThemeKey: docItem.data().actorUserThemeKey ?? null,
   }));
 
@@ -343,12 +472,13 @@ export async function uploadVehicleImages(
   const uploadedItems: VehicleImageItem[] = [];
 
   for (const file of files) {
-    const baseName = `${Date.now()}_${file.name
+    const safeBaseName = `${Date.now()}_${file.name
       .replace(/\s+/g, "_")
+      .replace(/[^\w.-]/g, "")
       .replace(/\.[^/.]+$/, "")}`;
 
-    const fullPath = `vehicles/${vehicleId}/images/${baseName}.jpg`;
-    const thumbPath = `vehicles/${vehicleId}/images/thumb_${baseName}.jpg`;
+    const fullPath = `vehicles/${vehicleId}/images/${safeBaseName}.jpg`;
+    const thumbPath = `vehicles/${vehicleId}/images/thumb_${safeBaseName}.jpg`;
 
     const fullRef = ref(storage, fullPath);
     const thumbRef = ref(storage, thumbPath);
@@ -476,15 +606,15 @@ export async function changeVehicleDriver(
   if (!vehicleSnap.exists()) return;
 
   const vehicleData = vehicleSnap.data();
-  const plateNumber = vehicleData.plateNumber ?? "Masina";
-  const previousDriverUserId = vehicleData.currentDriverUserId ?? "";
+  const plateNumber = toSafeString(vehicleData.plateNumber, "Masina");
+  const previousDriverUserId = toSafeString(vehicleData.currentDriverUserId);
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
-currentDriverUserId: nextDriverUserId || "",
-currentDriverUserName: nextDriverUserName || "",
-currentDriverThemeKey: nextDriverThemeKey ?? null,
-updatedAt: Date.now(),
-updatedAtServer: serverTimestamp(),
+    currentDriverUserId: nextDriverUserId || "",
+    currentDriverUserName: nextDriverUserName || "",
+    currentDriverThemeKey: nextDriverThemeKey ?? null,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
   });
 
   const message = nextDriverUserId
@@ -500,9 +630,9 @@ updatedAtServer: serverTimestamp(),
     title: "Sofer masina schimbat",
     message: `Masina ${plateNumber} are acum ca sofer curent ${nextDriverUserName || "niciun user"}.`,
     directUserId: nextDriverUserId || previousDriverUserId || "",
-    ownerUserId: vehicleData.ownerUserId ?? "",
-    actorUserId: vehicleData.ownerUserId ?? "",
-    actorUserName: vehicleData.ownerUserName ?? "Responsabil",
+    ownerUserId: toSafeString(vehicleData.ownerUserId),
+    actorUserId: toSafeString(vehicleData.ownerUserId),
+    actorUserName: toSafeString(vehicleData.ownerUserName, "Responsabil"),
     actorUserThemeKey: vehicleData.ownerThemeKey ?? null,
   });
 }
@@ -512,16 +642,16 @@ export async function claimVehicleForCurrentUser(
   userId: string,
   userName: string,
   userThemeKey: string | null
-): Promise<void>{
+): Promise<void> {
   await updateDoc(doc(db, "vehicles", vehicleId), {
-ownerUserId: userId,
-ownerUserName: userName,
-ownerThemeKey: userThemeKey ?? null,
-currentDriverUserId: userId,
-currentDriverUserName: userName,
-currentDriverThemeKey: userThemeKey ?? null,
-updatedAt: Date.now(),
-updatedAtServer: serverTimestamp(),
+    ownerUserId: userId,
+    ownerUserName: userName,
+    ownerThemeKey: userThemeKey ?? null,
+    currentDriverUserId: userId,
+    currentDriverUserName: userName,
+    currentDriverThemeKey: userThemeKey ?? null,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
   });
 
   await addVehicleEvent(
@@ -534,23 +664,24 @@ updatedAtServer: serverTimestamp(),
 export async function deleteVehicle(vehicleId: string): Promise<void> {
   await deleteDoc(doc(db, "vehicles", vehicleId));
 }
+
 function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePositionItem {
   return {
     id,
-    vehicleId: data.vehicleId ?? "",
-    imei: data.imei ?? "",
-    lat: Number(data.lat ?? 0),
-    lng: Number(data.lng ?? 0),
-    speedKmh: Number(data.speedKmh ?? 0),
-    altitude: Number(data.altitude ?? 0),
-    angle: Number(data.angle ?? 0),
-    satellites: Number(data.satellites ?? 0),
-    gpsTimestamp: Number(data.gpsTimestamp ?? 0),
-    serverTimestamp: Number(data.serverTimestamp ?? 0),
-    eventIoId: Number(data.eventIoId ?? 0),
-    ignitionOn: Boolean(data.ignitionOn ?? false),
-    odometerKm: Number(data.odometerKm ?? 0),
-    rawIo: typeof data.rawIo === "object" && data.rawIo ? data.rawIo : {},
+    vehicleId: toSafeString(data.vehicleId),
+    imei: toSafeString(data.imei),
+    lat: toSafeNumber(data.lat, 0),
+    lng: toSafeNumber(data.lng, 0),
+    speedKmh: toSafeNumber(data.speedKmh, 0),
+    altitude: toSafeNumber(data.altitude, 0),
+    angle: toSafeNumber(data.angle, 0),
+    satellites: toSafeNumber(data.satellites, 0),
+    gpsTimestamp: toSafeNumber(data.gpsTimestamp, 0),
+    serverTimestamp: toSafeNumber(data.serverTimestamp, 0),
+    eventIoId: toSafeNumber(data.eventIoId, 0),
+    ignitionOn: toSafeBoolean(data.ignitionOn, false),
+    odometerKm: toOptionalNumber(data.odometerKm),
+    rawIo: toSafeObject(data.rawIo),
   };
 }
 
@@ -560,30 +691,34 @@ function mapVehicleTrackerEventDoc(
 ): VehicleTrackerEventItem {
   return {
     id,
-    type: String(data.type ?? "tracker_event"),
-    timestamp: Number(data.timestamp ?? data.gpsTimestamp ?? data.createdAt ?? Date.now()),
-    lat: Number(data.lat ?? 0) || undefined,
-    lng: Number(data.lng ?? 0) || undefined,
-    speedKmh: Number(data.speedKmh ?? 0) || undefined,
-    metadata:
-      typeof data.metadata === "object" && data.metadata
-        ? data.metadata
-        : {},
+    type: toSafeString(data.type, "tracker_event"),
+    timestamp: toSafeNumber(data.timestamp ?? data.gpsTimestamp ?? data.createdAt, Date.now()),
+    lat: toOptionalNumber(data.lat),
+    lng: toOptionalNumber(data.lng),
+    speedKmh: toOptionalNumber(data.speedKmh),
+    metadata: toSafeObject(data.metadata),
   };
 }
 
 function mapVehicleCommandDoc(id: string, data: Record<string, any>): VehicleCommandItem {
+const type = toVehicleCommandType(data.type);
+const status = toVehicleCommandStatus(data.status);
+
   return {
     id,
-    type: data.type === "block_start" ? "block_start" : "allow_start",
-    status: ["requested", "pending", "completed", "failed"].includes(data.status)
-      ? data.status
-      : "requested",
-    requestedBy: String(data.requestedBy ?? "system"),
-    requestedAt: Number(data.requestedAt ?? Date.now()),
-    completedAt: data.completedAt ? Number(data.completedAt) : null,
-    providerMessage: String(data.providerMessage ?? ""),
-    result: String(data.result ?? ""),
+    type,
+    status,
+    requestedBy: toSafeString(data.requestedBy, "system"),
+    requestedAt: toSafeNumber(data.requestedAt, Date.now()),
+    completedAt:
+      data.completedAt === null || data.completedAt === undefined
+        ? null
+        : toSafeNumber(data.completedAt, Date.now()),
+    providerMessage: toSafeString(data.providerMessage),
+    result: toSafeString(data.result),
+    durationSec: data.durationSec === null || data.durationSec === undefined
+      ? null
+      : toSafeNumber(data.durationSec, 0),
   };
 }
 
@@ -592,20 +727,35 @@ export function subscribeVehiclePositions(
   onData: (items: VehiclePositionItem[]) => void,
   maxItems = 300
 ): () => void {
+  if (!vehicleId) {
+    onData([]);
+    return () => undefined;
+  }
+
   const positionsQuery = query(
     collection(db, "vehicles", vehicleId, "positions"),
     orderBy("gpsTimestamp", "desc"),
     limit(maxItems)
   );
 
-  return onSnapshot(positionsQuery, (snap) => {
-    const items = snap.docs
-      .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-      .filter((item) => !(item.lat === 0 && item.lng === 0))
-      .sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+  return onSnapshot(
+    positionsQuery,
+    (snap) => {
+      const items = dedupePositions(
+        sortPositionsAsc(
+          snap.docs
+            .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+            .filter((item) => isValidLatLng(item.lat, item.lng))
+        )
+      );
 
-    onData(items);
-  });
+      onData(items);
+    },
+    (error) => {
+      console.error("[subscribeVehiclePositions]", error);
+      onData([]);
+    }
+  );
 }
 
 export function subscribeVehiclePositionsRange(
@@ -615,6 +765,11 @@ export function subscribeVehiclePositionsRange(
   onData: (items: VehiclePositionItem[]) => void,
   maxItems = 2000
 ): () => void {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    onData([]);
+    return () => undefined;
+  }
+
   const positionsQuery = query(
     collection(db, "vehicles", vehicleId, "positions"),
     where("gpsTimestamp", ">=", fromTs),
@@ -623,13 +778,24 @@ export function subscribeVehiclePositionsRange(
     limit(maxItems)
   );
 
-  return onSnapshot(positionsQuery, (snap) => {
-    const items = snap.docs
-      .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-      .filter((item) => !(item.lat === 0 && item.lng === 0));
+  return onSnapshot(
+    positionsQuery,
+    (snap) => {
+      const items = dedupePositions(
+        sortPositionsAsc(
+          snap.docs
+            .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+            .filter((item) => isValidLatLng(item.lat, item.lng))
+        )
+      );
 
-    onData(items);
-  });
+      onData(items);
+    },
+    (error) => {
+      console.error("[subscribeVehiclePositionsRange]", error);
+      onData([]);
+    }
+  );
 }
 
 export async function getVehiclePositionsRange(
@@ -638,6 +804,10 @@ export async function getVehiclePositionsRange(
   toTs: number,
   maxItems = 1500
 ): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
   const positionsQuery = query(
     collection(db, "vehicles", vehicleId, "positions"),
     where("gpsTimestamp", ">=", fromTs),
@@ -647,9 +817,14 @@ export async function getVehiclePositionsRange(
   );
 
   const snap = await getDocs(positionsQuery);
-  return snap.docs
-    .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-    .filter((item) => !(item.lat === 0 && item.lng === 0));
+
+  return dedupePositions(
+    sortPositionsAsc(
+      snap.docs
+        .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
+        .filter((item) => isValidLatLng(item.lat, item.lng))
+    )
+  );
 }
 
 export async function getVehicleTrackerEvents(
@@ -658,6 +833,10 @@ export async function getVehicleTrackerEvents(
   toTs: number,
   maxItems = 500
 ): Promise<VehicleTrackerEventItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
   const eventsQuery = query(
     collection(db, "vehicles", vehicleId, "events"),
     where("timestamp", ">=", fromTs),
@@ -670,7 +849,12 @@ export async function getVehicleTrackerEvents(
   return snap.docs.map((docItem) => mapVehicleTrackerEventDoc(docItem.id, docItem.data()));
 }
 
-export async function getVehicleCommands(vehicleId: string, maxItems = 20): Promise<VehicleCommandItem[]> {
+export async function getVehicleCommands(
+  vehicleId: string,
+  maxItems = 20
+): Promise<VehicleCommandItem[]> {
+  if (!vehicleId) return [];
+
   const commandsQuery = query(
     collection(db, "vehicles", vehicleId, "commands"),
     orderBy("requestedAt", "desc"),
@@ -689,6 +873,10 @@ export async function requestVehicleCommand(
     durationSec?: number | null;
   }
 ): Promise<string> {
+  if (!vehicleId) {
+    throw new Error("vehicleId lipsa");
+  }
+
   const created = await addDoc(collection(db, "vehicles", vehicleId, "commands"), {
     type: payload.type,
     status: "requested",

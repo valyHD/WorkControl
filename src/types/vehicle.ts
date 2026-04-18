@@ -1,8 +1,11 @@
-export type VehicleStatus =
-  | "activa"
-  | "in_service"
-  | "indisponibila"
-  | "avariata";
+export const VEHICLE_STATUSES = [
+  "activa",
+  "in_service",
+  "indisponibila",
+  "avariata",
+] as const;
+
+export type VehicleStatus = (typeof VEHICLE_STATUSES)[number];
 
 export interface VehicleImageItem {
   id: string;
@@ -89,8 +92,22 @@ export interface VehicleTrackerEventItem {
   metadata?: Record<string, unknown>;
 }
 
-export type VehicleCommandType = "pulse_dout1" | "allow_start" | "block_start";
-export type VehicleCommandStatus = "requested" | "pending" | "completed" | "failed";
+export const VEHICLE_COMMAND_TYPES = [
+  "pulse_dout1",
+  "allow_start",
+  "block_start",
+] as const;
+
+export type VehicleCommandType = (typeof VEHICLE_COMMAND_TYPES)[number];
+
+export const VEHICLE_COMMAND_STATUSES = [
+  "requested",
+  "pending",
+  "completed",
+  "failed",
+] as const;
+
+export type VehicleCommandStatus = (typeof VEHICLE_COMMAND_STATUSES)[number];
 
 export interface VehicleCommandItem {
   id: string;
@@ -169,15 +186,17 @@ export interface VehicleFormValues {
   images: VehicleImageItem[];
 }
 
+export type VehicleEventType =
+  | "created"
+  | "updated"
+  | "driver_changed"
+  | "images_updated"
+  | "claimed";
+
 export interface VehicleEventItem {
   id: string;
   vehicleId: string;
-  type:
-    | "created"
-    | "updated"
-    | "driver_changed"
-    | "images_updated"
-    | "claimed";
+  type: VehicleEventType;
   message: string;
   createdAt: number;
   actorUserId?: string;

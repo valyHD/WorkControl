@@ -25,6 +25,7 @@ function formatDate(ts?: number) {
 
 function formatCoords(lat?: number, lng?: number) {
   if (typeof lat !== "number" || typeof lng !== "number") return "-";
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "-";
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
@@ -55,6 +56,7 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
   }, []);
 
   const snapshot = vehicle.gpsSnapshot;
+
   const trackerPingAt =
     vehicle.tracker?.lastSeenAt ||
     vehicle.tracker?.updatedAt ||
@@ -62,7 +64,9 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
     snapshot?.gpsTimestamp ||
     0;
 
-  const ageMs = trackerPingAt ? nowTs - trackerPingAt : Number.POSITIVE_INFINITY;
+  const ageMs = trackerPingAt
+    ? Math.max(0, nowTs - trackerPingAt)
+    : Number.POSITIVE_INFINITY;
 
   const trackerState = useMemo(() => {
     if (!trackerPingAt) {

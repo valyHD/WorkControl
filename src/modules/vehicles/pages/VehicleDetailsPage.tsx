@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
-import type { VehicleCommandItem, VehicleEventItem, VehicleItem } from "../../../types/vehicle";
+import type {
+  VehicleCommandItem,
+  VehicleEventItem,
+  VehicleItem,
+} from "../../../types/vehicle";
 import { useAuth } from "../../../providers/AuthProvider";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
@@ -18,7 +22,8 @@ import {
   subscribeVehicleById,
 } from "../services/vehiclesService";
 
-function formatDate(ts: number) {
+function formatDate(ts?: number) {
+  if (!ts) return "-";
   return new Date(ts).toLocaleString("ro-RO");
 }
 
@@ -42,7 +47,13 @@ export default function VehicleDetailsPage() {
       setLoading(false);
     });
 
-    return unsubscribe;
+    return () => {
+      try {
+        unsubscribe?.();
+      } catch (error) {
+        console.error("[VehicleDetailsPage][unsubscribe]", error);
+      }
+    };
   }, [vehicleId]);
 
   useEffect(() => {
@@ -58,7 +69,7 @@ export default function VehicleDetailsPage() {
         setUsers(usersData);
         setCommands(commandsData);
       } catch (error) {
-        console.error(error);
+        console.error("[VehicleDetailsPage][loadMeta]", error);
         setEvents([]);
         setUsers([]);
         setCommands([]);
@@ -104,11 +115,17 @@ export default function VehicleDetailsPage() {
 
   async function handleRequestCommand(type: "pulse_dout1" | "block_start") {
     if (!vehicle) return;
+
     await requestVehicleCommand(vehicle.id, {
       type,
-      requestedBy: user?.displayName || user?.email || vehicle.currentDriverUserName || "dashboard_user",
+      requestedBy:
+        user?.displayName ||
+        user?.email ||
+        vehicle.currentDriverUserName ||
+        "dashboard_user",
       durationSec: type === "pulse_dout1" ? 60 : null,
     });
+
     const latestCommands = await getVehicleCommands(vehicle.id).catch(() => []);
     setCommands(latestCommands);
   }
@@ -161,14 +178,19 @@ export default function VehicleDetailsPage() {
 
             <div>
               <h2 className="panel-title">{vehicle.plateNumber}</h2>
+
               <div className="tool-detail-line">
                 <strong>Marca / model:</strong> {vehicle.brand} {vehicle.model}
               </div>
+
               <div className="tool-detail-line">
-                <strong>Status masina:</strong> <VehicleStatusBadge status={vehicle.status} />
+                <strong>Status masina:</strong>{" "}
+                <VehicleStatusBadge status={vehicle.status} />
               </div>
+
               <div className="tool-detail-line">
-                <strong>Ultima actualizare document:</strong> {formatDate(vehicle.updatedAt)}
+                <strong>Ultima actualizare document:</strong>{" "}
+                {formatDate(vehicle.updatedAt)}
               </div>
             </div>
           </div>
@@ -179,6 +201,7 @@ export default function VehicleDetailsPage() {
                 Editeaza
               </Link>
             )}
+
             <Link to="/vehicles" className="secondary-btn">
               Inapoi
             </Link>
@@ -194,24 +217,32 @@ export default function VehicleDetailsPage() {
               loading={loading}
             />
           </div>
+
           <div className="panel tool-inner-panel">
             <h3 className="panel-title">Date generale</h3>
 
             <div className="tool-detail-line">
-              <strong>Responsabil principal:</strong> {vehicle.ownerUserName || "-"}
+              <strong>Responsabil principal:</strong>{" "}
+              {vehicle.ownerUserName || "-"}
             </div>
+
             <div className="tool-detail-line">
-              <strong>Sofer curent:</strong> {vehicle.currentDriverUserName || "-"}
+              <strong>Sofer curent:</strong>{" "}
+              {vehicle.currentDriverUserName || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>An:</strong> {vehicle.year || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>VIN:</strong> {vehicle.vin || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>Combustibil:</strong> {vehicle.fuelType || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>Km curenti:</strong> {vehicle.currentKm || 0}
             </div>
@@ -221,14 +252,18 @@ export default function VehicleDetailsPage() {
             <h3 className="panel-title">Mentenanta</h3>
 
             <div className="tool-detail-line">
-              <strong>Urmator service la km:</strong> {vehicle.nextServiceKm || "-"}
+              <strong>Urmator service la km:</strong>{" "}
+              {vehicle.nextServiceKm || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>ITP pana la:</strong> {vehicle.nextItpDate || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>RCA pana la:</strong> {vehicle.nextRcaDate || "-"}
             </div>
+
             <div className="tool-detail-line">
               <strong>Note:</strong> {vehicle.maintenanceNotes || "-"}
             </div>
@@ -240,11 +275,16 @@ export default function VehicleDetailsPage() {
         <div className="panel">
           <h3 className="panel-title">Reparare rapida date masina</h3>
           <p className="tools-subtitle" style={{ marginBottom: 16 }}>
-            Aceasta masina are date vechi sau incomplete. O poti trece pe profilul tau.
+            Aceasta masina are date vechi sau incomplete. O poti trece pe profilul
+            tau.
           </p>
 
           <div className="tool-form-actions">
-            <button className="primary-btn" type="button" onClick={() => void handleClaimVehicle()}>
+            <button
+              className="primary-btn"
+              type="button"
+              onClick={() => void handleClaimVehicle()}
+            >
               Preia responsabilitatea si seteaza-ma sofer curent
             </button>
           </div>
@@ -253,13 +293,13 @@ export default function VehicleDetailsPage() {
 
       {isOwner && (
         <VehicleChangeDriverCard
-  vehicle={vehicle}
-  users={users}
-  onChanged={async () => {
-    const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
-    setEvents(eventsData);
-  }}
-/>
+          vehicle={vehicle}
+          users={users}
+          onChanged={async () => {
+            const eventsData = await getVehicleEvents(vehicle.id).catch(() => []);
+            setEvents(eventsData);
+          }}
+        />
       )}
 
       <VehicleLiveRouteCard vehicle={vehicle} showControlCard={false} />
@@ -289,6 +329,7 @@ export default function VehicleDetailsPage() {
                     >
                       Seteaza avatar
                     </button>
+
                     <button
                       className="danger-btn"
                       type="button"
@@ -316,7 +357,8 @@ export default function VehicleDetailsPage() {
                 <div className="simple-list-text">
                   <div className="simple-list-label">{event.message}</div>
                   <div className="simple-list-subtitle">
-                    {event.actorUserName || "Sistem"} · {formatDate(event.createdAt)}
+                    {event.actorUserName || "Sistem"} ·{" "}
+                    {formatDate(event.createdAt)}
                   </div>
                 </div>
               </div>
