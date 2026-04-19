@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import ToolStatusBadge from "../../tools/components/ToolStatusBadge";
+import SafeImage from "../../../components/SafeImage";
 import { changeToolHolder } from "../../tools/services/toolsService";
 
 type Props = {
@@ -61,16 +62,13 @@ export default function MyToolCard({
     <div className="tool-card">
       <div className="tool-card-top">
         <div className="tool-card-avatar">
-          {tool.coverImageUrl ? (
-            <img
-              src={tool.coverThumbUrl || tool.coverImageUrl}
-              alt={tool.name}
-              className="tool-card-avatar-image"
-              loading="lazy"
-            />
-          ) : (
-            <span>{tool.name.slice(0, 1).toUpperCase()}</span>
-          )}
+          <SafeImage
+            src={tool.coverThumbUrl || tool.coverImageUrl}
+            alt={tool.name}
+            className="tool-card-avatar-image"
+            fallbackText={tool.name}
+            sizes="72px"
+          />
         </div>
 
         <ToolStatusBadge status={tool.status} />

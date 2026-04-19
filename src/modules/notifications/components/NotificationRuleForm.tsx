@@ -109,12 +109,13 @@ export default function NotificationRuleForm({
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<NotificationRuleFormValues>(initialValues);
+  const [isSubmittingNow, setIsSubmittingNow] = useState(false);
 
   useEffect(() => {
     setValues(initialValues);
   }, [initialValues]);
 
-  const currentEvents = eventOptionsByModule[values.module];
+  const currentEvents = eventOptionsByModule[values.module] ?? eventOptionsByModule.general;
   const activeModule = moduleOptions.find((item) => item.value === values.module);
   const activeEvent = currentEvents.find((item) => item.value === values.eventType);
 
@@ -174,7 +175,14 @@ export default function NotificationRuleForm({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await onSubmit(values);
+    if (submitting || isSubmittingNow) return;
+
+    try {
+      setIsSubmittingNow(true);
+      await onSubmit(values);
+    } finally {
+      setIsSubmittingNow(false);
+    }
   }
 
   return (
@@ -192,6 +200,7 @@ export default function NotificationRuleForm({
           <label className="tool-form-label">Nume regulă</label>
           <input
             className="tool-input"
+            disabled={submitting || isSubmittingNow}
             value={values.name}
             onChange={(e) => setValues((prev) => ({ ...prev, name: e.target.value }))}
             placeholder="Ex: Notifică admin când se schimbă statusul unei mașini"
@@ -202,10 +211,11 @@ export default function NotificationRuleForm({
           <label className="tool-form-label">Modul</label>
           <select
             className="tool-input"
+            disabled={submitting || isSubmittingNow}
             value={values.module}
             onChange={(e) => {
               const nextModule = e.target.value as NotificationRuleModule;
-              const nextEvents = eventOptionsByModule[nextModule];
+              const nextEvents = eventOptionsByModule[nextModule] ?? eventOptionsByModule.general;
               setValues((prev) => ({
                 ...prev,
                 module: nextModule,
@@ -228,6 +238,7 @@ export default function NotificationRuleForm({
             <label className="tool-form-label">Entitate specifică (opțional)</label>
             <select
               className="tool-input"
+              disabled={submitting || isSubmittingNow}
               value={values.entityId}
               onChange={(e) => {
                 const selectedId = e.target.value;
@@ -254,6 +265,7 @@ export default function NotificationRuleForm({
           <label className="tool-form-label">Eveniment</label>
           <select
             className="tool-input"
+            disabled={submitting || isSubmittingNow}
             value={values.eventType}
             onChange={(e) =>
               setValues((prev) => ({
@@ -274,6 +286,7 @@ export default function NotificationRuleForm({
           <label className="tool-form-label">Status regulă</label>
           <select
             className="tool-input"
+            disabled={submitting || isSubmittingNow}
             value={values.enabled ? "true" : "false"}
             onChange={(e) =>
               setValues((prev) => ({
@@ -289,10 +302,11 @@ export default function NotificationRuleForm({
 
         <div className="tool-form-block tool-form-block-full">
           <label className="tool-form-label">Destinatari</label>
-          <div className="checkbox-grid">
+          <div className="checkbox-grid checkbox-grid--rules">
             <label className="checkbox-line">
               <input
                 type="checkbox"
+                disabled={submitting || isSubmittingNow}
                 checked={values.recipients.notifyDirectUser}
                 onChange={(e) =>
                   setValues((prev) => ({
@@ -310,6 +324,7 @@ export default function NotificationRuleForm({
             <label className="checkbox-line">
               <input
                 type="checkbox"
+                disabled={submitting || isSubmittingNow}
                 checked={values.recipients.notifyOwner}
                 onChange={(e) =>
                   setValues((prev) => ({
@@ -327,6 +342,7 @@ export default function NotificationRuleForm({
             <label className="checkbox-line">
               <input
                 type="checkbox"
+                disabled={submitting || isSubmittingNow}
                 checked={values.recipients.notifyAdmins}
                 onChange={(e) =>
                   setValues((prev) => ({
@@ -344,6 +360,7 @@ export default function NotificationRuleForm({
             <label className="checkbox-line">
               <input
                 type="checkbox"
+                disabled={submitting || isSubmittingNow}
                 checked={values.recipients.notifyManagers}
                 onChange={(e) =>
                   setValues((prev) => ({
@@ -362,13 +379,14 @@ export default function NotificationRuleForm({
 
         <div className="tool-form-block tool-form-block-full">
           <label className="tool-form-label">Useri specifici</label>
-          <div className="checkbox-grid">
+          <div className="checkbox-grid checkbox-grid--users">
             {users
               .filter((user) => user.active !== false)
               .map((user) => (
                 <label className="checkbox-line" key={user.id}>
                   <input
                     type="checkbox"
+                    disabled={submitting || isSubmittingNow}
                     checked={values.recipients.specificUserIds.includes(user.id)}
                     onChange={() => toggleSpecificUser(user.id)}
                   />
@@ -380,8 +398,8 @@ export default function NotificationRuleForm({
       </div>
 
       <div className="tool-form-actions">
-        <button className="primary-btn" type="submit" disabled={submitting}>
-          {submitting ? "Se salvează..." : "Salvează regula"}
+        <button className="primary-btn" type="submit" disabled={submitting || isSubmittingNow}>
+          {submitting || isSubmittingNow ? "Se salvează..." : "Salvează regula"}
         </button>
       </div>
     </form>

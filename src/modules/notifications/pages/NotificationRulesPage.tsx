@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
@@ -8,7 +8,6 @@ import { getToolsList, getUsersList } from "../../tools/services/toolsService";
 import NotificationRuleForm from "../components/NotificationRuleForm";
 import {
   createNotificationRule,
-  getNotificationRules,
   subscribeNotificationRules,
   updateNotificationRule,
 } from "../services/notificationRulesService";
@@ -43,52 +42,76 @@ export default function NotificationRulesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState("");
-  const [editingValues, setEditingValues] =
-    useState<NotificationRuleFormValues>(emptyValues);
+  const [editingValues, setEditingValues] = useState<NotificationRuleFormValues>(emptyValues);
+  const isMountedRef = useRef(true);
 
-  async function load() {
-    setLoading(true);
+  const canManageRules = role === "admin" || role === "manager";
+
+  const loadDependencies = useCallback(async () => {
     setError("");
+    setLoading(true);
 
     try {
-      const [rulesData, usersData, toolsData, vehiclesData, projectsData] = await Promise.all([
-        getNotificationRules(),
+      const [usersData, toolsData, vehiclesData, projectsData] = await Promise.all([
         getUsersList(),
         getToolsList(),
         getVehiclesList(),
         getProjectsList(),
       ]);
 
-      setRules(rulesData);
+      if (!isMountedRef.current) return;
       setUsers(usersData);
       setTools(toolsData);
       setVehicles(vehiclesData);
       setProjects(projectsData);
     } catch (err) {
-      console.error(err);
-      setError("Nu am putut incarca regulile.");
+      console.error("[NotificationRulesPage][loadDependencies]", err);
+      if (!isMountedRef.current) return;
+      setError("Nu am putut incarca toate datele auxiliare. Poti reincerca.");
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
-  }
-
-  useEffect(() => {
-    void load();
   }, []);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canManageRules) {
+      setLoading(false);
+      return;
+    }
+
+    void loadDependencies();
+  }, [canManageRules, loadDependencies]);
+
+  useEffect(() => {
+    if (!canManageRules) return;
+
     const unsubscribe = subscribeNotificationRules(
       (rulesData) => {
-        setRules(rulesData);
+        if (!isMountedRef.current) return;
+        setRules(Array.isArray(rulesData) ? rulesData : []);
       },
       (err) => {
-        console.error(err);
+        console.error("[NotificationRulesPage][subscribeNotificationRules]", err);
+        if (!isMountedRef.current) return;
+        setError("Nu am putut sincroniza regulile live.");
       }
     );
+
     return () => unsubscribe();
-  }, []);
+  }, [canManageRules]);
 
   async function handleCreate(values: NotificationRuleFormValues) {
+    if (submitting) return;
+
     setSubmitting(true);
     setError("");
 
@@ -102,10 +125,8 @@ export default function NotificationRulesPage() {
         ...values,
         name: values.name.trim(),
       });
-
-      await load();
     } catch (err) {
-      console.error(err);
+      console.error("[NotificationRulesPage][handleCreate]", err);
       setError("Nu am putut crea regula.");
     } finally {
       setSubmitting(false);
@@ -113,7 +134,7 @@ export default function NotificationRulesPage() {
   }
 
   async function handleSaveEdit() {
-    if (!editingId) return;
+    if (!editingId || submitting) return;
 
     setSubmitting(true);
     setError("");
@@ -131,16 +152,20 @@ export default function NotificationRulesPage() {
 
       setEditingId("");
       setEditingValues(emptyValues);
-      await load();
     } catch (err) {
-      console.error(err);
+      console.error("[NotificationRulesPage][handleSaveEdit]", err);
       setError("Nu am putut salva regula.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (role !== "admin" && role !== "manager") {
+  const sortedRules = useMemo(
+    () => [...rules].sort((a, b) => b.updatedAt - a.updatedAt),
+    [rules]
+  );
+
+  if (!canManageRules) {
     return (
       <div className="placeholder-page">
         <h2>Acces restrictionat</h2>
@@ -184,11 +209,11 @@ export default function NotificationRulesPage() {
       <div className="panel">
         <h2 className="panel-title">Lista reguli</h2>
 
-        {rules.length === 0 ? (
+        {sortedRules.length === 0 ? (
           <p className="tools-subtitle">Nu exista reguli configurate.</p>
         ) : (
-          <div className="simple-list">
-            {rules.map((rule) => (
+          <div className="simple-list compact-rows">
+            {sortedRules.map((rule) => (
               <div key={rule.id} className="simple-list-item">
                 {editingId === rule.id ? (
                   <div style={{ width: "100%" }}>
