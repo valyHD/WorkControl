@@ -34,36 +34,71 @@ export type LiftUnit = {
   nextInspectionDate: string;
   contractExpiryDate: string;
   assignedTechnician: string;
+  maintenanceCompany: string;
+  expDate: string;
   status: LiftStatus;
   notes: string;
   createdAt: number;
   updatedAt: number;
 };
 
+export type MaintenanceBranding = {
+  id: string;
+  nume: string;
+  key: string;
+  aliases: string[];
+  logoUrl: string;
+  stampilaUrl: string;
+  semnaturaUrl?: string;
+  emailDisplayName: string;
+  emailImplicitCc: string[];
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type MaintenanceLocationOption = {
+  id: string;
+  label: string;
+  address: string;
+  email?: string;
+  lifts: LiftUnit[];
+};
+
 export type MaintenanceReport = {
   id: string;
+  reportId: string;
   clientId: string;
   clientName: string;
+  locatieId?: string;
+  locatieName: string;
+  adresa: string;
+  email: string;
   liftId: string;
+  liftIdDocument: string;
   liftNumber: string;
   reportType: ReportType;
   createdAt: number;
   dateText: string;
   timeText: string;
+  dataFolder: string;
   gpsLat: number | null;
   gpsLng: number | null;
-  gpsAddress: string;
+  gpsLocatie: string;
   technicianName: string;
   status: "draft" | "final";
   observations: string;
-  reviewChecklist: string[];
   standardText: string;
-  complaint: string;
-  finding: string;
-  workPerformed: string;
-  replacedParts: string;
-  recommendations: string;
+  constatareInterventie: string;
+  continutRaport: string;
   pdfUrl: string;
+  images: string[];
+  firmaLogo: string;
+  firmaMentenantaOriginala: string;
+  brandingId: string;
+  logoUrlFolosit: string;
+  stampilaUrlFolosita: string;
+  createdByUid: string;
 };
 
 export type MaintenanceDashboard = {
