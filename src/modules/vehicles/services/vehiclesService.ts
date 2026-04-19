@@ -11,8 +11,13 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  startAfter,
   updateDoc,
   where,
+  type CollectionReference,
+  type DocumentData,
+  type QueryConstraint,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import {
   deleteObject,
@@ -43,6 +48,11 @@ const usersCollection = collection(db, "users");
 const VEHICLE_STATUSES = ["activa", "in_service", "indisponibila", "avariata"] as const;
 const VEHICLE_COMMAND_TYPES = ["pulse_dout1", "allow_start", "block_start"] as const;
 const VEHICLE_COMMAND_STATUSES = ["requested", "pending", "completed", "failed"] as const;
+
+const MAX_TOTAL_ROUTE_POINTS = 250000;
+const DEFAULT_ROUTE_PAGE_SIZE = 2000;
+const DEFAULT_ROUTE_MAX_PAGES = 500;
+const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
 
 function toSafeString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
@@ -109,10 +119,52 @@ function dedupePositions(items: VehiclePositionItem[]): VehiclePositionItem[] {
   const seen = new Set<string>();
 
   for (const item of items) {
-    const key = item.id || `${item.gpsTimestamp}_${item.lat}_${item.lng}_${item.speedKmh ?? 0}`;
+    const key =
+      item.id || `${item.gpsTimestamp}_${item.lat}_${item.lng}_${item.speedKmh ?? 0}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(item);
+  }
+
+  return result;
+}
+
+function mergePositionItems(
+  existing: VehiclePositionItem[],
+  incoming: VehiclePositionItem[]
+): VehiclePositionItem[] {
+  return dedupePositions(sortPositionsAsc([...existing, ...incoming]));
+}
+
+function normalizePositionItems(items: VehiclePositionItem[]): VehiclePositionItem[] {
+  return dedupePositions(
+    sortPositionsAsc(items.filter((item) => isValidLatLng(item.lat, item.lng)))
+  );
+}
+
+function getDayKeyFromTs(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function getDayStartTs(dayKey: string): number {
+  return new Date(`${dayKey}T00:00:00.000Z`).getTime();
+}
+
+function addDays(dayKey: string, days: number): string {
+  const ts = getDayStartTs(dayKey) + days * 24 * 60 * 60 * 1000;
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function enumerateDayKeys(fromTs: number, toTs: number): string[] {
+  const startKey = getDayKeyFromTs(fromTs);
+  const endKey = getDayKeyFromTs(toTs);
+
+  const result: string[] = [];
+  let current = startKey;
+
+  while (current <= endKey) {
+    result.push(current);
+    current = addDays(current, 1);
   }
 
   return result;
@@ -169,22 +221,22 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
       thumbPath: toSafeString(item?.thumbPath),
     })),
 
-gpsSnapshot: gpsSnapshotRaw
-  ? {
-      lat: toSafeNumber(gpsSnapshotRaw.lat, 0),
-      lng: toSafeNumber(gpsSnapshotRaw.lng, 0),
-      speedKmh: toSafeNumber(gpsSnapshotRaw.speedKmh, 0),
-      altitude: toOptionalNumber(gpsSnapshotRaw.altitude),
-      angle: toOptionalNumber(gpsSnapshotRaw.angle),
-      satellites: toOptionalNumber(gpsSnapshotRaw.satellites),
-      gpsTimestamp: toSafeNumber(gpsSnapshotRaw.gpsTimestamp, 0),
-      serverTimestamp: toSafeNumber(gpsSnapshotRaw.serverTimestamp, 0),
-      ignitionOn: toSafeBoolean(gpsSnapshotRaw.ignitionOn, false),
-      odometerKm: toOptionalNumber(gpsSnapshotRaw.odometerKm),
-      imei: toSafeString(gpsSnapshotRaw.imei),
-      online: toSafeBoolean(gpsSnapshotRaw.online, false),
-    }
-  : null,
+    gpsSnapshot: gpsSnapshotRaw
+      ? {
+          lat: toSafeNumber(gpsSnapshotRaw.lat, 0),
+          lng: toSafeNumber(gpsSnapshotRaw.lng, 0),
+          speedKmh: toSafeNumber(gpsSnapshotRaw.speedKmh, 0),
+          altitude: toOptionalNumber(gpsSnapshotRaw.altitude),
+          angle: toOptionalNumber(gpsSnapshotRaw.angle),
+          satellites: toOptionalNumber(gpsSnapshotRaw.satellites),
+          gpsTimestamp: toSafeNumber(gpsSnapshotRaw.gpsTimestamp, 0),
+          serverTimestamp: toSafeNumber(gpsSnapshotRaw.serverTimestamp, 0),
+          ignitionOn: toSafeBoolean(gpsSnapshotRaw.ignitionOn, false),
+          odometerKm: toOptionalNumber(gpsSnapshotRaw.odometerKm),
+          imei: toSafeString(gpsSnapshotRaw.imei),
+          online: toSafeBoolean(gpsSnapshotRaw.online, false),
+        }
+      : null,
 
     tracker: trackerRaw
       ? {
@@ -395,8 +447,8 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
     module: "vehicles",
     eventType: "vehicle_created",
     entityId: refDoc.id,
-    title: "Mașină adăugată",
-    message: `A fost adăugată mașina ${normalizePlateNumber(values.plateNumber)}.`,
+    title: "Masina adaugata",
+    message: `A fost adaugata masina ${normalizePlateNumber(values.plateNumber)}.`,
     directUserId: values.currentDriverUserId || "",
     ownerUserId: values.ownerUserId || "",
     actorUserId: values.ownerUserId || "",
@@ -414,7 +466,7 @@ export async function updateVehicle(
   const existingSnap = await getDoc(doc(db, "vehicles", vehicleId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
 
-const previousStatus = toVehicleStatus(existingData?.status);
+  const previousStatus = toVehicleStatus(existingData?.status);
   const previousOwnerUserId = toSafeString(existingData?.ownerUserId);
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
@@ -435,8 +487,8 @@ const previousStatus = toVehicleStatus(existingData?.status);
     module: "vehicles",
     eventType: "vehicle_updated",
     entityId: vehicleId,
-    title: "Mașină actualizată",
-    message: `Datele mașinii ${normalizePlateNumber(values.plateNumber)} au fost actualizate.`,
+    title: "Masina actualizata",
+    message: `Datele masinii ${normalizePlateNumber(values.plateNumber)} au fost actualizate.`,
     directUserId: values.currentDriverUserId || "",
     ownerUserId: values.ownerUserId || previousOwnerUserId || "",
     actorUserId: values.ownerUserId || "",
@@ -487,6 +539,7 @@ export async function addVehicleEvent(
     createdAtServer: serverTimestamp(),
   });
 }
+
 function toVehicleEventType(value: unknown): VehicleEventItem["type"] {
   return value === "created" ||
     value === "updated" ||
@@ -496,6 +549,7 @@ function toVehicleEventType(value: unknown): VehicleEventItem["type"] {
     ? value
     : "updated";
 }
+
 export async function getVehicleEvents(vehicleId: string): Promise<VehicleEventItem[]> {
   if (!vehicleId) return [];
 
@@ -723,8 +777,8 @@ export async function deleteVehicle(vehicleId: string): Promise<void> {
     module: "vehicles",
     eventType: "vehicle_deleted",
     entityId: vehicleId,
-    title: "Mașină ștearsă",
-    message: `Mașina ${data?.plateNumber ?? vehicleId} a fost ștearsă din sistem.`,
+    title: "Masina stearsa",
+    message: `Masina ${data?.plateNumber ?? vehicleId} a fost stearsa din sistem.`,
     ownerUserId: data?.ownerUserId ?? "",
   });
 }
@@ -765,8 +819,8 @@ function mapVehicleTrackerEventDoc(
 }
 
 function mapVehicleCommandDoc(id: string, data: Record<string, any>): VehicleCommandItem {
-const type = toVehicleCommandType(data.type);
-const status = toVehicleCommandStatus(data.status);
+  const type = toVehicleCommandType(data.type);
+  const status = toVehicleCommandStatus(data.status);
 
   return {
     id,
@@ -780,10 +834,72 @@ const status = toVehicleCommandStatus(data.status);
         : toSafeNumber(data.completedAt, Date.now()),
     providerMessage: toSafeString(data.providerMessage),
     result: toSafeString(data.result),
-    durationSec: data.durationSec === null || data.durationSec === undefined
-      ? null
-      : toSafeNumber(data.durationSec, 0),
+    durationSec:
+      data.durationSec === null || data.durationSec === undefined
+        ? null
+        : toSafeNumber(data.durationSec, 0),
   };
+}
+
+async function getVehiclePositionsForDay(
+  vehicleId: string,
+  dayKey: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  const allItems: VehiclePositionItem[] = [];
+  let lastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+
+  const pointsRef = collection(
+    db,
+    "vehicles",
+    vehicleId,
+    "positionDays",
+    dayKey,
+    "points"
+  ) as CollectionReference<DocumentData>;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const constraints: QueryConstraint[] = [
+      where("gpsTimestamp", ">=", fromTs),
+      where("gpsTimestamp", "<=", toTs),
+      orderBy("gpsTimestamp", "asc"),
+      limit(pageSize),
+    ];
+
+    if (lastDoc) {
+      constraints.push(startAfter(lastDoc));
+    }
+
+    const q = query(pointsRef, ...constraints);
+    const snap = await getDocs(q);
+
+    if (snap.empty) break;
+
+    const pageItems: VehiclePositionItem[] = snap.docs.map((docItem) =>
+      mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
+    );
+
+    allItems.push(...pageItems);
+
+    if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
+      console.warn(
+        `[getVehiclePositionsForDay] limita atinsa vehicleId=${vehicleId} dayKey=${dayKey} points=${allItems.length}`
+      );
+      break;
+    }
+
+    if (snap.docs.length < pageSize) {
+      break;
+    }
+
+    lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+    if (!lastDoc) break;
+  }
+
+  return allItems;
 }
 
 export function subscribeVehiclePositions(
@@ -796,68 +912,46 @@ export function subscribeVehiclePositions(
     return () => undefined;
   }
 
-  const positionsQuery = query(
-    collection(db, "vehicles", vehicleId, "positions"),
-    orderBy("gpsTimestamp", "desc"),
-    limit(maxItems)
-  );
+  const snapRef = doc(db, "vehicles", vehicleId);
+  let requestSeq = 0;
 
   return onSnapshot(
-    positionsQuery,
-    (snap) => {
-      const items = dedupePositions(
-        sortPositionsAsc(
-          snap.docs
-            .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-            .filter((item) => isValidLatLng(item.lat, item.lng))
-        )
-      );
+    snapRef,
+    async (snap) => {
+      const currentSeq = ++requestSeq;
 
-      onData(items);
+      try {
+        if (!snap.exists()) {
+          onData([]);
+          return;
+        }
+
+        const data = snap.data();
+        const gpsSnapshot = data?.gpsSnapshot;
+        if (!gpsSnapshot?.gpsTimestamp) {
+          onData([]);
+          return;
+        }
+
+        const toTs = Number(gpsSnapshot.gpsTimestamp);
+        const fromTs = Math.max(0, toTs - 24 * 60 * 60 * 1000);
+
+        const items = await getVehiclePositionsRange(
+          vehicleId,
+          fromTs,
+          toTs,
+          maxItems,
+          5
+        );
+
+        if (currentSeq !== requestSeq) return;
+        onData(items.slice(Math.max(0, items.length - maxItems)));
+      } catch (error) {
+        console.error("[subscribeVehiclePositions]", error);
+      }
     },
     (error) => {
       console.error("[subscribeVehiclePositions]", error);
-      onData([]);
-    }
-  );
-}
-
-export function subscribeVehiclePositionsRange(
-  vehicleId: string,
-  fromTs: number,
-  toTs: number,
-  onData: (items: VehiclePositionItem[]) => void,
-  maxItems = 2000
-): () => void {
-  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
-    onData([]);
-    return () => undefined;
-  }
-
-  const positionsQuery = query(
-    collection(db, "vehicles", vehicleId, "positions"),
-    where("gpsTimestamp", ">=", fromTs),
-    where("gpsTimestamp", "<=", toTs),
-    orderBy("gpsTimestamp", "asc"),
-    limit(maxItems)
-  );
-
-  return onSnapshot(
-    positionsQuery,
-    (snap) => {
-      const items = dedupePositions(
-        sortPositionsAsc(
-          snap.docs
-            .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-            .filter((item) => isValidLatLng(item.lat, item.lng))
-        )
-      );
-
-      onData(items);
-    },
-    (error) => {
-      console.error("[subscribeVehiclePositionsRange]", error);
-      onData([]);
     }
   );
 }
@@ -866,28 +960,178 @@ export async function getVehiclePositionsRange(
   vehicleId: string,
   fromTs: number,
   toTs: number,
-  maxItems = 1500
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
 ): Promise<VehiclePositionItem[]> {
   if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
     return [];
   }
 
-  const positionsQuery = query(
-    collection(db, "vehicles", vehicleId, "positions"),
-    where("gpsTimestamp", ">=", fromTs),
-    where("gpsTimestamp", "<=", toTs),
-    orderBy("gpsTimestamp", "asc"),
-    limit(maxItems)
-  );
+  const dayKeys = enumerateDayKeys(fromTs, toTs);
+  const allItems: VehiclePositionItem[] = [];
 
-  const snap = await getDocs(positionsQuery);
+  for (const dayKey of dayKeys) {
+    const dayStart = getDayStartTs(dayKey);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
 
-  return dedupePositions(
-    sortPositionsAsc(
-      snap.docs
-        .map((docItem) => mapVehiclePositionDoc(docItem.id, docItem.data()))
-        .filter((item) => isValidLatLng(item.lat, item.lng))
-    )
+    const effectiveFrom = Math.max(fromTs, dayStart);
+    const effectiveTo = Math.min(toTs, dayEnd);
+
+    const dayItems = await getVehiclePositionsForDay(
+      vehicleId,
+      dayKey,
+      effectiveFrom,
+      effectiveTo,
+      pageSize,
+      maxPages
+    );
+
+    allItems.push(...dayItems);
+
+    if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
+      console.warn(
+        `[getVehiclePositionsRange] limita atinsa vehicleId=${vehicleId} points=${allItems.length}`
+      );
+      break;
+    }
+  }
+
+  return normalizePositionItems(allItems);
+}
+
+export async function getVehiclePositionsRangeChunked(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  return getVehiclePositionsRange(vehicleId, fromTs, toTs, pageSize, maxPages);
+}
+
+export function pollVehiclePositionsRange(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  onData: (items: VehiclePositionItem[]) => void,
+  onError?: (error: unknown) => void,
+  refreshMs = 15000,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): () => void {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    onData([]);
+    return () => undefined;
+  }
+
+  let stopped = false;
+  let timer: number | null = null;
+  let currentItems: VehiclePositionItem[] = [];
+  let lastLoadedToTs = fromTs;
+
+  const isPastWindow = toTs < Date.now() - 30_000;
+
+  const scheduleNext = () => {
+    if (stopped || isPastWindow) return;
+    timer = window.setTimeout(loadIncremental, refreshMs);
+  };
+
+  const loadInitial = async () => {
+    try {
+      const items = await getVehiclePositionsRange(
+        vehicleId,
+        fromTs,
+        toTs,
+        pageSize,
+        maxPages
+      );
+
+      if (stopped) return;
+
+      currentItems = items;
+      lastLoadedToTs =
+        items.length > 0 ? items[items.length - 1].gpsTimestamp : fromTs;
+
+      onData(currentItems);
+    } catch (error) {
+      console.error("[pollVehiclePositionsRange][initial]", error);
+      if (!stopped) onError?.(error);
+    } finally {
+      scheduleNext();
+    }
+  };
+
+  const loadIncremental = async () => {
+    try {
+      const now = Date.now();
+      const effectiveToTs = Math.min(now, toTs > now ? now : toTs);
+      const incrementalFromTs = Math.max(
+        fromTs,
+        lastLoadedToTs - ROUTE_INCREMENTAL_OVERLAP_MS
+      );
+
+      if (incrementalFromTs > effectiveToTs) {
+        onData(currentItems);
+        scheduleNext();
+        return;
+      }
+
+      const incoming = await getVehiclePositionsRange(
+        vehicleId,
+        incrementalFromTs,
+        effectiveToTs,
+        pageSize,
+        maxPages
+      );
+
+      if (stopped) return;
+
+      if (incoming.length > 0) {
+        currentItems = mergePositionItems(currentItems, incoming);
+
+        if (currentItems.length > MAX_TOTAL_ROUTE_POINTS) {
+          currentItems = currentItems.slice(
+            Math.max(0, currentItems.length - MAX_TOTAL_ROUTE_POINTS)
+          );
+        }
+
+        lastLoadedToTs =
+          currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+      }
+
+      onData(currentItems);
+    } catch (error) {
+      console.error("[pollVehiclePositionsRange][incremental]", error);
+      if (!stopped) onError?.(error);
+    } finally {
+      scheduleNext();
+    }
+  };
+
+  void loadInitial();
+
+  return () => {
+    stopped = true;
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+  };
+}
+
+export function subscribeVehiclePositionsRange(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  onData: (items: VehiclePositionItem[]) => void,
+  refreshMs = 15000
+): () => void {
+  return pollVehiclePositionsRange(
+    vehicleId,
+    fromTs,
+    toTs,
+    onData,
+    undefined,
+    refreshMs
   );
 }
 
@@ -1015,7 +1259,10 @@ export async function runVehicleMaintenanceAlerts(
             eventType: "vehicle_service_due_soon",
             entityId: vehicle.id,
             title: "Service aproape scadent",
-            message: `Mașina ${vehicle.plateNumber} se apropie de revizie (mai sunt ${Math.max(remainingKm, 0)} km).`,
+            message: `Masina ${vehicle.plateNumber} se apropie de revizie (mai sunt ${Math.max(
+              remainingKm,
+              0
+            )} km).`,
             directUserId,
             ownerUserId,
             actorUserId: actor?.userId ?? "",
@@ -1031,7 +1278,11 @@ export async function runVehicleMaintenanceAlerts(
       }
     }
 
-    const expiringDocs: Array<{ label: "ITP" | "RCA" | "CASCO"; value: string; key: string }> = [
+    const expiringDocs: Array<{
+      label: "ITP" | "RCA" | "CASCO";
+      value: string;
+      key: string;
+    }> = [
       { label: "ITP", value: vehicle.nextItpDate, key: "itp" },
       { label: "RCA", value: vehicle.nextRcaDate, key: "rca" },
       { label: "CASCO", value: vehicle.nextCascoDate, key: "casco" },
@@ -1056,11 +1307,14 @@ export async function runVehicleMaintenanceAlerts(
           docInfo.key === "itp"
             ? "vehicle_document_itp_due_soon"
             : docInfo.key === "rca"
-            ? "vehicle_document_rca_due_soon"
-            : "vehicle_document_casco_due_soon",
+              ? "vehicle_document_rca_due_soon"
+              : "vehicle_document_casco_due_soon",
         entityId: vehicle.id,
         title: `${docInfo.label} aproape de expirare`,
-        message: `Mașina ${vehicle.plateNumber}: ${docInfo.label} expiră în ${Math.max(daysLeft, 0)} zile (${docInfo.value}).`,
+        message: `Masina ${vehicle.plateNumber}: ${docInfo.label} expira in ${Math.max(
+          daysLeft,
+          0
+        )} zile (${docInfo.value}).`,
         directUserId,
         ownerUserId,
         actorUserId: actor?.userId ?? "",

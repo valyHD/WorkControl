@@ -20,10 +20,10 @@ import type {
 } from "../../../types/vehicle";
 import {
   getVehicleCommands,
-  getVehiclePositionsRange,
+  getVehiclePositionsRangeChunked,
   getVehicleTrackerEvents,
+  pollVehiclePositionsRange,
   requestVehicleCommand,
-  subscribeVehiclePositionsRange,
 } from "../services/vehiclesService";
 import {
   buildDistanceHistory,
@@ -44,6 +44,11 @@ import VehicleTripTimeline from "./VehicleTripTimeline";
 import VehicleControlCard from "./VehicleControlCard";
 
 const DEFAULT_OVERSPEED_THRESHOLD = 140;
+const LIVE_REFRESH_MS = 15000;
+const ROUTE_PAGE_SIZE = 2000;
+const ROUTE_MAX_PAGES = 500;
+const MAP_ROUTE_MAX_POINTS = 5000;
+const MAP_CRUMB_MAX_POINTS = 300;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
@@ -85,25 +90,25 @@ function formatCoords(lat: number, lng: number) {
 function isFiniteCoord(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
+
 function isValidCoordPair(lat: unknown, lng: unknown) {
   if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false;
-  const latNum = lat;
-  const lngNum = lng;
   return (
-    Math.abs(latNum) <= 90 &&
-    Math.abs(lngNum) <= 180 &&
-    !(latNum === 0 && lngNum === 0)
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180 &&
+    !(lat === 0 && lng === 0)
   );
 }
 
-function safeRoutePoints(items: VehiclePositionItem[]) {
+function normalizeRoutePoints(items: VehiclePositionItem[]): VehiclePositionItem[] {
   const clean = sanitizePositions(items)
     .filter(
       (item) =>
         isFiniteCoord(item.lat) &&
         isFiniteCoord(item.lng) &&
         Math.abs(item.lat) <= 90 &&
-        Math.abs(item.lng) <= 180
+        Math.abs(item.lng) <= 180 &&
+        !(item.lat === 0 && item.lng === 0)
     )
     .sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
 
@@ -111,13 +116,13 @@ function safeRoutePoints(items: VehiclePositionItem[]) {
   const seen = new Set<string>();
 
   for (const item of clean) {
-    const key = `${item.gpsTimestamp}_${item.lat}_${item.lng}`;
+    const key = item.id || `${item.gpsTimestamp}_${item.lat}_${item.lng}`;
     if (seen.has(key)) continue;
     seen.add(key);
     deduped.push(item);
   }
 
-  return samplePositions(deduped);
+  return deduped;
 }
 
 function FitRouteBounds({
@@ -130,8 +135,7 @@ function FitRouteBounds({
   const map = useMap();
 
   useEffect(() => {
-    if (!map) return;
-    if (!points.length) return;
+    if (!map || !points.length) return;
 
     let cancelled = false;
 
@@ -204,20 +208,25 @@ export default function VehicleLiveRouteCard({
   const initialRange = getPresetRange("today");
   const [fromTs, setFromTs] = useState<number>(initialRange.from);
   const [toTs, setToTs] = useState<number>(initialRange.to);
+
   const [loading, setLoading] = useState(true);
-  const [positions, setPositions] = useState<VehiclePositionItem[]>([]);
+  const [routePositions, setRoutePositions] = useState<VehiclePositionItem[]>([]);
+  const [historyPositions, setHistoryPositions] = useState<VehiclePositionItem[]>([]);
+
   const [stopItems, setStopItems] = useState<VehicleStopItem[]>([]);
   const [overspeedThreshold, setOverspeedThreshold] = useState<number>(
     DEFAULT_OVERSPEED_THRESHOLD
   );
   const [overspeedItems, setOverspeedItems] = useState<VehiclePositionItem[]>([]);
   const [timeline, setTimeline] = useState<VehicleGeoEvent[]>([]);
+
   const [externalEventsCount, setExternalEventsCount] = useState(0);
   const [commands, setCommands] = useState<VehicleCommandItem[]>([]);
   const [boundsTrigger, setBoundsTrigger] = useState(0);
-  const [historyPositions, setHistoryPositions] = useState<VehiclePositionItem[]>([]);
   const [didInitialFit, setDidInitialFit] = useState(false);
+
   const mountedRef = useRef(true);
+  const requestSeqRef = useRef(0);
 
   async function loadMeta() {
     try {
@@ -251,25 +260,28 @@ export default function VehicleLiveRouteCard({
 
   useEffect(() => {
     setLoading(true);
+    const requestSeq = ++requestSeqRef.current;
 
-    const unsubscribe = subscribeVehiclePositionsRange(
+    const unsubscribe = pollVehiclePositionsRange(
       vehicle.id,
       fromTs,
       toTs,
       (route) => {
-        const clean = safeRoutePoints(route);
-        const stops = detectStops(clean);
-        const overspeed = detectOverspeed(clean, overspeedThreshold);
-
         if (!mountedRef.current) return;
+        if (requestSeq !== requestSeqRef.current) return;
 
-        setPositions(clean);
-        setStopItems(stops);
-        setOverspeedItems(overspeed);
-        setTimeline(buildTimelineEvents(clean, stops, overspeed));
+        setRoutePositions(normalizeRoutePoints(route));
         setLoading(false);
       },
-      3000
+      (error) => {
+        console.error("[VehicleLiveRouteCard][pollRange]", error);
+        if (!mountedRef.current) return;
+        if (requestSeq !== requestSeqRef.current) return;
+        setLoading(false);
+      },
+      LIVE_REFRESH_MS,
+      ROUTE_PAGE_SIZE,
+      ROUTE_MAX_PAGES
     );
 
     return () => {
@@ -279,7 +291,16 @@ export default function VehicleLiveRouteCard({
         console.error("[VehicleLiveRouteCard][unsubscribe]", error);
       }
     };
-  }, [vehicle.id, fromTs, toTs, overspeedThreshold]);
+  }, [vehicle.id, fromTs, toTs]);
+
+  useEffect(() => {
+    const stops = detectStops(routePositions);
+    const overspeed = detectOverspeed(routePositions, overspeedThreshold);
+
+    setStopItems(stops);
+    setOverspeedItems(overspeed);
+    setTimeline(buildTimelineEvents(routePositions, stops, overspeed));
+  }, [routePositions, overspeedThreshold]);
 
   useEffect(() => {
     void loadMeta();
@@ -295,7 +316,7 @@ export default function VehicleLiveRouteCard({
 
     refreshWindow();
 
-    const interval = window.setInterval(refreshWindow, 30_000);
+    const interval = window.setInterval(refreshWindow, LIVE_REFRESH_MS);
     return () => window.clearInterval(interval);
   }, [preset]);
 
@@ -304,16 +325,18 @@ export default function VehicleLiveRouteCard({
       try {
         const now = Date.now();
         const fromHistory = now - 180 * 24 * 60 * 60 * 1000;
-        const route = await getVehiclePositionsRange(
+
+        const route = await getVehiclePositionsRangeChunked(
           vehicle.id,
           fromHistory,
           now,
-          20000
+          ROUTE_PAGE_SIZE,
+          ROUTE_MAX_PAGES
         ).catch(() => []);
 
         if (!mountedRef.current) return;
 
-        setHistoryPositions(safeRoutePoints(route));
+        setHistoryPositions(normalizeRoutePoints(route));
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadHistory]", error);
         if (!mountedRef.current) return;
@@ -322,22 +345,32 @@ export default function VehicleLiveRouteCard({
     }
 
     void loadHistory();
-  }, [vehicle.id, toTs]);
+  }, [vehicle.id]);
+
+  const mapRoutePoints = useMemo(
+    () => samplePositions(routePositions, MAP_ROUTE_MAX_POINTS),
+    [routePositions]
+  );
+
+  const crumbPositions = useMemo(
+    () => samplePositions(routePositions, MAP_CRUMB_MAX_POINTS),
+    [routePositions]
+  );
 
   useEffect(() => {
-    if (!didInitialFit && positions.length > 0) {
+    if (!didInitialFit && mapRoutePoints.length > 0) {
       setBoundsTrigger((value) => value + 1);
       setDidInitialFit(true);
     }
-  }, [positions.length, didInitialFit]);
+  }, [mapRoutePoints.length, didInitialFit]);
 
   const routeStats = useMemo(() => {
-    const start = positions[0] ?? null;
-    const end = positions[positions.length - 1] ?? null;
-    const maxSpeed = positions.length
-      ? Math.max(...positions.map((item) => item.speedKmh ?? 0))
+    const start = routePositions[0] ?? null;
+    const end = routePositions[routePositions.length - 1] ?? null;
+    const maxSpeed = routePositions.length
+      ? Math.max(...routePositions.map((item) => item.speedKmh ?? 0))
       : 0;
-    const distanceKm = calculateRouteDistanceKm(positions);
+    const distanceKm = calculateRouteDistanceKm(routePositions);
 
     return {
       start,
@@ -349,7 +382,7 @@ export default function VehicleLiveRouteCard({
           ? formatDuration(Math.max(0, end.gpsTimestamp - start.gpsTimestamp))
           : "-",
     };
-  }, [positions]);
+  }, [routePositions]);
 
   const historyStats = useMemo(() => {
     const dayBuckets = buildDistanceHistory(historyPositions, "day");
@@ -361,13 +394,9 @@ export default function VehicleLiveRouteCard({
       nowDate.getMonth() + 1
     ).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
 
-    const todayKm =
-      dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
+    const todayKm = dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
 
-    const totalTrackedKm = dayBuckets.reduce(
-      (sum, item) => sum + item.distanceKm,
-      0
-    );
+    const totalTrackedKm = dayBuckets.reduce((sum, item) => sum + item.distanceKm, 0);
 
     return {
       todayKm,
@@ -382,10 +411,12 @@ export default function VehicleLiveRouteCard({
     if (routeStats.end && isValidCoordPair(routeStats.end.lat, routeStats.end.lng)) {
       return [routeStats.end.lat, routeStats.end.lng];
     }
+
     const snapshot = vehicle.gpsSnapshot;
     if (snapshot && isValidCoordPair(snapshot.lat, snapshot.lng)) {
       return [snapshot.lat, snapshot.lng];
     }
+
     return [44.4268, 26.1025];
   }, [routeStats.end, vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng]);
 
@@ -401,8 +432,10 @@ export default function VehicleLiveRouteCard({
 
   function updateCustomRange(nextFrom: number, nextTo: number) {
     if (nextFrom >= nextTo) return;
+
     const maxRangeMs = 31 * 24 * 60 * 60 * 1000;
     if (nextTo - nextFrom > maxRangeMs) return;
+
     setFromTs(nextFrom);
     setToTs(nextTo);
   }
@@ -421,8 +454,10 @@ export default function VehicleLiveRouteCard({
     setCommands(latestCommands);
   }
 
-  const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
-  const crumbPositions = useMemo(() => samplePositions(positions, 300), [positions]);
+  const hasSnapshot = isValidCoordPair(
+    vehicle.gpsSnapshot?.lat,
+    vehicle.gpsSnapshot?.lng
+  );
 
   return (
     <div className="panel vehicle-live-route-card">
@@ -447,7 +482,7 @@ export default function VehicleLiveRouteCard({
             type="button"
             className="secondary-btn"
             onClick={() => setBoundsTrigger((value) => value + 1)}
-            disabled={!positions.length}
+            disabled={!mapRoutePoints.length}
           >
             <Crosshair size={14} /> Centreaza traseul
           </button>
@@ -529,15 +564,15 @@ export default function VehicleLiveRouteCard({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {positions.length > 0 && (
-            <FitRouteBounds points={positions} trigger={boundsTrigger} />
+          {mapRoutePoints.length > 0 && (
+            <FitRouteBounds points={mapRoutePoints} trigger={boundsTrigger} />
           )}
 
-          {positions.length > 0 ? (
+          {mapRoutePoints.length > 0 ? (
             <>
               <Pane name="route" style={{ zIndex: 410 }}>
                 <Polyline
-                  positions={positions.map(
+                  positions={mapRoutePoints.map(
                     (item) => [item.lat, item.lng] as [number, number]
                   )}
                   pathOptions={{ color: "#2563eb", weight: 5 }}
@@ -586,8 +621,7 @@ export default function VehicleLiveRouteCard({
                   <Popup>
                     Oprire {formatDuration(stop.durationMs)}
                     <br />
-                    {formatDate(stop.start.gpsTimestamp)} -{" "}
-                    {formatDate(stop.end.gpsTimestamp)}
+                    {formatDate(stop.start.gpsTimestamp)} - {formatDate(stop.end.gpsTimestamp)}
                   </Popup>
                 </CircleMarker>
               ))}
@@ -599,8 +633,7 @@ export default function VehicleLiveRouteCard({
                   icon={overspeedIcon}
                 >
                   <Popup>
-                    Depasire viteza: {point.speedKmh} km/h ·{" "}
-                    {formatDate(point.gpsTimestamp)}
+                    Depasire viteza: {point.speedKmh} km/h · {formatDate(point.gpsTimestamp)}
                   </Popup>
                 </Marker>
               ))}
@@ -621,12 +654,14 @@ export default function VehicleLiveRouteCard({
             </>
           ) : hasSnapshot ? (
             <Marker
-              position={[vehicle.gpsSnapshot?.lat ?? mapCenter[0], vehicle.gpsSnapshot?.lng ?? mapCenter[1]]}
+              position={[
+                vehicle.gpsSnapshot?.lat ?? mapCenter[0],
+                vehicle.gpsSnapshot?.lng ?? mapCenter[1],
+              ]}
               icon={currentIcon}
             >
               <Popup>
-                Ultima pozitie disponibila:{" "}
-                {formatDate(vehicle.gpsSnapshot?.gpsTimestamp)}
+                Ultima pozitie disponibila: {formatDate(vehicle.gpsSnapshot?.gpsTimestamp)}
               </Popup>
             </Marker>
           ) : null}
@@ -636,7 +671,7 @@ export default function VehicleLiveRouteCard({
           <div className="vehicle-live-route-card__empty">
             Se incarca datele GPS...
           </div>
-        ) : positions.length === 0 && !hasSnapshot ? (
+        ) : mapRoutePoints.length === 0 && !hasSnapshot ? (
           <div className="vehicle-live-route-card__empty">
             Nu exista traseu sau date suficiente pentru intervalul ales.
           </div>
@@ -650,22 +685,18 @@ export default function VehicleLiveRouteCard({
         </div>
 
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">
-            Km interval selectat
-          </span>
+          <span className="vehicle-gps-stat-card__label">Km interval selectat</span>
           <strong>{routeStats.distanceKm.toFixed(2)} km</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">
-            Km total monitorizat
-          </span>
+          <span className="vehicle-gps-stat-card__label">Km total monitorizat</span>
           <strong>{historyStats.totalTrackedKm.toFixed(2)} km</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
           <span className="vehicle-gps-stat-card__label">Puncte traseu</span>
-          <strong>{positions.length}</strong>
+          <strong>{routePositions.length}</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
@@ -689,9 +720,7 @@ export default function VehicleLiveRouteCard({
         </div>
 
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">
-            Evenimente tracker
-          </span>
+          <span className="vehicle-gps-stat-card__label">Evenimente tracker</span>
           <strong>{externalEventsCount}</strong>
         </div>
       </div>
@@ -704,9 +733,7 @@ export default function VehicleLiveRouteCard({
               <div key={item.id} className="simple-list-item">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{item.label}</div>
-                  <div className="simple-list-subtitle">
-                    {item.distanceKm.toFixed(2)} km
-                  </div>
+                  <div className="simple-list-subtitle">{item.distanceKm.toFixed(2)} km</div>
                 </div>
               </div>
             ))}
@@ -729,12 +756,8 @@ export default function VehicleLiveRouteCard({
             {historyStats.weekBuckets.slice(0, 4).map((item) => (
               <div key={item.id} className="simple-list-item">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">
-                    Saptamana: {item.label}
-                  </div>
-                  <div className="simple-list-subtitle">
-                    {item.distanceKm.toFixed(2)} km
-                  </div>
+                  <div className="simple-list-label">Saptamana: {item.label}</div>
+                  <div className="simple-list-subtitle">{item.distanceKm.toFixed(2)} km</div>
                 </div>
               </div>
             ))}
@@ -743,23 +766,20 @@ export default function VehicleLiveRouteCard({
               <div key={item.id} className="simple-list-item">
                 <div className="simple-list-text">
                   <div className="simple-list-label">Luna: {item.label}</div>
-                  <div className="simple-list-subtitle">
-                    {item.distanceKm.toFixed(2)} km
-                  </div>
+                  <div className="simple-list-subtitle">{item.distanceKm.toFixed(2)} km</div>
                 </div>
               </div>
             ))}
 
-            {!historyStats.weekBuckets.length &&
-              !historyStats.monthBuckets.length && (
-                <div className="simple-list-item">
-                  <div className="simple-list-text">
-                    <div className="simple-list-label">
-                      Nu exista date de istoric disponibile.
-                    </div>
+            {!historyStats.weekBuckets.length && !historyStats.monthBuckets.length && (
+              <div className="simple-list-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">
+                    Nu exista date de istoric disponibile.
                   </div>
                 </div>
-              )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -773,26 +793,23 @@ export default function VehicleLiveRouteCard({
             {stopItems.slice(0, 6).map((stop) => (
               <div key={stop.id} className="simple-list-item">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">
-                    Oprire {formatDuration(stop.durationMs)}
-                  </div>
+                  <div className="simple-list-label">Oprire {formatDuration(stop.durationMs)}</div>
                   <div className="simple-list-subtitle">
-                    {formatDate(stop.start.gpsTimestamp)} ·{" "}
-                    {formatCoords(stop.lat, stop.lng)}
+                    {formatDate(stop.start.gpsTimestamp)} · {formatCoords(stop.lat, stop.lng)}
                   </div>
                 </div>
               </div>
             ))}
 
             {overspeedItems.slice(0, 6).map((point) => (
-              <div key={`list-overspeed-${point.id}`} className="simple-list-item">
+              <div
+                key={`list-overspeed-${point.id || point.gpsTimestamp}`}
+                className="simple-list-item"
+              >
                 <div className="simple-list-text">
-                  <div className="simple-list-label">
-                    Depasire: {point.speedKmh} km/h
-                  </div>
+                  <div className="simple-list-label">Depasire: {point.speedKmh} km/h</div>
                   <div className="simple-list-subtitle">
-                    {formatDate(point.gpsTimestamp)} ·{" "}
-                    {formatCoords(point.lat, point.lng)}
+                    {formatDate(point.gpsTimestamp)} · {formatCoords(point.lat, point.lng)}
                   </div>
                 </div>
               </div>

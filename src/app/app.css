@@ -2841,3 +2841,636 @@ html {
     line-height: 1.45;
   }
 }
+
+/* ================================================================
+   PATCH v5 — Hardening, new components, polish
+   ================================================================ */
+
+/* ── spin animation (reusable) ── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-icon {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ── vc-feedback (VehicleControlCard banner) ── */
+.vc-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1.5px solid transparent;
+}
+.vc-feedback--success {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: var(--success-line);
+}
+.vc-feedback--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger-line);
+}
+.vc-feedback--warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: var(--warning-line);
+}
+.vc-feedback--info {
+  background: var(--info-soft);
+  color: var(--info);
+  border-color: var(--info-line);
+}
+
+/* ── vc-auth-panel ── */
+.vc-auth-panel {
+  margin-top: 14px;
+  border: 1.5px dashed var(--primary) !important;
+  background: color-mix(in srgb, var(--primary-soft) 60%, white) !important;
+}
+
+/* ── safe-image-fallback ── */
+.safe-image-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+/* ── empty-state (improved) ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 20px;
+  text-align: center;
+  gap: 10px;
+}
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.empty-state-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+/* ── vehicle-control-card improvements ── */
+.vehicle-control-card {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 16px 18px !important;
+}
+
+/* ── tool-gallery improvements ── */
+.tool-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.tool-gallery-item {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1.5px solid var(--line-mid);
+  background: var(--surface-muted);
+  aspect-ratio: 4/3;
+}
+.tool-gallery-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.2s ease;
+}
+.tool-gallery-item:hover .tool-gallery-image { transform: scale(1.03); }
+.tool-gallery-actions {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  padding: 8px;
+  background: linear-gradient(to top, rgba(0,0,0,.72) 0%, transparent 100%);
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.tool-gallery-item:hover .tool-gallery-actions { opacity: 1; }
+
+/* ── maintenance-alert row on VehicleDetailsPage ── */
+.vehicle-alert-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* ── improved tool-detail-line ── */
+.tool-detail-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 0;
+  font-size: 14px;
+  color: var(--text-soft);
+  border-bottom: 1px solid var(--line);
+}
+.tool-detail-line:last-of-type { border-bottom: none; }
+.tool-detail-line strong {
+  color: var(--text);
+  font-weight: 700;
+  flex-shrink: 0;
+  min-width: 120px;
+}
+
+/* ── vehicle-gps-stat-card (minor visual boost) ── */
+.vehicle-gps-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  border: 1.5px solid var(--line-mid);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.vehicle-gps-stat-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 10px var(--primary-glow);
+}
+.vehicle-gps-stat-card__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.vehicle-gps-stat-card strong {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.3px;
+}
+
+/* ── VehicleLiveRouteCard map loading overlay ── */
+.vehicle-live-route-card__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,.82);
+  backdrop-filter: blur(4px);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 500;
+  border-radius: inherit;
+}
+
+/* ── Dashboard today-strip ── */
+.today-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-soft) 50%, white);
+  border: 1.5px solid var(--primary-glow);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-deep);
+  margin-bottom: 16px;
+}
+.today-strip-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* ── KPI cards improved ── */
+.kpi-card {
+  position: relative;
+  background: var(--surface);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-lg);
+  padding: 20px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: box-shadow var(--transition), border-color var(--transition), transform var(--transition-fast);
+  overflow: hidden;
+}
+.kpi-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+.kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.kpi-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+.kpi-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.kpi-value {
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--text);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.kpi-trend {
+  font-size: 12px;
+  font-weight: 600;
+}
+.kpi-trend-positive { color: var(--success); }
+.kpi-trend-warning  { color: var(--warning); }
+.kpi-trend-danger   { color: var(--danger);  }
+.kpi-trend-info     { color: var(--info);    }
+.kpi-trend-muted    { color: var(--text-muted); }
+
+/* ── safe-image wrap fix ── */
+.safe-image-wrap { display: contents; }
+
+/* ── placeholder-page improved ── */
+.placeholder-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  gap: 10px;
+  min-height: 280px;
+}
+.placeholder-page h2 {
+  color: var(--text-soft);
+  margin: 0;
+}
+.placeholder-page p { font-size: 14px; margin: 0; }
+
+/* ── mobile: gallery fullwidth on small screens ── */
+@media (max-width: 640px) {
+  .tool-gallery { grid-template-columns: repeat(2, 1fr); }
+  .vc-auth-panel .tool-form-actions { flex-direction: column; }
+}
+@media (max-width: 400px) {
+  .tool-gallery { grid-template-columns: 1fr; }
+}
+
+/* ================================================================
+   PATCH v5b — Timeline, ImageUploader, UsersPage improvements
+   ================================================================ */
+
+/* ── Vehicle Trip Timeline redesign ── */
+.vehicle-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 8px 0 4px;
+}
+
+.vehicle-timeline-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.vehicle-timeline-item__track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.vehicle-timeline-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.timeline-dot--green  { background: var(--success-soft);  color: var(--success);  border: 2px solid var(--success-line);  }
+.timeline-dot--red    { background: var(--danger-soft);   color: var(--danger);   border: 2px solid var(--danger-line);   }
+.timeline-dot--orange { background: var(--warning-soft);  color: var(--warning);  border: 2px solid var(--warning-line);  }
+.timeline-dot--danger { background: var(--danger-soft);   color: var(--danger);   border: 2px solid var(--danger-line);   }
+.timeline-dot--blue   { background: var(--primary-soft);  color: var(--primary);  border: 2px solid rgba(37,99,235,.3);   }
+.timeline-dot--purple { background: #ede9fe;              color: #7c3aed;         border: 2px solid #c4b5fd;              }
+.timeline-dot--muted  { background: var(--surface-muted); color: var(--text-muted); border: 2px solid var(--line-mid);   }
+
+.vehicle-timeline-line {
+  flex: 1;
+  width: 2px;
+  background: var(--line-mid);
+  margin-top: 4px;
+  min-height: 16px;
+}
+
+.vehicle-timeline-item__body {
+  padding-bottom: 16px;
+}
+
+.vehicle-timeline-item__title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.vehicle-timeline-item__meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.vehicle-timeline-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  border: 1px solid var(--line-mid);
+}
+.vehicle-timeline-chip.type-ignition_on  { background: var(--success-soft);  color: var(--success);  border-color: var(--success-line);  }
+.vehicle-timeline-chip.type-ignition_off { background: var(--danger-soft);   color: var(--danger);   border-color: var(--danger-line);   }
+.vehicle-timeline-chip.type-stop         { background: var(--warning-soft);  color: var(--warning);  border-color: var(--warning-line);  }
+.vehicle-timeline-chip.type-overspeed    { background: var(--danger-soft);   color: var(--danger);   border-color: var(--danger-line);   }
+.vehicle-timeline-chip.type-moving       { background: var(--primary-soft);  color: var(--primary);  border-color: rgba(37,99,235,.3);   }
+
+/* ── VehicleImageUploader ── */
+.viu-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 20px;
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  text-align: center;
+  user-select: none;
+}
+.viu-dropzone:hover,
+.viu-dropzone:focus-visible {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  outline: none;
+}
+.viu-dropzone--over {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  transform: scale(1.01);
+}
+.viu-dropzone__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.viu-dropzone__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.viu-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.viu-file-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.viu-file-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  background: var(--surface-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.viu-file-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.viu-file-meta {
+  flex: 1;
+  min-width: 0;
+}
+.viu-file-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viu-file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.viu-file-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+.viu-file-remove:hover { background: var(--danger-line); }
+
+/* ── UsersPage table improvements ── */
+.users-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.users-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  border-bottom: 1.5px solid var(--line-mid);
+  white-space: nowrap;
+}
+.users-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.users-table tr:last-child td { border-bottom: none; }
+.users-table .user-table-row:hover td {
+  background: color-mix(in srgb, var(--user-accent-soft, var(--surface-muted)) 40%, transparent);
+}
+
+/* ── SectionErrorBoundary styled wrapper ── */
+.section-error-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 20px;
+  text-align: center;
+  background: var(--danger-soft);
+  border: 1.5px solid var(--danger-line);
+  border-radius: var(--radius-lg);
+  color: var(--danger);
+}
+
+/* ── Mobile: table becomes cards on tiny screens ── */
+@media (max-width: 600px) {
+  .users-table thead { display: none; }
+  .users-table, .users-table tbody, .users-table tr, .users-table td {
+    display: block;
+    width: 100%;
+  }
+  .users-table tr {
+    border: 1.5px solid var(--line-mid);
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+    background: var(--surface);
+    padding: 10px 14px;
+  }
+  .users-table td {
+    border: none;
+    padding: 4px 0;
+  }
+  .users-table td::before {
+    content: attr(data-label) ": ";
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-right: 6px;
+  }
+}
+
+/* ── vehicle-gps-stats-grid: 3 col on large, 2 on medium, 1 on small ── */
+.vehicle-gps-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+@media (max-width: 900px) {
+  .vehicle-gps-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .vehicle-gps-stats-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Improve .tool-message variants ── */
+.tool-message--success {
+  background: var(--success-soft) !important;
+  color: var(--success) !important;
+  border-color: var(--success-line) !important;
+}
+.tool-message--error {
+  background: var(--danger-soft) !important;
+  color: var(--danger) !important;
+  border-color: var(--danger-line) !important;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+/* ── Focus visible global improvement ── */
+*:focus-visible {
+  outline: 2.5px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

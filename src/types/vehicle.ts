@@ -63,7 +63,9 @@ export type VehicleGeoEventType =
   | "moving"
   | "stop"
   | "overspeed"
-  | "tracker_event";
+  | "tracker_event"
+  | "geo_fence_in"
+  | "geo_fence_out";
 
 export interface VehicleGeoEvent {
   id: string;

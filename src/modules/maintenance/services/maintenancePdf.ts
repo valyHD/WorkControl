@@ -1,22 +1,118 @@
-import type { LiftUnit, MaintenanceBranding, MaintenanceClient, MaintenanceReport, ReportType } from "../../../types/maintenance";
+import type { LiftUnit, MaintenanceClient } from "../../../types/maintenance";
 
-type PdfInput = {
+export type ReportType = "revizie" | "interventie" | string;
+
+export type MaintenanceBranding = {
+  companyName?: string;
+  companyAddress?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  logoUrl?: string;
+  stampUrl?: string;
+  signatureUrl?: string;
+};
+
+export type MaintenanceReport = {
+  reportType?: ReportType;
+  continutRaport?: string;
+  notes?: string;
+  observations?: string;
+  createdAt?: number | string;
+  locationText?: string;
+  technicianName?: string;
+  dateText?: string;
+  timeText?: string;
+  address?: string;
+};
+
+export type PdfInput = {
   client: MaintenanceClient;
   lift: LiftUnit;
   branding: MaintenanceBranding | null;
   report: Omit<MaintenanceReport, "id" | "pdfUrl">;
 };
 
+function getLiftLabel(lift: LiftUnit): string {
+  const candidate =
+    (lift as { liftNumber?: string }).liftNumber ||
+    (lift as { number?: string }).number ||
+    (lift as { code?: string }).code ||
+    (lift as { name?: string }).name ||
+    (lift as { id?: string }).id ||
+    "-";
+
+  return String(candidate).trim() || "-";
+}
+
+function getClientName(client: MaintenanceClient): string {
+  const candidate =
+    (client as { name?: string }).name ||
+    (client as { clientName?: string }).clientName ||
+    (client as { companyName?: string }).companyName ||
+    (client as { nume?: string }).nume ||
+    (client as { id?: string }).id ||
+    "-";
+
+  return String(candidate).trim() || "-";
+}
+
+function splitTextSafe(value?: string, maxLen = 95): string[] {
+  const text = String(value || "").trim();
+  if (!text) return ["-"];
+
+  const parts = text
+    .match(new RegExp(`.{1,${maxLen}}(\\s|$)`, "g"))
+    ?.map((item: string) => item.trim())
+    .filter(Boolean);
+
+  return parts && parts.length ? parts : [text];
+}
+
+function formatCreatedAt(value?: number | string): { dateText: string; timeText: string } {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return {
+      dateText: date.toLocaleDateString("ro-RO"),
+      timeText: date.toLocaleTimeString("ro-RO"),
+    };
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        dateText: parsed.toLocaleDateString("ro-RO"),
+        timeText: parsed.toLocaleTimeString("ro-RO"),
+      };
+    }
+
+    return {
+      dateText: value,
+      timeText: "-",
+    };
+  }
+
+  return {
+    dateText: "-",
+    timeText: "-",
+  };
+}
+
 function escapePdfText(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)");
 }
 
 function buildPdf(lines: string[]): Blob {
   const textCommands: string[] = ["BT", "/F1 10 Tf", "40 800 Td", "14 TL"];
+
   lines.forEach((line, index) => {
     if (index > 0) textCommands.push("T*");
     textCommands.push(`(${escapePdfText(line)}) Tj`);
   });
+
   textCommands.push("ET");
 
   const stream = textCommands.join("\n");
@@ -44,27 +140,63 @@ function buildPdf(lines: string[]): Blob {
   const xref = `xref\n0 ${objects.length + 1}\n${xrefRows.join("\n")}\n`;
   const trailer = `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
 
-  return new Blob([`%PDF-1.4\n${bodyParts.join("")}${xref}${trailer}`], { type: "application/pdf" });
+  return new Blob(
+    [`%PDF-1.4\n${bodyParts.join("")}${xref}${trailer}`],
+    { type: "application/pdf" }
+  );
 }
 
 export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
   const { client, lift, report, branding } = input;
-  const title = report.reportType === "interventie" ? "RAPORT INTERVENTIE" : "RAPORT REVIZIE";
+
+  const normalizedType = report.reportType === "interventie" ? "interventie" : "revizie";
+  const title =
+    normalizedType === "interventie" ? "RAPORT INTERVENTIE" : "RAPORT REVIZIE";
+
+  const fallbackDate = formatCreatedAt(report.createdAt);
+  const dateText = report.dateText || fallbackDate.dateText;
+  const timeText = report.timeText || fallbackDate.timeText;
+
+  const firma =
+    branding?.companyName ||
+    "DEFAULT";
+
+  const address =
+    report.address ||
+    report.locationText ||
+    "-";
+
+  const locationText =
+    report.locationText ||
+    "-";
+
+  const technicianName =
+    report.technicianName ||
+    "-";
+
+  const reportText =
+    report.continutRaport ||
+    report.notes ||
+    report.observations ||
+    "-";
+
   const lines = [
-    `${title}`,
-    `Firma: ${branding?.nume || "DEFAULT"}`,
+    title,
+    `Firma: ${firma}`,
     `Logo URL: ${branding?.logoUrl || "-"}`,
-    `Stampila URL: ${branding?.stampilaUrl || "-"}`,
-    `Locatie generare raport: ${report.gpsLocatie || "Locatie indisponibila"}`,
-    `Data: ${report.dateText} ${report.timeText}`,
-    `Client: ${client.name}`,
-    `Adresa: ${report.adresa}`,
-    `Lift: ${lift.liftNumber}`,
-    `Tehnician: ${report.technicianName}`,
-    `Tip lucrare: ${report.reportType}`,
+    `Stampila URL: ${branding?.stampUrl || "-"}`,
+    `Locatie generare raport: ${locationText}`,
+    `Data: ${dateText} ${timeText}`,
+    `Client: ${getClientName(client)}`,
+    `Adresa: ${address}`,
+    `Lift: ${getLiftLabel(lift)}`,
+    `Tehnician: ${technicianName}`,
+    `Tip lucrare: ${normalizedType}`,
     "",
-    report.reportType === "interventie" ? "Constatare interventie:" : "Continut revizie:",
-    ...report.continutRaport.match(/.{1,95}(\s|$)/g)?.map((item) => item.trim()).filter(Boolean) || ["-"],
+    normalizedType === "interventie"
+      ? "Constatare interventie:"
+      : "Continut revizie:",
+    ...splitTextSafe(reportText, 95),
     "",
     "Semnatura beneficiar: _____________________",
     "Semnatura tehnician: _____________________",
@@ -74,9 +206,13 @@ export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
 }
 
 export function defaultEmailSubject(type: ReportType, dateText: string): string {
-  return type === "interventie" ? `Raport Interventie ${dateText}` : `Raport Revizie ${dateText}`;
+  return type === "interventie"
+    ? `Raport Interventie ${dateText}`
+    : `Raport Revizie ${dateText}`;
 }
 
 export function defaultEmailBody(type: ReportType, firma: string): string {
-  return `Buna ziua,\n\nVa transmitem in atasament Raportul de ${type === "interventie" ? "Interventie" : "Revizie"}.\n\nO zi buna!\nEchipa ${firma}`;
+  return `Buna ziua,\n\nVa transmitem in atasament Raportul de ${
+    type === "interventie" ? "Interventie" : "Revizie"
+  }.\n\nO zi buna!\nEchipa ${firma}`;
 }
