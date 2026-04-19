@@ -1,89 +1,109 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     match /users/{userId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /tools/{toolId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /toolEvents/{eventId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /vehicles/{vehicleId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
 
       match /positions/{positionId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if isSignedIn();
+      }
+
+      match /positionDays/{dayKey} {
+        allow read, write: if isSignedIn();
+
+        match /points/{pointId} {
+          allow read, write: if isSignedIn();
+        }
       }
 
       match /events/{eventId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if isSignedIn();
       }
 
       match /commands/{commandId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if isSignedIn();
       }
     }
 
     match /vehicleEvents/{eventId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /projects/{projectId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /timesheets/{timesheetId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /notifications/{notificationId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /notificationRules/{ruleId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /systemSettings/{settingId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /backupJobs/{jobId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /vehicleMaintenanceAlerts/{alertId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
+    match /trackerBindings/{imei} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /unboundTrackerPackets/{packetId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /projects/{projectId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /timesheets/{timesheetId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /notificationRules/{ruleId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /systemSettings/{settingId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /backupJobs/{jobId} {
+      allow read, write: if isSignedIn();
+    }
 
     match /maintenanceClients/{clientId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
 
       match /rapoarte/{reportId} {
-        allow read, write: if request.auth != null;
+        allow read, write: if isSignedIn();
       }
     }
 
     match /maintenanceLifts/{liftId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /maintenanceReports/{reportId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /rapoarte/{reportId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
     match /firmeMentenanta/{brandingId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
   }
 }
