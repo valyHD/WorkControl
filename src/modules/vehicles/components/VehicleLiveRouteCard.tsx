@@ -82,7 +82,7 @@ function formatCoords(lat: number, lng: number) {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
 }
 
-function isFiniteCoord(value: unknown) {
+function isFiniteCoord(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 function isValidCoordPair(lat: unknown, lng: unknown) {
