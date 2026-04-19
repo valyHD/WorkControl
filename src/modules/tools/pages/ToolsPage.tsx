@@ -4,6 +4,7 @@ import type { ToolItem } from "../../../types/tool";
 import { getToolsList } from "../services/toolsService";
 import ToolStatusBadge from "../components/ToolStatusBadge";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import SafeImage from "../../../components/SafeImage";
 
 export default function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
@@ -118,16 +119,13 @@ const userThemeClass = getUserThemeClass(
                   <div className={`tool-card user-accent-card ${userThemeClass}`}>
                     <div className="tool-card-top">
                       <div className="tool-card-avatar">
-                        {tool.coverThumbUrl || tool.coverImageUrl ? (
-                          <img
-                            src={tool.coverThumbUrl || tool.coverImageUrl}
-                            alt={tool.name}
-                            className="tool-card-avatar-image"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span>{tool.name.slice(0, 1).toUpperCase()}</span>
-                        )}
+                        <SafeImage
+                          src={tool.coverThumbUrl || tool.coverImageUrl}
+                          alt={tool.name}
+                          className="tool-card-avatar-image"
+                          fallbackText={tool.name}
+                          sizes="72px"
+                        />
                       </div>
 
                       <ToolStatusBadge status={tool.status} />

@@ -53,7 +53,8 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
   const [confirmPin, setConfirmPin] = useState("");
   const [authMethod, setAuthMethod] = useState<AuthMethod>("fingerprint");
   const [authMessage, setAuthMessage] = useState("");
-  const [settingUp, setSettingUp] = useState(false);
+const [settingUp, setSettingUp] = useState(false);
+  const [commandError, setCommandError] = useState("");
 
   const supportStatus = useMemo(() => {
     const protocol = (vehicle.tracker?.protocol || "").toLowerCase();
@@ -228,11 +229,26 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
     if (!authorized) return false;
 
     setShowAuthPrompt(false);
+    setCommandError("");
     setBusyType(type);
+    let timeoutId = 0;
     try {
-      await onRequestCommand(type);
+      const withTimeout = new Promise<void>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error("Comanda a depasit timpul de asteptare. Verifica tracker-ul si conexiunea."));
+        }, 12_000);
+      });
+      await Promise.race([onRequestCommand(type), withTimeout]);
+      setAuthMessage("Comanda a fost trimisa. Statusul se actualizeaza automat.");
       return true;
+    } catch (error) {
+      console.error("[VehicleControlCard][requestWithAuth]", error);
+      setCommandError(
+        error instanceof Error ? error.message : "Nu am putut trimite comanda. Incearca din nou."
+      );
+      return false;
     } finally {
+      window.clearTimeout(timeoutId);
       setBusyType(null);
     }
   }
@@ -346,9 +362,10 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
             </div>
           )}
 
-          {authMessage && (
-            <p className="tools-subtitle" style={{ marginTop: 10 }}>{authMessage}</p>
-          )}
+      {authMessage && (
+        <p className="tools-subtitle" style={{ marginTop: 10 }}>{authMessage}</p>
+      )}
+      {commandError && <div className="tool-message">{commandError}</div>}
 
           <div className="tool-form-actions" style={{ marginTop: 10 }}>
             <button

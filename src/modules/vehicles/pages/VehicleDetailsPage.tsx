@@ -7,6 +7,8 @@ import type {
   VehicleItem,
 } from "../../../types/vehicle";
 import { useAuth } from "../../../providers/AuthProvider";
+import SafeImage from "../../../components/SafeImage";
+import { SectionErrorBoundary } from "../../../lib/errors/SectionErrorBoundary";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
@@ -164,16 +166,13 @@ export default function VehicleDetailsPage() {
         <div className="tools-header">
           <div className="tool-details-header">
             <div className="tool-details-avatar">
-              {vehicle.coverThumbUrl || vehicle.coverImageUrl ? (
-                <img
-                  src={vehicle.coverThumbUrl || vehicle.coverImageUrl}
-                  alt={vehicle.plateNumber}
-                  className="tool-details-avatar-image"
-                  loading="lazy"
-                />
-              ) : (
-                <span>{vehicle.brand.slice(0, 1).toUpperCase()}</span>
-              )}
+              <SafeImage
+                src={vehicle.coverThumbUrl || vehicle.coverImageUrl}
+                alt={vehicle.plateNumber}
+                className="tool-details-avatar-image"
+                fallbackText={vehicle.brand || vehicle.plateNumber}
+                sizes="140px"
+              />
             </div>
 
             <div>
@@ -309,7 +308,9 @@ export default function VehicleDetailsPage() {
         />
       )}
 
-      <VehicleLiveRouteCard vehicle={vehicle} showControlCard={false} />
+      <SectionErrorBoundary sectionName="harta GPS">
+        <VehicleLiveRouteCard vehicle={vehicle} showControlCard={false} />
+      </SectionErrorBoundary>
 
       <div className="panel">
         <h3 className="panel-title">Galerie poze</h3>

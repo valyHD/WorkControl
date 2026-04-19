@@ -85,6 +85,15 @@ function formatCoords(lat: number, lng: number) {
 function isFiniteCoord(value: unknown) {
   return typeof value === "number" && Number.isFinite(value);
 }
+function isValidCoordPair(lat: unknown, lng: unknown) {
+  return (
+    isFiniteCoord(lat) &&
+    isFiniteCoord(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
 
 function safeRoutePoints(items: VehiclePositionItem[]) {
   const clean = sanitizePositions(items)
@@ -369,11 +378,10 @@ export default function VehicleLiveRouteCard({
   }, [historyPositions]);
 
   const mapCenter = useMemo<[number, number]>(() => {
-    if (routeStats.end) return [routeStats.end.lat, routeStats.end.lng];
-    if (
-      typeof vehicle.gpsSnapshot?.lat === "number" &&
-      typeof vehicle.gpsSnapshot?.lng === "number"
-    ) {
+    if (routeStats.end && isValidCoordPair(routeStats.end.lat, routeStats.end.lng)) {
+      return [routeStats.end.lat, routeStats.end.lng];
+    }
+    if (isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng)) {
       return [vehicle.gpsSnapshot.lat, vehicle.gpsSnapshot.lng];
     }
     return [44.4268, 26.1025];
@@ -411,9 +419,8 @@ export default function VehicleLiveRouteCard({
     setCommands(latestCommands);
   }
 
-  const hasSnapshot =
-    typeof vehicle.gpsSnapshot?.lat === "number" &&
-    typeof vehicle.gpsSnapshot?.lng === "number";
+  const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
+  const crumbPositions = useMemo(() => samplePositions(positions, 300), [positions]);
 
   return (
     <div className="panel vehicle-live-route-card">
@@ -597,7 +604,7 @@ export default function VehicleLiveRouteCard({
               ))}
 
               <Pane name="crumbs" style={{ zIndex: 390 }}>
-                {positions.map((item) => (
+                {crumbPositions.map((item) => (
                   <CircleMarker
                     key={`crumb-${item.id || item.gpsTimestamp}`}
                     center={[item.lat, item.lng]}
@@ -612,7 +619,7 @@ export default function VehicleLiveRouteCard({
             </>
           ) : hasSnapshot ? (
             <Marker
-              position={[vehicle.gpsSnapshot!.lat, vehicle.gpsSnapshot!.lng]}
+              position={[vehicle.gpsSnapshot?.lat ?? mapCenter[0], vehicle.gpsSnapshot?.lng ?? mapCenter[1]]}
               icon={currentIcon}
             >
               <Popup>

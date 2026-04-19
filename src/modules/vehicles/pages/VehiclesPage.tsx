@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import SafeImage from "../../../components/SafeImage";
 import type { VehicleItem } from "../../../types/vehicle";
 import { subscribeVehiclesList } from "../services/vehiclesService";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
@@ -111,16 +112,13 @@ const userThemeClass = getUserThemeClass(
                   <div className={`tool-card user-accent-card ${userThemeClass}`}>
                     <div className="tool-card-top">
                       <div className="tool-card-avatar">
-                        {vehicle.coverThumbUrl || vehicle.coverImageUrl ? (
-                          <img
-                            src={vehicle.coverThumbUrl || vehicle.coverImageUrl}
-                            alt={vehicle.plateNumber}
-                            className="tool-card-avatar-image"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span>{vehicle.brand.slice(0, 1).toUpperCase()}</span>
-                        )}
+                        <SafeImage
+                          src={vehicle.coverThumbUrl || vehicle.coverImageUrl}
+                          alt={vehicle.plateNumber}
+                          className="tool-card-avatar-image"
+                          fallbackText={vehicle.brand || vehicle.plateNumber}
+                          sizes="72px"
+                        />
                       </div>
 
                       <VehicleStatusBadge status={vehicle.status} />
