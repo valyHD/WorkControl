@@ -87,10 +87,12 @@ function isFiniteCoord(value: unknown) {
 }
 function isValidCoordPair(lat: unknown, lng: unknown) {
   if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false;
+  const latNum = lat;
+  const lngNum = lng;
   return (
-    Math.abs(lat) <= 90 &&
-    Math.abs(lng) <= 180 &&
-    !(lat === 0 && lng === 0)
+    Math.abs(latNum) <= 90 &&
+    Math.abs(lngNum) <= 180 &&
+    !(latNum === 0 && lngNum === 0)
   );
 }
 
