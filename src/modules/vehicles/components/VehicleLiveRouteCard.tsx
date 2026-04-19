@@ -86,9 +86,8 @@ function isFiniteCoord(value: unknown) {
   return typeof value === "number" && Number.isFinite(value);
 }
 function isValidCoordPair(lat: unknown, lng: unknown) {
+  if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false;
   return (
-    isFiniteCoord(lat) &&
-    isFiniteCoord(lng) &&
     Math.abs(lat) <= 90 &&
     Math.abs(lng) <= 180 &&
     !(lat === 0 && lng === 0)
@@ -381,8 +380,9 @@ export default function VehicleLiveRouteCard({
     if (routeStats.end && isValidCoordPair(routeStats.end.lat, routeStats.end.lng)) {
       return [routeStats.end.lat, routeStats.end.lng];
     }
-    if (isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng)) {
-      return [vehicle.gpsSnapshot.lat, vehicle.gpsSnapshot.lng];
+    const snapshot = vehicle.gpsSnapshot;
+    if (snapshot && isValidCoordPair(snapshot.lat, snapshot.lng)) {
+      return [snapshot.lat, snapshot.lng];
     }
     return [44.4268, 26.1025];
   }, [routeStats.end, vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng]);
