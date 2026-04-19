@@ -16,8 +16,9 @@ import { buildMaintenancePdfBlob } from "../services/maintenancePdf";
 import "./maintenance.css";
 
 type Tab = "dashboard" | "clients" | "lifts" | "reports";
+type ClientFormState = Omit<MaintenanceClient, "id" | "createdAt" | "updatedAt">;
 
-const defaultClientForm = {
+const defaultClientForm: ClientFormState = {
   name: "",
   contactPerson: "",
   phone: "",
@@ -25,7 +26,7 @@ const defaultClientForm = {
   mainAddress: "",
   notes: "",
   internalCode: "",
-  status: "active" as const,
+  status: "active",
 };
 
 const defaultLiftForm = {
@@ -79,7 +80,7 @@ export default function MaintenancePage() {
   const [query, setQuery] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [selectedLiftId, setSelectedLiftId] = useState<string>("");
-  const [clientForm, setClientForm] = useState(defaultClientForm);
+  const [clientForm, setClientForm] = useState<ClientFormState>(defaultClientForm);
   const [editingClientId, setEditingClientId] = useState<string>("");
   const [liftForm, setLiftForm] = useState(defaultLiftForm);
   const [editingLiftId, setEditingLiftId] = useState<string>("");
