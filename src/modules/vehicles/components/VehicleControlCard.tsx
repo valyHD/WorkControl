@@ -143,12 +143,8 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
     inFlightRef.current = true;
     setCommandState("sending");
     setFeedbackMsg("");
-    let tid = 0;
     try {
-      const timeout = new Promise<void>((_, reject) => {
-        tid = window.setTimeout(() => reject(new Error("Comanda a depasit 12s. Verifica tracker-ul.")), 12_000);
-      });
-      await Promise.race([onRequestCommand(type), timeout]);
+      await onRequestCommand(type);
       setCommandState("success");
       showFeedback(
         type === "pulse_dout1" ? "Comanda de pornire trimisa cu succes." : "Blocare pornire activata.",
@@ -161,13 +157,13 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
       showFeedback(err instanceof Error ? err.message : "Nu am putut trimite comanda. Incearca din nou.", "error");
       window.setTimeout(() => { setCommandState("idle"); setFeedbackMsg(""); }, 4000);
     } finally {
-      window.clearTimeout(tid);
       inFlightRef.current = false;
     }
   }, [onRequestCommand]);
 
   async function handleStart(): Promise<void> {
     if (isBusy) return;
+    setPendingType("pulse_dout1");
     setCommandState("auth"); setAuthMessage("");
     const ok = await verifyBiometric();
     if (!ok) { setCommandState("idle"); setPendingType("pulse_dout1"); setShowAuth(true); return; }
@@ -177,6 +173,7 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
 
   async function handleBlock(): Promise<void> {
     if (isBusy) return;
+    setPendingType("block_start");
     setCommandState("auth");
     const ok = await verifyBiometric();
     if (!ok) { setCommandState("idle"); setPendingType("block_start"); setShowAuth(true); return; }

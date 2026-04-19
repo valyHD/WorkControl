@@ -13,6 +13,8 @@ const MAX_REASONABLE_GAP_MS = 12 * 60 * 60 * 1000; // 12h
 const MAX_REASONABLE_POINT_JUMP_KM = 20; // evita salturi GPS false
 const MAX_REASONABLE_ODOMETER_STEP_KM = 20; // evita odometru corupt
 const MIN_MOVING_SPEED_KMH = 6;
+const START_TO_MOVE_MAX_MS = 10 * 60 * 1000;
+const MIN_ENGINE_ON_VOLTAGE = 12.2;
 
 export type DateRangePreset = "today" | "last24h" | "last7d" | "custom";
 export type VehicleDistanceBucketType = "day" | "week" | "month";
@@ -23,6 +25,37 @@ export interface VehicleDistanceBucket {
   startTs: number;
   endTs: number;
   distanceKm: number;
+}
+
+function extractVoltageFromRawIo(rawIo: unknown): number | null {
+  if (!rawIo || typeof rawIo !== "object") return null;
+  const io = rawIo as Record<string, unknown>;
+
+  const candidates = [
+    io["66"],
+    io["67"],
+    io["68"],
+    io["externalVoltage"],
+    io["batteryVoltage"],
+    io["voltage"],
+  ];
+
+  for (const candidate of candidates) {
+    if (!isFiniteNumber(candidate)) continue;
+    const value = Number(candidate);
+
+    if (value > 1000) {
+      const volts = value / 1000;
+      if (volts >= 6 && volts <= 36) return volts;
+      continue;
+    }
+
+    if (value >= 6 && value <= 36) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -427,6 +460,66 @@ if (
   }
 
   return Number(total.toFixed(2));
+}
+
+export function filterTrackableRoutePositions(
+  positions: VehiclePositionItem[]
+): VehiclePositionItem[] {
+  const clean = sanitizePositions(positions);
+  if (!clean.length) return [];
+
+  const result: VehiclePositionItem[] = [];
+  let segment: VehiclePositionItem[] = [];
+
+  const flushSegment = () => {
+    if (!segment.length) return;
+
+    const start = segment[0];
+    const startTs = start.gpsTimestamp;
+
+    let firstMovingIndex = -1;
+    for (let index = 0; index < segment.length; index += 1) {
+      const point = segment[index];
+      const elapsed = point.gpsTimestamp - startTs;
+      if (elapsed > START_TO_MOVE_MAX_MS) break;
+      if (toSafeSpeed(point.speedKmh) >= MIN_MOVING_SPEED_KMH) {
+        firstMovingIndex = index;
+        break;
+      }
+    }
+
+    if (firstMovingIndex < 0) {
+      segment = [];
+      return;
+    }
+
+    const voltageAtStart = extractVoltageFromRawIo(start.rawIo);
+    const voltageAtMove = extractVoltageFromRawIo(segment[firstMovingIndex].rawIo);
+    const hasEngineVoltage =
+      (voltageAtStart !== null && voltageAtStart >= MIN_ENGINE_ON_VOLTAGE) ||
+      (voltageAtMove !== null && voltageAtMove >= MIN_ENGINE_ON_VOLTAGE);
+
+    if (!hasEngineVoltage && (voltageAtStart !== null || voltageAtMove !== null)) {
+      segment = [];
+      return;
+    }
+
+    result.push(...segment.slice(firstMovingIndex));
+    segment = [];
+  };
+
+  for (const point of clean) {
+    if (point.ignitionOn) {
+      segment.push(point);
+      continue;
+    }
+
+    flushSegment();
+  }
+
+  flushSegment();
+
+  return result.length ? sanitizePositions(result) : [];
 }
 
 function getWeekStart(date: Date): Date {

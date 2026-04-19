@@ -30,6 +30,7 @@ import {
   buildTimelineEvents,
   calculateRouteDistanceKm,
   detectOverspeed,
+  filterTrackableRoutePositions,
   detectStops,
   formatDuration,
   fromDateTimeLocalValue,
@@ -202,7 +203,7 @@ export default function VehicleLiveRouteCard({
   showControlCard = true,
 }: Props) {
   const { user } = useAuth();
-const authReady = true;
+  const authReady = true;
 
   const [preset, setPreset] = useState<DateRangePreset>("today");
   const initialRange = getPresetRange("today");
@@ -277,7 +278,7 @@ const authReady = true;
       fromTs,
       toTs,
       (route) => {
-        const clean = safeRoutePoints(route);
+        const clean = safeRoutePoints(filterTrackableRoutePositions(route));
         const stops = detectStops(clean);
         const overspeed = detectOverspeed(clean, overspeedThreshold);
 
@@ -327,6 +328,8 @@ const authReady = true;
   }, [preset]);
 
   useEffect(() => {
+    let interval: number | null = null;
+
     async function loadHistory() {
       if (!authReady || !user) return;
 
@@ -343,7 +346,7 @@ const authReady = true;
 
         if (!mountedRef.current) return;
 
-        setHistoryPositions(safeRoutePoints(route));
+        setHistoryPositions(filterTrackableRoutePositions(route));
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadHistory]", error);
         if (!mountedRef.current) return;
@@ -352,6 +355,13 @@ const authReady = true;
     }
 
     void loadHistory();
+    interval = window.setInterval(() => {
+      void loadHistory();
+    }, 60_000);
+
+    return () => {
+      if (interval !== null) window.clearInterval(interval);
+    };
   }, [authReady, user, vehicle.id]);
 
   useEffect(() => {
@@ -382,9 +392,10 @@ const authReady = true;
   }, [positions]);
 
   const historyStats = useMemo(() => {
-    const dayBuckets = buildDistanceHistory(historyPositions, "day");
-    const weekBuckets = buildDistanceHistory(historyPositions, "week");
-    const monthBuckets = buildDistanceHistory(historyPositions, "month");
+    const merged = filterTrackableRoutePositions([...historyPositions, ...positions]);
+    const dayBuckets = buildDistanceHistory(merged, "day");
+    const weekBuckets = buildDistanceHistory(merged, "week");
+    const monthBuckets = buildDistanceHistory(merged, "month");
 
     const nowDate = new Date();
     const todayKey = `${nowDate.getFullYear()}-${String(
