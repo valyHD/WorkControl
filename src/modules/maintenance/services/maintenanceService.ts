@@ -3,20 +3,31 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getDownloadURL, listAll, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "../../../lib/firebase/firebase";
-import type { LiftUnit, LiftStatus, MaintenanceClient, MaintenanceDashboard, MaintenanceReport } from "../../../types/maintenance";
+import type {
+  LiftStatus,
+  LiftUnit,
+  MaintenanceBranding,
+  MaintenanceClient,
+  MaintenanceDashboard,
+  MaintenanceLocationOption,
+  MaintenanceReport,
+  ReportType,
+} from "../../../types/maintenance";
+import { buildReportFolderDate, normalizeCompanyName, sanitizePathSegment } from "../utils/reportUtils";
 
 const clientsCollection = collection(db, "maintenanceClients");
 const liftsCollection = collection(db, "maintenanceLifts");
-const reportsCollection = collection(db, "maintenanceReports");
+const reportsCollection = collection(db, "rapoarte");
+const brandingCollection = collection(db, "firmeMentenanta");
 
 const warningThresholds = { yellow: 30, orange: 15, red: 7 };
 
@@ -28,13 +39,13 @@ function toNumber(value: unknown): number {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function toLiftStatus(value: unknown): LiftStatus {
   if (value === "stopped" || value === "repair" || value === "overdue") return value;
   return "active";
-}
-
-function toChecklist(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 }
 
 function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient {
@@ -58,9 +69,9 @@ function mapLift(id: string, data: Record<string, unknown>): LiftUnit {
     id,
     clientId: toText(data.clientId),
     clientName: toText(data.clientName),
-    liftNumber: toText(data.liftNumber),
-    locationName: toText(data.locationName),
-    exactAddress: toText(data.exactAddress),
+    liftNumber: toText(data.liftNumber || data.Lift),
+    locationName: toText(data.locationName || data.locatie),
+    exactAddress: toText(data.exactAddress || data.adresa),
     building: toText(data.building),
     serialNumber: toText(data.serialNumber),
     liftType: toText(data.liftType),
@@ -72,6 +83,8 @@ function mapLift(id: string, data: Record<string, unknown>): LiftUnit {
     nextInspectionDate: toText(data.nextInspectionDate),
     contractExpiryDate: toText(data.contractExpiryDate),
     assignedTechnician: toText(data.assignedTechnician),
+    maintenanceCompany: toText(data.maintenanceCompany || data.firmaMentenanta || data["Firma Mentenanta"]),
+    expDate: toText(data.expDate || data.expData),
     status: toLiftStatus(data.status),
     notes: toText(data.notes),
     createdAt: toNumber(data.createdAt) || Date.now(),
@@ -82,28 +95,55 @@ function mapLift(id: string, data: Record<string, unknown>): LiftUnit {
 function mapReport(id: string, data: Record<string, unknown>): MaintenanceReport {
   return {
     id,
+    reportId: toText(data.reportId) || id,
     clientId: toText(data.clientId),
-    clientName: toText(data.clientName),
-    liftId: toText(data.liftId),
-    liftNumber: toText(data.liftNumber),
-    reportType: data.reportType === "interventie" ? "interventie" : "revizie",
+    clientName: toText(data.client),
+    locatieId: toText(data.locatieId),
+    locatieName: toText(data.locatieName),
+    adresa: toText(data.adresa),
+    email: toText(data.email),
+    liftId: toText(data.lift),
+    liftIdDocument: toText(data.liftIdDocument),
+    liftNumber: toText(data.lift),
+    reportType: data.tipLucrare === "interventie" ? "interventie" : "revizie",
     createdAt: toNumber(data.createdAt) || Date.now(),
-    dateText: toText(data.dateText),
+    dateText: toText(data.data),
     timeText: toText(data.timeText),
+    dataFolder: toText(data.dataFolder),
     gpsLat: typeof data.gpsLat === "number" ? data.gpsLat : null,
     gpsLng: typeof data.gpsLng === "number" ? data.gpsLng : null,
-    gpsAddress: toText(data.gpsAddress),
-    technicianName: toText(data.technicianName),
-    status: data.status === "draft" ? "draft" : "final",
+    gpsLocatie: toText(data.gpsLocatie),
+    technicianName: toText(data.tehnician),
+    status: "final",
     observations: toText(data.observations),
-    reviewChecklist: toChecklist(data.reviewChecklist),
     standardText: toText(data.standardText),
-    complaint: toText(data.complaint),
-    finding: toText(data.finding),
-    workPerformed: toText(data.workPerformed),
-    replacedParts: toText(data.replacedParts),
-    recommendations: toText(data.recommendations),
+    constatareInterventie: toText(data.constatareInterventie),
+    continutRaport: toText(data.continutRaport),
     pdfUrl: toText(data.pdfUrl),
+    images: toStringArray(data.images),
+    firmaLogo: toText(data.firmaLogo),
+    firmaMentenantaOriginala: toText(data.firmaMentenantaOriginala),
+    brandingId: toText(data.brandingId),
+    logoUrlFolosit: toText(data.logoUrlFolosit),
+    stampilaUrlFolosita: toText(data.stampilaUrlFolosita),
+    createdByUid: toText(data.createdByUid),
+  };
+}
+
+function mapBranding(id: string, data: Record<string, unknown>): MaintenanceBranding {
+  return {
+    id,
+    nume: toText(data.nume),
+    key: toText(data.key),
+    aliases: toStringArray(data.aliases),
+    logoUrl: toText(data.logoUrl),
+    stampilaUrl: toText(data.stampilaUrl),
+    semnaturaUrl: toText(data.semnaturaUrl),
+    emailDisplayName: toText(data.emailDisplayName),
+    emailImplicitCc: toStringArray(data.emailImplicitCc),
+    active: data.active !== false,
+    createdAt: toNumber(data.createdAt) || Date.now(),
+    updatedAt: toNumber(data.updatedAt) || Date.now(),
   };
 }
 
@@ -121,17 +161,20 @@ export async function getMaintenanceData(): Promise<{
   clients: MaintenanceClient[];
   lifts: LiftUnit[];
   reports: MaintenanceReport[];
+  branding: MaintenanceBranding[];
   dashboard: MaintenanceDashboard;
 }> {
-  const [clientSnap, liftSnap, reportSnap] = await Promise.all([
+  const [clientSnap, liftSnap, reportSnap, brandingSnap] = await Promise.all([
     getDocs(query(clientsCollection, orderBy("updatedAt", "desc"))),
     getDocs(query(liftsCollection, orderBy("updatedAt", "desc"))),
     getDocs(query(reportsCollection, orderBy("createdAt", "desc"))),
+    getDocs(query(brandingCollection, orderBy("nume", "asc"))),
   ]);
 
   const clients = clientSnap.docs.map((item) => mapClient(item.id, item.data() as Record<string, unknown>));
   const lifts = liftSnap.docs.map((item) => mapLift(item.id, item.data() as Record<string, unknown>));
   const reports = reportSnap.docs.map((item) => mapReport(item.id, item.data() as Record<string, unknown>));
+  const branding = brandingSnap.docs.map((item) => mapBranding(item.id, item.data() as Record<string, unknown>));
 
   const dashboard: MaintenanceDashboard = {
     totalClients: clients.length,
@@ -145,7 +188,44 @@ export async function getMaintenanceData(): Promise<{
     latestReports: reports.slice(0, 8),
   };
 
-  return { clients, lifts, reports, dashboard };
+  return { clients, lifts, reports, branding, dashboard };
+}
+
+export function resolveBrandingForCompany(companyName: string, branding: MaintenanceBranding[]): { branding: MaintenanceBranding | null; warning: string } {
+  const normalized = normalizeCompanyName(companyName);
+  const active = branding.filter((item) => item.active);
+  const found = active.find((item) => {
+    const keyList = [item.key, item.nume, ...item.aliases].map(normalizeCompanyName);
+    return keyList.includes(normalized);
+  });
+
+  if (found) return { branding: found, warning: "" };
+  const fallback = active[0] ?? null;
+  return {
+    branding: fallback,
+    warning: companyName ? `Branding inexistent pentru firma \"${companyName}\". Folosesc fallback.` : "Firma de mentenanta lipsa pe lift. Folosesc fallback.",
+  };
+}
+
+export function buildLiftLocations(clientId: string, lifts: LiftUnit[]): MaintenanceLocationOption[] {
+  const grouped = new Map<string, MaintenanceLocationOption>();
+  lifts
+    .filter((lift) => lift.clientId === clientId)
+    .forEach((lift) => {
+      const key = lift.locationName || lift.exactAddress || "Locatie";
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.lifts.push(lift);
+      } else {
+        grouped.set(key, {
+          id: key,
+          label: key,
+          address: lift.exactAddress || key,
+          lifts: [lift],
+        });
+      }
+    });
+  return Array.from(grouped.values());
 }
 
 export async function createMaintenanceClient(input: Omit<MaintenanceClient, "id" | "createdAt" | "updatedAt">) {
@@ -194,23 +274,89 @@ export async function deleteLift(id: string) {
   await deleteDoc(doc(liftsCollection, id));
 }
 
-export async function createReport(input: Omit<MaintenanceReport, "id" | "pdfUrl">, pdfBlob: Blob) {
-  const reportRef = await addDoc(reportsCollection, {
+export async function upsertBranding(input: Omit<MaintenanceBranding, "createdAt" | "updatedAt">) {
+  const now = Date.now();
+  await setDoc(doc(brandingCollection, input.id), {
     ...input,
-    pdfUrl: "",
-    createdAtServer: serverTimestamp(),
-  });
-
-  const storageRef = ref(storage, `maintenanceReports/${reportRef.id}.pdf`);
-  await uploadBytes(storageRef, pdfBlob, { contentType: "application/pdf" });
-  const pdfUrl = await getDownloadURL(storageRef);
-
-  await updateDoc(reportRef, { pdfUrl });
-  return reportRef.id;
+    updatedAt: now,
+    createdAt: now,
+    updatedAtServer: serverTimestamp(),
+  }, { merge: true });
 }
 
-export async function getClientById(clientId: string) {
-  const snapshot = await getDoc(doc(clientsCollection, clientId));
-  if (!snapshot.exists()) return null;
-  return mapClient(snapshot.id, snapshot.data() as Record<string, unknown>);
+export async function uploadBrandingAsset(brandingId: string, kind: "logo" | "stampila" | "semnatura", file: File): Promise<string> {
+  const storageRef = ref(storage, `branding/${brandingId}/${kind}_${Date.now()}_${sanitizePathSegment(file.name)}`);
+  await uploadBytes(storageRef, file, { contentType: file.type });
+  return getDownloadURL(storageRef);
+}
+
+export async function createReportWithAssets(params: {
+  reportPayload: Omit<MaintenanceReport, "id" | "pdfUrl">;
+  pdfBlob: Blob;
+  images: File[];
+  clientId: string;
+  reportType: ReportType;
+  clientName: string;
+  adresa: string;
+  liftNumber: string;
+  dataFolder: string;
+}) {
+  const { reportPayload, pdfBlob, images, clientId, reportType, clientName, adresa, liftNumber, dataFolder } = params;
+  const baseFolder = `${reportType === "interventie" ? "INTERVENTII" : "REVIZII"}/${sanitizePathSegment(clientName)}/${sanitizePathSegment(adresa)}/${sanitizePathSegment(liftNumber)}/${dataFolder}`;
+
+  const imageUrls: string[] = [];
+  for (let i = 0; i < images.length; i += 1) {
+    const ext = images[i].name.split(".").pop() || "jpg";
+    const imgRef = ref(storage, `${baseFolder}/img_${i}.${ext}`);
+    await uploadBytes(imgRef, images[i], { contentType: images[i].type });
+    imageUrls.push(await getDownloadURL(imgRef));
+  }
+
+  const pdfRef = ref(storage, `${baseFolder}/${reportType === "interventie" ? "raport_interventie.pdf" : "raport_revizie.pdf"}`);
+  await uploadBytes(pdfRef, pdfBlob, { contentType: "application/pdf" });
+  const pdfUrl = await getDownloadURL(pdfRef);
+
+  const docData = {
+    ...reportPayload,
+    pdfUrl,
+    images: imageUrls,
+    createdAtServer: serverTimestamp(),
+  };
+
+  await setDoc(doc(reportsCollection, reportPayload.reportId), docData, { merge: true });
+  await setDoc(doc(db, `maintenanceClients/${clientId}/rapoarte/${reportPayload.reportId}`), docData, { merge: true });
+  return { pdfUrl, imageUrls, path: baseFolder };
+}
+
+export async function deleteReportFully(report: MaintenanceReport) {
+  await Promise.all([
+    deleteDoc(doc(reportsCollection, report.id)),
+    deleteDoc(doc(db, `maintenanceClients/${report.clientId}/rapoarte/${report.id}`)),
+  ]);
+
+  const files = [report.pdfUrl, ...report.images].filter(Boolean);
+  await Promise.all(
+    files.map(async (url) => {
+      try {
+        await deleteObject(ref(storage, url));
+      } catch {
+        // ignore broken links
+      }
+    }),
+  );
+}
+
+export async function deleteBranding(id: string) {
+  await deleteDoc(doc(brandingCollection, id));
+  try {
+    const folderRef = ref(storage, `branding/${id}`);
+    const list = await listAll(folderRef);
+    await Promise.all(list.items.map((item) => deleteObject(item)));
+  } catch {
+    // ignore
+  }
+}
+
+export function nowFolderString(): string {
+  return buildReportFolderDate(new Date());
 }

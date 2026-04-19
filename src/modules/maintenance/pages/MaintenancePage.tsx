@@ -1,21 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../../providers/AuthProvider";
-import type { LiftStatus, LiftUnit, MaintenanceClient, MaintenanceReport, ReportType } from "../../../types/maintenance";
+import type { LiftStatus, LiftUnit, MaintenanceBranding, MaintenanceClient, MaintenanceReport, ReportType } from "../../../types/maintenance";
 import {
+  buildLiftLocations,
   createLift,
   createMaintenanceClient,
-  createReport,
+  createReportWithAssets,
+  deleteBranding,
   deleteLift,
   deleteMaintenanceClient,
+  deleteReportFully,
   getLiftUrgency,
   getMaintenanceData,
+  nowFolderString,
+  resolveBrandingForCompany,
   updateLift,
   updateMaintenanceClient,
+  uploadBrandingAsset,
+  upsertBranding,
 } from "../services/maintenanceService";
-import { buildMaintenancePdfBlob } from "../services/maintenancePdf";
+import { buildMaintenancePdfBlob, defaultEmailBody, defaultEmailSubject } from "../services/maintenancePdf";
+import { generateReportId, reviewStandardText } from "../utils/reportUtils";
 import "./maintenance.css";
 
-type Tab = "dashboard" | "clients" | "lifts" | "reports";
+type Tab = "dashboard" | "clients" | "lifts" | "newReport" | "history" | "branding";
 type ClientFormState = Omit<MaintenanceClient, "id" | "createdAt" | "updatedAt">;
 
 const defaultClientForm: ClientFormState = {
@@ -46,33 +54,32 @@ const defaultLiftForm = {
   nextInspectionDate: "",
   contractExpiryDate: "",
   assignedTechnician: "",
+  maintenanceCompany: "",
+  expDate: "",
   status: "active" as LiftStatus,
   notes: "",
 };
 
-const defaultReportForm = {
-  clientId: "",
-  liftId: "",
-  reportType: "revizie" as ReportType,
-  technicianName: "",
-  observations: "",
-  reviewChecklist: [] as string[],
-  standardText: "Revizie periodică executată conform planului de mentenanță, fără abateri critice.",
-  complaint: "",
-  finding: "",
-  workPerformed: "",
-  replacedParts: "",
-  recommendations: "",
+const defaultBranding: Omit<MaintenanceBranding, "createdAt" | "updatedAt"> = {
+  id: "",
+  nume: "",
+  key: "",
+  aliases: [],
+  logoUrl: "",
+  stampilaUrl: "",
+  semnaturaUrl: "",
+  emailDisplayName: "",
+  emailImplicitCc: [],
+  active: true,
 };
 
-const checklistOptions = ["Usi", "Panou comanda", "Frana", "Cabina", "Sistem siguranta", "Curatare camera tehnica"];
-
 export default function MaintenancePage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [clients, setClients] = useState<MaintenanceClient[]>([]);
   const [lifts, setLifts] = useState<LiftUnit[]>([]);
   const [reports, setReports] = useState<MaintenanceReport[]>([]);
+  const [branding, setBranding] = useState<MaintenanceBranding[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -80,11 +87,19 @@ export default function MaintenancePage() {
   const [query, setQuery] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string>("");
   const [selectedLiftId, setSelectedLiftId] = useState<string>("");
+  const [selectedLocationId, setSelectedLocationId] = useState<string>("");
   const [clientForm, setClientForm] = useState<ClientFormState>(defaultClientForm);
   const [editingClientId, setEditingClientId] = useState<string>("");
   const [liftForm, setLiftForm] = useState(defaultLiftForm);
   const [editingLiftId, setEditingLiftId] = useState<string>("");
-  const [reportForm, setReportForm] = useState(defaultReportForm);
+  const [reportType, setReportType] = useState<ReportType>("revizie");
+  const [reportEmail, setReportEmail] = useState("");
+  const [technicianName, setTechnicianName] = useState("");
+  const [constatareInterventie, setConstatareInterventie] = useState("");
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [brandingForm, setBrandingForm] = useState(defaultBranding);
+  const [brandingLogoFile, setBrandingLogoFile] = useState<File | null>(null);
+  const [brandingStampilaFile, setBrandingStampilaFile] = useState<File | null>(null);
   const [reportTypeFilter, setReportTypeFilter] = useState<"all" | ReportType>("all");
 
   async function loadData() {
@@ -94,7 +109,11 @@ export default function MaintenancePage() {
       setClients(data.clients);
       setLifts(data.lifts);
       setReports(data.reports);
-      if (!selectedClientId && data.clients[0]) setSelectedClientId(data.clients[0].id);
+      setBranding(data.branding);
+      if (!selectedClientId && data.clients[0]) {
+        setSelectedClientId(data.clients[0].id);
+        setReportEmail(data.clients[0].email);
+      }
     } catch (loadError) {
       console.error(loadError);
       setError("Nu am putut încărca datele de mentenanță.");
@@ -107,188 +126,163 @@ export default function MaintenancePage() {
     void loadData();
   }, []);
 
-  const filteredClients = useMemo(() => {
-    if (!query.trim()) return clients;
-    const q = query.toLowerCase();
-    return clients.filter((item) => `${item.name} ${item.phone} ${item.mainAddress}`.toLowerCase().includes(q));
-  }, [clients, query]);
-
-  const filteredLifts = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return lifts.filter((lift) => {
-      if (selectedClientId && lift.clientId !== selectedClientId) return false;
-      if (!q) return true;
-      return `${lift.liftNumber} ${lift.clientName} ${lift.exactAddress} ${lift.assignedTechnician}`.toLowerCase().includes(q);
-    });
-  }, [lifts, query, selectedClientId]);
-
   const filteredReports = useMemo(() => {
     const q = query.trim().toLowerCase();
     return reports.filter((report) => {
       if (selectedClientId && report.clientId !== selectedClientId) return false;
-      if (selectedLiftId && report.liftId !== selectedLiftId) return false;
       if (reportTypeFilter !== "all" && report.reportType !== reportTypeFilter) return false;
       if (!q) return true;
-      return `${report.clientName} ${report.liftNumber} ${report.technicianName} ${report.observations}`.toLowerCase().includes(q);
+      return `${report.clientName} ${report.liftNumber} ${report.technicianName} ${report.adresa}`.toLowerCase().includes(q);
     });
-  }, [reports, query, selectedClientId, selectedLiftId, reportTypeFilter]);
+  }, [reports, query, selectedClientId, reportTypeFilter]);
 
-  const dashboard = useMemo(() => {
-    const activeLifts = lifts.filter((lift) => lift.status === "active").length;
-    const expired = lifts.filter((lift) => lift.nextInspectionDate && new Date(lift.nextInspectionDate).getTime() < Date.now()).length;
-    const dueSoon = lifts.filter((lift) => {
-      const urgency = getLiftUrgency(lift);
-      return urgency === "yellow" || urgency === "orange" || urgency === "red";
-    }).length;
-    return {
-      totalClients: clients.length,
-      totalLifts: lifts.length,
-      activeLifts,
-      expired,
-      dueSoon,
-      latestReports: reports.slice(0, 6),
-      latestInterventions: reports.filter((item) => item.reportType === "interventie").slice(0, 4),
-      latestReviews: reports.filter((item) => item.reportType === "revizie").slice(0, 4),
-    };
-  }, [clients, lifts, reports]);
+  const locationOptions = useMemo(() => buildLiftLocations(selectedClientId, lifts), [selectedClientId, lifts]);
+  const selectedLocation = locationOptions.find((item) => item.id === selectedLocationId) || locationOptions[0] || null;
+  const availableLifts = selectedLocation?.lifts || [];
 
-  async function saveClient() {
-    if (!clientForm.name.trim()) return setError("Numele clientului este obligatoriu.");
-    setBusy(true);
-    setError("");
-    setMessage("");
+  useEffect(() => {
+    if (locationOptions.length === 1) setSelectedLocationId(locationOptions[0].id);
+  }, [locationOptions]);
+
+  useEffect(() => {
+    if (availableLifts.length === 1) setSelectedLiftId(availableLifts[0].id);
+  }, [availableLifts]);
+
+  const selectedClient = clients.find((item) => item.id === selectedClientId) || null;
+  const selectedLift = lifts.find((item) => item.id === selectedLiftId) || null;
+  const resolvedBranding = resolveBrandingForCompany(selectedLift?.maintenanceCompany || "", branding);
+
+  async function detectGpsAddress() {
+    if (!navigator.geolocation) return { lat: null, lng: null, text: "Locatie indisponibila" };
+
     try {
-      if (editingClientId) {
-        await updateMaintenanceClient(editingClientId, clientForm);
-        setMessage("Client actualizat cu succes.");
-      } else {
-        await createMaintenanceClient(clientForm);
-        setMessage("Client adăugat cu succes.");
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 9000, maximumAge: 120000 });
+      });
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      let text = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+        const j = (await r.json()) as { display_name?: string };
+        if (j.display_name) text = j.display_name;
+      } catch {
+        // fallback to coordinates
       }
-      setClientForm(defaultClientForm);
-      setEditingClientId("");
-      await loadData();
-    } catch (saveError) {
-      console.error(saveError);
-      setError("Eroare la salvarea clientului.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeClient(clientId: string) {
-    if (!window.confirm("Ștergi clientul? Lifturile și rapoartele trebuie șterse separat.")) return;
-    setBusy(true);
-    try {
-      await deleteMaintenanceClient(clientId);
-      await loadData();
-      setMessage("Client șters.");
-    } catch (removeError) {
-      console.error(removeError);
-      setError("Nu am putut șterge clientul.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveLift() {
-    if (!liftForm.clientId || !liftForm.liftNumber.trim()) {
-      return setError("Selectează clientul și completează numărul liftului.");
-    }
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      if (editingLiftId) {
-        await updateLift(editingLiftId, liftForm);
-        setMessage("Lift actualizat.");
-      } else {
-        await createLift(liftForm);
-        setMessage("Lift adăugat.");
-      }
-      setLiftForm(defaultLiftForm);
-      setEditingLiftId("");
-      await loadData();
-    } catch (saveError) {
-      console.error(saveError);
-      setError("Nu am putut salva liftul.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeLift(liftId: string) {
-    if (!window.confirm("Ștergi liftul selectat?")) return;
-    setBusy(true);
-    try {
-      await deleteLift(liftId);
-      await loadData();
-      setMessage("Lift șters.");
-    } catch (removeError) {
-      console.error(removeError);
-      setError("Nu am putut șterge liftul.");
-    } finally {
-      setBusy(false);
+      return { lat, lng, text };
+    } catch {
+      return { lat: null, lng: null, text: "Locatie indisponibila" };
     }
   }
 
   async function generateReport() {
-    const client = clients.find((item) => item.id === reportForm.clientId);
-    const lift = lifts.find((item) => item.id === reportForm.liftId);
-    if (!client || !lift) return setError("Selectează client și lift.");
+    if (!selectedClient || !selectedLift) return setError("Selectează client, locație și lift.");
+    if (!technicianName.trim()) return setError("Completează numele tehnicianului.");
+    if (reportType === "interventie" && !constatareInterventie.trim()) return setError("Completează constatarea pentru intervenție.");
 
     setBusy(true);
     setError("");
     setMessage("");
+
     try {
       const now = new Date();
-      let gpsLat: number | null = null;
-      let gpsLng: number | null = null;
-
-      if (navigator.geolocation) {
-        try {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 8000, maximumAge: 60000 });
-          });
-          gpsLat = pos.coords.latitude;
-          gpsLng = pos.coords.longitude;
-        } catch {
-          // opțional; continuăm fără coordonate
-        }
-      }
+      const gps = await detectGpsAddress();
+      const dataFolder = nowFolderString();
+      const reportId = generateReportId(now);
+      const dateText = now.toLocaleDateString("ro-RO");
+      const timeText = now.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
+      const standardText = reportType === "revizie" ? reviewStandardText(selectedLift.liftNumber) : "";
+      const continutRaport = reportType === "interventie" ? constatareInterventie : standardText;
 
       const payload: Omit<MaintenanceReport, "id" | "pdfUrl"> = {
-        clientId: client.id,
-        clientName: client.name,
-        liftId: lift.id,
-        liftNumber: lift.liftNumber,
-        reportType: reportForm.reportType,
+        reportId,
+        clientId: selectedClient.id,
+        clientName: selectedClient.name,
+        locatieId: selectedLocation?.id,
+        locatieName: selectedLocation?.label || "",
+        adresa: selectedLift.exactAddress || selectedClient.mainAddress,
+        email: reportEmail || selectedClient.email,
+        liftId: selectedLift.id,
+        liftIdDocument: selectedLift.id,
+        liftNumber: selectedLift.liftNumber,
+        reportType,
         createdAt: Date.now(),
-        dateText: now.toLocaleDateString("ro-RO"),
-        timeText: now.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" }),
-        gpsLat,
-        gpsLng,
-        gpsAddress: gpsLat && gpsLng ? "Locație GPS browser" : "Locație indisponibilă",
-        technicianName: reportForm.technicianName,
+        dateText,
+        timeText,
+        dataFolder,
+        gpsLat: gps.lat,
+        gpsLng: gps.lng,
+        gpsLocatie: gps.text,
+        technicianName,
         status: "final",
-        observations: reportForm.observations,
-        reviewChecklist: reportForm.reviewChecklist,
-        standardText: reportForm.standardText,
-        complaint: reportForm.complaint,
-        finding: reportForm.finding,
-        workPerformed: reportForm.workPerformed,
-        replacedParts: reportForm.replacedParts,
-        recommendations: reportForm.recommendations,
+        observations: "",
+        standardText,
+        constatareInterventie,
+        continutRaport,
+        images: [],
+        firmaLogo: resolvedBranding.branding?.nume || "DEFAULT",
+        firmaMentenantaOriginala: selectedLift.maintenanceCompany,
+        brandingId: resolvedBranding.branding?.id || "",
+        logoUrlFolosit: resolvedBranding.branding?.logoUrl || "",
+        stampilaUrlFolosita: resolvedBranding.branding?.stampilaUrl || "",
+        createdByUid: user?.uid || "",
       };
 
-      const pdfBlob = buildMaintenancePdfBlob({ client, lift, report: payload, companyName: "WorkControl" });
-      await createReport(payload, pdfBlob);
-      setReportForm((prev) => ({ ...defaultReportForm, clientId: prev.clientId, liftId: prev.liftId }));
-      setMessage("Raport generat și salvat.");
+      const pdfBlob = await buildMaintenancePdfBlob({
+        client: selectedClient,
+        lift: selectedLift,
+        branding: resolvedBranding.branding,
+        report: payload,
+      });
+
+      await createReportWithAssets({
+        reportPayload: payload,
+        pdfBlob,
+        images: reportType === "interventie" ? selectedImages : [],
+        clientId: selectedClient.id,
+        reportType,
+        clientName: selectedClient.name,
+        adresa: payload.adresa,
+        liftNumber: selectedLift.liftNumber,
+        dataFolder,
+      });
+
+      setMessage("Raport generat și salvat cu succes.");
+      setConstatareInterventie("");
+      setSelectedImages([]);
       await loadData();
     } catch (reportError) {
       console.error(reportError);
       setError("Generarea raportului a eșuat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveBranding() {
+    if (!brandingForm.id.trim() || !brandingForm.nume.trim()) {
+      return setError("ID-ul și numele firmei sunt obligatorii.");
+    }
+    setBusy(true);
+    try {
+      let logoUrl = brandingForm.logoUrl;
+      let stampilaUrl = brandingForm.stampilaUrl;
+      if (brandingLogoFile) logoUrl = await uploadBrandingAsset(brandingForm.id, "logo", brandingLogoFile);
+      if (brandingStampilaFile) stampilaUrl = await uploadBrandingAsset(brandingForm.id, "stampila", brandingStampilaFile);
+
+      await upsertBranding({
+        ...brandingForm,
+        logoUrl,
+        stampilaUrl,
+      });
+      setBrandingForm(defaultBranding);
+      setBrandingLogoFile(null);
+      setBrandingStampilaFile(null);
+      setMessage("Branding salvat.");
+      await loadData();
+    } catch (e) {
+      console.error(e);
+      setError("Nu am putut salva branding-ul.");
     } finally {
       setBusy(false);
     }
@@ -311,98 +305,52 @@ export default function MaintenancePage() {
             ["dashboard", "Dashboard"],
             ["clients", "Clienți"],
             ["lifts", "Lifturi"],
-            ["reports", "Rapoarte"],
+            ["newReport", "Raport nou"],
+            ["history", "Istoric"],
+            ["branding", "Branding firme"],
           ].map(([value, label]) => (
             <button key={value} className={tab === value ? "primary-btn" : "secondary-btn"} onClick={() => setTab(value as Tab)} type="button">
               {label}
             </button>
           ))}
         </div>
-        <input className="tool-input maintenance-search" placeholder="Caută client, lift, adresă, tehnician..." value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className="tool-input maintenance-search" placeholder="Caută..." value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
 
       {error && <div className="tool-message">{error}</div>}
       {message && <div className="tool-message success-message">{message}</div>}
+      {resolvedBranding.warning && tab === "newReport" && <div className="tool-message">{resolvedBranding.warning}</div>}
 
       {loading ? (
         <div className="panel">Se încarcă modulul Mentenanță...</div>
       ) : (
         <>
-          {tab === "dashboard" && (
-            <>
-              <div className="kpi-grid">
-                <div className="kpi-card"><div className="kpi-label">Total clienți</div><div className="kpi-value">{dashboard.totalClients}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Total lifturi</div><div className="kpi-value">{dashboard.totalLifts}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Lifturi active</div><div className="kpi-value">{dashboard.activeLifts}</div></div>
-                <div className="kpi-card"><div className="kpi-label">Scadente/expirate</div><div className="kpi-value">{dashboard.dueSoon + dashboard.expired}</div></div>
-              </div>
-
-              <div className="maintenance-two-cols">
-                <div className="panel">
-                  <h3 className="panel-subtitle">Avertizări</h3>
-                  {lifts
-                    .filter((lift) => getLiftUrgency(lift) !== "normal")
-                    .slice(0, 8)
-                    .map((lift) => (
-                      <div key={lift.id} className="simple-list-item">
-                        <div className="simple-list-text">
-                          <div className="simple-list-label">{lift.liftNumber} · {lift.clientName}</div>
-                          <div className="simple-list-subtitle">{lift.exactAddress} · scadență {lift.nextInspectionDate || "-"}</div>
-                        </div>
-                        <span className={`badge badge-${getLiftUrgency(lift)}`}>{getLiftUrgency(lift)}</span>
-                      </div>
-                    ))}
-                </div>
-                <div className="panel">
-                  <h3 className="panel-subtitle">Ultime rapoarte</h3>
-                  {dashboard.latestReports.map((report) => (
-                    <div key={report.id} className="simple-list-item">
-                      <div className="simple-list-text">
-                        <div className="simple-list-label">{report.clientName} · {report.liftNumber}</div>
-                        <div className="simple-list-subtitle">{report.dateText} {report.timeText} · {report.technicianName}</div>
-                      </div>
-                      <span className="badge badge-blue">{report.reportType}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+          {tab === "dashboard" && <div className="panel">Clienți: {clients.length} · Lifturi: {lifts.length} · Rapoarte: {reports.length}</div>}
 
           {tab === "clients" && (
             <div className="maintenance-two-cols">
               <div className="panel">
                 <h3 className="panel-subtitle">{editingClientId ? "Editare client" : "Adaugă client"}</h3>
                 <div className="tool-form-grid">
-                  {Object.entries(clientForm).map(([key, value]) =>
-                    key === "status" ? (
-                      <div key={key} className="tool-form-block"><label className="tool-form-label">Status</label>
-                        <select className="tool-input" value={value} onChange={(e) => setClientForm((prev) => ({ ...prev, status: e.target.value as "active" | "inactive" }))}>
-                          <option value="active">Activ</option>
-                          <option value="inactive">Inactiv</option>
-                        </select>
-                      </div>
-                    ) : (
-                      <div key={key} className="tool-form-block"><label className="tool-form-label">{key}</label>
-                        <input className="tool-input" value={value} onChange={(e) => setClientForm((prev) => ({ ...prev, [key]: e.target.value }))} />
-                      </div>
-                    )
-                  )}
+                  {Object.entries(clientForm).map(([key, value]) => (
+                    <div key={key} className="tool-form-block">
+                      <label className="tool-form-label">{key}</label>
+                      <input className="tool-input" value={value} onChange={(e) => setClientForm((prev) => ({ ...prev, [key]: e.target.value }))} />
+                    </div>
+                  ))}
                 </div>
-                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void saveClient()} type="button">Salvează client</button></div>
+                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void (editingClientId ? updateMaintenanceClient(editingClientId, clientForm) : createMaintenanceClient(clientForm)).then(loadData)} type="button">Salvează client</button></div>
               </div>
-
               <div className="panel">
-                <h3 className="panel-subtitle">Listă clienți</h3>
-                {filteredClients.map((client) => (
+                {clients.map((client) => (
                   <div key={client.id} className="simple-list-item">
-                    <div className="simple-list-text" onClick={() => setSelectedClientId(client.id)}>
+                    <div className="simple-list-text" onClick={() => { setSelectedClientId(client.id); setReportEmail(client.email); }}>
                       <div className="simple-list-label">{client.name}</div>
-                      <div className="simple-list-subtitle">{client.phone || "fără telefon"} · {client.mainAddress || "fără adresă"}</div>
+                      <div className="simple-list-subtitle">{client.email} · {client.mainAddress}</div>
                     </div>
                     <div className="maintenance-actions">
-                      <button className="secondary-btn" type="button" onClick={() => { setClientForm(client); setEditingClientId(client.id); }}>Edit</button>
-                      <button className="danger-btn" type="button" onClick={() => void removeClient(client.id)}>Șterge</button>
+                      <button className="secondary-btn" onClick={() => { setClientForm(client); setEditingClientId(client.id); }} type="button">Edit</button>
+                      <button className="danger-btn" onClick={() => void deleteMaintenanceClient(client.id).then(loadData)} type="button">Șterge</button>
                     </div>
                   </div>
                 ))}
@@ -419,38 +367,26 @@ export default function MaintenancePage() {
                     <select className="tool-input" value={liftForm.clientId} onChange={(e) => {
                       const client = clients.find((item) => item.id === e.target.value);
                       setLiftForm((prev) => ({ ...prev, clientId: e.target.value, clientName: client?.name || "" }));
-                    }}>
-                      <option value="">Selectează client</option>
-                      {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                    </select>
+                    }}><option value="">Selectează client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
                   </div>
-                  {Object.entries(liftForm).filter(([key]) => key !== "clientId" && key !== "clientName").map(([key, value]) => (
-                    <div key={key} className="tool-form-block"><label className="tool-form-label">{key}</label>
-                      {key === "status" ? (
-                        <select className="tool-input" value={value} onChange={(e) => setLiftForm((prev) => ({ ...prev, status: e.target.value as LiftStatus }))}>
-                          <option value="active">Activ</option><option value="stopped">Oprit</option><option value="repair">În reparație</option><option value="overdue">Scadent</option>
-                        </select>
-                      ) : (
-                        <input className="tool-input" value={value} onChange={(e) => setLiftForm((prev) => ({ ...prev, [key]: e.target.value }))} />
-                      )}
-                    </div>
+                  {Object.entries(liftForm).filter(([key]) => key !== "clientId").map(([key, value]) => (
+                    <div key={key} className="tool-form-block"><label className="tool-form-label">{key}</label><input className="tool-input" value={value} onChange={(e) => setLiftForm((prev) => ({ ...prev, [key]: e.target.value }))} /></div>
                   ))}
                 </div>
-                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void saveLift()} type="button">Salvează lift</button></div>
+                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void (editingLiftId ? updateLift(editingLiftId, liftForm) : createLift(liftForm)).then(loadData)} type="button">Salvează lift</button></div>
               </div>
 
               <div className="panel">
-                <h3 className="panel-subtitle">Listă lifturi</h3>
-                {filteredLifts.map((lift) => (
+                {lifts.map((lift) => (
                   <div key={lift.id} className="simple-list-item">
-                    <div className="simple-list-text" onClick={() => { setSelectedLiftId(lift.id); setReportForm((prev) => ({ ...prev, clientId: lift.clientId, liftId: lift.id })); }}>
+                    <div className="simple-list-text" onClick={() => { setSelectedClientId(lift.clientId); setSelectedLiftId(lift.id); }}>
                       <div className="simple-list-label">{lift.liftNumber} · {lift.clientName}</div>
-                      <div className="simple-list-subtitle">{lift.exactAddress} · tehnician: {lift.assignedTechnician || "-"}</div>
+                      <div className="simple-list-subtitle">{lift.exactAddress} · {lift.maintenanceCompany}</div>
                     </div>
                     <div className="maintenance-actions">
                       <span className={`badge badge-${getLiftUrgency(lift)}`}>{getLiftUrgency(lift)}</span>
                       <button className="secondary-btn" type="button" onClick={() => { setLiftForm(lift); setEditingLiftId(lift.id); }}>Edit</button>
-                      <button className="danger-btn" type="button" onClick={() => void removeLift(lift.id)}>Șterge</button>
+                      <button className="danger-btn" type="button" onClick={() => void deleteLift(lift.id).then(loadData)}>Șterge</button>
                     </div>
                   </div>
                 ))}
@@ -458,85 +394,87 @@ export default function MaintenancePage() {
             </div>
           )}
 
-          {tab === "reports" && (
+          {tab === "newReport" && (
             <div className="maintenance-two-cols">
               <div className="panel">
-                <h3 className="panel-subtitle">Generează raport</h3>
+                <h3 className="panel-subtitle">Raport nou</h3>
                 <div className="tool-form-grid">
-                  <div className="tool-form-block"><label className="tool-form-label">Client</label>
-                    <select className="tool-input" value={reportForm.clientId} onChange={(e) => setReportForm((prev) => ({ ...prev, clientId: e.target.value, liftId: "" }))}>
-                      <option value="">Selectează client</option>
-                      {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="tool-form-block"><label className="tool-form-label">Lift</label>
-                    <select className="tool-input" value={reportForm.liftId} onChange={(e) => setReportForm((prev) => ({ ...prev, liftId: e.target.value }))}>
-                      <option value="">Selectează lift</option>
-                      {lifts.filter((lift) => !reportForm.clientId || lift.clientId === reportForm.clientId).map((lift) => <option key={lift.id} value={lift.id}>{lift.liftNumber}</option>)}
-                    </select>
-                  </div>
-                  <div className="tool-form-block"><label className="tool-form-label">Tip raport</label>
-                    <select className="tool-input" value={reportForm.reportType} onChange={(e) => setReportForm((prev) => ({ ...prev, reportType: e.target.value as ReportType }))}>
-                      <option value="revizie">Revizie</option><option value="interventie">Intervenție</option>
-                    </select>
-                  </div>
-                  <div className="tool-form-block"><label className="tool-form-label">Tehnician</label><input className="tool-input" value={reportForm.technicianName} onChange={(e) => setReportForm((prev) => ({ ...prev, technicianName: e.target.value }))} /></div>
-                  <div className="tool-form-block"><label className="tool-form-label">Observații</label><textarea className="tool-input" value={reportForm.observations} onChange={(e) => setReportForm((prev) => ({ ...prev, observations: e.target.value }))} /></div>
-
-                  {reportForm.reportType === "revizie" ? (
-                    <>
-                      <div className="tool-form-block"><label className="tool-form-label">Text standard revizie</label><textarea className="tool-input" value={reportForm.standardText} onChange={(e) => setReportForm((prev) => ({ ...prev, standardText: e.target.value }))} /></div>
-                      <div className="tool-form-block"><label className="tool-form-label">Checklist</label>
-                        <div className="maintenance-checklist">
-                          {checklistOptions.map((item) => (
-                            <label key={item}>
-                              <input
-                                type="checkbox"
-                                checked={reportForm.reviewChecklist.includes(item)}
-                                onChange={(e) => setReportForm((prev) => ({
-                                  ...prev,
-                                  reviewChecklist: e.target.checked
-                                    ? [...prev.reviewChecklist, item]
-                                    : prev.reviewChecklist.filter((value) => value !== item),
-                                }))}
-                              />
-                              {item}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="tool-form-block"><label className="tool-form-label">Reclamație</label><textarea className="tool-input" value={reportForm.complaint} onChange={(e) => setReportForm((prev) => ({ ...prev, complaint: e.target.value }))} /></div>
-                      <div className="tool-form-block"><label className="tool-form-label">Constatare</label><textarea className="tool-input" value={reportForm.finding} onChange={(e) => setReportForm((prev) => ({ ...prev, finding: e.target.value }))} /></div>
-                      <div className="tool-form-block"><label className="tool-form-label">Lucrare efectuată</label><textarea className="tool-input" value={reportForm.workPerformed} onChange={(e) => setReportForm((prev) => ({ ...prev, workPerformed: e.target.value }))} /></div>
-                      <div className="tool-form-block"><label className="tool-form-label">Piese schimbate</label><textarea className="tool-input" value={reportForm.replacedParts} onChange={(e) => setReportForm((prev) => ({ ...prev, replacedParts: e.target.value }))} /></div>
-                      <div className="tool-form-block"><label className="tool-form-label">Recomandări</label><textarea className="tool-input" value={reportForm.recommendations} onChange={(e) => setReportForm((prev) => ({ ...prev, recommendations: e.target.value }))} /></div>
-                    </>
-                  )}
+                  <div className="tool-form-block"><label className="tool-form-label">Client</label><select className="tool-input" value={selectedClientId} onChange={(e) => { setSelectedClientId(e.target.value); setSelectedLocationId(""); setSelectedLiftId(""); const c = clients.find((x) => x.id === e.target.value); setReportEmail(c?.email || ""); }}><option value="">Selectează client</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Email</label><input className="tool-input" value={reportEmail} onChange={(e) => setReportEmail(e.target.value)} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Adresă / locație</label><select className="tool-input" value={selectedLocationId} onChange={(e) => { setSelectedLocationId(e.target.value); setSelectedLiftId(""); }}><option value="">Selectează locație</option>{locationOptions.map((loc) => <option key={loc.id} value={loc.id}>{loc.label}</option>)}</select></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Lift</label><select className="tool-input" value={selectedLiftId} onChange={(e) => setSelectedLiftId(e.target.value)}><option value="">Selectează lift</option>{availableLifts.map((lift) => <option key={lift.id} value={lift.id}>{lift.liftNumber}</option>)}</select></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Tehnician</label><input className="tool-input" value={technicianName} onChange={(e) => setTechnicianName(e.target.value)} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Tip lucrare</label><select className="tool-input" value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)}><option value="revizie">Revizie</option><option value="interventie">Intervenție</option></select></div>
+                  {reportType === "interventie" && <div className="tool-form-block"><label className="tool-form-label">Constatare intervenție</label><textarea className="tool-input" value={constatareInterventie} onChange={(e) => setConstatareInterventie(e.target.value)} /></div>}
+                  {reportType === "interventie" && <div className="tool-form-block"><label className="tool-form-label">Poze intervenție</label><input type="file" className="tool-input" multiple accept="image/*" onChange={(e) => setSelectedImages(Array.from(e.target.files || []))} /></div>}
                 </div>
-                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void generateReport()} type="button">Generează PDF</button></div>
+                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void generateReport()} type="button">Generează raport</button></div>
               </div>
 
               <div className="panel">
-                <h3 className="panel-subtitle">Istoric rapoarte</h3>
-                <div className="maintenance-actions" style={{ marginBottom: 10 }}>
-                  <button className={reportTypeFilter === "all" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("all")} type="button">Toate</button>
-                  <button className={reportTypeFilter === "revizie" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("revizie")} type="button">Revizii</button>
-                  <button className={reportTypeFilter === "interventie" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("interventie")} type="button">Intervenții</button>
+                <h3 className="panel-subtitle">Preview branding selectat</h3>
+                <p>Firma mentenanță detectată: <b>{selectedLift?.maintenanceCompany || "-"}</b></p>
+                <p>Branding folosit: <b>{resolvedBranding.branding?.nume || "Fallback"}</b></p>
+                {resolvedBranding.branding?.logoUrl && <img src={resolvedBranding.branding.logoUrl} alt="logo" style={{ maxWidth: 240, maxHeight: 100 }} />}
+                {resolvedBranding.branding?.stampilaUrl && <img src={resolvedBranding.branding.stampilaUrl} alt="stampila" style={{ maxWidth: 200, maxHeight: 120 }} />}
+                <div className="tool-form-actions" style={{ marginTop: 16 }}>
+                  <a
+                    className="secondary-btn"
+                    href={`mailto:${reportEmail}?subject=${encodeURIComponent(defaultEmailSubject(reportType, new Date().toLocaleDateString("ro-RO")))}&body=${encodeURIComponent(defaultEmailBody(reportType, resolvedBranding.branding?.emailDisplayName || "Mentenanta"))}${(resolvedBranding.branding?.nume || "").includes("KLEEMANN") && resolvedBranding.branding?.emailImplicitCc[0] ? `&cc=${encodeURIComponent(resolvedBranding.branding.emailImplicitCc[0])}` : ""}`}
+                  >Trimite email</a>
                 </div>
-                {filteredReports.map((report) => (
-                  <div key={report.id} className="simple-list-item">
-                    <div className="simple-list-text">
-                      <div className="simple-list-label">{report.clientName} · {report.liftNumber}</div>
-                      <div className="simple-list-subtitle">{report.dateText} {report.timeText} · {report.technicianName}</div>
-                      <div className="simple-list-subtitle">{report.observations || report.standardText || report.finding || "Fără observații"}</div>
+              </div>
+            </div>
+          )}
+
+          {tab === "history" && (
+            <div className="panel">
+              <div className="maintenance-actions" style={{ marginBottom: 12 }}>
+                <button className={reportTypeFilter === "all" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("all")} type="button">Toate</button>
+                <button className={reportTypeFilter === "revizie" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("revizie")} type="button">Revizii</button>
+                <button className={reportTypeFilter === "interventie" ? "primary-btn" : "secondary-btn"} onClick={() => setReportTypeFilter("interventie")} type="button">Intervenții</button>
+              </div>
+              {filteredReports.map((report) => (
+                <div key={report.id} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{report.clientName} · {report.liftNumber}</div>
+                    <div className="simple-list-subtitle">{report.dateText} · {report.technicianName} · {report.reportType}</div>
+                    <div className="simple-list-subtitle">{report.adresa}</div>
+                    {!!report.images.length && <div className="simple-list-subtitle">Imagini: {report.images.length}</div>}
+                  </div>
+                  <div className="maintenance-actions">
+                    {report.pdfUrl && <a className="secondary-btn" href={report.pdfUrl} target="_blank" rel="noreferrer">PDF</a>}
+                    <button className="danger-btn" onClick={() => void deleteReportFully(report).then(loadData)} type="button">Șterge</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "branding" && (
+            <div className="maintenance-two-cols">
+              <div className="panel">
+                <h3 className="panel-subtitle">Setări firme mentenanță</h3>
+                <div className="tool-form-grid">
+                  <div className="tool-form-block"><label className="tool-form-label">ID firmă</label><input className="tool-input" value={brandingForm.id} onChange={(e) => setBrandingForm((prev) => ({ ...prev, id: e.target.value }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Nume</label><input className="tool-input" value={brandingForm.nume} onChange={(e) => setBrandingForm((prev) => ({ ...prev, nume: e.target.value }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Key</label><input className="tool-input" value={brandingForm.key} onChange={(e) => setBrandingForm((prev) => ({ ...prev, key: e.target.value }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Aliases (virgulă)</label><input className="tool-input" value={brandingForm.aliases.join(", ")} onChange={(e) => setBrandingForm((prev) => ({ ...prev, aliases: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Email display</label><input className="tool-input" value={brandingForm.emailDisplayName} onChange={(e) => setBrandingForm((prev) => ({ ...prev, emailDisplayName: e.target.value }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Email implicit CC (virgulă)</label><input className="tool-input" value={brandingForm.emailImplicitCc.join(", ")} onChange={(e) => setBrandingForm((prev) => ({ ...prev, emailImplicitCc: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) }))} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Logo</label><input type="file" className="tool-input" accept="image/*" onChange={(e) => setBrandingLogoFile(e.target.files?.[0] || null)} /></div>
+                  <div className="tool-form-block"><label className="tool-form-label">Ștampilă</label><input type="file" className="tool-input" accept="image/*" onChange={(e) => setBrandingStampilaFile(e.target.files?.[0] || null)} /></div>
+                </div>
+                <div className="tool-form-actions"><button className="primary-btn" disabled={busy} onClick={() => void saveBranding()} type="button">Salvează branding</button></div>
+              </div>
+              <div className="panel">
+                {branding.map((item) => (
+                  <div key={item.id} className="simple-list-item">
+                    <div className="simple-list-text" onClick={() => setBrandingForm({ ...item })}>
+                      <div className="simple-list-label">{item.nume}</div>
+                      <div className="simple-list-subtitle">{item.aliases.join(", ")}</div>
                     </div>
-                    <div className="maintenance-actions">
-                      <span className="badge badge-blue">{report.reportType}</span>
-                      {report.pdfUrl && <a className="secondary-btn" href={report.pdfUrl} target="_blank" rel="noreferrer">Vezi PDF</a>}
-                    </div>
+                    <div className="maintenance-actions"><button className="danger-btn" type="button" onClick={() => void deleteBranding(item.id).then(loadData)}>Șterge</button></div>
                   </div>
                 ))}
               </div>

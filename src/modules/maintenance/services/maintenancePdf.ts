@@ -1,51 +1,18 @@
-import type { LiftUnit, MaintenanceClient, MaintenanceReport } from "../../../types/maintenance";
+import type { LiftUnit, MaintenanceBranding, MaintenanceClient, MaintenanceReport, ReportType } from "../../../types/maintenance";
 
 type PdfInput = {
   client: MaintenanceClient;
   lift: LiftUnit;
+  branding: MaintenanceBranding | null;
   report: Omit<MaintenanceReport, "id" | "pdfUrl">;
-  companyName: string;
 };
 
 function escapePdfText(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function formatGps(report: Omit<MaintenanceReport, "id" | "pdfUrl">): string {
-  if (report.gpsLat == null || report.gpsLng == null) return report.gpsAddress || "Locatie indisponibila";
-  return `${report.gpsLat.toFixed(6)}, ${report.gpsLng.toFixed(6)}`;
-}
-
-export function buildMaintenancePdfBlob(input: PdfInput): Blob {
-  const { client, lift, report, companyName } = input;
-  const lines = [
-    `${companyName}`,
-    "RAPORT MENTENANTA LIFT",
-    `Tip raport: ${report.reportType.toUpperCase()}`,
-    "",
-    `Client: ${client.name}`,
-    `Persoana contact: ${client.contactPerson || "-"}`,
-    `Telefon: ${client.phone || "-"}`,
-    `Lift: ${lift.liftNumber}`,
-    `Adresa: ${lift.exactAddress || client.mainAddress || "-"}`,
-    `Tehnician: ${report.technicianName || "-"}`,
-    `Data: ${report.dateText} ${report.timeText}`,
-    `GPS: ${formatGps(report)}`,
-    "",
-    "CONTINUT",
-    `Text standard: ${report.standardText || "-"}`,
-    `Checklist: ${report.reviewChecklist.join(", ") || "-"}`,
-    `Observatii: ${report.observations || "-"}`,
-    `Reclamatie: ${report.complaint || "-"}`,
-    `Constatare: ${report.finding || "-"}`,
-    `Lucrare efectuata: ${report.workPerformed || "-"}`,
-    `Piese schimbate: ${report.replacedParts || "-"}`,
-    `Recomandari: ${report.recommendations || "-"}`,
-    "",
-    "Semnatura tehnician: _____________________",
-  ];
-
-  const textCommands: string[] = ["BT", "/F1 11 Tf", "50 790 Td", "14 TL"];
+function buildPdf(lines: string[]): Blob {
+  const textCommands: string[] = ["BT", "/F1 10 Tf", "40 800 Td", "14 TL"];
   lines.forEach((line, index) => {
     if (index > 0) textCommands.push("T*");
     textCommands.push(`(${escapePdfText(line)}) Tj`);
@@ -77,6 +44,39 @@ export function buildMaintenancePdfBlob(input: PdfInput): Blob {
   const xref = `xref\n0 ${objects.length + 1}\n${xrefRows.join("\n")}\n`;
   const trailer = `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
 
-  const pdf = `%PDF-1.4\n${bodyParts.join("")}${xref}${trailer}`;
-  return new Blob([pdf], { type: "application/pdf" });
+  return new Blob([`%PDF-1.4\n${bodyParts.join("")}${xref}${trailer}`], { type: "application/pdf" });
+}
+
+export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
+  const { client, lift, report, branding } = input;
+  const title = report.reportType === "interventie" ? "RAPORT INTERVENTIE" : "RAPORT REVIZIE";
+  const lines = [
+    `${title}`,
+    `Firma: ${branding?.nume || "DEFAULT"}`,
+    `Logo URL: ${branding?.logoUrl || "-"}`,
+    `Stampila URL: ${branding?.stampilaUrl || "-"}`,
+    `Locatie generare raport: ${report.gpsLocatie || "Locatie indisponibila"}`,
+    `Data: ${report.dateText} ${report.timeText}`,
+    `Client: ${client.name}`,
+    `Adresa: ${report.adresa}`,
+    `Lift: ${lift.liftNumber}`,
+    `Tehnician: ${report.technicianName}`,
+    `Tip lucrare: ${report.reportType}`,
+    "",
+    report.reportType === "interventie" ? "Constatare interventie:" : "Continut revizie:",
+    ...report.continutRaport.match(/.{1,95}(\s|$)/g)?.map((item) => item.trim()).filter(Boolean) || ["-"],
+    "",
+    "Semnatura beneficiar: _____________________",
+    "Semnatura tehnician: _____________________",
+  ];
+
+  return buildPdf(lines);
+}
+
+export function defaultEmailSubject(type: ReportType, dateText: string): string {
+  return type === "interventie" ? `Raport Interventie ${dateText}` : `Raport Revizie ${dateText}`;
+}
+
+export function defaultEmailBody(type: ReportType, firma: string): string {
+  return `Buna ziua,\n\nVa transmitem in atasament Raportul de ${type === "interventie" ? "Interventie" : "Revizie"}.\n\nO zi buna!\nEchipa ${firma}`;
 }
