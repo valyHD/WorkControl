@@ -221,7 +221,7 @@ export default function VehicleLiveRouteCard({
   const [historyPositions, setHistoryPositions] = useState<VehiclePositionItem[]>([]);
   const [didInitialFit, setDidInitialFit] = useState(false);
   const mountedRef = useRef(true);
-
+  const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
   async function loadMeta() {
     if (!authReady || !user) return;
 
@@ -268,58 +268,72 @@ export default function VehicleLiveRouteCard({
     setDidInitialFit(false);
   }, [fromTs, toTs, vehicle.id]);
 
-  useEffect(() => {
-    if (!authReady) {
-      setLoading(true);
-      return;
-    }
-
-    if (!user) {
-      setLoading(false);
-      setPositions([]);
-      setStopItems([]);
-      setOverspeedItems([]);
-      setTimeline([]);
-      return;
-    }
-
+useEffect(() => {
+  if (!authReady) {
     setLoading(true);
+    return;
+  }
 
-    const unsubscribe = pollVehiclePositionsRange(
-      vehicle.id,
-      fromTs,
-      toTs,
-      (route) => {
-        const clean = safeRoutePoints(filterTrackableRoutePositions(route));
-        const stops = detectStops(clean);
-        const overspeed = detectOverspeed(clean, overspeedThreshold);
+  if (!user) {
+    setLoading(false);
+    setPositions([]);
+    setStopItems([]);
+    setOverspeedItems([]);
+    setTimeline([]);
+    return;
+  }
 
-        if (!mountedRef.current) return;
+  if (positions.length === 0 && !hasSnapshot) {
+    setLoading(true);
+  }
 
-        setPositions(clean);
-        setStopItems(stops);
-        setOverspeedItems(overspeed);
-        setTimeline(buildTimelineEvents(clean, stops, overspeed));
-        setLoading(false);
-      },
-      (error) => {
-        console.error("[VehicleLiveRouteCard][pollRange]", error);
-        if (!mountedRef.current) return;
-        setLoading(false);
-      },
-      LIVE_REFRESH_MS,
-      ROUTE_PAGE_SIZE
-    );
+  const loadingGuard = window.setTimeout(() => {
+    if (!mountedRef.current) return;
+    setLoading(false);
+  }, 8000);
 
-    return () => {
-      try {
-        unsubscribe?.();
-      } catch (error) {
-        console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
-      }
-    };
-  }, [authReady, user, vehicle.id, fromTs, toTs, overspeedThreshold]);
+  const unsubscribe = pollVehiclePositionsRange(
+    vehicle.id,
+    fromTs,
+    toTs,
+    (route) => {
+      const clean = safeRoutePoints(filterTrackableRoutePositions(route));
+      const stops = detectStops(clean);
+      const overspeed = detectOverspeed(clean, overspeedThreshold);
 
+      if (!mountedRef.current) return;
+
+      setPositions(clean);
+      setStopItems(stops);
+      setOverspeedItems(overspeed);
+      setTimeline(buildTimelineEvents(clean, stops, overspeed));
+      setLoading(false);
+
+      console.log("[VehicleLiveRouteCard][route loaded]", {
+        vehicleId: vehicle.id,
+        fromTs,
+        toTs,
+        points: clean.length,
+      });
+    },
+    (error) => {
+      console.error("[VehicleLiveRouteCard][pollRange]", error);
+      if (!mountedRef.current) return;
+      setLoading(false);
+    },
+    LIVE_REFRESH_MS,
+    ROUTE_PAGE_SIZE
+  );
+
+  return () => {
+    window.clearTimeout(loadingGuard);
+    try {
+      unsubscribe?.();
+    } catch (error) {
+      console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
+    }
+  };
+}, [authReady, user, vehicle.id, fromTs, toTs, overspeedThreshold, hasSnapshot, positions.length]);
   useEffect(() => {
     if (!authReady || !user) return;
     void loadMeta();
@@ -469,7 +483,6 @@ export default function VehicleLiveRouteCard({
     });
   }
 
-  const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
   const crumbPositions = useMemo(() => samplePositions(positions, 300), [positions]);
 
   return (
@@ -672,9 +685,9 @@ export default function VehicleLiveRouteCard({
           <div className="vehicle-live-route-card__empty">
             Se initializeaza autentificarea...
           </div>
-        ) : loading ? (
+        ) : loading && positions.length === 0 && !hasSnapshot ? (
           <div className="vehicle-live-route-card__empty">Se incarca datele GPS...</div>
-        ) : positions.length === 0 && !hasSnapshot ? (
+        ) : !loading && positions.length === 0 && !hasSnapshot ? (
           <div className="vehicle-live-route-card__empty">
             Nu exista traseu sau date suficiente pentru intervalul ales.
           </div>
