@@ -256,6 +256,19 @@ function buildPersistedRouteCacheKey(vehicleId: string, fromTs: number, toTs: nu
   return `wc_route_cache:${vehicleId}:${fromTs}:${toTs}`;
 }
 
+function buildPersistedRouteCachePrefix(vehicleId: string): string {
+  return `wc_route_cache:${vehicleId}:`;
+}
+
+function parsePersistedRangeFromKey(key: string): { fromTs: number; toTs: number } | null {
+  const parts = key.split(":");
+  if (parts.length !== 5) return null;
+  const fromTs = Number(parts[3]);
+  const toTs = Number(parts[4]);
+  if (!Number.isFinite(fromTs) || !Number.isFinite(toTs)) return null;
+  return { fromTs, toTs };
+}
+
 function readPersistedRouteCache(
   vehicleId: string,
   fromTs: number,
@@ -272,6 +285,57 @@ function readPersistedRouteCache(
     if (Date.now() - Number(parsed.savedAt || 0) > PERSISTED_ROUTE_CACHE_TTL_MS) return null;
 
     return normalizePositionItems(parsed.items);
+  } catch {
+    return null;
+  }
+}
+
+function readBestPersistedRouteCache(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number
+): VehiclePositionItem[] | null {
+  if (typeof window === "undefined") return null;
+
+  const exact = readPersistedRouteCache(vehicleId, fromTs, toTs);
+  if (exact?.length) return exact;
+
+  try {
+    const prefix = buildPersistedRouteCachePrefix(vehicleId);
+    let best: { fromTs: number; toTs: number; savedAt: number; items: VehiclePositionItem[] } | null = null;
+
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(prefix)) continue;
+
+      const range = parsePersistedRangeFromKey(key);
+      if (!range) continue;
+
+      if (range.fromTs > fromTs || range.toTs < fromTs) continue;
+
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+
+      const parsed = JSON.parse(raw) as PersistedRouteCacheItem;
+      if (!parsed || !Array.isArray(parsed.items)) continue;
+      if (Date.now() - Number(parsed.savedAt || 0) > PERSISTED_ROUTE_CACHE_TTL_MS) continue;
+
+      const items = normalizePositionItems(parsed.items).filter(
+        (item) => item.gpsTimestamp >= fromTs && item.gpsTimestamp <= toTs
+      );
+      if (!items.length) continue;
+
+      if (!best || Number(parsed.savedAt || 0) > best.savedAt) {
+        best = {
+          fromTs: range.fromTs,
+          toTs: range.toTs,
+          savedAt: Number(parsed.savedAt || 0),
+          items,
+        };
+      }
+    }
+
+    return best?.items ?? null;
   } catch {
     return null;
   }
@@ -1322,7 +1386,7 @@ export function pollVehiclePositionsRange(
 
   const loadInitial = async () => {
     try {
-      const persisted = readPersistedRouteCache(vehicleId, fromTs, toTs);
+      const persisted = readBestPersistedRouteCache(vehicleId, fromTs, toTs);
       if (persisted && persisted.length > 0) {
         currentItems = persisted;
         lastLoadedToTs =
