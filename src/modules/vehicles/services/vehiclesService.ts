@@ -53,6 +53,26 @@ const MAX_TOTAL_ROUTE_POINTS = 250000;
 const DEFAULT_ROUTE_PAGE_SIZE = 2000;
 const DEFAULT_ROUTE_MAX_PAGES = 500;
 const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 12_000;
+const MAX_POLL_BACKOFF_MS = 90_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`request_timeout_${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 export function subscribeVehicleCommands(
   vehicleId: string,
   callback: (items: VehicleCommandItem[]) => void,
@@ -927,7 +947,7 @@ async function getVehiclePositionsForDay(
     }
 
     const q = query(pointsRef, ...constraints);
-    const snap = await getDocs(q);
+    const snap = await withTimeout(getDocs(q));
 
     if (snap.empty) break;
 
@@ -1075,12 +1095,17 @@ export function pollVehiclePositionsRange(
   let timer: number | null = null;
   let currentItems: VehiclePositionItem[] = [];
   let lastLoadedToTs = fromTs;
+  let errorStreak = 0;
 
   const isPastWindow = toTs < Date.now() - 30_000;
 
   const scheduleNext = () => {
     if (stopped || isPastWindow) return;
-    timer = window.setTimeout(loadIncremental, refreshMs);
+    const backoffMs = Math.min(
+      MAX_POLL_BACKOFF_MS,
+      refreshMs * Math.max(1, Math.pow(2, errorStreak))
+    );
+    timer = window.setTimeout(loadIncremental, backoffMs);
   };
 
   const loadInitial = async () => {
@@ -1098,10 +1123,12 @@ export function pollVehiclePositionsRange(
       currentItems = items;
       lastLoadedToTs =
         items.length > 0 ? items[items.length - 1].gpsTimestamp : fromTs;
+      errorStreak = 0;
 
       onData(currentItems);
     } catch (error) {
       console.error("[pollVehiclePositionsRange][initial]", error);
+      errorStreak += 1;
       if (!stopped) onError?.(error);
     } finally {
       scheduleNext();
@@ -1146,10 +1173,14 @@ export function pollVehiclePositionsRange(
           currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
       }
 
+      errorStreak = 0;
+
       onData(currentItems);
     } catch (error) {
       console.error("[pollVehiclePositionsRange][incremental]", error);
+      errorStreak += 1;
       if (!stopped) onError?.(error);
+      onData(currentItems);
     } finally {
       scheduleNext();
     }
@@ -1200,7 +1231,7 @@ export async function getVehicleTrackerEvents(
     limit(maxItems)
   );
 
-  const snap = await getDocs(eventsQuery);
+  const snap = await withTimeout(getDocs(eventsQuery));
   return snap.docs.map((docItem) => mapVehicleTrackerEventDoc(docItem.id, docItem.data()));
 }
 

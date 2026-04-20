@@ -50,6 +50,11 @@ const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
 const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const ROUTE_RENDER_POINTS = 1400;
+const ROUTE_ANALYSIS_POINTS = 2500;
+const CRUMB_POINTS = 220;
+const OVERSPEED_RENDER_POINTS = 80;
+const STOP_RENDER_LIMIT = 120;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
@@ -118,7 +123,7 @@ function safeRoutePoints(items: VehiclePositionItem[]) {
     deduped.push(item);
   }
 
-  return samplePositions(deduped);
+  return deduped;
 }
 
 function FitRouteBounds({
@@ -220,6 +225,8 @@ export default function VehicleLiveRouteCard({
   const [boundsTrigger, setBoundsTrigger] = useState(0);
   const [historyPositions, setHistoryPositions] = useState<VehiclePositionItem[]>([]);
   const [didInitialFit, setDidInitialFit] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [lastDataAt, setLastDataAt] = useState<number | null>(null);
   const mountedRef = useRef(true);
   const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
   async function loadMeta() {
@@ -241,6 +248,23 @@ export default function VehicleLiveRouteCard({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateOnlineState = () => {
+      const offline = typeof navigator !== "undefined" && !navigator.onLine;
+      if (!mountedRef.current) return;
+      setIsOffline(offline);
+    };
+
+    updateOnlineState();
+    window.addEventListener("online", updateOnlineState);
+    window.addEventListener("offline", updateOnlineState);
+
+    return () => {
+      window.removeEventListener("online", updateOnlineState);
+      window.removeEventListener("offline", updateOnlineState);
     };
   }, []);
 
@@ -298,15 +322,17 @@ useEffect(() => {
     toTs,
     (route) => {
       const clean = safeRoutePoints(filterTrackableRoutePositions(route));
-      const stops = detectStops(clean);
-      const overspeed = detectOverspeed(clean, overspeedThreshold);
+      const analysisPoints = samplePositions(clean, ROUTE_ANALYSIS_POINTS);
+      const stops = detectStops(analysisPoints);
+      const overspeed = detectOverspeed(analysisPoints, overspeedThreshold);
 
       if (!mountedRef.current) return;
 
       setPositions(clean);
       setStopItems(stops);
       setOverspeedItems(overspeed);
-      setTimeline(buildTimelineEvents(clean, stops, overspeed));
+      setTimeline(buildTimelineEvents(analysisPoints, stops, overspeed));
+      setLastDataAt(Date.now());
       setLoading(false);
 
       console.log("[VehicleLiveRouteCard][route loaded]", {
@@ -320,6 +346,7 @@ useEffect(() => {
       console.error("[VehicleLiveRouteCard][pollRange]", error);
       if (!mountedRef.current) return;
       setLoading(false);
+      setIsOffline(typeof navigator !== "undefined" ? !navigator.onLine : false);
     },
     LIVE_REFRESH_MS,
     ROUTE_PAGE_SIZE
@@ -417,7 +444,10 @@ useEffect(() => {
   }, [positions]);
 
   const historyStats = useMemo(() => {
-    const merged = filterTrackableRoutePositions([...historyPositions, ...positions]);
+    const merged = samplePositions(
+      filterTrackableRoutePositions([...historyPositions, ...positions]),
+      5000
+    );
     const dayBuckets = buildDistanceHistory(merged, "day");
     const weekBuckets = buildDistanceHistory(merged, "week");
     const monthBuckets = buildDistanceHistory(merged, "month");
@@ -438,6 +468,27 @@ useEffect(() => {
       monthBuckets,
     };
   }, [historyPositions, positions]);
+
+  const routeRenderPositions = useMemo(
+    () => samplePositions(positions, ROUTE_RENDER_POINTS),
+    [positions]
+  );
+
+  const routePolyline = useMemo(
+    () => routeRenderPositions.map((item) => [item.lat, item.lng] as [number, number]),
+    [routeRenderPositions]
+  );
+
+  const renderedOverspeedItems = useMemo(
+    () => samplePositions(overspeedItems, OVERSPEED_RENDER_POINTS),
+    [overspeedItems]
+  );
+
+  const renderedStopItems = useMemo(() => {
+    if (stopItems.length <= STOP_RENDER_LIMIT) return stopItems;
+    const stride = Math.ceil(stopItems.length / STOP_RENDER_LIMIT);
+    return stopItems.filter((_, index) => index % stride === 0);
+  }, [stopItems]);
 
   const mapCenter = useMemo<[number, number]>(() => {
     if (routeStats.end && isValidCoordPair(routeStats.end.lat, routeStats.end.lng)) {
@@ -483,7 +534,7 @@ useEffect(() => {
     });
   }
 
-  const crumbPositions = useMemo(() => samplePositions(positions, 300), [positions]);
+  const crumbPositions = useMemo(() => samplePositions(positions, CRUMB_POINTS), [positions]);
 
   return (
     <div className="panel vehicle-live-route-card">
@@ -591,13 +642,15 @@ useEffect(() => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {positions.length > 0 && <FitRouteBounds points={positions} trigger={boundsTrigger} />}
+          {routeRenderPositions.length > 0 && (
+            <FitRouteBounds points={routeRenderPositions} trigger={boundsTrigger} />
+          )}
 
           {positions.length > 0 ? (
             <>
               <Pane name="route" style={{ zIndex: 410 }}>
                 <Polyline
-                  positions={positions.map((item) => [item.lat, item.lng] as [number, number])}
+                  positions={routePolyline}
                   pathOptions={{ color: "#2563eb", weight: 5 }}
                 />
               </Pane>
@@ -620,7 +673,7 @@ useEffect(() => {
                 </>
               )}
 
-              {stopItems.map((stop) => (
+              {renderedStopItems.map((stop) => (
                 <CircleMarker
                   key={stop.id}
                   center={[stop.lat, stop.lng]}
@@ -640,7 +693,7 @@ useEffect(() => {
                 </CircleMarker>
               ))}
 
-              {overspeedItems.map((point) => (
+              {renderedOverspeedItems.map((point) => (
                 <Marker
                   key={`overspeed-${point.id || point.gpsTimestamp}`}
                   position={[point.lat, point.lng]}
@@ -684,6 +737,11 @@ useEffect(() => {
         {!authReady ? (
           <div className="vehicle-live-route-card__empty">
             Se initializeaza autentificarea...
+          </div>
+        ) : isOffline ? (
+          <div className="vehicle-live-route-card__empty">
+            Fara internet momentan. Pastram ultima ruta vizibila si reluam automat cand revine netul.
+            {lastDataAt ? ` Ultima sincronizare: ${formatDate(lastDataAt)}.` : ""}
           </div>
         ) : loading && positions.length === 0 && !hasSnapshot ? (
           <div className="vehicle-live-route-card__empty">Se incarca datele GPS...</div>
