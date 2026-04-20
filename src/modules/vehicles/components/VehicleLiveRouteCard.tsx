@@ -10,6 +10,7 @@ import {
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Crosshair, RefreshCw } from "lucide-react";
 import type {
   VehicleCommandItem,
@@ -50,11 +51,11 @@ const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
 const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
-const ROUTE_RENDER_POINTS = 260;
-const ROUTE_ANALYSIS_POINTS = 420;
-const CRUMB_POINTS = 45;
-const OVERSPEED_RENDER_POINTS = 25;
-const STOP_RENDER_LIMIT = 45;
+const ROUTE_RENDER_POINTS = 180;
+const ROUTE_ANALYSIS_POINTS = 300;
+const CRUMB_POINTS = 24;
+const OVERSPEED_RENDER_POINTS = 16;
+const STOP_RENDER_LIMIT = 32;
 const SIGNATURE_SAMPLE_POINTS = 16;
 const HISTORY_INCREMENTAL_OVERLAP_MS = 60_000;
 
@@ -708,14 +709,16 @@ export default function VehicleLiveRouteCard({
       <div className="vehicle-live-route-card__mapWrap">
         <MapContainer
           center={mapCenter}
-          zoom={15}
+          zoom={13}
           scrollWheelZoom
           preferCanvas
           className="vehicle-live-route-card__map"
         >
           <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+            url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+            updateWhenIdle
+            keepBuffer={1}
           />
 
           {routeRenderPositions.length > 0 && (

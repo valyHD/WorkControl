@@ -1,27 +1,49 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import AppShell from "../layouts/AppShell";
-import DashboardPage from "../modules/dashboard/pages/DashboardPage";
-import UsersPage from "../modules/users/pages/UsersPage";
-import LoginPage from "../modules/auth/pages/LoginPage";
 import { useAuth } from "../providers/AuthProvider";
-import MyProfilePage from "../modules/users/pages/MyProfilePage";
-import ToolsPage from "../modules/tools/pages/ToolsPage";
-import ToolFormPage from "../modules/tools/pages/ToolFormPage";
-import ToolDetailsPage from "../modules/tools/pages/ToolDetailsPage";
-import ToolScanPage from "../modules/tools/pages/ToolScanPage";
-import UserFormPage from "../modules/users/pages/UserFormPage";
-import VehiclesPage from "../modules/vehicles/pages/VehiclesPage";
-import VehicleFormPage from "../modules/vehicles/pages/VehicleFormPage";
-import VehicleDetailsPage from "../modules/vehicles/pages/VehicleDetailsPage";
-import MyVehiclePage from "../modules/vehicles/pages/MyVehiclePage";
-import TimesheetsPage from "../modules/timesheets/pages/TimesheetsPage";
-import TimesheetDetailsPage from "../modules/timesheets/pages/TimesheetDetailsPage";
-import MyTimesheetsPage from "../modules/timesheets/pages/MyTimesheetsPage";
-import ProjectsPage from "../modules/timesheets/pages/ProjectsPage";
-import NotificationsPage from "../modules/notifications/pages/NotificationsPage";
-import ControlPanelPage from "../modules/reports/pages/ReportsPage";
-import NotificationRulesPage from "../modules/notifications/pages/NotificationRulesPage";
-import MaintenancePage from "../modules/maintenance/pages/MaintenancePage";
+
+const DashboardPage = lazy(() => import("../modules/dashboard/pages/DashboardPage"));
+const UsersPage = lazy(() => import("../modules/users/pages/UsersPage"));
+const LoginPage = lazy(() => import("../modules/auth/pages/LoginPage"));
+const MyProfilePage = lazy(() => import("../modules/users/pages/MyProfilePage"));
+const ToolsPage = lazy(() => import("../modules/tools/pages/ToolsPage"));
+const ToolFormPage = lazy(() => import("../modules/tools/pages/ToolFormPage"));
+const ToolDetailsPage = lazy(() => import("../modules/tools/pages/ToolDetailsPage"));
+const ToolScanPage = lazy(() => import("../modules/tools/pages/ToolScanPage"));
+const UserFormPage = lazy(() => import("../modules/users/pages/UserFormPage"));
+const VehiclesPage = lazy(() => import("../modules/vehicles/pages/VehiclesPage"));
+const VehicleFormPage = lazy(() => import("../modules/vehicles/pages/VehicleFormPage"));
+const VehicleDetailsPage = lazy(() => import("../modules/vehicles/pages/VehicleDetailsPage"));
+const MyVehiclePage = lazy(() => import("../modules/vehicles/pages/MyVehiclePage"));
+const TimesheetsPage = lazy(() => import("../modules/timesheets/pages/TimesheetsPage"));
+const TimesheetDetailsPage = lazy(
+  () => import("../modules/timesheets/pages/TimesheetDetailsPage")
+);
+const MyTimesheetsPage = lazy(() => import("../modules/timesheets/pages/MyTimesheetsPage"));
+const ProjectsPage = lazy(() => import("../modules/timesheets/pages/ProjectsPage"));
+const NotificationsPage = lazy(() => import("../modules/notifications/pages/NotificationsPage"));
+const ControlPanelPage = lazy(() => import("../modules/reports/pages/ReportsPage"));
+const NotificationRulesPage = lazy(
+  () => import("../modules/notifications/pages/NotificationRulesPage")
+);
+const MaintenancePage = lazy(() => import("../modules/maintenance/pages/MaintenancePage"));
+
+function RouteLoader() {
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <h1 className="auth-title">Se incarca pagina...</h1>
+        <p className="auth-subtitle">Pregatim modulele necesare.</p>
+      </div>
+    </div>
+  );
+}
+
+function withSuspense(element: ReactNode) {
+  return <Suspense fallback={<RouteLoader />}>{element}</Suspense>;
+}
+
 function ProtectedLayout() {
   const { user, loading } = useAuth();
 
@@ -46,41 +68,41 @@ function ProtectedLayout() {
 export const router = createBrowserRouter([
   {
     path: "/login",
-    element: <LoginPage />,
+    element: withSuspense(<LoginPage />),
   },
   {
     path: "/",
     element: <ProtectedLayout />,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
-      { path: "/dashboard", element: <DashboardPage /> },
+      { path: "/dashboard", element: withSuspense(<DashboardPage />) },
 
-      { path: "/my-profile", element: <MyProfilePage /> },
-{ path: "/notification-rules", element: <NotificationRulesPage /> },
-      { path: "/users", element: <UsersPage /> },
-      { path: "/users/new", element: <UserFormPage /> },
-      { path: "/users/:userId/edit", element: <UserFormPage /> },
+      { path: "/my-profile", element: withSuspense(<MyProfilePage />) },
+      { path: "/notification-rules", element: withSuspense(<NotificationRulesPage />) },
+      { path: "/users", element: withSuspense(<UsersPage />) },
+      { path: "/users/new", element: withSuspense(<UserFormPage />) },
+      { path: "/users/:userId/edit", element: withSuspense(<UserFormPage />) },
 
-      { path: "/tools", element: <ToolsPage /> },
-      { path: "/tools/new", element: <ToolFormPage /> },
-      { path: "/tools/scan", element: <ToolScanPage /> },
-      { path: "/tools/:toolId", element: <ToolDetailsPage /> },
-      { path: "/tools/:toolId/edit", element: <ToolFormPage /> },
+      { path: "/tools", element: withSuspense(<ToolsPage />) },
+      { path: "/tools/new", element: withSuspense(<ToolFormPage />) },
+      { path: "/tools/scan", element: withSuspense(<ToolScanPage />) },
+      { path: "/tools/:toolId", element: withSuspense(<ToolDetailsPage />) },
+      { path: "/tools/:toolId/edit", element: withSuspense(<ToolFormPage />) },
 
-      { path: "/vehicles", element: <VehiclesPage /> },
-      { path: "/my-vehicle", element: <MyVehiclePage /> },
-      { path: "/vehicles/new", element: <VehicleFormPage /> },
-      { path: "/vehicles/:vehicleId", element: <VehicleDetailsPage /> },
-      { path: "/vehicles/:vehicleId/edit", element: <VehicleFormPage /> },
+      { path: "/vehicles", element: withSuspense(<VehiclesPage />) },
+      { path: "/my-vehicle", element: withSuspense(<MyVehiclePage />) },
+      { path: "/vehicles/new", element: withSuspense(<VehicleFormPage />) },
+      { path: "/vehicles/:vehicleId", element: withSuspense(<VehicleDetailsPage />) },
+      { path: "/vehicles/:vehicleId/edit", element: withSuspense(<VehicleFormPage />) },
 
-      { path: "/timesheets", element: <TimesheetsPage /> },
-      { path: "/my-timesheets", element: <MyTimesheetsPage /> },
-      { path: "/projects", element: <ProjectsPage /> },
-      { path: "/timesheets/:timesheetId", element: <TimesheetDetailsPage /> },
+      { path: "/timesheets", element: withSuspense(<TimesheetsPage />) },
+      { path: "/my-timesheets", element: withSuspense(<MyTimesheetsPage />) },
+      { path: "/projects", element: withSuspense(<ProjectsPage />) },
+      { path: "/timesheets/:timesheetId", element: withSuspense(<TimesheetDetailsPage />) },
 
-      { path: "/notifications", element: <NotificationsPage /> },
-      { path: "/control-panel", element: <ControlPanelPage /> },
-      { path: "/maintenance", element: <MaintenancePage /> },
+      { path: "/notifications", element: withSuspense(<NotificationsPage />) },
+      { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
+      { path: "/maintenance", element: withSuspense(<MaintenancePage />) },
       { path: "/reports", element: <Navigate to="/control-panel" replace /> },
     ],
   },
