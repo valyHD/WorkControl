@@ -53,7 +53,37 @@ const MAX_TOTAL_ROUTE_POINTS = 250000;
 const DEFAULT_ROUTE_PAGE_SIZE = 2000;
 const DEFAULT_ROUTE_MAX_PAGES = 500;
 const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
+export function subscribeVehicleCommands(
+  vehicleId: string,
+  callback: (items: VehicleCommandItem[]) => void,
+  maxItems = 20
+) {
+  if (!vehicleId) {
+    callback([]);
+    return () => undefined;
+  }
 
+  const commandsQuery = query(
+    collection(db, "vehicles", vehicleId, "commands"),
+    orderBy("requestedAt", "desc"),
+    limit(maxItems)
+  );
+
+  return onSnapshot(
+    commandsQuery,
+    (snap) => {
+      callback(
+        snap.docs.map((docItem) =>
+          mapVehicleCommandDoc(docItem.id, docItem.data())
+        )
+      );
+    },
+    (error) => {
+      console.error("[subscribeVehicleCommands]", error);
+      callback([]);
+    }
+  );
+}
 function toSafeString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }

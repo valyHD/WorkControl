@@ -468,6 +468,15 @@ export function filterTrackableRoutePositions(
   const clean = sanitizePositions(positions);
   if (!clean.length) return [];
 
+  const hasIgnitionData = clean.some((point) => point.ignitionOn === true);
+  const hasVoltageData = clean.some((point) => extractVoltageFromRawIo(point.rawIo) !== null);
+
+  // fallback: daca trackerul nu trimite ignition/voltage coerent,
+  // nu mai aruncam tot traseul, ci pastram punctele valide
+  if (!hasIgnitionData && !hasVoltageData) {
+    return clean;
+  }
+
   const result: VehiclePositionItem[] = [];
   let segment: VehiclePositionItem[] = [];
 
@@ -495,13 +504,17 @@ export function filterTrackableRoutePositions(
 
     const voltageAtStart = extractVoltageFromRawIo(start.rawIo);
     const voltageAtMove = extractVoltageFromRawIo(segment[firstMovingIndex].rawIo);
-    const hasEngineVoltage =
-      (voltageAtStart !== null && voltageAtStart >= MIN_ENGINE_ON_VOLTAGE) ||
-      (voltageAtMove !== null && voltageAtMove >= MIN_ENGINE_ON_VOLTAGE);
 
-    if (!hasEngineVoltage && (voltageAtStart !== null || voltageAtMove !== null)) {
-      segment = [];
-      return;
+    // daca exista date de voltaj, le folosim
+    if (voltageAtStart !== null || voltageAtMove !== null) {
+      const hasEngineVoltage =
+        (voltageAtStart !== null && voltageAtStart >= MIN_ENGINE_ON_VOLTAGE) ||
+        (voltageAtMove !== null && voltageAtMove >= MIN_ENGINE_ON_VOLTAGE);
+
+      if (!hasEngineVoltage) {
+        segment = [];
+        return;
+      }
     }
 
     result.push(...segment.slice(firstMovingIndex));
@@ -509,7 +522,7 @@ export function filterTrackableRoutePositions(
   };
 
   for (const point of clean) {
-    if (point.ignitionOn) {
+    if (point.ignitionOn || !hasIgnitionData) {
       segment.push(point);
       continue;
     }
@@ -519,7 +532,7 @@ export function filterTrackableRoutePositions(
 
   flushSegment();
 
-  return result.length ? sanitizePositions(result) : [];
+  return result.length ? sanitizePositions(result) : clean;
 }
 
 function getWeekStart(date: Date): Date {

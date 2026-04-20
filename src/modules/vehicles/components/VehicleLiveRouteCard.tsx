@@ -19,11 +19,11 @@ import type {
   VehicleStopItem,
 } from "../../../types/vehicle";
 import {
-  getVehicleCommands,
   getVehiclePositionsRangeChunked,
   getVehicleTrackerEvents,
   pollVehiclePositionsRange,
   requestVehicleCommand,
+  subscribeVehicleCommands,
 } from "../services/vehiclesService";
 import {
   buildDistanceHistory,
@@ -51,7 +51,7 @@ const ROUTE_PAGE_SIZE = 2000;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
-  html: '<span>●</span>',
+  html: "<span>●</span>",
   iconSize: [30, 30],
   iconAnchor: [15, 15],
 });
@@ -92,11 +92,7 @@ function isFiniteCoord(value: unknown): value is number {
 
 function isValidCoordPair(lat: unknown, lng: unknown) {
   if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false;
-  return (
-    Math.abs(lat) <= 90 &&
-    Math.abs(lng) <= 180 &&
-    !(lat === 0 && lng === 0)
-  );
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
 }
 
 function safeRoutePoints(items: VehiclePositionItem[]) {
@@ -185,7 +181,7 @@ function FitRouteBounds({
       try {
         map.stop();
       } catch {
-        // noop
+        //
       }
     };
   }, [map, trigger, points]);
@@ -228,20 +224,14 @@ export default function VehicleLiveRouteCard({
     if (!authReady || !user) return;
 
     try {
-      const [extEvents, latestCommands] = await Promise.all([
-        getVehicleTrackerEvents(vehicle.id, fromTs, toTs).catch(() => []),
-        getVehicleCommands(vehicle.id).catch(() => []),
-      ]);
+      const extEvents = await getVehicleTrackerEvents(vehicle.id, fromTs, toTs).catch(() => []);
 
       if (!mountedRef.current) return;
-
       setExternalEventsCount(extEvents.length);
-      setCommands(latestCommands);
     } catch (error) {
       console.error("[VehicleLiveRouteCard][loadMeta]", error);
       if (!mountedRef.current) return;
       setExternalEventsCount(0);
-      setCommands([]);
     }
   }
 
@@ -251,6 +241,26 @@ export default function VehicleLiveRouteCard({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!vehicle.id) {
+      setCommands([]);
+      return;
+    }
+
+    const unsubscribe = subscribeVehicleCommands(vehicle.id, (items) => {
+      if (!mountedRef.current) return;
+      setCommands(items);
+    });
+
+    return () => {
+      try {
+        unsubscribe?.();
+      } catch (error) {
+        console.error("[VehicleLiveRouteCard][unsubscribeCommands]", error);
+      }
+    };
+  }, [vehicle.id]);
 
   useEffect(() => {
     setDidInitialFit(false);
@@ -303,7 +313,7 @@ export default function VehicleLiveRouteCard({
       try {
         unsubscribe?.();
       } catch (error) {
-        console.error("[VehicleLiveRouteCard][unsubscribe]", error);
+        console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
       }
     };
   }, [authReady, user, vehicle.id, fromTs, toTs, overspeedThreshold]);
@@ -345,7 +355,6 @@ export default function VehicleLiveRouteCard({
         ).catch(() => []);
 
         if (!mountedRef.current) return;
-
         setHistoryPositions(filterTrackableRoutePositions(route));
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadHistory]", error);
@@ -355,6 +364,7 @@ export default function VehicleLiveRouteCard({
     }
 
     void loadHistory();
+
     interval = window.setInterval(() => {
       void loadHistory();
     }, 60_000);
@@ -412,7 +422,7 @@ export default function VehicleLiveRouteCard({
       weekBuckets,
       monthBuckets,
     };
-  }, [historyPositions]);
+  }, [historyPositions, positions]);
 
   const mapCenter = useMemo<[number, number]>(() => {
     if (routeStats.end && isValidCoordPair(routeStats.end.lat, routeStats.end.lng)) {
@@ -449,14 +459,13 @@ export default function VehicleLiveRouteCard({
     await requestVehicleCommand(vehicle.id, {
       type,
       requestedBy:
+        user.displayName ||
+        user.email ||
         vehicle.currentDriverUserName ||
         vehicle.ownerUserName ||
         "dashboard_user",
       durationSec: type === "pulse_dout1" ? 60 : null,
     });
-
-    const latestCommands = await getVehicleCommands(vehicle.id).catch(() => []);
-    setCommands(latestCommands);
   }
 
   const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
@@ -504,10 +513,10 @@ export default function VehicleLiveRouteCard({
             {item === "today"
               ? "Azi"
               : item === "last24h"
-              ? "Ultimele 24h"
-              : item === "last7d"
-              ? "Ultimele 7 zile"
-              : "Custom"}
+                ? "Ultimele 24h"
+                : item === "last7d"
+                  ? "Ultimele 7 zile"
+                  : "Custom"}
           </button>
         ))}
 
@@ -566,9 +575,7 @@ export default function VehicleLiveRouteCard({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {positions.length > 0 && (
-            <FitRouteBounds points={positions} trigger={boundsTrigger} />
-          )}
+          {positions.length > 0 && <FitRouteBounds points={positions} trigger={boundsTrigger} />}
 
           {positions.length > 0 ? (
             <>
@@ -580,27 +587,18 @@ export default function VehicleLiveRouteCard({
               </Pane>
 
               {routeStats.start && (
-                <Marker
-                  position={[routeStats.start.lat, routeStats.start.lng]}
-                  icon={startIcon}
-                >
+                <Marker position={[routeStats.start.lat, routeStats.start.lng]} icon={startIcon}>
                   <Popup>Start: {formatDate(routeStats.start.gpsTimestamp)}</Popup>
                 </Marker>
               )}
 
               {routeStats.end && (
                 <>
-                  <Marker
-                    position={[routeStats.end.lat, routeStats.end.lng]}
-                    icon={endIcon}
-                  >
+                  <Marker position={[routeStats.end.lat, routeStats.end.lng]} icon={endIcon}>
                     <Popup>Final: {formatDate(routeStats.end.gpsTimestamp)}</Popup>
                   </Marker>
 
-                  <Marker
-                    position={[routeStats.end.lat, routeStats.end.lng]}
-                    icon={currentIcon}
-                  >
+                  <Marker position={[routeStats.end.lat, routeStats.end.lng]} icon={currentIcon}>
                     <Popup>Pozitie curenta</Popup>
                   </Marker>
                 </>
@@ -672,9 +670,7 @@ export default function VehicleLiveRouteCard({
             Se initializeaza autentificarea...
           </div>
         ) : loading ? (
-          <div className="vehicle-live-route-card__empty">
-            Se incarca datele GPS...
-          </div>
+          <div className="vehicle-live-route-card__empty">Se incarca datele GPS...</div>
         ) : positions.length === 0 && !hasSnapshot ? (
           <div className="vehicle-live-route-card__empty">
             Nu exista traseu sau date suficiente pentru intervalul ales.
