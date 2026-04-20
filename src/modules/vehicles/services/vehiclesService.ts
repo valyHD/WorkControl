@@ -55,6 +55,15 @@ const DEFAULT_ROUTE_MAX_PAGES = 500;
 const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_POLL_BACKOFF_MS = 90_000;
+const ROUTE_CACHE_TTL_MS = 10_000;
+
+type RouteCacheItem = {
+  key: string;
+  expiresAt: number;
+  items: VehiclePositionItem[];
+};
+
+const routeRangeCache = new Map<string, RouteCacheItem>();
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -190,6 +199,46 @@ function normalizePositionItems(items: VehiclePositionItem[]): VehiclePositionIt
   return dedupePositions(
     sortPositionsAsc(items.filter((item) => isValidLatLng(item.lat, item.lng)))
   );
+}
+
+function buildRangeCacheKey(vehicleId: string, fromTs: number, toTs: number): string {
+  return `${vehicleId}:${fromTs}:${toTs}`;
+}
+
+function getRouteCache(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number
+): VehiclePositionItem[] | null {
+  const key = buildRangeCacheKey(vehicleId, fromTs, toTs);
+  const cached = routeRangeCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt < Date.now()) {
+    routeRangeCache.delete(key);
+    return null;
+  }
+  return cached.items;
+}
+
+function setRouteCache(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  items: VehiclePositionItem[]
+): void {
+  const key = buildRangeCacheKey(vehicleId, fromTs, toTs);
+  routeRangeCache.set(key, {
+    key,
+    items,
+    expiresAt: Date.now() + ROUTE_CACHE_TTL_MS,
+  });
+
+  if (routeRangeCache.size > 180) {
+    const now = Date.now();
+    for (const [cacheKey, value] of routeRangeCache.entries()) {
+      if (value.expiresAt < now) routeRangeCache.delete(cacheKey);
+    }
+  }
 }
 
 function getDayKeyFromTs(ts: number): string {
@@ -975,6 +1024,57 @@ async function getVehiclePositionsForDay(
   return allItems;
 }
 
+async function getVehiclePositionsFromFlatCollection(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  const allItems: VehiclePositionItem[] = [];
+  let lastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+
+  const pointsRef = collection(db, "vehicles", vehicleId, "positions") as CollectionReference<
+    DocumentData
+  >;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const constraints: QueryConstraint[] = [
+      where("gpsTimestamp", ">=", fromTs),
+      where("gpsTimestamp", "<=", toTs),
+      orderBy("gpsTimestamp", "asc"),
+      limit(pageSize),
+    ];
+
+    if (lastDoc) {
+      constraints.push(startAfter(lastDoc));
+    }
+
+    const q = query(pointsRef, ...constraints);
+    const snap = await withTimeout(getDocs(q));
+    if (snap.empty) break;
+
+    allItems.push(
+      ...snap.docs.map((docItem) =>
+        mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
+      )
+    );
+
+    if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
+      break;
+    }
+
+    if (snap.docs.length < pageSize) {
+      break;
+    }
+
+    lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+    if (!lastDoc) break;
+  }
+
+  return allItems;
+}
+
 export function subscribeVehiclePositions(
   vehicleId: string,
   onData: (items: VehiclePositionItem[]) => void,
@@ -1040,6 +1140,29 @@ export async function getVehiclePositionsRange(
     return [];
   }
 
+  const cached = getRouteCache(vehicleId, fromTs, toTs);
+  if (cached) return cached;
+
+  let normalized: VehiclePositionItem[] = [];
+
+  try {
+    const flatItems = await getVehiclePositionsFromFlatCollection(
+      vehicleId,
+      fromTs,
+      toTs,
+      pageSize,
+      maxPages
+    );
+    normalized = normalizePositionItems(flatItems);
+  } catch (error) {
+    console.warn("[getVehiclePositionsRange][flatCollectionFallback]", error);
+  }
+
+  if (normalized.length) {
+    setRouteCache(vehicleId, fromTs, toTs, normalized);
+    return normalized;
+  }
+
   const dayKeys = enumerateDayKeysWithNeighbors(fromTs, toTs);
   const allItems: VehiclePositionItem[] = [];
 
@@ -1063,7 +1186,9 @@ export async function getVehiclePositionsRange(
     }
   }
 
-  return normalizePositionItems(allItems);
+  normalized = normalizePositionItems(allItems);
+  setRouteCache(vehicleId, fromTs, toTs, normalized);
+  return normalized;
 }
 
 export async function getVehiclePositionsRangeChunked(
@@ -1101,6 +1226,11 @@ export function pollVehiclePositionsRange(
 
   const scheduleNext = () => {
     if (stopped || isPastWindow) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      timer = window.setTimeout(loadIncremental, refreshMs);
+      return;
+    }
+
     const backoffMs = Math.min(
       MAX_POLL_BACKOFF_MS,
       refreshMs * Math.max(1, Math.pow(2, errorStreak))
@@ -1137,6 +1267,12 @@ export function pollVehiclePositionsRange(
 
   const loadIncremental = async () => {
     try {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        onData(currentItems);
+        scheduleNext();
+        return;
+      }
+
       const now = Date.now();
       const effectiveToTs = Math.min(now, toTs > now ? now : toTs);
       const incrementalFromTs = Math.max(
