@@ -32,9 +32,10 @@ const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
 const UNBOUND_LOG_THROTTLE_MS = 15 * 60 * 1000;
 const SNAPSHOT_WRITE_MIN_INTERVAL_MS = 15_000;
 const MIN_POINT_INTERVAL_MS_MOVING = 15_000;
-const MIN_POINT_INTERVAL_MS_IDLE = 120_000;
-const MIN_POINT_DISTANCE_METERS = 20;
+const MIN_POINT_INTERVAL_MS_IDLE = 180_000;
+const MIN_POINT_DISTANCE_METERS = 35;
 const MOVING_SPEED_THRESHOLD_KMH = 5;
+const MAX_DISTANCE_STEP_METERS = 2000;
 const trackerBindingCache = new Map();
 const lastSavedPointByImei = new Map();
 const lastSnapshotWriteByVehicle = new Map();
@@ -468,6 +469,38 @@ function shouldKeepRecord(lastSaved, record) {
   return true;
 }
 
+function distanceMetersBetween(a, b) {
+  if (!a || !b) return 0;
+  return distanceMeters(a.lat, a.lng, b.lat, b.lng);
+}
+
+function computeDistanceIncrementKm(previousPoint, points) {
+  if (!Array.isArray(points) || !points.length) return 0;
+
+  let totalMeters = 0;
+  let prev = previousPoint || null;
+
+  for (const point of points) {
+    if (!prev) {
+      prev = point;
+      continue;
+    }
+
+    const segmentMeters = distanceMetersBetween(prev, point);
+    if (
+      Number.isFinite(segmentMeters) &&
+      segmentMeters >= 0 &&
+      segmentMeters <= MAX_DISTANCE_STEP_METERS
+    ) {
+      totalMeters += segmentMeters;
+    }
+
+    prev = point;
+  }
+
+  return Number((totalMeters / 1000).toFixed(3));
+}
+
 function getLastCleanupTs() {
   try {
     if (!fs.existsSync(LAST_CLEANUP_FILE)) return 0;
@@ -579,7 +612,8 @@ async function saveRecordsToFirestore(imei, records) {
     return;
   }
 
-  let previousSavedPoint = lastSavedPointByImei.get(imei) || null;
+  const previousSavedPointFromMemory = lastSavedPointByImei.get(imei) || null;
+  let previousSavedPoint = previousSavedPointFromMemory;
   const recordsForStorage = [];
   for (const record of validRecords) {
     if (shouldKeepRecord(previousSavedPoint, record)) {
@@ -596,6 +630,11 @@ async function saveRecordsToFirestore(imei, records) {
     recordsForStorage.length > 0
       ? recordsForStorage
       : [validRecords[validRecords.length - 1]];
+
+  const distanceIncrementKm = computeDistanceIncrementKm(
+    previousSavedPointFromMemory,
+    effectiveRecords
+  );
 
   let latestSnapshot = null;
   const groups = new Map();
@@ -666,8 +705,8 @@ async function saveRecordsToFirestore(imei, records) {
             imei,
             vehicleId,
             dayKey,
-            lat: record.lat,
-            lng: record.lng,
+            lat: Number(record.lat.toFixed(6)),
+            lng: Number(record.lng.toFixed(6)),
             speedKmh: record.speedKmh,
             altitude: record.altitude,
             angle: record.angle,
@@ -704,6 +743,11 @@ async function saveRecordsToFirestore(imei, records) {
       await db.collection("vehicles").doc(vehicleId).set(
         {
           gpsSnapshot: latestSnapshot,
+          ...(distanceIncrementKm > 0
+            ? {
+                currentKm: admin.firestore.FieldValue.increment(distanceIncrementKm),
+              }
+            : {}),
           tracker: {
             imei,
             lastSeenAt: now,
