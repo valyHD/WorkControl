@@ -28,6 +28,8 @@ const SOCKET_IDLE_TIMEOUT_MS = 120000;
 
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LAST_CLEANUP_FILE = "/tmp/workcontrol-last-cleanup.txt";
+const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
+const trackerBindingCache = new Map();
 function isCodec12SuccessPayload(payload) {
   const text = String(payload || "").toLowerCase();
 
@@ -491,10 +493,22 @@ function startCleanupScheduler() {
 }
 
 async function saveRecordsToFirestore(imei, records) {
-  const bindingRef = db.collection("trackerBindings").doc(imei);
-  const bindingSnap = await bindingRef.get();
+  const cacheEntry = trackerBindingCache.get(imei);
+  let binding = cacheEntry?.expiresAt > Date.now() ? cacheEntry.binding : null;
 
-  if (!bindingSnap.exists) {
+  if (!binding) {
+    const bindingRef = db.collection("trackerBindings").doc(imei);
+    const bindingSnap = await bindingRef.get();
+    if (bindingSnap.exists) {
+      binding = bindingSnap.data();
+      trackerBindingCache.set(imei, {
+        binding,
+        expiresAt: Date.now() + TRACKER_BINDING_CACHE_TTL_MS,
+      });
+    }
+  }
+
+  if (!binding) {
     console.warn(`[WARN] IMEI fara binding: ${imei}`);
     await db.collection("unboundTrackerPackets").add({
       imei,
@@ -505,7 +519,6 @@ async function saveRecordsToFirestore(imei, records) {
     return;
   }
 
-  const binding = bindingSnap.data();
   const vehicleId = binding.vehicleId;
   const now = Date.now();
 
@@ -558,7 +571,7 @@ async function saveRecordsToFirestore(imei, records) {
       .collection("positionDays")
       .doc(dayKey);
 
-    const dayChunks = chunkArray(dayRecords, 400);
+    const dayChunks = chunkArray(dayRecords, 450);
 
     for (const dayChunk of dayChunks) {
       const batch = db.batch();
@@ -582,60 +595,32 @@ async function saveRecordsToFirestore(imei, records) {
         const ignitionOn =
           typeof record.io[239] === "number" ? record.io[239] === 1 : null;
 
+        const pointPayload = {
+          imei,
+          vehicleId,
+          dayKey,
+          lat: record.lat,
+          lng: record.lng,
+          speedKmh: record.speedKmh,
+          altitude: record.altitude,
+          angle: record.angle,
+          satellites: record.satellites,
+          gpsTimestamp: record.gpsTimestamp,
+          serverTimestamp: now,
+          eventIoId: record.eventIoId,
+          ignitionOn,
+          odometerKm:
+            odometerMeters !== null
+              ? Number((odometerMeters / 1000).toFixed(1))
+              : null,
+        };
+
         const pointRef = dayRef.collection("points").doc(buildPointId(record));
-const flatPositionRef = db
-  .collection("vehicles")
-  .doc(vehicleId)
-  .collection("positions")
-  .doc(buildPointId(record));
         batch.set(
           pointRef,
-          {
-            imei,
-            vehicleId,
-            dayKey,
-            lat: record.lat,
-            lng: record.lng,
-            speedKmh: record.speedKmh,
-            altitude: record.altitude,
-            angle: record.angle,
-            satellites: record.satellites,
-            gpsTimestamp: record.gpsTimestamp,
-            serverTimestamp: now,
-            eventIoId: record.eventIoId,
-            ignitionOn,
-            odometerKm:
-              odometerMeters !== null
-                ? Number((odometerMeters / 1000).toFixed(1))
-                : null,
-            rawIo: record.io,
-          },
+          pointPayload,
           { merge: true }
         );
-        batch.set(
-  flatPositionRef,
-  {
-    imei,
-    vehicleId,
-    dayKey,
-    lat: record.lat,
-    lng: record.lng,
-    speedKmh: record.speedKmh,
-    altitude: record.altitude,
-    angle: record.angle,
-    satellites: record.satellites,
-    gpsTimestamp: record.gpsTimestamp,
-    serverTimestamp: now,
-    eventIoId: record.eventIoId,
-    ignitionOn,
-    odometerKm:
-      odometerMeters !== null
-        ? Number((odometerMeters / 1000).toFixed(1))
-        : null,
-    rawIo: record.io,
-  },
-  { merge: true }
-);
       }
 
       await batch.commit();
