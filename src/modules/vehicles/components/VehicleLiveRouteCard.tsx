@@ -51,10 +51,11 @@ const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
 const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 const ROUTE_RENDER_POINTS = 1400;
-const ROUTE_ANALYSIS_POINTS = 2500;
+const ROUTE_ANALYSIS_POINTS = 1800;
 const CRUMB_POINTS = 220;
 const OVERSPEED_RENDER_POINTS = 80;
 const STOP_RENDER_LIMIT = 120;
+const SIGNATURE_SAMPLE_POINTS = 16;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
@@ -124,6 +125,25 @@ function safeRoutePoints(items: VehiclePositionItem[]) {
   }
 
   return deduped;
+}
+
+function buildPositionsSignature(items: VehiclePositionItem[]) {
+  if (!items.length) return "0";
+  const first = items[0];
+  const last = items[items.length - 1];
+  const step = Math.max(1, Math.floor(items.length / SIGNATURE_SAMPLE_POINTS));
+
+  let checksum = 0;
+  for (let i = 0; i < items.length; i += step) {
+    const item = items[i];
+    checksum +=
+      Math.round(item.lat * 1000) +
+      Math.round(item.lng * 1000) +
+      (item.speedKmh ?? 0) +
+      (item.gpsTimestamp % 10000);
+  }
+
+  return `${items.length}:${first.gpsTimestamp}:${last.gpsTimestamp}:${checksum}`;
 }
 
 function FitRouteBounds({
@@ -228,6 +248,8 @@ export default function VehicleLiveRouteCard({
   const [isOffline, setIsOffline] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
   const mountedRef = useRef(true);
+  const routeSignatureRef = useRef("");
+  const historySignatureRef = useRef("");
   const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
   async function loadMeta() {
     if (!authReady || !user) return;
@@ -292,75 +314,77 @@ export default function VehicleLiveRouteCard({
     setDidInitialFit(false);
   }, [fromTs, toTs, vehicle.id]);
 
-useEffect(() => {
-  if (!authReady) {
-    setLoading(true);
-    return;
-  }
-
-  if (!user) {
-    setLoading(false);
-    setPositions([]);
-    setStopItems([]);
-    setOverspeedItems([]);
-    setTimeline([]);
-    return;
-  }
-
-  if (positions.length === 0 && !hasSnapshot) {
-    setLoading(true);
-  }
-
-  const loadingGuard = window.setTimeout(() => {
-    if (!mountedRef.current) return;
-    setLoading(false);
-  }, 8000);
-
-  const unsubscribe = pollVehiclePositionsRange(
-    vehicle.id,
-    fromTs,
-    toTs,
-    (route) => {
-      const clean = safeRoutePoints(filterTrackableRoutePositions(route));
-      const analysisPoints = samplePositions(clean, ROUTE_ANALYSIS_POINTS);
-      const stops = detectStops(analysisPoints);
-      const overspeed = detectOverspeed(analysisPoints, overspeedThreshold);
-
-      if (!mountedRef.current) return;
-
-      setPositions(clean);
-      setStopItems(stops);
-      setOverspeedItems(overspeed);
-      setTimeline(buildTimelineEvents(analysisPoints, stops, overspeed));
-      setLastDataAt(Date.now());
-      setLoading(false);
-
-      console.log("[VehicleLiveRouteCard][route loaded]", {
-        vehicleId: vehicle.id,
-        fromTs,
-        toTs,
-        points: clean.length,
-      });
-    },
-    (error) => {
-      console.error("[VehicleLiveRouteCard][pollRange]", error);
-      if (!mountedRef.current) return;
-      setLoading(false);
-      setIsOffline(typeof navigator !== "undefined" ? !navigator.onLine : false);
-    },
-    LIVE_REFRESH_MS,
-    ROUTE_PAGE_SIZE
-  );
-
-  return () => {
-    window.clearTimeout(loadingGuard);
-    try {
-      unsubscribe?.();
-    } catch (error) {
-      console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
+  useEffect(() => {
+    if (!authReady) {
+      setLoading(true);
+      return;
     }
-  };
-}, [authReady, user, vehicle.id, fromTs, toTs, overspeedThreshold, hasSnapshot, positions.length]);
+
+    if (!user) {
+      setLoading(false);
+      setPositions([]);
+      setStopItems([]);
+      setOverspeedItems([]);
+      setTimeline([]);
+      return;
+    }
+
+    if (positions.length === 0 && !hasSnapshot) {
+      setLoading(true);
+    }
+
+    const loadingGuard = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      setLoading(false);
+    }, 8000);
+
+    const unsubscribe = pollVehiclePositionsRange(
+      vehicle.id,
+      fromTs,
+      toTs,
+      (route) => {
+        const clean = safeRoutePoints(filterTrackableRoutePositions(route));
+        const nextSignature = buildPositionsSignature(clean);
+
+        if (!mountedRef.current) return;
+
+        if (routeSignatureRef.current === nextSignature) {
+          setLastDataAt(Date.now());
+          setLoading(false);
+          return;
+        }
+
+        routeSignatureRef.current = nextSignature;
+        setPositions(clean);
+        setLastDataAt(Date.now());
+        setLoading(false);
+
+        console.log("[VehicleLiveRouteCard][route loaded]", {
+          vehicleId: vehicle.id,
+          fromTs,
+          toTs,
+          points: clean.length,
+        });
+      },
+      (error) => {
+        console.error("[VehicleLiveRouteCard][pollRange]", error);
+        if (!mountedRef.current) return;
+        setLoading(false);
+        setIsOffline(typeof navigator !== "undefined" ? !navigator.onLine : false);
+      },
+      LIVE_REFRESH_MS,
+      ROUTE_PAGE_SIZE
+    );
+
+    return () => {
+      window.clearTimeout(loadingGuard);
+      try {
+        unsubscribe?.();
+      } catch (error) {
+        console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
+      }
+    };
+  }, [authReady, user, vehicle.id, fromTs, toTs, hasSnapshot, positions.length]);
   useEffect(() => {
     if (!authReady || !user) return;
     void loadMeta();
@@ -398,7 +422,11 @@ useEffect(() => {
         ).catch(() => []);
 
         if (!mountedRef.current) return;
-        setHistoryPositions(filterTrackableRoutePositions(route));
+        const normalizedHistory = filterTrackableRoutePositions(route);
+        const signature = buildPositionsSignature(normalizedHistory);
+        if (historySignatureRef.current === signature) return;
+        historySignatureRef.current = signature;
+        setHistoryPositions(normalizedHistory);
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadHistory]", error);
         if (!mountedRef.current) return;
@@ -416,6 +444,19 @@ useEffect(() => {
       if (interval !== null) window.clearInterval(interval);
     };
   }, [authReady, user, vehicle.id]);
+
+  const analysisPoints = useMemo(
+    () => samplePositions(positions, ROUTE_ANALYSIS_POINTS),
+    [positions]
+  );
+
+  useEffect(() => {
+    const stops = detectStops(analysisPoints);
+    const overspeed = detectOverspeed(analysisPoints, overspeedThreshold);
+    setStopItems(stops);
+    setOverspeedItems(overspeed);
+    setTimeline(buildTimelineEvents(analysisPoints, stops, overspeed));
+  }, [analysisPoints, overspeedThreshold]);
 
   useEffect(() => {
     if (!didInitialFit && positions.length > 0) {
