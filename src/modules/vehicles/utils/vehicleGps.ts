@@ -14,9 +14,10 @@ const MAX_REASONABLE_POINT_JUMP_KM = 20; // evita salturi GPS false
 const MAX_REASONABLE_ODOMETER_STEP_KM = 20; // evita odometru corupt
 const MIN_MOVING_SPEED_KMH = 6;
 const START_TO_MOVE_MAX_MS = 10 * 60 * 1000;
-const MIN_ENGINE_ON_VOLTAGE = 12.2;
+const MIN_ENGINE_ON_VOLTAGE = 13;
+const MAX_ENGINE_ON_VOLTAGE = 30;
 
-export type DateRangePreset = "today" | "last24h" | "last7d" | "custom";
+export type DateRangePreset = "today" | "last24h" | "last3d" | "last7d" | "custom";
 export type VehicleDistanceBucketType = "day" | "week" | "month";
 
 export interface VehicleDistanceBucket {
@@ -56,6 +57,43 @@ function extractVoltageFromRawIo(rawIo: unknown): number | null {
   }
 
   return null;
+}
+
+function extractAccelerometerFromRawIo(rawIo: unknown): boolean | null {
+  if (!rawIo || typeof rawIo !== "object") return null;
+  const io = rawIo as Record<string, unknown>;
+
+  const candidates = [
+    io["accel"],
+    io["accelerometer"],
+    io["movement"],
+    io["motion"],
+    io["239"],
+    io["240"],
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "boolean") return candidate;
+    if (isFiniteNumber(candidate)) return Number(candidate) > 0;
+    if (typeof candidate === "string") {
+      const normalized = candidate.trim().toLowerCase();
+      if (["1", "true", "on", "active", "moving"].includes(normalized)) return true;
+      if (["0", "false", "off", "inactive", "stopped"].includes(normalized)) return false;
+    }
+  }
+
+  return null;
+}
+
+function isPointEngineOn(point: VehiclePositionItem): boolean {
+  if (!point.ignitionOn) return false;
+
+  const accelerometerOn = extractAccelerometerFromRawIo(point.rawIo);
+  const voltage = extractVoltageFromRawIo(point.rawIo);
+  const hasEngineVoltage =
+    voltage !== null && voltage >= MIN_ENGINE_ON_VOLTAGE && voltage <= MAX_ENGINE_ON_VOLTAGE;
+
+  return accelerometerOn === true || hasEngineVoltage;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -105,6 +143,10 @@ export function getPresetRange(preset: DateRangePreset): { from: number; to: num
 
   if (preset === "last7d") {
     return { from: now - 7 * 24 * 60 * 60 * 1000, to: now };
+  }
+
+  if (preset === "last3d") {
+    return { from: now - 3 * 24 * 60 * 60 * 1000, to: now };
   }
 
   if (preset === "today") {
@@ -437,16 +479,18 @@ export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): numb
     if (timeDeltaMs <= 0) continue;
     if (timeDeltaMs > MAX_REASONABLE_GAP_MS) continue;
 
-const prevOdo = toSafeOdometer(prev.odometerKm);
-const nextOdo = toSafeOdometer(next.odometerKm);
-const odometerDelta =
-  prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+    if (!isPointEngineOn(prev) || !isPointEngineOn(next)) continue;
 
-if (
-  odometerDelta !== undefined &&
-  odometerDelta > 0 &&
-  odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
-) {
+    const prevOdo = toSafeOdometer(prev.odometerKm);
+    const nextOdo = toSafeOdometer(next.odometerKm);
+    const odometerDelta =
+      prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+
+    if (
+      odometerDelta !== undefined &&
+      odometerDelta > 0 &&
+      odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
+    ) {
       total += odometerDelta;
       continue;
     }
@@ -462,20 +506,33 @@ if (
   return Number(total.toFixed(2));
 }
 
+export function calculateRouteDurationMs(positions: VehiclePositionItem[]): number {
+  if (!Array.isArray(positions) || positions.length <= 1) return 0;
+
+  let totalMs = 0;
+
+  for (let index = 1; index < positions.length; index += 1) {
+    const prev = positions[index - 1];
+    const next = positions[index];
+
+    if (!prev || !next) continue;
+    if (!isPointEngineOn(prev) || !isPointEngineOn(next)) continue;
+
+    const deltaMs = next.gpsTimestamp - prev.gpsTimestamp;
+    if (deltaMs <= 0) continue;
+    if (deltaMs > MAX_REASONABLE_GAP_MS) continue;
+
+    totalMs += deltaMs;
+  }
+
+  return totalMs;
+}
+
 export function filterTrackableRoutePositions(
   positions: VehiclePositionItem[]
 ): VehiclePositionItem[] {
   const clean = sanitizePositions(positions);
   if (!clean.length) return [];
-
-  const hasIgnitionData = clean.some((point) => point.ignitionOn === true);
-  const hasVoltageData = clean.some((point) => extractVoltageFromRawIo(point.rawIo) !== null);
-
-  // fallback: daca trackerul nu trimite ignition/voltage coerent,
-  // nu mai aruncam tot traseul, ci pastram punctele valide
-  if (!hasIgnitionData && !hasVoltageData) {
-    return clean;
-  }
 
   const result: VehiclePositionItem[] = [];
   let segment: VehiclePositionItem[] = [];
@@ -502,27 +559,19 @@ export function filterTrackableRoutePositions(
       return;
     }
 
-    const voltageAtStart = extractVoltageFromRawIo(start.rawIo);
-    const voltageAtMove = extractVoltageFromRawIo(segment[firstMovingIndex].rawIo);
-
-    // daca exista date de voltaj, le folosim
-    if (voltageAtStart !== null || voltageAtMove !== null) {
-      const hasEngineVoltage =
-        (voltageAtStart !== null && voltageAtStart >= MIN_ENGINE_ON_VOLTAGE) ||
-        (voltageAtMove !== null && voltageAtMove >= MIN_ENGINE_ON_VOLTAGE);
-
-      if (!hasEngineVoltage) {
-        segment = [];
-        return;
-      }
+    const startedSlice = segment.slice(firstMovingIndex);
+    const engineOnSlice = startedSlice.filter((point) => isPointEngineOn(point));
+    if (!engineOnSlice.length) {
+      segment = [];
+      return;
     }
 
-    result.push(...segment.slice(firstMovingIndex));
+    result.push(...engineOnSlice);
     segment = [];
   };
 
   for (const point of clean) {
-    if (point.ignitionOn || !hasIgnitionData) {
+    if (isPointEngineOn(point)) {
       segment.push(point);
       continue;
     }
@@ -532,7 +581,7 @@ export function filterTrackableRoutePositions(
 
   flushSegment();
 
-  return result.length ? sanitizePositions(result) : clean;
+  return sanitizePositions(result);
 }
 
 function getWeekStart(date: Date): Date {
