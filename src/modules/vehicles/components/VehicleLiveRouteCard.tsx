@@ -27,6 +27,7 @@ import {
 } from "../services/vehiclesService";
 import {
   buildDistanceHistory,
+  calculateRouteDurationMs,
   buildTimelineEvents,
   calculateRouteDistanceKm,
   detectOverspeed,
@@ -48,6 +49,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
+const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
@@ -345,7 +347,7 @@ export default function VehicleLiveRouteCard({
 
       try {
         const now = Date.now();
-        const fromHistory = now - 180 * 24 * 60 * 60 * 1000;
+        const fromHistory = now - HISTORY_WINDOW_MS;
 
         const route = await getVehiclePositionsRangeChunked(
           vehicle.id,
@@ -389,15 +391,14 @@ export default function VehicleLiveRouteCard({
       : 0;
     const distanceKm = calculateRouteDistanceKm(positions);
 
+    const durationMs = calculateRouteDurationMs(positions);
+
     return {
       start,
       end,
       maxSpeed,
       distanceKm,
-      duration:
-        start && end
-          ? formatDuration(Math.max(0, end.gpsTimestamp - start.gpsTimestamp))
-          : "-",
+      duration: formatDuration(durationMs),
     };
   }, [positions]);
 
@@ -503,7 +504,7 @@ export default function VehicleLiveRouteCard({
       </div>
 
       <div className="vehicle-range-toolbar">
-        {(["today", "last24h", "last7d", "custom"] as DateRangePreset[]).map((item) => (
+        {(["today", "last24h", "last3d", "last7d", "custom"] as DateRangePreset[]).map((item) => (
           <button
             key={item}
             type="button"
@@ -514,6 +515,8 @@ export default function VehicleLiveRouteCard({
               ? "Azi"
               : item === "last24h"
                 ? "Ultimele 24h"
+                : item === "last3d"
+                  ? "Ultimele 3 zile"
                 : item === "last7d"
                   ? "Ultimele 7 zile"
                   : "Custom"}
