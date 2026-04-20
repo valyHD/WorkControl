@@ -1,5 +1,6 @@
 import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import * as L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 type Props = {
   lat: number;
@@ -28,13 +29,16 @@ export default function TimesheetLocationPreviewMap({
     <div className="timesheet-map-preview">
       <MapContainer
         center={position}
-        zoom={16}
+        zoom={14}
         scrollWheelZoom={false}
         style={{ width: "100%", height: "100%" }}
+        preferCanvas
       >
         <TileLayer
-          attribution="&copy; OpenStreetMap contributors"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+          url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+          updateWhenIdle
+          keepBuffer={1}
         />
 
         <Marker position={position} icon={markerIcon}>
