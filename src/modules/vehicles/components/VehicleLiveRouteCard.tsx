@@ -56,6 +56,7 @@ const CRUMB_POINTS = 140;
 const OVERSPEED_RENDER_POINTS = 80;
 const STOP_RENDER_LIMIT = 120;
 const SIGNATURE_SAMPLE_POINTS = 16;
+const HISTORY_INCREMENTAL_OVERLAP_MS = 60_000;
 
 const currentIcon = new L.DivIcon({
   className: "vehicle-map-pin vehicle-map-pin--current",
@@ -104,15 +105,13 @@ function isValidCoordPair(lat: unknown, lng: unknown) {
 }
 
 function safeRoutePoints(items: VehiclePositionItem[]) {
-  const clean = sanitizePositions(items)
-    .filter(
-      (item) =>
-        isFiniteCoord(item.lat) &&
-        isFiniteCoord(item.lng) &&
-        Math.abs(item.lat) <= 90 &&
-        Math.abs(item.lng) <= 180
-    )
-    .sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
+  const clean = sanitizePositions(items).filter(
+    (item) =>
+      isFiniteCoord(item.lat) &&
+      isFiniteCoord(item.lng) &&
+      Math.abs(item.lat) <= 90 &&
+      Math.abs(item.lng) <= 180
+  );
 
   const deduped: VehiclePositionItem[] = [];
   const seen = new Set<string>();
@@ -125,6 +124,17 @@ function safeRoutePoints(items: VehiclePositionItem[]) {
   }
 
   return deduped;
+}
+
+function mergeHistoryRoutePoints(
+  currentItems: VehiclePositionItem[],
+  incomingItems: VehiclePositionItem[],
+  minTimestamp: number
+) {
+  const merged = safeRoutePoints([...currentItems, ...incomingItems]).filter(
+    (item) => item.gpsTimestamp >= minTimestamp
+  );
+  return merged;
 }
 
 function buildPositionsSignature(items: VehiclePositionItem[]) {
@@ -250,6 +260,7 @@ export default function VehicleLiveRouteCard({
   const mountedRef = useRef(true);
   const routeSignatureRef = useRef("");
   const historySignatureRef = useRef("");
+  const historyPositionsRef = useRef<VehiclePositionItem[]>([]);
   const hasSnapshot = isValidCoordPair(vehicle.gpsSnapshot?.lat, vehicle.gpsSnapshot?.lng);
   async function loadMeta() {
     if (!authReady || !user) return;
@@ -272,6 +283,10 @@ export default function VehicleLiveRouteCard({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    historyPositionsRef.current = historyPositions;
+  }, [historyPositions]);
 
   useEffect(() => {
     const updateOnlineState = () => {
@@ -329,7 +344,7 @@ export default function VehicleLiveRouteCard({
       return;
     }
 
-    if (positions.length === 0 && !hasSnapshot) {
+    if (!routeSignatureRef.current && !hasSnapshot) {
       setLoading(true);
     }
 
@@ -384,7 +399,7 @@ export default function VehicleLiveRouteCard({
         console.error("[VehicleLiveRouteCard][unsubscribeRange]", error);
       }
     };
-  }, [authReady, user, vehicle.id, fromTs, toTs, hasSnapshot, positions.length]);
+  }, [authReady, user, vehicle.id, fromTs, toTs, hasSnapshot]);
   useEffect(() => {
     if (!authReady || !user) return;
     void loadMeta();
@@ -413,16 +428,28 @@ export default function VehicleLiveRouteCard({
       try {
         const now = Date.now();
         const fromHistory = now - HISTORY_WINDOW_MS;
+        const currentHistory = historyPositionsRef.current;
+        const hasHistory = historySignatureRef.current.length > 0 && currentHistory.length > 0;
+        const lastPointTs = hasHistory
+          ? currentHistory[currentHistory.length - 1]?.gpsTimestamp ?? fromHistory
+          : fromHistory;
+        const fromTsIncremental = Math.max(
+          fromHistory,
+          lastPointTs - HISTORY_INCREMENTAL_OVERLAP_MS
+        );
 
         const route = await getVehiclePositionsRangeChunked(
           vehicle.id,
-          fromHistory,
+          hasHistory ? fromTsIncremental : fromHistory,
           now,
           ROUTE_PAGE_SIZE
         ).catch(() => []);
 
         if (!mountedRef.current) return;
-        const normalizedHistory = filterTrackableRoutePositions(route);
+        const normalizedIncoming = filterTrackableRoutePositions(route);
+        const normalizedHistory = hasHistory
+          ? mergeHistoryRoutePoints(currentHistory, normalizedIncoming, fromHistory)
+          : safeRoutePoints(normalizedIncoming);
         const signature = buildPositionsSignature(normalizedHistory);
         if (historySignatureRef.current === signature) return;
         historySignatureRef.current = signature;
