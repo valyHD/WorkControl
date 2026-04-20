@@ -200,6 +200,29 @@ function enumerateDayKeys(fromTs: number, toTs: number): string[] {
   return result;
 }
 
+function enumerateDayKeysWithNeighbors(fromTs: number, toTs: number): string[] {
+  const base = enumerateDayKeys(fromTs, toTs);
+  if (!base.length) return [];
+
+  const first = base[0];
+  const last = base[base.length - 1];
+
+  return dedupeDayKeys([addDays(first, -1), ...base, addDays(last, 1)]);
+}
+
+function dedupeDayKeys(dayKeys: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const dayKey of dayKeys) {
+    if (!dayKey || seen.has(dayKey)) continue;
+    seen.add(dayKey);
+    result.push(dayKey);
+  }
+
+  return result;
+}
+
 function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const gpsSnapshotRaw = data.gpsSnapshot ? toSafeObject(data.gpsSnapshot) : null;
   const trackerRaw = data.tracker ? toSafeObject(data.tracker) : null;
@@ -997,21 +1020,15 @@ export async function getVehiclePositionsRange(
     return [];
   }
 
-  const dayKeys = enumerateDayKeys(fromTs, toTs);
+  const dayKeys = enumerateDayKeysWithNeighbors(fromTs, toTs);
   const allItems: VehiclePositionItem[] = [];
 
   for (const dayKey of dayKeys) {
-    const dayStart = getDayStartTs(dayKey);
-    const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
-
-    const effectiveFrom = Math.max(fromTs, dayStart);
-    const effectiveTo = Math.min(toTs, dayEnd);
-
     const dayItems = await getVehiclePositionsForDay(
       vehicleId,
       dayKey,
-      effectiveFrom,
-      effectiveTo,
+      fromTs,
+      toTs,
       pageSize,
       maxPages
     );
