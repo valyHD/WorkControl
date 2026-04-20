@@ -449,7 +449,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const imagesRaw = Array.isArray(data.images) ? data.images : [];
   const gpsOdometerKm = gpsSnapshotRaw ? toOptionalNumber(gpsSnapshotRaw.odometerKm) : undefined;
   const storedCurrentKm = toSafeNumber(data.currentKm, 0);
-  const currentKm = Math.max(storedCurrentKm, gpsOdometerKm ?? 0);
+  const currentKm = gpsOdometerKm ?? storedCurrentKm;
   const initialRecordedKm = toSafeNumber(data.initialRecordedKm, storedCurrentKm || currentKm);
   const serviceStrategy = data.serviceStrategy === "absolute" ? "absolute" : "interval";
   const serviceIntervalKm = toSafeNumber(data.serviceIntervalKm, 15000);
