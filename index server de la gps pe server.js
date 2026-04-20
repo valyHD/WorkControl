@@ -29,7 +29,16 @@ const SOCKET_IDLE_TIMEOUT_MS = 120000;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LAST_CLEANUP_FILE = "/tmp/workcontrol-last-cleanup.txt";
 const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
+const UNBOUND_LOG_THROTTLE_MS = 15 * 60 * 1000;
+const SNAPSHOT_WRITE_MIN_INTERVAL_MS = 15_000;
+const MIN_POINT_INTERVAL_MS_MOVING = 15_000;
+const MIN_POINT_INTERVAL_MS_IDLE = 120_000;
+const MIN_POINT_DISTANCE_METERS = 20;
+const MOVING_SPEED_THRESHOLD_KMH = 5;
 const trackerBindingCache = new Map();
+const lastSavedPointByImei = new Map();
+const lastSnapshotWriteByVehicle = new Map();
+const lastUnboundLogByImei = new Map();
 function isCodec12SuccessPayload(payload) {
   const text = String(payload || "").toLowerCase();
 
@@ -425,6 +434,40 @@ function buildPointId(record) {
   return `${record.gpsTimestamp}_${latPart}_${lngPart}`;
 }
 
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceMeters(aLat, aLng, bLat, bLng) {
+  const earthRadius = 6_371_000;
+  const dLat = toRadians(bLat - aLat);
+  const dLng = toRadians(bLng - aLng);
+  const lat1 = toRadians(aLat);
+  const lat2 = toRadians(bLat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadius * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function shouldKeepRecord(lastSaved, record) {
+  if (!lastSaved) return true;
+
+  const deltaMs = record.gpsTimestamp - lastSaved.gpsTimestamp;
+  if (deltaMs <= 0) return false;
+
+  const speedKmh = Number(record.speedKmh || 0);
+  const moving = speedKmh >= MOVING_SPEED_THRESHOLD_KMH;
+  const minInterval = moving ? MIN_POINT_INTERVAL_MS_MOVING : MIN_POINT_INTERVAL_MS_IDLE;
+  const movedMeters = distanceMeters(lastSaved.lat, lastSaved.lng, record.lat, record.lng);
+
+  if (deltaMs < minInterval && movedMeters < MIN_POINT_DISTANCE_METERS) {
+    return false;
+  }
+
+  return true;
+}
+
 function getLastCleanupTs() {
   try {
     if (!fs.existsSync(LAST_CLEANUP_FILE)) return 0;
@@ -510,12 +553,17 @@ async function saveRecordsToFirestore(imei, records) {
 
   if (!binding) {
     console.warn(`[WARN] IMEI fara binding: ${imei}`);
-    await db.collection("unboundTrackerPackets").add({
-      imei,
-      recordsCount: records.length,
-      createdAt: Date.now(),
-      sample: records[0] || null,
-    });
+    const now = Date.now();
+    const lastLoggedAt = lastUnboundLogByImei.get(imei) || 0;
+    if (now - lastLoggedAt >= UNBOUND_LOG_THROTTLE_MS) {
+      lastUnboundLogByImei.set(imei, now);
+      await db.collection("unboundTrackerPackets").add({
+        imei,
+        recordsCount: records.length,
+        createdAt: now,
+        sample: records[0] || null,
+      });
+    }
     return;
   }
 
@@ -531,10 +579,28 @@ async function saveRecordsToFirestore(imei, records) {
     return;
   }
 
+  let previousSavedPoint = lastSavedPointByImei.get(imei) || null;
+  const recordsForStorage = [];
+  for (const record of validRecords) {
+    if (shouldKeepRecord(previousSavedPoint, record)) {
+      recordsForStorage.push(record);
+      previousSavedPoint = record;
+    }
+  }
+
+  if (previousSavedPoint) {
+    lastSavedPointByImei.set(imei, previousSavedPoint);
+  }
+
+  const effectiveRecords =
+    recordsForStorage.length > 0
+      ? recordsForStorage
+      : [validRecords[validRecords.length - 1]];
+
   let latestSnapshot = null;
   const groups = new Map();
 
-  for (const record of validRecords) {
+  for (const record of effectiveRecords) {
     const dayKey = getDayKeyFromTs(record.gpsTimestamp);
     if (!groups.has(dayKey)) groups.set(dayKey, []);
     groups.get(dayKey).push(record);
@@ -564,89 +630,98 @@ async function saveRecordsToFirestore(imei, records) {
     };
   }
 
-  for (const [dayKey, dayRecords] of groups.entries()) {
-    const dayRef = db
-      .collection("vehicles")
-      .doc(vehicleId)
-      .collection("positionDays")
-      .doc(dayKey);
+  if (recordsForStorage.length > 0) {
+    for (const [dayKey, dayRecords] of groups.entries()) {
+      const dayRef = db
+        .collection("vehicles")
+        .doc(vehicleId)
+        .collection("positionDays")
+        .doc(dayKey);
 
-    const dayChunks = chunkArray(dayRecords, 450);
+      const dayChunks = chunkArray(dayRecords, 450);
 
-    for (const dayChunk of dayChunks) {
-      const batch = db.batch();
+      for (const dayChunk of dayChunks) {
+        const batch = db.batch();
 
-      batch.set(
-        dayRef,
-        {
-          vehicleId,
-          imei,
-          dayKey,
-          updatedAt: now,
-          updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      for (const record of dayChunk) {
-        const odometerMeters =
-          typeof record.io[16] === "number" ? record.io[16] : null;
-
-        const ignitionOn =
-          typeof record.io[239] === "number" ? record.io[239] === 1 : null;
-
-        const pointPayload = {
-          imei,
-          vehicleId,
-          dayKey,
-          lat: record.lat,
-          lng: record.lng,
-          speedKmh: record.speedKmh,
-          altitude: record.altitude,
-          angle: record.angle,
-          satellites: record.satellites,
-          gpsTimestamp: record.gpsTimestamp,
-          serverTimestamp: now,
-          eventIoId: record.eventIoId,
-          ignitionOn,
-          odometerKm:
-            odometerMeters !== null
-              ? Number((odometerMeters / 1000).toFixed(1))
-              : null,
-        };
-
-        const pointRef = dayRef.collection("points").doc(buildPointId(record));
         batch.set(
-          pointRef,
-          pointPayload,
+          dayRef,
+          {
+            vehicleId,
+            imei,
+            dayKey,
+            updatedAt: now,
+            updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          },
           { merge: true }
         );
-      }
 
-      await batch.commit();
+        for (const record of dayChunk) {
+          const odometerMeters =
+            typeof record.io[16] === "number" ? record.io[16] : null;
+
+          const ignitionOn =
+            typeof record.io[239] === "number" ? record.io[239] === 1 : null;
+
+          const pointPayload = {
+            imei,
+            vehicleId,
+            dayKey,
+            lat: record.lat,
+            lng: record.lng,
+            speedKmh: record.speedKmh,
+            altitude: record.altitude,
+            angle: record.angle,
+            satellites: record.satellites,
+            gpsTimestamp: record.gpsTimestamp,
+            serverTimestamp: now,
+            eventIoId: record.eventIoId,
+            ignitionOn,
+            odometerKm:
+              odometerMeters !== null
+                ? Number((odometerMeters / 1000).toFixed(1))
+                : null,
+          };
+
+          const pointRef = dayRef.collection("points").doc(buildPointId(record));
+          batch.set(
+            pointRef,
+            pointPayload,
+            { merge: true }
+          );
+        }
+
+        await batch.commit();
+      }
     }
   }
 
   if (latestSnapshot) {
-    await db.collection("vehicles").doc(vehicleId).set(
-      {
-        gpsSnapshot: latestSnapshot,
-        tracker: {
-          imei,
-          lastSeenAt: now,
+    const lastSnapshotWriteAt = lastSnapshotWriteByVehicle.get(vehicleId) || 0;
+    const shouldWriteSnapshot =
+      now - lastSnapshotWriteAt >= SNAPSHOT_WRITE_MIN_INTERVAL_MS ||
+      (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH;
+    if (shouldWriteSnapshot) {
+      await db.collection("vehicles").doc(vehicleId).set(
+        {
+          gpsSnapshot: latestSnapshot,
+          tracker: {
+            imei,
+            lastSeenAt: now,
+            updatedAt: now,
+            protocol: "teltonika_codec_8e_tcp",
+          },
           updatedAt: now,
-          protocol: "teltonika_codec_8e_tcp",
         },
-        updatedAt: now,
-      },
-      { merge: true }
-    );
+        { merge: true }
+      );
+      lastSnapshotWriteByVehicle.set(vehicleId, now);
+    }
   }
 
   if (!healthyLoggedImei.has(imei)) {
     healthyLoggedImei.add(imei);
     console.log(
-      `[TRACKER OK] imei=${imei} vehicleId=${vehicleId} recordsSaved=${validRecords.length}`
+      `[TRACKER OK] imei=${imei} vehicleId=${vehicleId} recordsIn=${validRecords.length} recordsSaved=${recordsForStorage.length}`
     );
   }
 }

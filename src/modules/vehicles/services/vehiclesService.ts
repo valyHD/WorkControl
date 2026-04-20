@@ -57,6 +57,8 @@ const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_POLL_BACKOFF_MS = 90_000;
 const ROUTE_CACHE_TTL_MS = 10_000;
 const DAY_QUERY_CONCURRENCY = 3;
+const PERSISTED_ROUTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const PERSISTED_ROUTE_CACHE_MAX_ITEMS = 12_000;
 
 type RouteCacheItem = {
   key: string;
@@ -65,6 +67,14 @@ type RouteCacheItem = {
 };
 
 const routeRangeCache = new Map<string, RouteCacheItem>();
+
+type PersistedRouteCacheItem = {
+  vehicleId: string;
+  fromTs: number;
+  toTs: number;
+  savedAt: number;
+  items: VehiclePositionItem[];
+};
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -239,6 +249,58 @@ function setRouteCache(
     for (const [cacheKey, value] of routeRangeCache.entries()) {
       if (value.expiresAt < now) routeRangeCache.delete(cacheKey);
     }
+  }
+}
+
+function buildPersistedRouteCacheKey(vehicleId: string, fromTs: number, toTs: number): string {
+  return `wc_route_cache:${vehicleId}:${fromTs}:${toTs}`;
+}
+
+function readPersistedRouteCache(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number
+): VehiclePositionItem[] | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(buildPersistedRouteCacheKey(vehicleId, fromTs, toTs));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as PersistedRouteCacheItem;
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    if (Date.now() - Number(parsed.savedAt || 0) > PERSISTED_ROUTE_CACHE_TTL_MS) return null;
+
+    return normalizePositionItems(parsed.items);
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedRouteCache(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  items: VehiclePositionItem[]
+): void {
+  if (typeof window === "undefined") return;
+  if (!items.length) return;
+
+  try {
+    const payload: PersistedRouteCacheItem = {
+      vehicleId,
+      fromTs,
+      toTs,
+      savedAt: Date.now(),
+      items: items.slice(Math.max(0, items.length - PERSISTED_ROUTE_CACHE_MAX_ITEMS)),
+    };
+
+    window.localStorage.setItem(
+      buildPersistedRouteCacheKey(vehicleId, fromTs, toTs),
+      JSON.stringify(payload)
+    );
+  } catch {
+    // ignore storage quota / private mode errors
   }
 }
 
@@ -1260,6 +1322,38 @@ export function pollVehiclePositionsRange(
 
   const loadInitial = async () => {
     try {
+      const persisted = readPersistedRouteCache(vehicleId, fromTs, toTs);
+      if (persisted && persisted.length > 0) {
+        currentItems = persisted;
+        lastLoadedToTs =
+          persisted[persisted.length - 1]?.gpsTimestamp ?? fromTs;
+        errorStreak = 0;
+        onData(currentItems);
+
+        const now = Date.now();
+        const effectiveToTs = Math.min(now, toTs > now ? now : toTs);
+        const incrementalFromTs = Math.max(
+          fromTs,
+          lastLoadedToTs - ROUTE_INCREMENTAL_OVERLAP_MS
+        );
+
+        if (incrementalFromTs <= effectiveToTs) {
+          const incoming = await getVehiclePositionsRange(
+            vehicleId,
+            incrementalFromTs,
+            effectiveToTs,
+            pageSize,
+            maxPages
+          );
+          currentItems = mergePositionItems(currentItems, incoming);
+          lastLoadedToTs =
+            currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+          onData(currentItems);
+          writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
+        }
+        return;
+      }
+
       const items = await getVehiclePositionsRange(
         vehicleId,
         fromTs,
@@ -1276,6 +1370,7 @@ export function pollVehiclePositionsRange(
       errorStreak = 0;
 
       onData(currentItems);
+      writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
     } catch (error) {
       console.error("[pollVehiclePositionsRange][initial]", error);
       errorStreak += 1;
@@ -1332,6 +1427,7 @@ export function pollVehiclePositionsRange(
       errorStreak = 0;
 
       onData(currentItems);
+      writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
     } catch (error) {
       console.error("[pollVehiclePositionsRange][incremental]", error);
       errorStreak += 1;
