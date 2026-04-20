@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -50,9 +50,9 @@ const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
 const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
-const ROUTE_RENDER_POINTS = 1400;
-const ROUTE_ANALYSIS_POINTS = 1800;
-const CRUMB_POINTS = 220;
+const ROUTE_RENDER_POINTS = 900;
+const ROUTE_ANALYSIS_POINTS = 1100;
+const CRUMB_POINTS = 140;
 const OVERSPEED_RENDER_POINTS = 80;
 const STOP_RENDER_LIMIT = 120;
 const SIGNATURE_SAMPLE_POINTS = 16;
@@ -445,9 +445,11 @@ export default function VehicleLiveRouteCard({
     };
   }, [authReady, user, vehicle.id]);
 
+  const deferredPositions = useDeferredValue(positions);
+
   const analysisPoints = useMemo(
-    () => samplePositions(positions, ROUTE_ANALYSIS_POINTS),
-    [positions]
+    () => samplePositions(deferredPositions, ROUTE_ANALYSIS_POINTS),
+    [deferredPositions]
   );
 
   useEffect(() => {
@@ -468,9 +470,11 @@ export default function VehicleLiveRouteCard({
   const routeStats = useMemo(() => {
     const start = positions[0] ?? null;
     const end = positions[positions.length - 1] ?? null;
-    const maxSpeed = positions.length
-      ? Math.max(...positions.map((item) => item.speedKmh ?? 0))
-      : 0;
+    let maxSpeed = 0;
+    for (const item of positions) {
+      const speed = item.speedKmh ?? 0;
+      if (speed > maxSpeed) maxSpeed = speed;
+    }
     const distanceKm = calculateRouteDistanceKm(positions);
 
     const durationMs = calculateRouteDurationMs(positions);
@@ -511,8 +515,8 @@ export default function VehicleLiveRouteCard({
   }, [historyPositions, positions]);
 
   const routeRenderPositions = useMemo(
-    () => samplePositions(positions, ROUTE_RENDER_POINTS),
-    [positions]
+    () => samplePositions(deferredPositions, ROUTE_RENDER_POINTS),
+    [deferredPositions]
   );
 
   const routePolyline = useMemo(
@@ -575,7 +579,10 @@ export default function VehicleLiveRouteCard({
     });
   }
 
-  const crumbPositions = useMemo(() => samplePositions(positions, CRUMB_POINTS), [positions]);
+  const crumbPositions = useMemo(
+    () => samplePositions(deferredPositions, CRUMB_POINTS),
+    [deferredPositions]
+  );
 
   return (
     <div className="panel vehicle-live-route-card">
@@ -676,6 +683,7 @@ export default function VehicleLiveRouteCard({
           center={mapCenter}
           zoom={15}
           scrollWheelZoom
+          preferCanvas
           className="vehicle-live-route-card__map"
         >
           <TileLayer

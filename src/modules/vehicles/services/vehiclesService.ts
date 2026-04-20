@@ -56,6 +56,7 @@ const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 12_000;
 const MAX_POLL_BACKOFF_MS = 90_000;
 const ROUTE_CACHE_TTL_MS = 10_000;
+const DAY_QUERY_CONCURRENCY = 3;
 
 type RouteCacheItem = {
   key: string;
@@ -290,6 +291,30 @@ function dedupeDayKeys(dayKeys: string[]): string[] {
   }
 
   return result;
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  limitCount: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (!items.length) return [];
+
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+
+  const runner = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  };
+
+  const slots = Math.max(1, Math.min(limitCount, items.length));
+  await Promise.all(new Array(slots).fill(null).map(() => runner()));
+
+  return results;
 }
 
 function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
@@ -921,7 +946,6 @@ function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePo
     eventIoId: toSafeNumber(data.eventIoId, 0),
     ignitionOn: toSafeBoolean(data.ignitionOn, false),
     odometerKm: toOptionalNumber(data.odometerKm),
-    rawIo: toSafeObject(data.rawIo),
   };
 }
 
@@ -1144,49 +1168,39 @@ export async function getVehiclePositionsRange(
   if (cached) return cached;
 
   let normalized: VehiclePositionItem[] = [];
-
-  try {
-    const flatItems = await getVehiclePositionsFromFlatCollection(
-      vehicleId,
-      fromTs,
-      toTs,
-      pageSize,
-      maxPages
-    );
-    normalized = normalizePositionItems(flatItems);
-  } catch (error) {
-    console.warn("[getVehiclePositionsRange][flatCollectionFallback]", error);
-  }
-
-  if (normalized.length) {
-    setRouteCache(vehicleId, fromTs, toTs, normalized);
-    return normalized;
-  }
-
   const dayKeys = enumerateDayKeysWithNeighbors(fromTs, toTs);
-  const allItems: VehiclePositionItem[] = [];
-
-  for (const dayKey of dayKeys) {
-    const dayItems = await getVehiclePositionsForDay(
-      vehicleId,
-      dayKey,
-      fromTs,
-      toTs,
-      pageSize,
-      maxPages
+  if (dayKeys.length > 0) {
+    const dayResults = await runWithConcurrency(
+      dayKeys,
+      DAY_QUERY_CONCURRENCY,
+      async (dayKey) =>
+        getVehiclePositionsForDay(vehicleId, dayKey, fromTs, toTs, pageSize, maxPages)
     );
 
-    allItems.push(...dayItems);
-
+    const allItems = dayResults.flat();
     if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
       console.warn(
         `[getVehiclePositionsRange] limita atinsa vehicleId=${vehicleId} points=${allItems.length}`
       );
-      break;
+    }
+    normalized = normalizePositionItems(allItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+  }
+
+  if (!normalized.length) {
+    try {
+      const flatItems = await getVehiclePositionsFromFlatCollection(
+        vehicleId,
+        fromTs,
+        toTs,
+        pageSize,
+        maxPages
+      );
+      normalized = normalizePositionItems(flatItems);
+    } catch (error) {
+      console.warn("[getVehiclePositionsRange][flatCollectionFallback]", error);
     }
   }
 
-  normalized = normalizePositionItems(allItems);
   setRouteCache(vehicleId, fromTs, toTs, normalized);
   return normalized;
 }
@@ -1221,11 +1235,17 @@ export function pollVehiclePositionsRange(
   let currentItems: VehiclePositionItem[] = [];
   let lastLoadedToTs = fromTs;
   let errorStreak = 0;
+  let forceFastRetry = false;
 
   const isPastWindow = toTs < Date.now() - 30_000;
 
   const scheduleNext = () => {
     if (stopped || isPastWindow) return;
+    if (forceFastRetry) {
+      forceFastRetry = false;
+      timer = window.setTimeout(loadIncremental, 250);
+      return;
+    }
     if (typeof navigator !== "undefined" && !navigator.onLine) {
       timer = window.setTimeout(loadIncremental, refreshMs);
       return;
@@ -1322,12 +1342,31 @@ export function pollVehiclePositionsRange(
     }
   };
 
+  const handleBackOnline = () => {
+    if (stopped || isPastWindow) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    forceFastRetry = true;
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    void loadIncremental();
+  };
+
   void loadInitial();
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", handleBackOnline);
+    document.addEventListener("visibilitychange", handleBackOnline);
+  }
 
   return () => {
     stopped = true;
     if (timer !== null) {
       window.clearTimeout(timer);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", handleBackOnline);
+      document.removeEventListener("visibilitychange", handleBackOnline);
     }
   };
 }
