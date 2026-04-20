@@ -1,6 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const chunkGroups: Record<string, string[]> = {
+  react: ["react", "react-dom", "react-router-dom"],
+  firebase: ["firebase/app", "firebase/auth", "firebase/firestore", "firebase/messaging"],
+  leaflet: ["leaflet", "react-leaflet"],
+  qr: ["html5-qrcode", "qrcode.react"],
+};
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -9,11 +16,14 @@ export default defineConfig({
     cssCodeSplit: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ["react", "react-dom", "react-router-dom"],
-          firebase: ["firebase/app", "firebase/auth", "firebase/firestore", "firebase/messaging"],
-          leaflet: ["leaflet", "react-leaflet"],
-          qr: ["html5-qrcode", "qrcode.react"],
+        manualChunks(id) {
+          for (const [chunkName, packages] of Object.entries(chunkGroups)) {
+            if (packages.some((pkg) => id.includes(`/node_modules/${pkg}/`) || id.includes(`\\node_modules\\${pkg}\\`))) {
+              return chunkName;
+            }
+          }
+
+          return undefined;
         },
       },
     },
