@@ -301,7 +301,7 @@ export default function VehicleDetailsPage() {
               />
             </div>
 
-            <div>
+            <div className="vehicle-details-summary">
               <h2 className="panel-title" style={{ marginBottom: 6 }}>
                 {vehicle.plateNumber}
               </h2>

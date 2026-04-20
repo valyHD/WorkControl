@@ -3184,7 +3184,7 @@ html {
   display: grid;
   grid-template-columns: 28px 1fr;
   gap: 10px;
-  min-height: 44px;
+  min-height: 52px;
 }
 
 .vehicle-timeline-item__track {
@@ -3221,7 +3221,7 @@ html {
 }
 
 .vehicle-timeline-item__body {
-  padding-bottom: 16px;
+  padding-bottom: 24px;
 }
 
 .vehicle-timeline-item__title {
@@ -3233,8 +3233,25 @@ html {
 .vehicle-timeline-item__meta {
   font-size: 11.5px;
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: 4px;
   line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .tool-details-header {
+    align-items: flex-start;
+  }
+
+  .vehicle-details-summary .tool-detail-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 7px 0;
+  }
+
+  .vehicle-details-summary .tool-detail-line strong {
+    min-width: 0;
+  }
 }
 
 .vehicle-timeline-chip {
