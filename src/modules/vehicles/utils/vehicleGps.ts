@@ -14,8 +14,7 @@ const MAX_REASONABLE_POINT_JUMP_KM = 20; // evita salturi GPS false
 const MAX_REASONABLE_ODOMETER_STEP_KM = 20; // evita odometru corupt
 const MIN_MOVING_SPEED_KMH = 6;
 const START_TO_MOVE_MAX_MS = 10 * 60 * 1000;
-const MIN_ENGINE_ON_VOLTAGE = 13;
-const MAX_ENGINE_ON_VOLTAGE = 30;
+const IGNITION_OFF_AFTER_IDLE_MS = 10 * 60 * 1000;
 
 export type DateRangePreset = "today" | "last24h" | "last3d" | "last7d" | "custom";
 export type VehicleDistanceBucketType = "day" | "week" | "month";
@@ -28,72 +27,35 @@ export interface VehicleDistanceBucket {
   distanceKm: number;
 }
 
-function extractVoltageFromRawIo(rawIo: unknown): number | null {
-  if (!rawIo || typeof rawIo !== "object") return null;
-  const io = rawIo as Record<string, unknown>;
-
-  const candidates = [
-    io["66"],
-    io["67"],
-    io["68"],
-    io["externalVoltage"],
-    io["batteryVoltage"],
-    io["voltage"],
-  ];
-
-  for (const candidate of candidates) {
-    if (!isFiniteNumber(candidate)) continue;
-    const value = Number(candidate);
-
-    if (value > 1000) {
-      const volts = value / 1000;
-      if (volts >= 6 && volts <= 36) return volts;
-      continue;
-    }
-
-    if (value >= 6 && value <= 36) {
-      return value;
-    }
-  }
-
-  return null;
+function isPointMoving(point: VehiclePositionItem): boolean {
+  return toSafeSpeed(point.speedKmh) > DEFAULT_STOP_SPEED_KMH;
 }
 
-function extractAccelerometerFromRawIo(rawIo: unknown): boolean | null {
-  if (!rawIo || typeof rawIo !== "object") return null;
-  const io = rawIo as Record<string, unknown>;
+function buildDerivedIgnitionStates(positions: VehiclePositionItem[]): boolean[] {
+  if (!positions.length) return [];
 
-  const candidates = [
-    io["accel"],
-    io["accelerometer"],
-    io["movement"],
-    io["motion"],
-    io["239"],
-    io["240"],
-  ];
+  const states: boolean[] = [];
+  let ignitionOn = false;
+  let lastMovingAt: number | null = null;
 
-  for (const candidate of candidates) {
-    if (typeof candidate === "boolean") return candidate;
-    if (isFiniteNumber(candidate)) return Number(candidate) > 0;
-    if (typeof candidate === "string") {
-      const normalized = candidate.trim().toLowerCase();
-      if (["1", "true", "on", "active", "moving"].includes(normalized)) return true;
-      if (["0", "false", "off", "inactive", "stopped"].includes(normalized)) return false;
+  for (const point of positions) {
+    const timestamp = point.gpsTimestamp;
+
+    if (isPointMoving(point)) {
+      ignitionOn = true;
+      lastMovingAt = timestamp;
+    } else if (
+      ignitionOn &&
+      lastMovingAt !== null &&
+      timestamp - lastMovingAt >= IGNITION_OFF_AFTER_IDLE_MS
+    ) {
+      ignitionOn = false;
     }
+
+    states.push(ignitionOn);
   }
 
-  return null;
-}
-
-function isPointEngineOn(point: VehiclePositionItem): boolean {
-  if (!point.ignitionOn) return false;
-
-  const accelerometerOn = extractAccelerometerFromRawIo(point.rawIo);
-  const voltage = extractVoltageFromRawIo(point.rawIo);
-  const hasEngineVoltage =
-    voltage !== null && voltage >= MIN_ENGINE_ON_VOLTAGE && voltage <= MAX_ENGINE_ON_VOLTAGE;
-
-  return accelerometerOn === true || hasEngineVoltage;
+  return states;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -381,8 +343,11 @@ export function buildTimelineEvents(
     });
   };
 
-  const firstIgnitionOn = positions.find((point) => point.ignitionOn);
-  if (firstIgnitionOn) {
+  const ignitionStates = buildDerivedIgnitionStates(positions);
+
+  const firstIgnitionOnIndex = ignitionStates.findIndex((state) => state);
+  if (firstIgnitionOnIndex >= 0) {
+    const firstIgnitionOn = positions[firstIgnitionOnIndex];
     add("ignition_on", firstIgnitionOn.gpsTimestamp, "Contact pornit", {
       speedKmh: firstIgnitionOn.speedKmh,
     });
@@ -413,7 +378,9 @@ export function buildTimelineEvents(
 
   for (let index = positions.length - 1; index >= 0; index -= 1) {
     const point = positions[index];
-    if (!point.ignitionOn) {
+    const current = ignitionStates[index];
+    const prev = index > 0 ? ignitionStates[index - 1] : false;
+    if (!current && prev) {
       add("ignition_off", point.gpsTimestamp, "Contact oprit", {
         speedKmh: point.speedKmh,
       });
@@ -467,6 +434,7 @@ function haversineKm(
 export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): number {
   if (!Array.isArray(positions) || positions.length <= 1) return 0;
 
+  const ignitionStates = buildDerivedIgnitionStates(positions);
   let total = 0;
 
   for (let index = 1; index < positions.length; index += 1) {
@@ -479,7 +447,7 @@ export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): numb
     if (timeDeltaMs <= 0) continue;
     if (timeDeltaMs > MAX_REASONABLE_GAP_MS) continue;
 
-    if (!isPointEngineOn(prev) || !isPointEngineOn(next)) continue;
+    if (!ignitionStates[index - 1] || !ignitionStates[index]) continue;
 
     const prevOdo = toSafeOdometer(prev.odometerKm);
     const nextOdo = toSafeOdometer(next.odometerKm);
@@ -509,6 +477,7 @@ export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): numb
 export function calculateRouteDurationMs(positions: VehiclePositionItem[]): number {
   if (!Array.isArray(positions) || positions.length <= 1) return 0;
 
+  const ignitionStates = buildDerivedIgnitionStates(positions);
   let totalMs = 0;
 
   for (let index = 1; index < positions.length; index += 1) {
@@ -516,7 +485,7 @@ export function calculateRouteDurationMs(positions: VehiclePositionItem[]): numb
     const next = positions[index];
 
     if (!prev || !next) continue;
-    if (!isPointEngineOn(prev) || !isPointEngineOn(next)) continue;
+    if (!ignitionStates[index - 1] || !ignitionStates[index]) continue;
 
     const deltaMs = next.gpsTimestamp - prev.gpsTimestamp;
     if (deltaMs <= 0) continue;
@@ -534,7 +503,10 @@ export function filterTrackableRoutePositions(
   const clean = sanitizePositions(positions);
   if (!clean.length) return [];
 
+  const ignitionStates = buildDerivedIgnitionStates(clean);
+
   const result: VehiclePositionItem[] = [];
+  let segmentStartIndex = -1;
   let segment: VehiclePositionItem[] = [];
 
   const flushSegment = () => {
@@ -555,23 +527,32 @@ export function filterTrackableRoutePositions(
     }
 
     if (firstMovingIndex < 0) {
+      segmentStartIndex = -1;
       segment = [];
       return;
     }
 
     const startedSlice = segment.slice(firstMovingIndex);
-    const engineOnSlice = startedSlice.filter((point) => isPointEngineOn(point));
+    const startedSliceStart = segmentStartIndex + firstMovingIndex;
+    const engineOnSlice = startedSlice.filter(
+      (_point, index) => ignitionStates[startedSliceStart + index]
+    );
     if (!engineOnSlice.length) {
+      segmentStartIndex = -1;
       segment = [];
       return;
     }
 
     result.push(...engineOnSlice);
+    segmentStartIndex = -1;
     segment = [];
   };
 
-  for (const point of clean) {
-    if (isPointEngineOn(point)) {
+  for (let index = 0; index < clean.length; index += 1) {
+    const point = clean[index];
+
+    if (ignitionStates[index]) {
+      if (segmentStartIndex < 0) segmentStartIndex = index;
       segment.push(point);
       continue;
     }

@@ -17,6 +17,8 @@ type Props = {
 
 const ONLINE_MS = 3 * 60 * 1000;
 const RECENT_MS = 10 * 60 * 1000;
+const MOVING_SPEED_THRESHOLD_KMH = 4;
+const IGNITION_OFF_IDLE_MS = 10 * 60 * 1000;
 
 function formatDate(ts?: number) {
   if (!ts) return "-";
@@ -101,6 +103,15 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
       ? `https://www.google.com/maps?q=${snapshot.lat},${snapshot.lng}`
       : "";
 
+  const ignitionFromGpsOn = useMemo(() => {
+    if (!snapshot?.gpsTimestamp) return false;
+
+    const speed = Number.isFinite(snapshot.speedKmh) ? Number(snapshot.speedKmh) : 0;
+    if (speed > MOVING_SPEED_THRESHOLD_KMH) return true;
+
+    return nowTs - snapshot.gpsTimestamp < IGNITION_OFF_IDLE_MS;
+  }, [nowTs, snapshot?.gpsTimestamp, snapshot?.speedKmh]);
+
   return (
     <div className="panel vehicle-info-card">
       <div className="vehicle-control-card__header">
@@ -129,7 +140,7 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
 
         <div className="vehicle-info-item">
           <Waypoints size={16} />
-          <strong>{snapshot?.ignitionOn ? "Contact pornit" : "Contact oprit"}</strong>
+          <strong>{ignitionFromGpsOn ? "Contact pornit" : "Contact oprit"}</strong>
           <span>Contact</span>
         </div>
 
