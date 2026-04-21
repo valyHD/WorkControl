@@ -230,11 +230,13 @@ function FitRouteBounds({
 type Props = {
   vehicle: VehicleItem;
   showControlCard?: boolean;
+  onKmEstimateChange?: (km: number) => void;
 };
 
 export default function VehicleLiveRouteCard({
   vehicle,
   showControlCard = true,
+  onKmEstimateChange,
 }: Props) {
   const { user } = useAuth();
   const authReady = true;
@@ -517,13 +519,11 @@ export default function VehicleLiveRouteCard({
   }, [positions]);
 
   const historyStats = useMemo(() => {
-    const merged = samplePositions(
-      filterTrackableRoutePositions([...historyPositions, ...positions]),
-      5000
-    );
-    const dayBuckets = buildDistanceHistory(merged, "day");
-    const weekBuckets = buildDistanceHistory(merged, "week");
-    const monthBuckets = buildDistanceHistory(merged, "month");
+    const source = historyPositions.length ? historyPositions : positions;
+    const normalized = samplePositions(filterTrackableRoutePositions(source), 5000);
+    const dayBuckets = buildDistanceHistory(normalized, "day");
+    const weekBuckets = buildDistanceHistory(normalized, "week");
+    const monthBuckets = buildDistanceHistory(normalized, "month");
 
     const nowDate = new Date();
     const todayKey = `${nowDate.getFullYear()}-${String(
@@ -532,15 +532,24 @@ export default function VehicleLiveRouteCard({
 
     const todayKm = dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
     const totalTrackedKm = dayBuckets.reduce((sum, item) => sum + item.distanceKm, 0);
+    const estimatedCurrentKm = Number(
+      ((vehicle.initialRecordedKm || 0) + totalTrackedKm).toFixed(2)
+    );
 
     return {
       todayKm,
       totalTrackedKm: Number(totalTrackedKm.toFixed(2)),
+      estimatedCurrentKm,
       dayBuckets,
       weekBuckets,
       monthBuckets,
     };
-  }, [historyPositions, positions]);
+  }, [historyPositions, positions, vehicle.initialRecordedKm]);
+
+  useEffect(() => {
+    if (!onKmEstimateChange) return;
+    onKmEstimateChange(historyStats.estimatedCurrentKm);
+  }, [historyStats.estimatedCurrentKm, onKmEstimateChange]);
 
   const routeRenderPositions = useMemo(
     () => samplePositions(deferredPositions, ROUTE_RENDER_POINTS),
@@ -716,7 +725,7 @@ export default function VehicleLiveRouteCard({
         >
           <TileLayer
             attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-            url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
             updateWhenIdle
             keepBuffer={1}
           />
@@ -848,6 +857,11 @@ export default function VehicleLiveRouteCard({
         </div>
 
         <div className="vehicle-gps-stat-card">
+          <span className="vehicle-gps-stat-card__label">Km total estimat masina</span>
+          <strong>{historyStats.estimatedCurrentKm.toFixed(2)} km</strong>
+        </div>
+
+        <div className="vehicle-gps-stat-card">
           <span className="vehicle-gps-stat-card__label">Puncte traseu</span>
           <strong>{positions.length}</strong>
         </div>
@@ -938,7 +952,10 @@ export default function VehicleLiveRouteCard({
       </div>
 
       <div className="vehicle-gps-detail-grid">
-        <VehicleGpsStatsCard vehicle={vehicle} />
+        <VehicleGpsStatsCard
+          vehicle={vehicle}
+          odometerKmOverride={historyStats.estimatedCurrentKm}
+        />
 
         <div className="panel vehicle-info-card">
           <h4 className="panel-title">Opriri & overspeed</h4>

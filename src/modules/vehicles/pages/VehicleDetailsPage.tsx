@@ -108,6 +108,7 @@ export default function VehicleDetailsPage() {
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimMsg, setClaimMsg] = useState("");
+  const [estimatedCurrentKm, setEstimatedCurrentKm] = useState<number | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -263,6 +264,15 @@ export default function VehicleDetailsPage() {
     ].filter((a) => Boolean(a.date));
   }, [vehicle]);
 
+  const displayedCurrentKm = useMemo(() => {
+    if (!vehicle) return 0;
+    const candidates = [vehicle.currentKm, vehicle.gpsSnapshot?.odometerKm, estimatedCurrentKm].filter(
+      (value): value is number => typeof value === "number" && Number.isFinite(value)
+    );
+    if (!candidates.length) return 0;
+    return Math.max(...candidates);
+  }, [estimatedCurrentKm, vehicle]);
+
   if (loading) return <VehicleDetailSkeleton />;
 
   if (!vehicle) {
@@ -328,7 +338,11 @@ export default function VehicleDetailsPage() {
 
               <div className="tool-detail-line">
                 <strong>Km curenti:</strong>{" "}
-                {(vehicle.currentKm || 0).toLocaleString("ro-RO")} km
+                {displayedCurrentKm.toLocaleString("ro-RO", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}{" "}
+                km
               </div>
             </div>
           </div>
@@ -427,7 +441,11 @@ export default function VehicleDetailsPage() {
           </div>
           <div className="tool-detail-line">
             <strong>Km curenti:</strong>{" "}
-            {(vehicle.currentKm || 0).toLocaleString("ro-RO")} km
+            {displayedCurrentKm.toLocaleString("ro-RO", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}{" "}
+            km
           </div>
           <div className="tool-detail-line">
             <strong>Km la inregistrare:</strong>{" "}
@@ -492,7 +510,11 @@ export default function VehicleDetailsPage() {
       )}
 
       <SectionErrorBoundary sectionName="harta GPS">
-        <VehicleLiveRouteCard vehicle={vehicle} showControlCard={false} />
+        <VehicleLiveRouteCard
+          vehicle={vehicle}
+          showControlCard={false}
+          onKmEstimateChange={setEstimatedCurrentKm}
+        />
       </SectionErrorBoundary>
 
       <div className="panel">
