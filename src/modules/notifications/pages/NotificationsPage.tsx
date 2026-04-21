@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   collection,
   query,
@@ -12,6 +13,7 @@ import { db } from "../../../lib/firebase/firebase";
 import { useAuth } from "../../../providers/AuthProvider";
 import { requestBrowserPermission } from "../../../lib/notifications/requestPermission";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
 
 type NotificationItem = {
   id: string;
@@ -21,6 +23,7 @@ type NotificationItem = {
   read: boolean;
   createdAt: number;
   module?: string;
+  eventType?: string;
   entityId?: string;
   targetUserThemeKey?: string | null;
   actorUserId?: string;
@@ -30,6 +33,7 @@ type NotificationItem = {
 
 export default function NotificationsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [permissionState, setPermissionState] = useState<string>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
@@ -59,6 +63,7 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
           read: data.read ?? false,
           createdAt: data.createdAt ?? Date.now(),
           module: data.module ?? "",
+          eventType: data.eventType ?? "",
           entityId: data.entityId ?? "",
           targetUserThemeKey: data.targetUserThemeKey ?? null,
         });
@@ -73,6 +78,17 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
     await updateDoc(doc(db, "notifications", id), {
       read: true,
     });
+  }
+
+  async function handleOpenNotification(notification: NotificationItem) {
+    await markAsRead(notification.id);
+    navigate(
+      resolveNotificationPath({
+        module: notification.module,
+        eventType: notification.eventType,
+        entityId: notification.entityId,
+      })
+    );
   }
 
   async function handleEnableBrowserNotifications() {
@@ -131,7 +147,7 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
     <div
       key={notification.id}
       className={`simple-list-item user-history-row ${userThemeClass}`}
-      onClick={() => void markAsRead(notification.id)}
+      onClick={() => void handleOpenNotification(notification)}
       style={{
         cursor: "pointer",
         opacity: notification.read ? 0.9 : 1,

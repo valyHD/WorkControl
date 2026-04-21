@@ -5,10 +5,15 @@ import { changeToolHolder } from "../services/toolsService";
 type Props = {
   tool: ToolItem;
   users: AppUser[];
+  initiator: {
+    userId: string;
+    userName: string;
+    userThemeKey: string | null;
+  };
   onChanged: () => Promise<void>;
 };
 
-export default function ToolChangeHolderCard({ tool, users, onChanged }: Props) {
+export default function ToolChangeHolderCard({ tool, users, initiator, onChanged }: Props) {
   const [selectedUserId, setSelectedUserId] = useState(tool.currentHolderUserId || "");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -27,7 +32,7 @@ export default function ToolChangeHolderCard({ tool, users, onChanged }: Props) 
         selectedUserId,
         selectedUser?.fullName ?? "",
         selectedUser?.themeKey ?? null,
-        tool.ownerUserName || "Responsabil"
+        initiator
       );
 
       setMessage(

@@ -98,6 +98,7 @@ async function createNotificationForUser(params: {
   title: string;
   message: string;
   module: NotificationRuleModule;
+  eventType: NotificationRuleEventType;
   entityId?: string;
 }) {
   if (!params.userId) return;
@@ -111,6 +112,7 @@ async function createNotificationForUser(params: {
     title: params.title,
     message: params.message,
     module: params.module,
+    eventType: params.eventType,
     entityId: params.entityId ?? "",
     read: false,
     createdAt: Date.now(),
@@ -168,6 +170,7 @@ export async function dispatchNotificationEvent(
         title: input.title,
         message: input.message,
         module: input.module,
+        eventType: input.eventType,
         entityId: input.entityId,
       });
     })
