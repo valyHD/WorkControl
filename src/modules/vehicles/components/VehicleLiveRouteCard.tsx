@@ -531,7 +531,7 @@ export default function VehicleLiveRouteCard({
     ).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
 
     const todayKm = dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
-    const totalTrackedKm = dayBuckets.reduce((sum, item) => sum + item.distanceKm, 0);
+    const totalTrackedKm = calculateRouteDistanceKm(positions);
     const estimatedCurrentKm = Number(
       Math.max(
         vehicle.currentKm || 0,
@@ -548,13 +548,7 @@ export default function VehicleLiveRouteCard({
       weekBuckets,
       monthBuckets,
     };
-  }, [
-    historyPositions,
-    positions,
-    vehicle.currentKm,
-    vehicle.gpsSnapshot?.odometerKm,
-    vehicle.initialRecordedKm,
-  ]);
+  }, [historyPositions, positions, vehicle.currentKm, vehicle.gpsSnapshot?.odometerKm, vehicle.initialRecordedKm]);
 
   useEffect(() => {
     if (!onKmEstimateChange) return;
