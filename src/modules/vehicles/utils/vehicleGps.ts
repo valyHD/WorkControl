@@ -13,6 +13,7 @@ const MAX_REASONABLE_GAP_MS = 12 * 60 * 60 * 1000; // 12h
 const MAX_REASONABLE_POINT_JUMP_KM = 20; // evita salturi GPS false
 const MAX_REASONABLE_ODOMETER_STEP_KM = 20; // evita odometru corupt
 const MIN_MOVING_SPEED_KMH = 6;
+const MIN_GEO_MOVEMENT_STEP_KM = 0.05; // ~50m: elimina drift GPS la stationare
 const START_TO_MOVE_MAX_MS = 10 * 60 * 1000;
 const IGNITION_OFF_AFTER_IDLE_MS = 10 * 60 * 1000;
 
@@ -464,9 +465,14 @@ export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): numb
     }
 
     const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
+    const prevSpeed = toSafeSpeed(prev.speedKmh);
+    const nextSpeed = toSafeSpeed(next.speedKmh);
+    const movingBySpeed = prevSpeed >= MIN_MOVING_SPEED_KMH || nextSpeed >= MIN_MOVING_SPEED_KMH;
 
     if (geoDelta <= 0) continue;
     if (geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
+    if (!movingBySpeed) continue;
+    if (geoDelta < MIN_GEO_MOVEMENT_STEP_KM) continue;
 
     total += geoDelta;
   }
@@ -589,84 +595,121 @@ export function buildDistanceHistory(
       label: string;
       startTs: number;
       endTs: number;
-      points: VehiclePositionItem[];
+      distanceKm: number;
     }
   >();
 
-  for (const point of clean) {
-    const date = new Date(point.gpsTimestamp);
-    let key = "";
-    let startTs = 0;
-    let endTs = 0;
-    let label = "";
+  const getBucketMeta = (timestamp: number) => {
+    const date = new Date(timestamp);
 
     if (type === "day") {
       const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
       const end = new Date(start.getTime());
       end.setDate(end.getDate() + 1);
 
-      key = localDayKey(start);
-      startTs = start.getTime();
-      endTs = end.getTime();
-      label = start.toLocaleDateString("ro-RO", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    } else if (type === "week") {
+      return {
+        key: localDayKey(start),
+        startTs: start.getTime(),
+        endTs: end.getTime(),
+        label: start.toLocaleDateString("ro-RO", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }),
+      };
+    }
+
+    if (type === "week") {
       const start = getWeekStart(date);
       const end = new Date(start.getTime());
       end.setDate(end.getDate() + 7);
 
-      key = `wk-${localDayKey(start)}`;
-      startTs = start.getTime();
-      endTs = end.getTime();
-      label = `${start.toLocaleDateString("ro-RO", {
-        day: "2-digit",
-        month: "2-digit",
-      })} - ${new Date(end.getTime() - 1).toLocaleDateString("ro-RO", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      })}`;
-    } else {
-      const start = new Date(date.getFullYear(), date.getMonth(), 1);
-      const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
-
-      key = `mo-${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
-      startTs = start.getTime();
-      endTs = end.getTime();
-      label = start.toLocaleDateString("ro-RO", {
-        month: "long",
-        year: "numeric",
-      });
+      return {
+        key: `wk-${localDayKey(start)}`,
+        startTs: start.getTime(),
+        endTs: end.getTime(),
+        label: `${start.toLocaleDateString("ro-RO", {
+          day: "2-digit",
+          month: "2-digit",
+        })} - ${new Date(end.getTime() - 1).toLocaleDateString("ro-RO", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        })}`,
+      };
     }
 
-    const existing = buckets.get(key);
+    const start = new Date(date.getFullYear(), date.getMonth(), 1);
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+
+    return {
+      key: `mo-${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`,
+      startTs: start.getTime(),
+      endTs: end.getTime(),
+      label: start.toLocaleDateString("ro-RO", {
+        month: "long",
+        year: "numeric",
+      }),
+    };
+  };
+
+  for (let index = 1; index < clean.length; index += 1) {
+    const prev = clean[index - 1];
+    const next = clean[index];
+
+    if (!prev || !next) continue;
+
+    const deltaMs = next.gpsTimestamp - prev.gpsTimestamp;
+    if (deltaMs <= 0 || deltaMs > MAX_REASONABLE_GAP_MS) continue;
+
+    const prevOdo = toSafeOdometer(prev.odometerKm);
+    const nextOdo = toSafeOdometer(next.odometerKm);
+    const odometerDelta =
+      prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+
+    let segmentDistance = 0;
+
+    if (
+      odometerDelta !== undefined &&
+      odometerDelta > 0 &&
+      odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
+    ) {
+      segmentDistance = odometerDelta;
+    } else {
+      const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
+      const prevSpeed = toSafeSpeed(prev.speedKmh);
+      const nextSpeed = toSafeSpeed(next.speedKmh);
+      const movingBySpeed = prevSpeed >= MIN_MOVING_SPEED_KMH || nextSpeed >= MIN_MOVING_SPEED_KMH;
+
+      if (geoDelta <= 0 || geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
+      if (!movingBySpeed) continue;
+      if (geoDelta < MIN_GEO_MOVEMENT_STEP_KM) continue;
+
+      segmentDistance = geoDelta;
+    }
+
+    const meta = getBucketMeta(next.gpsTimestamp);
+    const existing = buckets.get(meta.key);
     if (!existing) {
-      buckets.set(key, {
-        label,
-        startTs,
-        endTs,
-        points: [point],
+      buckets.set(meta.key, {
+        label: meta.label,
+        startTs: meta.startTs,
+        endTs: meta.endTs,
+        distanceKm: segmentDistance,
       });
     } else {
-      existing.points.push(point);
+      existing.distanceKm += segmentDistance;
     }
   }
 
   return [...buckets.entries()]
-    .map(([id, value]) => {
-      const bucketPoints = value.points.sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
-
-      return {
-        id,
-        label: value.label,
-        startTs: value.startTs,
-        endTs: value.endTs,
-        distanceKm: calculateRouteDistanceKm(bucketPoints),
-      };
-    })
+    .map(([id, value]) => ({
+      id,
+      label: value.label,
+      startTs: value.startTs,
+      endTs: value.endTs,
+      distanceKm: Number(value.distanceKm.toFixed(2)),
+    }))
     .filter((item) => item.distanceKm >= 0)
     .sort((a, b) => b.startTs - a.startTs);
 }
