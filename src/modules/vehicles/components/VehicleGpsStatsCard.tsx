@@ -13,6 +13,7 @@ import type { VehicleItem } from "../../../types/vehicle";
 
 type Props = {
   vehicle: VehicleItem;
+  odometerKmOverride?: number;
 };
 
 const ONLINE_MS = 3 * 60 * 1000;
@@ -46,7 +47,7 @@ function formatRelative(msAgo: number) {
   return `${hours}h ${restMin}m in urma`;
 }
 
-export default function VehicleGpsStatsCard({ vehicle }: Props) {
+export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Props) {
   const [nowTs, setNowTs] = useState(Date.now());
 
   useEffect(() => {
@@ -112,6 +113,18 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
     return nowTs - snapshot.gpsTimestamp < IGNITION_OFF_IDLE_MS;
   }, [nowTs, snapshot?.gpsTimestamp, snapshot?.speedKmh]);
 
+  const displayedOdometerKm = useMemo(() => {
+    const candidates = [
+      snapshot?.odometerKm,
+      vehicle.currentKm,
+      odometerKmOverride,
+      vehicle.initialRecordedKm,
+    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+
+    if (!candidates.length) return 0;
+    return Math.max(...candidates);
+  }, [odometerKmOverride, snapshot?.odometerKm, vehicle.currentKm, vehicle.initialRecordedKm]);
+
   return (
     <div className="panel vehicle-info-card">
       <div className="vehicle-control-card__header">
@@ -152,7 +165,7 @@ export default function VehicleGpsStatsCard({ vehicle }: Props) {
 
         <div className="vehicle-info-item">
           <Gauge size={16} />
-          <strong>{snapshot?.odometerKm ?? vehicle.currentKm ?? 0} km</strong>
+          <strong>{displayedOdometerKm.toFixed(2)} km</strong>
           <span>Odometru</span>
         </div>
 
