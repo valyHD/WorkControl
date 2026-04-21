@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import { useAuth } from "../../../providers/AuthProvider";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
@@ -236,6 +237,9 @@ export default function MyProfilePage() {
         </div>
         <div className="tool-detail-line">
           <strong>Email:</strong> {user.email}
+        </div>
+        <div className="tool-form-actions" style={{ padding: 0, marginTop: 12 }}>
+          <Link to="/my-leave" className="primary-btn">Calendar concedii & cereri libere</Link>
         </div>
       </div>
 
