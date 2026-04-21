@@ -50,7 +50,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
-const HISTORY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+const HISTORY_WINDOW_MS = 45 * 24 * 60 * 60 * 1000;
 const ROUTE_RENDER_POINTS = 180;
 const ROUTE_ANALYSIS_POINTS = 300;
 const CRUMB_POINTS = 24;
@@ -533,7 +533,11 @@ export default function VehicleLiveRouteCard({
     const todayKm = dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
     const totalTrackedKm = dayBuckets.reduce((sum, item) => sum + item.distanceKm, 0);
     const estimatedCurrentKm = Number(
-      ((vehicle.initialRecordedKm || 0) + totalTrackedKm).toFixed(2)
+      Math.max(
+        vehicle.currentKm || 0,
+        vehicle.gpsSnapshot?.odometerKm || 0,
+        (vehicle.initialRecordedKm || 0) + totalTrackedKm
+      ).toFixed(2)
     );
 
     return {
@@ -544,7 +548,13 @@ export default function VehicleLiveRouteCard({
       weekBuckets,
       monthBuckets,
     };
-  }, [historyPositions, positions, vehicle.initialRecordedKm]);
+  }, [
+    historyPositions,
+    positions,
+    vehicle.currentKm,
+    vehicle.gpsSnapshot?.odometerKm,
+    vehicle.initialRecordedKm,
+  ]);
 
   useEffect(() => {
     if (!onKmEstimateChange) return;
@@ -842,13 +852,13 @@ export default function VehicleLiveRouteCard({
 
       <div className="vehicle-gps-stats-grid">
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Km azi</span>
-          <strong>{historyStats.todayKm.toFixed(2)} km</strong>
+          <span className="vehicle-gps-stat-card__label">Km perioada selectata</span>
+          <strong>{routeStats.distanceKm.toFixed(2)} km</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Km interval selectat</span>
-          <strong>{routeStats.distanceKm.toFixed(2)} km</strong>
+          <span className="vehicle-gps-stat-card__label">Km azi</span>
+          <strong>{historyStats.todayKm.toFixed(2)} km</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
