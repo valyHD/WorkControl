@@ -95,3 +95,13 @@ Cand creezi o notificare in Firestore, trebuie sa trimiti si push catre token-ur
 - payload recomandat: `title`, `body`, `data.path` (ex: `/notifications`)
 
 Fara acest pas de backend, browserul nu poate afisa notificare daca aplicatia e inchisa complet.
+
+### Troubleshooting rapid (cand nu apare push pe telefon)
+0. Asigura dependintele backend instalate: `npm install dotenv firebase-admin`.
+1. Ruleaza backend-ul care trimite push: `npm run gps-server` (sau `node server.cjs`).
+2. Verifica in log sa apara:
+   - `[BOOT] WorkControl GPS server file loaded`
+   - `[PUSH BRIDGE] Starting notification -> FCM bridge listener`
+3. Verifica sa existe token in `pushTokens` pentru **acelasi** `userId` care primeste documentul din `notifications`.
+   - daca `notifications.userId != pushTokens.userId`, push-ul nu are destinatar corect.
+4. In documentul notificarii verifica dupa creare campurile `pushDispatchStatus`, `pushDispatchSuccessCount`, `pushDispatchFailureCount` (sunt puse de backend bridge).
