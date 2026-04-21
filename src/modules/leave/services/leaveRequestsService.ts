@@ -1,4 +1,4 @@
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp, where } from "firebase/firestore";
+import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp, where } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import type { LeaveRequestFormValues, LeaveRequestItem, LeaveRequestType } from "../../../types/leave";
 import type { TimesheetItem } from "../../../types/timesheet";
@@ -24,7 +24,10 @@ function buildPdfDataUrl(title: string, lines: string[]): string {
 }
 
 function toIsoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getRequestedDays(startIso: string, endIso: string): number {
@@ -122,6 +125,18 @@ export async function saveLeaveRequest(userId: string, values: LeaveRequestFormV
   });
 
   return refDoc.id;
+}
+
+
+export function subscribeLeaveRequestsForUser(
+  userId: string,
+  onNext: (requests: LeaveRequestItem[]) => void
+): () => void {
+  const q = query(leaveRequestsCollection, where("userId", "==", userId), orderBy("createdAt", "desc"));
+
+  return onSnapshot(q, (snap) => {
+    onNext(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+  });
 }
 
 export async function getLeaveRequestsForUser(userId: string): Promise<LeaveRequestItem[]> {

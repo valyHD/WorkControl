@@ -6,15 +6,18 @@ import type { TimesheetItem } from "../../../types/timesheet";
 import type { LeaveRequestFormValues, LeaveRequestItem } from "../../../types/leave";
 import {
   getLeaveDateSet,
-  getLeaveRequestsForUser,
   getWorkedMinutesByDay,
   saveLeaveRequest,
+  subscribeLeaveRequestsForUser,
 } from "../services/leaveRequestsService";
 
 const weekDays = ["L", "Ma", "Mi", "J", "V", "S", "D"];
 
 function toIsoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getMonthMatrix(baseDate: Date): Date[] {
@@ -99,11 +102,15 @@ export default function LeavePlannerPage() {
       }
     );
 
-    void getLeaveRequestsForUser(user.uid)
-      .then((items) => setLeaveRequests(items))
-      .finally(() => setLoading(false));
+    const leaveUnsub = subscribeLeaveRequestsForUser(user.uid, (items) => {
+      setLeaveRequests(items);
+      setLoading(false);
+    });
 
-    return () => timesheetUnsub();
+    return () => {
+      timesheetUnsub();
+      leaveUnsub();
+    };
   }, [user?.uid]);
 
   const workedMinutesByDay = useMemo(() => getWorkedMinutesByDay(timesheets), [timesheets]);
@@ -125,8 +132,6 @@ export default function LeavePlannerPage() {
 
     try {
       await saveLeaveRequest(user.uid, formValues);
-      const refreshed = await getLeaveRequestsForUser(user.uid);
-      setLeaveRequests(refreshed);
       setSuccess("Cererea a fost generata si salvata cu PDF in lista de mai jos.");
       setFormValues((prev) => ({
         ...defaultForm(user.displayName || user.email || "", user.email || ""),
