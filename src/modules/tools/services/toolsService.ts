@@ -470,7 +470,11 @@ export async function changeToolHolder(
   nextHolderUserId: string,
   nextHolderUserName: string,
   nextHolderThemeKey: string | null,
-  ownerUserName: string
+  initiator: {
+    userId: string;
+    userName: string;
+    userThemeKey: string | null;
+  }
 ): Promise<void> {
   const toolSnap = await getDoc(doc(db, "tools", toolId));
   if (!toolSnap.exists()) return;
@@ -478,6 +482,9 @@ export async function changeToolHolder(
   const toolData = toolSnap.data();
   const toolName = toolData.name ?? "Scula";
   const previousHolderUserId = toolData.currentHolderUserId ?? "";
+  const isOwnerInitiator = Boolean(initiator.userId && initiator.userId === (toolData.ownerUserId ?? ""));
+  const initiatorName = initiator.userName || (isOwnerInitiator ? toolData.ownerUserName : toolData.currentHolderUserName) || "Utilizator";
+  const initiatorThemeKey = initiator.userThemeKey ?? (isOwnerInitiator ? toolData.ownerThemeKey : toolData.currentHolderThemeKey) ?? null;
 
   if (nextHolderUserId) {
     await updateDoc(doc(db, "tools", toolId), {
@@ -503,9 +510,9 @@ export async function changeToolHolder(
       message: `${toolName} ti-a fost asignata. Accepta solicitarea pentru a deveni detinator curent.`,
       directUserId: nextHolderUserId,
       ownerUserId: toolData.ownerUserId ?? "",
-      actorUserId: toolData.ownerUserId ?? "",
-      actorUserName: toolData.ownerUserName ?? "Responsabil",
-      actorUserThemeKey: toolData.ownerThemeKey ?? null,
+      actorUserId: initiator.userId || "",
+      actorUserName: initiatorName,
+      actorUserThemeKey: initiatorThemeKey,
     });
     return;
   }
@@ -525,7 +532,7 @@ export async function changeToolHolder(
     updatedAtServer: serverTimestamp(),
   });
 
-  const message = `Scula a fost returnata in depozit de responsabilul ${ownerUserName}.`;
+  const message = `Scula a fost returnata in depozit de ${initiatorName}.`;
 
   await addToolEvent(toolId, "holder_changed", message);
 
@@ -537,9 +544,9 @@ await dispatchNotificationEvent({
   message: `${toolName} a fost mutata in depozit.`,
   directUserId: previousHolderUserId || "",
   ownerUserId: toolData.ownerUserId ?? "",
-  actorUserId: toolData.ownerUserId ?? "",
-  actorUserName: toolData.ownerUserName ?? "Responsabil",
-  actorUserThemeKey: toolData.ownerThemeKey ?? null,
+  actorUserId: initiator.userId || "",
+  actorUserName: initiatorName,
+  actorUserThemeKey: initiatorThemeKey,
 });
 }
 

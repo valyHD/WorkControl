@@ -99,6 +99,10 @@ await claimToolForCurrentUser(
     if (!tool || !user) return false;
     return tool.ownerUserId === user.uid;
   }, [tool, user]);
+  const isCurrentHolder = useMemo(() => {
+    if (!tool || !user) return false;
+    return tool.currentHolderUserId === user.uid;
+  }, [tool, user]);
 
   const needsRepair = useMemo(() => {
     if (!tool) return false;
@@ -238,8 +242,17 @@ src={tool.coverThumbUrl || tool.coverImageUrl}
         </div>
       )}
 
-      {isOwner && (
-        <ToolChangeHolderCard tool={tool} users={users} onChanged={load} />
+      {(isOwner || isCurrentHolder) && (
+        <ToolChangeHolderCard
+          tool={tool}
+          users={users}
+          initiator={{
+            userId: user?.uid ?? "",
+            userName: user?.displayName || user?.email || "Utilizator",
+            userThemeKey: user?.themeKey ?? null,
+          }}
+          onChanged={load}
+        />
       )}
 
       {hasPendingHolderRequest && (

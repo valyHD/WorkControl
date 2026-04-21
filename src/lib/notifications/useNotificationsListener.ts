@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase/firebase";
 import { showBrowserNotification } from "./showNotification";
+import { resolveNotificationPath } from "./notificationNavigation";
 
 export function useNotificationsListener(userId: string | undefined) {
   const initializedRef = useRef(false);
@@ -35,7 +36,12 @@ export function useNotificationsListener(userId: string | undefined) {
             const data = change.doc.data();
             showBrowserNotification(
               data.title ?? "Notificare",
-              data.message ?? ""
+              data.message ?? "",
+              resolveNotificationPath({
+                module: data.module,
+                eventType: data.eventType,
+                entityId: data.entityId,
+              })
             );
           }
         });
