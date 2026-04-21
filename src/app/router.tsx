@@ -7,6 +7,7 @@ const DashboardPage = lazy(() => import("../modules/dashboard/pages/DashboardPag
 const UsersPage = lazy(() => import("../modules/users/pages/UsersPage"));
 const LoginPage = lazy(() => import("../modules/auth/pages/LoginPage"));
 const MyProfilePage = lazy(() => import("../modules/users/pages/MyProfilePage"));
+const LeavePlannerPage = lazy(() => import("../modules/leave/pages/LeavePlannerPage"));
 const ToolsPage = lazy(() => import("../modules/tools/pages/ToolsPage"));
 const ToolFormPage = lazy(() => import("../modules/tools/pages/ToolFormPage"));
 const ToolDetailsPage = lazy(() => import("../modules/tools/pages/ToolDetailsPage"));
@@ -78,6 +79,7 @@ export const router = createBrowserRouter([
       { path: "/dashboard", element: withSuspense(<DashboardPage />) },
 
       { path: "/my-profile", element: withSuspense(<MyProfilePage />) },
+      { path: "/my-leave", element: withSuspense(<LeavePlannerPage />) },
       { path: "/notification-rules", element: withSuspense(<NotificationRulesPage />) },
       { path: "/users", element: withSuspense(<UsersPage />) },
       { path: "/users/new", element: withSuspense(<UserFormPage />) },

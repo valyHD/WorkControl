@@ -6,7 +6,7 @@ import { useNotificationsListener } from "../lib/notifications/useNotificationsL
 import { hasPushVapidKey, syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
 import {
   LayoutDashboard, User, Users, Wrench, CarFront, Clock3, Clock4,
-  Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2,
+  Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2, CalendarDays,
 } from "lucide-react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
@@ -25,6 +25,7 @@ const menuSections: { label: string; items: MenuItem[] }[] = [
     items: [
       { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard, colorClass: "menu-icon-blue", section: "Principal" },
       { label: "Profilul meu", path: "/my-profile", Icon: User, colorClass: "menu-icon-violet", section: "Principal" },
+      { label: "Concedii & Liber", path: "/my-leave", Icon: CalendarDays, colorClass: "menu-icon-orange", section: "Principal" },
       { label: "Utilizatori", path: "/users", Icon: Users, colorClass: "menu-icon-cyan", section: "Principal" },
     ],
   },
