@@ -200,6 +200,15 @@ export default function MyProfilePage() {
     [myTimesheets]
   );
 
+  const toolChangeInitiator = useMemo(
+    () => ({
+      userId: user?.uid ?? "",
+      userName: user?.displayName || user?.email || "Utilizator",
+      userThemeKey: user?.themeKey ?? null,
+    }),
+    [user?.displayName, user?.email, user?.themeKey, user?.uid]
+  );
+
   if (!user) {
     return (
       <div className="placeholder-page">
@@ -331,6 +340,7 @@ export default function MyProfilePage() {
                   onChanged={load}
                   showOwner={false}
                   canManage={true}
+                  initiator={toolChangeInitiator}
                 />
               ))}
             </div>
@@ -350,6 +360,7 @@ export default function MyProfilePage() {
                   users={users}
                   onChanged={load}
                   canManage={false}
+                  initiator={toolChangeInitiator}
                 />
               ))}
             </div>
@@ -370,6 +381,7 @@ export default function MyProfilePage() {
                   onChanged={load}
                   showOwner={false}
                   canManage={true}
+                  initiator={toolChangeInitiator}
                 />
               ))}
             </div>

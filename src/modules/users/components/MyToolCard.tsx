@@ -11,6 +11,11 @@ type Props = {
   onChanged: () => Promise<void>;
   showOwner?: boolean;
   canManage?: boolean;
+  initiator: {
+    userId: string;
+    userName: string;
+    userThemeKey: string | null;
+  };
 };
 
 export default function MyToolCard({
@@ -19,6 +24,7 @@ export default function MyToolCard({
   onChanged,
   showOwner = true,
   canManage = true,
+  initiator,
 }: Props) {
   const [selectedUserId, setSelectedUserId] = useState(tool.currentHolderUserId || "");
   const [submitting, setSubmitting] = useState(false);
@@ -40,7 +46,7 @@ export default function MyToolCard({
         selectedUserId,
         selectedUser?.fullName ?? "",
         selectedUser?.themeKey ?? null,
-        tool.ownerUserName || "Responsabil"
+        initiator
       );
 
       setMessage(
