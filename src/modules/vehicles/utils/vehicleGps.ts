@@ -467,7 +467,7 @@ export function calculateRouteDistanceKm(positions: VehiclePositionItem[]): numb
     const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
     const prevSpeed = toSafeSpeed(prev.speedKmh);
     const nextSpeed = toSafeSpeed(next.speedKmh);
-    const movingBySpeed = prevSpeed >= MIN_MOVING_SPEED_KMH || nextSpeed >= MIN_MOVING_SPEED_KMH;
+    const movingBySpeed = prevSpeed > MIN_MOVING_SPEED_KMH || nextSpeed > MIN_MOVING_SPEED_KMH;
 
     if (geoDelta <= 0) continue;
     if (geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
@@ -526,7 +526,7 @@ export function filterTrackableRoutePositions(
       const point = segment[index];
       const elapsed = point.gpsTimestamp - startTs;
       if (elapsed > START_TO_MOVE_MAX_MS) break;
-      if (toSafeSpeed(point.speedKmh) >= MIN_MOVING_SPEED_KMH) {
+      if (toSafeSpeed(point.speedKmh) > MIN_MOVING_SPEED_KMH) {
         firstMovingIndex = index;
         break;
       }
@@ -679,7 +679,7 @@ export function buildDistanceHistory(
       const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
       const prevSpeed = toSafeSpeed(prev.speedKmh);
       const nextSpeed = toSafeSpeed(next.speedKmh);
-      const movingBySpeed = prevSpeed >= MIN_MOVING_SPEED_KMH || nextSpeed >= MIN_MOVING_SPEED_KMH;
+      const movingBySpeed = prevSpeed > MIN_MOVING_SPEED_KMH || nextSpeed > MIN_MOVING_SPEED_KMH;
 
       if (geoDelta <= 0 || geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
       if (!movingBySpeed) continue;
