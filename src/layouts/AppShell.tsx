@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { logoutUser } from "../modules/auth/services/authService";
 import { useNotificationsListener } from "../lib/notifications/useNotificationsListener";
+import { hasPushVapidKey, syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
 import {
   LayoutDashboard, User, Users, Wrench, CarFront, Clock3, Clock4,
   Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2,
@@ -96,6 +97,12 @@ export default function AppShell() {
   const maintenanceRanRef = useRef<string | null>(null);
 
   useNotificationsListener(user?.uid);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!hasPushVapidKey()) return;
+    void syncPushTokenIfGranted(user.uid);
+  }, [user?.uid]);
 
   // Live clock
   useEffect(() => {

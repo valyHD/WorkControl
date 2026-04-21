@@ -1,19 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
-  query,
-  where,
-  orderBy,
-  onSnapshot,
-  updateDoc,
   doc,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import { useAuth } from "../../../providers/AuthProvider";
-import { requestBrowserPermission } from "../../../lib/notifications/requestPermission";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
+import {
+  activatePushNotifications,
+  hasPushVapidKey,
+  hasUserPushToken,
+  syncPushTokenIfGranted,
+  type PushActivationResult,
+} from "../../../lib/notifications/pushNotifications";
 
 type NotificationItem = {
   id: string;
@@ -31,6 +37,32 @@ type NotificationItem = {
   actorUserThemeKey?: string | null;
 };
 
+function getActivationMessage(result: PushActivationResult | null): string {
+  if (!result) return "";
+
+  if (result.ok) {
+    return "Notificarile push sunt active. Vei primi notificari si cand aplicatia este inchisa.";
+  }
+
+  if (result.reason === "permission_denied") {
+    return "Permisiunea de notificari este blocata. Activeaz-o din setarile browserului.";
+  }
+
+  if (result.reason === "missing_vapid") {
+    return "Lipseste configurarea VAPID (VITE_FIREBASE_VAPID_KEY).";
+  }
+
+  if (result.reason === "token_error") {
+    return "Nu am putut inregistra dispozitivul pentru push. Reincearca.";
+  }
+
+  if (result.reason === "missing_service_worker") {
+    return "Service Worker-ul de notificari nu este disponibil pe acest dispozitiv.";
+  }
+
+  return "Dispozitivul nu suporta notificari push in fundal.";
+}
+
 export default function NotificationsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -38,6 +70,10 @@ export default function NotificationsPage() {
   const [permissionState, setPermissionState] = useState<string>(
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
+  const [activatingPush, setActivatingPush] = useState(false);
+  const [pushResult, setPushResult] = useState<PushActivationResult | null>(null);
+
+  const pushConfigReady = hasPushVapidKey();
 
   useEffect(() => {
     if (!user) return;
@@ -55,8 +91,8 @@ export default function NotificationsPage() {
         list.push({
           id: item.id,
           actorUserId: data.actorUserId ?? "",
-actorUserName: data.actorUserName ?? "",
-actorUserThemeKey: data.actorUserThemeKey ?? null,
+          actorUserName: data.actorUserName ?? "",
+          actorUserThemeKey: data.actorUserThemeKey ?? null,
           userId: data.userId ?? "",
           title: data.title ?? "",
           message: data.message ?? "",
@@ -73,6 +109,34 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
 
     return () => unsub();
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!pushConfigReady) return;
+
+    const loadPushState = async () => {
+      try {
+        if (typeof Notification !== "undefined") {
+          setPermissionState(Notification.permission);
+        }
+
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+          return;
+        }
+
+        await syncPushTokenIfGranted(user.uid);
+
+        const hasToken = await hasUserPushToken(user.uid);
+        if (hasToken) {
+          setPushResult({ ok: true, reason: "ok" });
+        }
+      } catch (error) {
+        console.error("[NotificationsPage][loadPushState]", error);
+      }
+    };
+
+    void loadPushState();
+  }, [user?.uid, pushConfigReady]);
 
   async function markAsRead(id: string) {
     await updateDoc(doc(db, "notifications", id), {
@@ -91,10 +155,22 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
     );
   }
 
-  async function handleEnableBrowserNotifications() {
-    const granted = await requestBrowserPermission();
-    setPermissionState(granted ? "granted" : Notification.permission);
+  async function handleActivatePush() {
+    if (!user?.uid || activatingPush || !pushConfigReady) return;
+
+    setActivatingPush(true);
+    try {
+      const result = await activatePushNotifications(user.uid);
+      setPushResult(result);
+      setPermissionState(
+        typeof Notification !== "undefined" ? Notification.permission : "default"
+      );
+    } finally {
+      setActivatingPush(false);
+    }
   }
+
+  const pushMessage = useMemo(() => getActivationMessage(pushResult), [pushResult]);
 
   if (!user) {
     return (
@@ -116,17 +192,25 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
             </p>
           </div>
 
-          <div className="tools-header-actions">
-            {permissionState !== "granted" ? (
-              <button
-                className="primary-btn"
-                type="button"
-                onClick={() => void handleEnableBrowserNotifications()}
-              >
-                Activeaza notificari browser
-              </button>
-            ) : (
-              <span className="badge badge-green">Notificari browser active</span>
+          <div className="tools-header-actions" style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+            <button
+              className="primary-btn"
+              type="button"
+              onClick={() => void handleActivatePush()}
+              disabled={activatingPush || !pushConfigReady}
+            >
+              {activatingPush ? "Se activeaza..." : "Activeaza notificari push (fundal)"}
+            </button>
+            {permissionState === "granted" && (
+              <span className="badge badge-green">Permisiune browser: activa</span>
+            )}
+            {!pushConfigReady && (
+              <span className="badge badge-orange">Lipseste configurarea VAPID pe frontend (.env).</span>
+            )}
+            {pushMessage && (
+              <span className={pushResult?.ok ? "badge badge-green" : "badge badge-orange"}>
+                {pushMessage}
+              </span>
             )}
           </div>
         </div>
@@ -138,50 +222,48 @@ actorUserThemeKey: data.actorUserThemeKey ?? null,
           </div>
         ) : (
           <div className="simple-list">
-{notifications.map((notification) => {
+            {notifications.map((notification) => {
               const userThemeClass = getUserThemeClass(
                 notification.actorUserThemeKey ?? null
               );
 
-  return (
-    <div
-      key={notification.id}
-      className={`simple-list-item user-history-row ${userThemeClass}`}
-      onClick={() => void handleOpenNotification(notification)}
-      style={{
-        cursor: "pointer",
-        opacity: notification.read ? 0.9 : 1,
-      }}
-    >
-      <div className="simple-list-text">
-        <div className="user-inline-meta">
-          <span className="user-accent-avatar">
-            {getUserInitials(notification.actorUserName || notification.title || "S")}
-          </span>
-          <span className="simple-list-label user-accent-name">
-            {notification.actorUserName || notification.title}
-          </span>
-        </div>
+              return (
+                <div
+                  key={notification.id}
+                  className={`simple-list-item user-history-row ${userThemeClass}`}
+                  onClick={() => void handleOpenNotification(notification)}
+                  style={{
+                    cursor: "pointer",
+                    opacity: notification.read ? 0.9 : 1,
+                  }}
+                >
+                  <div className="simple-list-text">
+                    <div className="user-inline-meta">
+                      <span className="user-accent-avatar">
+                        {getUserInitials(notification.actorUserName || notification.title || "S")}
+                      </span>
+                      <span className="simple-list-label user-accent-name">
+                        {notification.actorUserName || notification.title}
+                      </span>
+                    </div>
 
-        <div className="simple-list-subtitle">{notification.title}</div>
-        <div className="simple-list-subtitle">
-          {notification.message}
-        </div>
-        <div className="simple-list-subtitle">
-          {new Date(notification.createdAt).toLocaleString("ro-RO")}
-        </div>
-      </div>
+                    <div className="simple-list-subtitle">{notification.title}</div>
+                    <div className="simple-list-subtitle">{notification.message}</div>
+                    <div className="simple-list-subtitle">
+                      {new Date(notification.createdAt).toLocaleString("ro-RO")}
+                    </div>
+                  </div>
 
-      <span
-        className={
-          notification.read ? "badge badge-green" : "badge badge-orange"
-        }
-      >
-        {notification.read ? "citita" : "noua"}
-      </span>
-    </div>
-  );
-})}
+                  <span
+                    className={
+                      notification.read ? "badge badge-green" : "badge badge-orange"
+                    }
+                  >
+                    {notification.read ? "citita" : "noua"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
