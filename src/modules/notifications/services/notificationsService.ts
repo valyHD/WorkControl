@@ -124,10 +124,16 @@ export async function dispatchNotificationEvent(
   input: DispatchNotificationEventInput
 ): Promise<void> {
   const rules = await getMatchingRules(input.module, input.eventType, input.entityId);
-  if (rules.length === 0) return;
-
   const users = await getAllUsersLite();
   const recipientsSet = new Set<string>();
+
+  if (input.directUserId) {
+    recipientsSet.add(input.directUserId);
+  }
+
+  if (input.ownerUserId) {
+    recipientsSet.add(input.ownerUserId);
+  }
 
   for (const rule of rules) {
     if (rule.recipients.notifyDirectUser && input.directUserId) {
@@ -156,6 +162,7 @@ export async function dispatchNotificationEvent(
   }
 
   const userIds = Array.from(recipientsSet);
+  if (userIds.length === 0) return;
 
   await Promise.all(
     userIds.map((userId) => {
