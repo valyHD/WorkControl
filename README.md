@@ -71,3 +71,33 @@ export default defineConfig([
   },
 ])
 ```
+
+## WorkControl - notificari push in fundal (PWA)
+
+Ca notificarea sa ajunga chiar daca aplicatia este inchisa (inclusiv proces inchis), trebuie Firebase Cloud Messaging (FCM).
+
+### 1) Frontend (.env)
+Adauga in `.env`:
+
+```bash
+VITE_FIREBASE_VAPID_KEY=PASTE_WEB_PUSH_CERTIFICATE_KEY_PAIR_PUBLIC_KEY
+```
+
+Cheia se ia din Firebase Console -> Project Settings -> Cloud Messaging -> Web Push certificates.
+
+### 2) Ce salveaza aplicatia
+Aplicatia salveaza token-ul FCM in colectia Firestore `pushTokens` cand userul apasa `Activeaza notificari push (fundal)` din pagina Notificari.
+
+### 3) Backend obligatoriu (Cloud Function / server)
+Cand creezi o notificare in Firestore, trebuie sa trimiti si push catre token-urile userului:
+- iei token-urile din `pushTokens` dupa `userId`
+- trimiti prin Firebase Admin SDK `sendEachForMulticast`
+- payload recomandat: `title`, `body`, `data.path` (ex: `/notifications`)
+
+Fara acest pas de backend, browserul nu poate afisa notificare daca aplicatia e inchisa complet.
+
+### Troubleshooting rapid (cand nu apare push pe telefon)
+1. Verifica sa existe token in `pushTokens` pentru **acelasi** `userId` care primeste documentul din `notifications`.
+   - daca `notifications.userId != pushTokens.userId`, push-ul nu are destinatar corect.
+2. Verifica in backend-ul tau (Cloud Function/server de notificari) daca apelul FCM (`sendEachForMulticast`) se executa fara erori.
+3. Daca trimiti push din backend, salveaza in documentul notificarii un status de dispatch (`sent` / `failed`) ca sa poti diagnostica usor.
