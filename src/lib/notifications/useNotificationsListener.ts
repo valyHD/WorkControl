@@ -34,7 +34,7 @@ export function useNotificationsListener(userId: string | undefined) {
         snap.docChanges().forEach((change) => {
           if (change.type === "added") {
             const data = change.doc.data();
-            showBrowserNotification(
+            void showBrowserNotification(
               data.title ?? "Notificare",
               data.message ?? "",
               resolveNotificationPath({

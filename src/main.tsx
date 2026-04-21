@@ -6,6 +6,14 @@ import "./app/app.css";
 import { AuthProvider } from "./providers/AuthProvider";
 import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/notification-sw.js").catch((error) => {
+      console.error("Nu s-a putut inregistra service worker-ul de notificari:", error);
+    });
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppErrorBoundary>
