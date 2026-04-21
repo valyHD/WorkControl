@@ -74,6 +74,11 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+
+    match /pushTokens/{tokenId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /systemSettings/{settingId} {
       allow read, write: if isSignedIn();
     }
