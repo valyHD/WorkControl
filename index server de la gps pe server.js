@@ -40,6 +40,9 @@ const trackerBindingCache = new Map();
 const lastSavedPointByImei = new Map();
 const lastSnapshotWriteByVehicle = new Map();
 const lastUnboundLogByImei = new Map();
+const NOTIFICATION_LISTENER_START_TS = Date.now();
+const NOTIFICATION_STARTUP_GRACE_MS = 90_000;
+const NOTIFICATION_PUSH_BATCH_LIMIT = 120;
 function isCodec12SuccessPayload(payload) {
   const text = String(payload || "").toLowerCase();
 
@@ -51,6 +54,154 @@ function isCodec12SuccessPayload(payload) {
   if (text.includes("bad syntax")) return false;
 
   return true;
+}
+
+function resolveNotificationPath(moduleName, eventType, entityId) {
+  const moduleValue = String(moduleName || "").trim();
+  const eventValue = String(eventType || "").trim();
+  const entityValue = String(entityId || "").trim();
+
+  if (moduleValue === "tools" && entityValue) return `/tools/${entityValue}`;
+  if (moduleValue === "vehicles" && entityValue) return `/vehicles/${entityValue}`;
+  if (moduleValue === "timesheets" && entityValue) return `/timesheets/${entityValue}`;
+  if (moduleValue === "users" && entityValue) return `/users/${entityValue}/edit`;
+  if (moduleValue === "projects") return "/projects";
+  if (moduleValue === "notifications") return "/notifications";
+
+  if (eventValue === "notification_rule_changed") return "/notification-rules";
+  if (
+    eventValue === "backup_requested" ||
+    eventValue === "backup_completed" ||
+    eventValue === "backup_failed" ||
+    eventValue === "data_retention_cleanup"
+  ) {
+    return "/control-panel";
+  }
+
+  if (moduleValue === "web" || moduleValue === "server" || moduleValue === "system" || moduleValue === "backup") {
+    return "/control-panel";
+  }
+
+  return "/notifications";
+}
+
+async function collectPushTokensForUser(userId) {
+  if (!userId) return [];
+
+  const snap = await db
+    .collection("pushTokens")
+    .where("userId", "==", userId)
+    .limit(NOTIFICATION_PUSH_BATCH_LIMIT)
+    .get();
+
+  if (snap.empty) return [];
+
+  return snap.docs
+    .map((docSnap) => ({
+      id: docSnap.id,
+      token: String(docSnap.data().token || "").trim(),
+    }))
+    .filter((item) => item.token);
+}
+
+async function sendPushForNotification(docSnap) {
+  const data = docSnap.data() || {};
+
+  if (data.pushDispatchedAt || data.pushDispatchStatus === "sent") {
+    return;
+  }
+
+  const createdAt = Number(data.createdAt || 0);
+  if (createdAt > 0 && createdAt < NOTIFICATION_LISTENER_START_TS - NOTIFICATION_STARTUP_GRACE_MS) {
+    return;
+  }
+
+  const userId = String(data.userId || "").trim();
+  if (!userId) return;
+
+  const tokenItems = await collectPushTokensForUser(userId);
+  if (tokenItems.length === 0) {
+    await docSnap.ref.set(
+      {
+        pushDispatchStatus: "no_tokens",
+        pushDispatchCheckedAt: Date.now(),
+      },
+      { merge: true }
+    );
+    return;
+  }
+
+  const path = resolveNotificationPath(data.module, data.eventType, data.entityId);
+  const title = String(data.title || "Notificare WorkControl");
+  const body = String(data.message || "");
+
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens: tokenItems.map((item) => item.token),
+    notification: {
+      title,
+      body,
+    },
+    data: {
+      path,
+      notificationId: docSnap.id,
+      module: String(data.module || ""),
+      eventType: String(data.eventType || ""),
+      entityId: String(data.entityId || ""),
+    },
+    webpush: {
+      fcmOptions: {
+        link: path,
+      },
+    },
+  });
+
+  const invalidTokenDocIds = [];
+
+  response.responses.forEach((result, index) => {
+    if (result.success) return;
+    const code = String(result.error?.code || "");
+    if (code === "messaging/invalid-registration-token" || code === "messaging/registration-token-not-registered") {
+      invalidTokenDocIds.push(tokenItems[index].id);
+    }
+  });
+
+  if (invalidTokenDocIds.length > 0) {
+    await Promise.all(
+      invalidTokenDocIds.map((id) => db.collection("pushTokens").doc(id).delete().catch(() => null))
+    );
+  }
+
+  await docSnap.ref.set(
+    {
+      pushDispatchedAt: Date.now(),
+      pushDispatchStatus: response.successCount > 0 ? "sent" : "failed",
+      pushDispatchSuccessCount: response.successCount,
+      pushDispatchFailureCount: response.failureCount,
+    },
+    { merge: true }
+  );
+}
+
+function startNotificationPushBridge() {
+  console.log("[PUSH BRIDGE] Starting notification -> FCM bridge listener");
+
+  return db
+    .collection("notifications")
+    .orderBy("createdAt", "desc")
+    .limit(NOTIFICATION_PUSH_BATCH_LIMIT)
+    .onSnapshot(
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type !== "added") return;
+          void sendPushForNotification(change.doc).catch((error) => {
+            console.error("[PUSH BRIDGE][SEND ERROR]", error);
+          });
+        });
+      },
+      (error) => {
+        console.error("[PUSH BRIDGE][LISTENER ERROR]", error);
+      }
+    );
 }
 function bytesToUnsignedBigInt(buffer) {
   let value = 0n;
@@ -1163,6 +1314,7 @@ server.on("error", (error) => {
 
 watchVehicleCommands();
 startCleanupScheduler();
+startNotificationPushBridge();
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER STARTED] GPS gateway listening on 0.0.0.0:${PORT}`);
