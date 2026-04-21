@@ -38,7 +38,7 @@ export default function VehicleChangeDriverCard({ vehicle, users, onChanged }: P
       );
       setMessage(
         selectedUserId
-          ? `Șoferul curent a fost actualizat la ${selectedUser?.fullName ?? "utilizatorul selectat"}.`
+          ? "Solicitarea a fost trimisă. Șoferul se schimbă după acceptare."
           : "Șoferul curent a fost eliminat."
       );
       setMessageType("success");

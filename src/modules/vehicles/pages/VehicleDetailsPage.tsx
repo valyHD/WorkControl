@@ -14,6 +14,7 @@ import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
 import VehicleControlCard from "../components/VehicleControlCard";
 import {
+  acceptVehicleDriverChange,
   claimVehicleForCurrentUser,
   getVehicleEvents,
   getVehicleUsers,
@@ -208,6 +209,13 @@ export default function VehicleDetailsPage() {
     }
   }
 
+  async function handleAcceptPendingDriver() {
+    if (!vehicle || !user?.uid) return;
+
+    await acceptVehicleDriverChange(vehicle.id, user.uid);
+    await loadMeta();
+  }
+
   async function handleSetCover(url: string) {
     if (!vehicle || !user || vehicle.ownerUserId !== user.uid) return;
 
@@ -272,6 +280,15 @@ export default function VehicleDetailsPage() {
     if (!candidates.length) return 0;
     return Math.max(...candidates);
   }, [estimatedCurrentKm, vehicle]);
+
+  const hasPendingDriverRequest = useMemo(() => {
+    return Boolean(vehicle?.pendingDriverUserId);
+  }, [vehicle?.pendingDriverUserId]);
+
+  const isPendingForCurrentUser = useMemo(() => {
+    if (!vehicle?.pendingDriverUserId || !user?.uid) return false;
+    return vehicle.pendingDriverUserId === user.uid;
+  }, [vehicle?.pendingDriverUserId, user?.uid]);
 
   if (loading) return <VehicleDetailSkeleton />;
 
@@ -507,6 +524,27 @@ export default function VehicleDetailsPage() {
 
       {isOwner && (
         <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />
+      )}
+
+      {hasPendingDriverRequest && (
+        <div className="panel">
+          <h3 className="panel-title">Solicitare schimbare șofer</h3>
+          <p className="tools-subtitle" style={{ marginBottom: 12 }}>
+            Solicitare pentru: <strong>{vehicle.pendingDriverUserName || "utilizator"}</strong>.
+            {vehicle.pendingDriverRequestedAt
+              ? ` Trimisă la ${formatDate(vehicle.pendingDriverRequestedAt)}.`
+              : ""}
+          </p>
+          {isPendingForCurrentUser ? (
+            <div className="tool-form-actions">
+              <button className="primary-btn" type="button" onClick={() => void handleAcceptPendingDriver()}>
+                Acceptă și devino șofer curent
+              </button>
+            </div>
+          ) : (
+            <p className="tools-subtitle">În așteptarea acceptării de către utilizatorul selectat.</p>
+          )}
+        </div>
       )}
 
       <SectionErrorBoundary sectionName="harta GPS">

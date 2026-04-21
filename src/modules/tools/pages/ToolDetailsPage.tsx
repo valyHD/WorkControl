@@ -6,6 +6,7 @@ import ToolStatusBadge from "../components/ToolStatusBadge";
 import ToolChangeHolderCard from "../components/ToolChangeHolderCard";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import {
+  acceptToolHolderChange,
   claimToolForCurrentUser,
   getToolById,
   getToolEvents,
@@ -83,6 +84,12 @@ await claimToolForCurrentUser(
     await load();
   }
 
+  async function handleAcceptPendingHolder() {
+    if (!tool || !user?.uid) return;
+    await acceptToolHolderChange(tool.id, user.uid);
+    await load();
+  }
+
   const qrDisplayValue = useMemo(() => {
     if (!tool) return "";
     return tool.qrCodeValue || `${window.location.origin}/tools/${tool.id}`;
@@ -102,6 +109,15 @@ await claimToolForCurrentUser(
       (!tool.currentHolderUserId && tool.locationLabel !== "Depozit")
     );
   }, [tool]);
+
+  const hasPendingHolderRequest = useMemo(() => {
+    return Boolean(tool?.pendingHolderUserId);
+  }, [tool?.pendingHolderUserId]);
+
+  const isPendingForCurrentUser = useMemo(() => {
+    if (!tool?.pendingHolderUserId || !user?.uid) return false;
+    return tool.pendingHolderUserId === user.uid;
+  }, [tool?.pendingHolderUserId, user?.uid]);
 
   if (loading) {
     return (
@@ -224,6 +240,28 @@ src={tool.coverThumbUrl || tool.coverImageUrl}
 
       {isOwner && (
         <ToolChangeHolderCard tool={tool} users={users} onChanged={load} />
+      )}
+
+      {hasPendingHolderRequest && (
+        <div className="panel">
+          <h3 className="panel-title">Solicitare schimbare detinator</h3>
+          <p className="tools-subtitle" style={{ marginBottom: 12 }}>
+            Solicitare pentru: <strong>{tool.pendingHolderUserName || "utilizator"}</strong>.
+            {tool.pendingHolderRequestedAt
+              ? ` Trimisa la ${formatDate(tool.pendingHolderRequestedAt)}.`
+              : ""}
+          </p>
+
+          {isPendingForCurrentUser ? (
+            <div className="tool-form-actions">
+              <button className="primary-btn" type="button" onClick={() => void handleAcceptPendingHolder()}>
+                Accepta si devino detinator
+              </button>
+            </div>
+          ) : (
+            <p className="tools-subtitle">In asteptarea acceptarii de catre utilizatorul selectat.</p>
+          )}
+        </div>
       )}
 
       <div className="panel">
