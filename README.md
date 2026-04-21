@@ -104,3 +104,4 @@ Fara acest pas de backend, browserul nu poate afisa notificare daca aplicatia e 
    - `[PUSH BRIDGE] Starting notification -> FCM bridge listener`
 3. Verifica sa existe token in `pushTokens` pentru **acelasi** `userId` care primeste documentul din `notifications`.
    - daca `notifications.userId != pushTokens.userId`, push-ul nu are destinatar corect.
+4. In documentul notificarii verifica dupa creare campurile `pushDispatchStatus`, `pushDispatchSuccessCount`, `pushDispatchFailureCount` (sunt puse de backend bridge).
