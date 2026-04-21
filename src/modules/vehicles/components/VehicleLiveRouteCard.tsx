@@ -531,7 +531,9 @@ export default function VehicleLiveRouteCard({
     ).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
 
     const todayKm = dayBuckets.find((item) => item.id === todayKey)?.distanceKm ?? 0;
-    const totalTrackedKm = calculateRouteDistanceKm(positions);
+    const totalTrackedKm = Number(
+      dayBuckets.reduce((total, item) => total + (item.distanceKm || 0), 0).toFixed(2)
+    );
     const estimatedCurrentKm = Number(
       Math.max(
         vehicle.currentKm || 0,
