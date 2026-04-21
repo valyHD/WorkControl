@@ -16,6 +16,8 @@ import { resolveNotificationPath } from "../../../lib/notifications/notification
 import {
   activatePushNotifications,
   hasPushVapidKey,
+  hasUserPushToken,
+  syncPushTokenIfGranted,
   type PushActivationResult,
 } from "../../../lib/notifications/pushNotifications";
 
@@ -107,6 +109,34 @@ export default function NotificationsPage() {
 
     return () => unsub();
   }, [user]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    if (!pushConfigReady) return;
+
+    const loadPushState = async () => {
+      try {
+        if (typeof Notification !== "undefined") {
+          setPermissionState(Notification.permission);
+        }
+
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+          return;
+        }
+
+        await syncPushTokenIfGranted(user.uid);
+
+        const hasToken = await hasUserPushToken(user.uid);
+        if (hasToken) {
+          setPushResult({ ok: true, reason: "ok" });
+        }
+      } catch (error) {
+        console.error("[NotificationsPage][loadPushState]", error);
+      }
+    };
+
+    void loadPushState();
+  }, [user?.uid, pushConfigReady]);
 
   async function markAsRead(id: string) {
     await updateDoc(doc(db, "notifications", id), {

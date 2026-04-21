@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   getDocs,
+  limit,
   query,
   serverTimestamp,
   where,
@@ -55,6 +56,17 @@ async function saveTokenForUser(userId: string, token: string): Promise<void> {
     createdAt: Date.now(),
     createdAtServer: serverTimestamp(),
   });
+}
+
+
+export async function hasUserPushToken(userId: string): Promise<boolean> {
+  if (!userId) return false;
+
+  const snap = await getDocs(
+    query(collection(db, "pushTokens"), where("userId", "==", userId), limit(1))
+  );
+
+  return !snap.empty;
 }
 
 export async function activatePushNotifications(userId: string): Promise<PushActivationResult> {
