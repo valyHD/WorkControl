@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { logoutUser } from "../modules/auth/services/authService";
 import { useNotificationsListener } from "../lib/notifications/useNotificationsListener";
-import { syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
+import { hasPushVapidKey, syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
 import {
   LayoutDashboard, User, Users, Wrench, CarFront, Clock3, Clock4,
   Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2,
@@ -100,6 +100,7 @@ export default function AppShell() {
 
   useEffect(() => {
     if (!user?.uid) return;
+    if (!hasPushVapidKey()) return;
     void syncPushTokenIfGranted(user.uid);
   }, [user?.uid]);
 

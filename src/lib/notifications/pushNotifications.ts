@@ -24,6 +24,10 @@ export type PushActivationResult = {
 
 const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
 
+export function hasPushVapidKey(): boolean {
+  return Boolean(VAPID_KEY && VAPID_KEY.trim());
+}
+
 async function getNotificationServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
   if (typeof window === "undefined") return null;
   if (!("serviceWorker" in navigator)) return null;
@@ -69,8 +73,7 @@ export async function activatePushNotifications(userId: string): Promise<PushAct
     return { ok: false, reason: "permission_denied" };
   }
 
-  if (!VAPID_KEY) {
-    console.error("[Push] Lipseste VITE_FIREBASE_VAPID_KEY.");
+  if (!hasPushVapidKey()) {
     return { ok: false, reason: "missing_vapid" };
   }
 
@@ -86,7 +89,7 @@ export async function activatePushNotifications(userId: string): Promise<PushAct
 
   try {
     const token = await getToken(messaging, {
-      vapidKey: VAPID_KEY,
+      vapidKey: VAPID_KEY!,
       serviceWorkerRegistration: swRegistration,
     });
 

@@ -15,6 +15,7 @@ import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
 import {
   activatePushNotifications,
+  hasPushVapidKey,
   type PushActivationResult,
 } from "../../../lib/notifications/pushNotifications";
 
@@ -70,6 +71,8 @@ export default function NotificationsPage() {
   const [activatingPush, setActivatingPush] = useState(false);
   const [pushResult, setPushResult] = useState<PushActivationResult | null>(null);
 
+  const pushConfigReady = hasPushVapidKey();
+
   useEffect(() => {
     if (!user) return;
 
@@ -123,7 +126,7 @@ export default function NotificationsPage() {
   }
 
   async function handleActivatePush() {
-    if (!user?.uid || activatingPush) return;
+    if (!user?.uid || activatingPush || !pushConfigReady) return;
 
     setActivatingPush(true);
     try {
@@ -164,12 +167,15 @@ export default function NotificationsPage() {
               className="primary-btn"
               type="button"
               onClick={() => void handleActivatePush()}
-              disabled={activatingPush}
+              disabled={activatingPush || !pushConfigReady}
             >
               {activatingPush ? "Se activeaza..." : "Activeaza notificari push (fundal)"}
             </button>
             {permissionState === "granted" && (
               <span className="badge badge-green">Permisiune browser: activa</span>
+            )}
+            {!pushConfigReady && (
+              <span className="badge badge-orange">Lipseste configurarea VAPID pe frontend (.env).</span>
             )}
             {pushMessage && (
               <span className={pushResult?.ok ? "badge badge-green" : "badge badge-orange"}>
