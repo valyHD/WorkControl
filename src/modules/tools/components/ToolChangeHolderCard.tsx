@@ -30,7 +30,11 @@ export default function ToolChangeHolderCard({ tool, users, onChanged }: Props) 
         tool.ownerUserName || "Responsabil"
       );
 
-      setMessage(selectedUserId ? "Detinatorul curent a fost actualizat." : "Scula a fost mutata in depozit.");
+      setMessage(
+        selectedUserId
+          ? "Solicitarea a fost trimisa. Detinatorul se schimba dupa acceptare."
+          : "Scula a fost mutata in depozit."
+      );
       await onChanged();
     } catch (error) {
       console.error(error);

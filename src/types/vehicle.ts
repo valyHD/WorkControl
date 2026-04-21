@@ -143,6 +143,10 @@ export interface VehicleItem {
   currentDriverUserId: string;
   currentDriverUserName: string;
   currentDriverThemeKey?: string | null;
+  pendingDriverUserId?: string;
+  pendingDriverUserName?: string;
+  pendingDriverThemeKey?: string | null;
+  pendingDriverRequestedAt?: number;
 
   maintenanceNotes: string;
   serviceStrategy: "interval" | "absolute";
@@ -182,6 +186,10 @@ export interface VehicleFormValues {
   currentDriverUserId: string;
   currentDriverUserName: string;
   currentDriverThemeKey?: string | null;
+  pendingDriverUserId?: string;
+  pendingDriverUserName?: string;
+  pendingDriverThemeKey?: string | null;
+  pendingDriverRequestedAt?: number;
 
   maintenanceNotes: string;
   serviceStrategy: "interval" | "absolute";

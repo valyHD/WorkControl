@@ -35,6 +35,10 @@ export interface ToolItem {
   currentHolderUserId: string;
   currentHolderUserName: string;
   currentHolderThemeKey?: string | null;
+  pendingHolderUserId?: string;
+  pendingHolderUserName?: string;
+  pendingHolderThemeKey?: string | null;
+  pendingHolderRequestedAt?: number;
 
   locationType: "depozit" | "utilizator";
   locationLabel: string;
@@ -84,6 +88,10 @@ export interface ToolFormValues {
   currentHolderUserId: string;
   currentHolderUserName: string;
   currentHolderThemeKey?: string | null;
+  pendingHolderUserId?: string;
+  pendingHolderUserName?: string;
+  pendingHolderThemeKey?: string | null;
+  pendingHolderRequestedAt?: number;
 
   locationType: "depozit" | "utilizator";
   locationLabel: string;

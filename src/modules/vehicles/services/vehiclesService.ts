@@ -473,6 +473,10 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
 
     currentDriverUserId: toSafeString(data.currentDriverUserId),
     currentDriverUserName: toSafeString(data.currentDriverUserName),
+    pendingDriverUserId: toSafeString(data.pendingDriverUserId),
+    pendingDriverUserName: toSafeString(data.pendingDriverUserName),
+    pendingDriverThemeKey: data.pendingDriverThemeKey ?? null,
+    pendingDriverRequestedAt: toSafeNumber(data.pendingDriverRequestedAt, 0),
 
     maintenanceNotes: toSafeString(data.maintenanceNotes),
     serviceStrategy,
@@ -988,31 +992,109 @@ export async function changeVehicleDriver(
   const plateNumber = toSafeString(vehicleData.plateNumber, "Masina");
   const previousDriverUserId = toSafeString(vehicleData.currentDriverUserId);
 
+  if (nextDriverUserId) {
+    await updateDoc(doc(db, "vehicles", vehicleId), {
+      pendingDriverUserId: nextDriverUserId,
+      pendingDriverUserName: nextDriverUserName || "",
+      pendingDriverThemeKey: nextDriverThemeKey ?? null,
+      pendingDriverRequestedAt: Date.now(),
+      updatedAt: Date.now(),
+      updatedAtServer: serverTimestamp(),
+    });
+
+    await addVehicleEvent(
+      vehicleId,
+      "driver_changed",
+      `A fost trimisa o solicitare catre ${nextDriverUserName} pentru preluarea masinii.`
+    );
+
+    await dispatchNotificationEvent({
+      module: "vehicles",
+      eventType: "vehicle_driver_changed",
+      entityId: vehicleId,
+      title: "Solicitare preluare masina",
+      message: `Masina ${plateNumber} ti-a fost asignata. Accepta solicitarea pentru a deveni sofer curent.`,
+      directUserId: nextDriverUserId,
+      ownerUserId: toSafeString(vehicleData.ownerUserId),
+      actorUserId: toSafeString(vehicleData.ownerUserId),
+      actorUserName: toSafeString(vehicleData.ownerUserName, "Responsabil"),
+      actorUserThemeKey: vehicleData.ownerThemeKey ?? null,
+    });
+    return;
+  }
+
   await updateDoc(doc(db, "vehicles", vehicleId), {
-    currentDriverUserId: nextDriverUserId || "",
-    currentDriverUserName: nextDriverUserName || "",
-    currentDriverThemeKey: nextDriverThemeKey ?? null,
+    currentDriverUserId: "",
+    currentDriverUserName: "",
+    currentDriverThemeKey: null,
+    pendingDriverUserId: "",
+    pendingDriverUserName: "",
+    pendingDriverThemeKey: null,
+    pendingDriverRequestedAt: 0,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
 
-  const message = nextDriverUserId
-    ? `Soferul curent a fost schimbat la ${nextDriverUserName}.`
-    : "Masina nu mai are sofer curent alocat.";
-
-  await addVehicleEvent(vehicleId, "driver_changed", message);
+  await addVehicleEvent(vehicleId, "driver_changed", "Masina nu mai are sofer curent alocat.");
 
   await dispatchNotificationEvent({
     module: "vehicles",
     eventType: "vehicle_driver_changed",
     entityId: vehicleId,
     title: "Sofer masina schimbat",
-    message: `Masina ${plateNumber} are acum ca sofer curent ${nextDriverUserName || "niciun user"}.`,
-    directUserId: nextDriverUserId || previousDriverUserId || "",
+    message: `Masina ${plateNumber} nu mai are sofer curent alocat.`,
+    directUserId: previousDriverUserId || "",
     ownerUserId: toSafeString(vehicleData.ownerUserId),
     actorUserId: toSafeString(vehicleData.ownerUserId),
     actorUserName: toSafeString(vehicleData.ownerUserName, "Responsabil"),
     actorUserThemeKey: vehicleData.ownerThemeKey ?? null,
+  });
+}
+
+export async function acceptVehicleDriverChange(
+  vehicleId: string,
+  accepterUserId: string
+): Promise<void> {
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  if (!vehicleSnap.exists()) return;
+
+  const vehicleData = vehicleSnap.data();
+  const pendingDriverUserId = toSafeString(vehicleData.pendingDriverUserId);
+  if (!pendingDriverUserId || pendingDriverUserId !== accepterUserId) return;
+
+  const pendingDriverUserName = toSafeString(vehicleData.pendingDriverUserName);
+  const pendingDriverThemeKey = vehicleData.pendingDriverThemeKey ?? null;
+  const plateNumber = toSafeString(vehicleData.plateNumber, "Masina");
+
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    currentDriverUserId: pendingDriverUserId,
+    currentDriverUserName: pendingDriverUserName,
+    currentDriverThemeKey: pendingDriverThemeKey,
+    pendingDriverUserId: "",
+    pendingDriverUserName: "",
+    pendingDriverThemeKey: null,
+    pendingDriverRequestedAt: 0,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
+
+  await addVehicleEvent(
+    vehicleId,
+    "driver_changed",
+    `Solicitarea a fost acceptata. Masina este acum la ${pendingDriverUserName || "utilizator"}.`
+  );
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_driver_changed",
+    entityId: vehicleId,
+    title: "Solicitare masina acceptata",
+    message: `Masina ${plateNumber} a fost acceptata de ${pendingDriverUserName || "utilizator"}.`,
+    directUserId: toSafeString(vehicleData.ownerUserId),
+    ownerUserId: toSafeString(vehicleData.ownerUserId),
+    actorUserId: pendingDriverUserId,
+    actorUserName: pendingDriverUserName || "Utilizator",
+    actorUserThemeKey: pendingDriverThemeKey ?? null,
   });
 }
 

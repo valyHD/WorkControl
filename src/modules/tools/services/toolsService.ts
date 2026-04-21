@@ -110,6 +110,10 @@ currentHolderThemeKey: data.currentHolderThemeKey ?? null,
 
     currentHolderUserId: data.currentHolderUserId ?? "",
     currentHolderUserName: data.currentHolderUserName ?? "",
+    pendingHolderUserId: data.pendingHolderUserId ?? "",
+    pendingHolderUserName: data.pendingHolderUserName ?? "",
+    pendingHolderThemeKey: data.pendingHolderThemeKey ?? null,
+    pendingHolderRequestedAt: data.pendingHolderRequestedAt ?? 0,
 
     locationType: data.locationType ?? "depozit",
     locationLabel: data.locationLabel ?? "Depozit",
@@ -474,26 +478,54 @@ export async function changeToolHolder(
   const toolData = toolSnap.data();
   const toolName = toolData.name ?? "Scula";
   const previousHolderUserId = toolData.currentHolderUserId ?? "";
-  const previousHolderUserName = toolData.currentHolderUserName ?? "";
 
-  const locationType = nextHolderUserId ? "utilizator" : "depozit";
-  const locationLabel = nextHolderUserId ? nextHolderUserName : "Depozit";
-  const status = nextHolderUserId ? "atribuita" : "depozit";
+  if (nextHolderUserId) {
+    await updateDoc(doc(db, "tools", toolId), {
+      pendingHolderUserId: nextHolderUserId,
+      pendingHolderUserName: nextHolderUserName || "",
+      pendingHolderThemeKey: nextHolderThemeKey ?? null,
+      pendingHolderRequestedAt: Date.now(),
+      updatedAt: Date.now(),
+      updatedAtServer: serverTimestamp(),
+    });
+
+    await addToolEvent(
+      toolId,
+      "holder_changed",
+      `A fost trimisa o solicitare catre ${nextHolderUserName} pentru preluarea sculei.`
+    );
+
+    await dispatchNotificationEvent({
+      module: "tools",
+      eventType: "tool_holder_changed",
+      entityId: toolId,
+      title: "Solicitare primire scula",
+      message: `${toolName} ti-a fost asignata. Accepta solicitarea pentru a deveni detinator curent.`,
+      directUserId: nextHolderUserId,
+      ownerUserId: toolData.ownerUserId ?? "",
+      actorUserId: toolData.ownerUserId ?? "",
+      actorUserName: toolData.ownerUserName ?? "Responsabil",
+      actorUserThemeKey: toolData.ownerThemeKey ?? null,
+    });
+    return;
+  }
 
   await updateDoc(doc(db, "tools", toolId), {
-    currentHolderUserId: nextHolderUserId || "",
-    currentHolderUserName: nextHolderUserName || "",
-    currentHolderThemeKey: nextHolderThemeKey ?? null,
-    locationType,
-    locationLabel,
-    status,
+    currentHolderUserId: "",
+    currentHolderUserName: "",
+    currentHolderThemeKey: null,
+    pendingHolderUserId: "",
+    pendingHolderUserName: "",
+    pendingHolderThemeKey: null,
+    pendingHolderRequestedAt: 0,
+    locationType: "depozit",
+    locationLabel: "Depozit",
+    status: "depozit",
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
 
-  const message = nextHolderUserId
-    ? `Scula a fost mutata de la ${previousHolderUserName || "depozit"} la ${nextHolderUserName}.`
-    : `Scula a fost returnata in depozit de responsabilul ${ownerUserName}.`;
+  const message = `Scula a fost returnata in depozit de responsabilul ${ownerUserName}.`;
 
   await addToolEvent(toolId, "holder_changed", message);
 
@@ -502,13 +534,63 @@ await dispatchNotificationEvent({
   eventType: "tool_holder_changed",
   entityId: toolId,
   title: "Scula mutata",
-  message: `${toolName} a fost mutata ${nextHolderUserId ? `la ${nextHolderUserName}` : "in depozit"}.`,
-  directUserId: nextHolderUserId || previousHolderUserId || "",
+  message: `${toolName} a fost mutata in depozit.`,
+  directUserId: previousHolderUserId || "",
   ownerUserId: toolData.ownerUserId ?? "",
   actorUserId: toolData.ownerUserId ?? "",
   actorUserName: toolData.ownerUserName ?? "Responsabil",
   actorUserThemeKey: toolData.ownerThemeKey ?? null,
 });
+}
+
+export async function acceptToolHolderChange(
+  toolId: string,
+  accepterUserId: string
+): Promise<void> {
+  const toolSnap = await getDoc(doc(db, "tools", toolId));
+  if (!toolSnap.exists()) return;
+
+  const toolData = toolSnap.data();
+  const pendingHolderUserId = toolData.pendingHolderUserId ?? "";
+  if (!pendingHolderUserId || pendingHolderUserId !== accepterUserId) return;
+
+  const pendingHolderUserName = toolData.pendingHolderUserName ?? "";
+  const pendingHolderThemeKey = toolData.pendingHolderThemeKey ?? null;
+  const toolName = toolData.name ?? "Scula";
+
+  await updateDoc(doc(db, "tools", toolId), {
+    currentHolderUserId: pendingHolderUserId,
+    currentHolderUserName: pendingHolderUserName,
+    currentHolderThemeKey: pendingHolderThemeKey,
+    pendingHolderUserId: "",
+    pendingHolderUserName: "",
+    pendingHolderThemeKey: null,
+    pendingHolderRequestedAt: 0,
+    locationType: "utilizator",
+    locationLabel: pendingHolderUserName || "Utilizator",
+    status: "atribuita",
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
+
+  await addToolEvent(
+    toolId,
+    "holder_changed",
+    `Solicitarea a fost acceptata. Scula este acum la ${pendingHolderUserName || "utilizator"}`
+  );
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_holder_changed",
+    entityId: toolId,
+    title: "Solicitare scula acceptata",
+    message: `${toolName} a fost acceptata de ${pendingHolderUserName || "utilizator"}.`,
+    directUserId: toolData.ownerUserId ?? "",
+    ownerUserId: toolData.ownerUserId ?? "",
+    actorUserId: pendingHolderUserId,
+    actorUserName: pendingHolderUserName || "Utilizator",
+    actorUserThemeKey: pendingHolderThemeKey ?? null,
+  });
 }
 
 export async function getToolsOwnedByUser(userId: string): Promise<ToolItem[]> {
