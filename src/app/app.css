@@ -3599,6 +3599,39 @@ html {
 }
 .leave-history-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .leave-admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.leave-signature-pad {
+  border: 1px dashed var(--line-mid);
+  border-radius: 8px;
+  background: #fff;
+  width: 100%;
+  max-width: 420px;
+  touch-action: none;
+}
+.leave-year-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.7);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+  padding: 16px;
+}
+.leave-year-modal-panel { width: min(980px, 95vw); }
+.leave-year-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.leave-year-month {
+  border: 1px solid var(--line-mid);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 14px 10px;
+  text-transform: capitalize;
+  font-weight: 700;
+}
 .status-error {
   background: var(--danger-soft);
   color: var(--danger);
@@ -3619,4 +3652,5 @@ html {
 @media (max-width: 860px) {
   .leave-calendar-nav { flex-direction: column; }
   .leave-calendar-nav .secondary-btn { width: 100%; }
+  .leave-year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
