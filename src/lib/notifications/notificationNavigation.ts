@@ -13,6 +13,7 @@ const moduleBasePath: Record<NotificationRuleModule, string> = {
   tools: "/tools",
   vehicles: "/vehicles",
   timesheets: "/timesheets",
+  leave: "/my-leave",
   users: "/users",
   projects: "/projects",
   notifications: "/notifications",
@@ -31,6 +32,7 @@ export function resolveNotificationPath(input: NotificationNavigationInput): str
   if (moduleName === "tools" && entityId) return `/tools/${entityId}`;
   if (moduleName === "vehicles" && entityId) return `/vehicles/${entityId}`;
   if (moduleName === "timesheets" && entityId) return `/timesheets/${entityId}`;
+  if (moduleName === "leave") return "/my-leave";
   if (moduleName === "users" && entityId) return `/users/${entityId}/edit`;
   if (moduleName === "projects") return "/projects";
   if (moduleName === "notifications") return "/notifications";

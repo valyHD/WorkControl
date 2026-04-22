@@ -425,7 +425,12 @@ export default function LeavePlannerPage() {
     setSuccess("");
 
     try {
-      await approveLeaveRequest(requestId);
+      await approveLeaveRequest({
+        requestId,
+        actorUserId: user?.uid || "",
+        actorUserName: user?.displayName || user?.email || "Administrator",
+        actorUserThemeKey: user?.themeKey ?? null,
+      });
       setSuccess("Cererea a fost aprobata. PDF-ul contine acum eticheta albastra «Aprobat». ");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut aproba cererea.");
@@ -440,7 +445,13 @@ export default function LeavePlannerPage() {
     setSuccess("");
 
     try {
-      await deleteLeaveRequest(requestId, user?.uid || "", isAdmin);
+      await deleteLeaveRequest(
+        requestId,
+        user?.uid || "",
+        isAdmin,
+        user?.displayName || user?.email || "Utilizator",
+        user?.themeKey ?? null
+      );
       setSuccess("Cererea PDF a fost stearsa.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut sterge cererea.");
