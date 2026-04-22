@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { ControlPanelSettings } from "../services/controlPanelService";
 import {
+  buildProfessionalBackupView,
   cleanupHistory,
   exportBackupDataset,
   getCollectionCounters,
   getControlPanelSettings,
   getLatestBackupJob,
+  type ProfessionalBackupView,
   saveControlPanelSettings,
 } from "../services/controlPanelService";
 
@@ -46,6 +48,8 @@ export default function ControlPanelPage() {
   const [busyMessage, setBusyMessage] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [uploadedBackupSummary, setUploadedBackupSummary] = useState<ProfessionalBackupView | null>(null);
+  const [uploadedBackupMeta, setUploadedBackupMeta] = useState<{ fileName: string; exportedAt: number | null } | null>(null);
   const [cleanupMessage, setCleanupMessage] = useState("");
   const [personalizationMessage, setPersonalizationMessage] = useState("");
   const [error, setError] = useState("");
@@ -167,6 +171,42 @@ export default function ControlPanelPage() {
     }
   }
 
+  async function handleUploadBackup(file: File | null) {
+    if (!file) return;
+    try {
+      setBusyMessage("Se încarcă și se analizează backup-ul...");
+      setError("");
+      const text = await file.text();
+      const parsed = JSON.parse(text) as {
+        meta?: { exportedAt?: unknown };
+        professionalView?: ProfessionalBackupView;
+        data?: Record<string, Array<Record<string, unknown>>>;
+      };
+
+      const professionalView =
+        parsed.professionalView ??
+        (parsed.data ? buildProfessionalBackupView(parsed.data) : null);
+
+      if (!professionalView) {
+        throw new Error("Fișierul încărcat nu conține structura de backup așteptată.");
+      }
+
+      setUploadedBackupSummary(professionalView);
+      setUploadedBackupMeta({
+        fileName: file.name,
+        exportedAt: Number(parsed.meta?.exportedAt ?? 0) || null,
+      });
+      setBackupMessage("Backup-ul a fost încărcat cu succes. Mai jos ai rezumatul complet.");
+    } catch (err) {
+      console.error(err);
+      setError("Nu am putut citi backup-ul încărcat. Verifică dacă este un JSON valid exportat din aplicație.");
+      setUploadedBackupSummary(null);
+      setUploadedBackupMeta(null);
+    } finally {
+      setBusyMessage("");
+    }
+  }
+
   async function handleCleanup() {
     try {
       setBusyMessage("Se curăță istoricul vechi...");
@@ -273,8 +313,146 @@ export default function ControlPanelPage() {
           <button className="primary-btn" type="button" onClick={() => void handleExportBackup()}>
             Exportă backup complet
           </button>
+          <label className="secondary-btn" style={{ cursor: "pointer" }}>
+            Upload backup
+            <input
+              type="file"
+              accept="application/json"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const selected = e.target.files?.[0] ?? null;
+                void handleUploadBackup(selected);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
         </div>
         {backupMessage && <div className="tool-message success-message" style={{ marginTop: 12 }}>{backupMessage}</div>}
+
+        {uploadedBackupSummary && (
+          <div className="backup-upload-summary">
+            <div className="backup-upload-summary__header">
+              <strong>Rezumat backup încărcat</strong>
+              <span>
+                {uploadedBackupMeta?.fileName ?? "Fișier necunoscut"}
+                {uploadedBackupMeta?.exportedAt ? ` · ${new Date(uploadedBackupMeta.exportedAt).toLocaleString("ro-RO")}` : ""}
+              </span>
+            </div>
+
+            <div className="backup-upload-summary__kpis">
+              <article className="collection-card">
+                <div className="collection-header"><strong>Users</strong><span>{uploadedBackupSummary.users.length}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Tools</strong><span>{uploadedBackupSummary.tools.length}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Tool events</strong><span>{uploadedBackupSummary.toolEvents.reduce((sum, item) => sum + item.events.length, 0)}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Vehicles</strong><span>{uploadedBackupSummary.vehicles.length}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Vehicle events</strong><span>{uploadedBackupSummary.vehicleEvents.reduce((sum, item) => sum + item.events.length, 0)}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Timesheets</strong><span>{uploadedBackupSummary.timesheets.reduce((sum, item) => sum + item.entries.length, 0)}</span></div>
+              </article>
+              <article className="collection-card">
+                <div className="collection-header"><strong>Notifications</strong><span>{uploadedBackupSummary.notifications.length}</span></div>
+              </article>
+            </div>
+
+            <div className="backup-upload-summary__groups">
+              <article className="backup-user-block">
+                <h4>Users (nume + email)</h4>
+                {uploadedBackupSummary.users.map((user) => (
+                  <div key={`${user.userName}-${user.email}`} className="simple-list-item">
+                    <strong>{user.userName}</strong>
+                    <small>{user.email}</small>
+                  </div>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Tools + proprietar</h4>
+                {uploadedBackupSummary.tools.map((tool) => (
+                  <div key={`${tool.toolName}-${tool.internalCode}`} className="simple-list-item">
+                    <strong>{tool.toolName} ({tool.internalCode})</strong>
+                    <small>{tool.ownerName} · {tool.ownerEmail}</small>
+                  </div>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Vehicles + proprietar</h4>
+                {uploadedBackupSummary.vehicles.map((vehicle) => (
+                  <div key={`${vehicle.plateNumber}-${vehicle.vehicleName}`} className="simple-list-item">
+                    <strong>{vehicle.vehicleName} · {vehicle.plateNumber}</strong>
+                    <small>{vehicle.ownerName} · {vehicle.ownerEmail}</small>
+                  </div>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Tool events per user</h4>
+                {uploadedBackupSummary.toolEvents.map((group) => (
+                  <details key={`${group.userName}-${group.userEmail}`} className="backup-details">
+                    <summary>{group.userName} ({group.events.length})</summary>
+                    {group.events.map((event, index) => (
+                      <div key={`${event.toolName}-${event.dateTime}-${index}`} className="simple-list-item">
+                        <strong>{event.toolName}</strong>
+                        <small>{event.message} · {new Date(event.dateTime).toLocaleString("ro-RO")}</small>
+                      </div>
+                    ))}
+                  </details>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Vehicle events per user</h4>
+                {uploadedBackupSummary.vehicleEvents.map((group) => (
+                  <details key={`${group.userName}-${group.userEmail}`} className="backup-details">
+                    <summary>{group.userName} ({group.events.length})</summary>
+                    {group.events.map((event, index) => (
+                      <div key={`${event.vehicleName}-${event.dateTime}-${index}`} className="simple-list-item">
+                        <strong>{event.vehicleName}</strong>
+                        <small>{event.message} · {new Date(event.dateTime).toLocaleString("ro-RO")}</small>
+                      </div>
+                    ))}
+                  </details>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Timesheets per user</h4>
+                {uploadedBackupSummary.timesheets.map((group) => (
+                  <details key={`${group.userName}-${group.userEmail}`} className="backup-details">
+                    <summary>{group.userName} ({group.entries.length})</summary>
+                    {group.entries.map((entry, index) => (
+                      <div key={`${group.userName}-${entry.startAt}-${index}`} className="simple-list-item">
+                        <strong>{entry.projectCode} · {entry.projectName}</strong>
+                        <small>
+                          {new Date(entry.startAt).toLocaleString("ro-RO")} - {entry.stopAt ? new Date(entry.stopAt).toLocaleString("ro-RO") : "în curs"} · {entry.workedMinutes} min · {entry.status}
+                        </small>
+                      </div>
+                    ))}
+                  </details>
+                ))}
+              </article>
+
+              <article className="backup-user-block">
+                <h4>Notificări generale</h4>
+                {uploadedBackupSummary.notifications.map((notification, index) => (
+                  <div key={`${notification.title}-${notification.dateTime}-${index}`} className="simple-list-item">
+                    <strong>{notification.title}</strong>
+                    <small>{notification.message} · {new Date(notification.dateTime).toLocaleString("ro-RO")}</small>
+                  </div>
+                ))}
+              </article>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="panel">

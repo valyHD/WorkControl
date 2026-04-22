@@ -2796,6 +2796,69 @@ html {
   color: var(--success);
 }
 
+.backup-upload-summary {
+  margin-top: 14px;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  background: var(--surface-alt);
+  display: grid;
+  gap: 12px;
+}
+
+.backup-upload-summary__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.backup-upload-summary__header span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.backup-upload-summary__kpis {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.backup-upload-summary__groups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.backup-user-block {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.backup-user-block h4 {
+  margin: 0;
+}
+
+.backup-details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 8px;
+  background: var(--surface-alt);
+}
+
+.backup-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
 /* Visual refresh: gradient cards + vivid chips */
 .panel,
 .tool-card,
