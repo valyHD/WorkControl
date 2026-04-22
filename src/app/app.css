@@ -3715,11 +3715,16 @@ html {
   place-items: center;
   z-index: 40;
   padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .leave-year-modal-panel {
   width: min(1400px, 98vw);
   max-height: 95vh;
   overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 .leave-year-grid {
   margin-top: 12px;
