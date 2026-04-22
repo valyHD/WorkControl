@@ -25,6 +25,7 @@ const MyTimesheetsPage = lazy(() => import("../modules/timesheets/pages/MyTimesh
 const ProjectsPage = lazy(() => import("../modules/timesheets/pages/ProjectsPage"));
 const NotificationsPage = lazy(() => import("../modules/notifications/pages/NotificationsPage"));
 const ControlPanelPage = lazy(() => import("../modules/reports/pages/ReportsPage"));
+const BackupPreviewPage = lazy(() => import("../modules/reports/pages/BackupPreviewPage"));
 const NotificationRulesPage = lazy(
   () => import("../modules/notifications/pages/NotificationRulesPage")
 );
@@ -104,6 +105,7 @@ export const router = createBrowserRouter([
 
       { path: "/notifications", element: withSuspense(<NotificationsPage />) },
       { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
+      { path: "/control-panel/backup-preview", element: withSuspense(<BackupPreviewPage />) },
       { path: "/maintenance", element: withSuspense(<MaintenancePage />) },
       { path: "/reports", element: <Navigate to="/control-panel" replace /> },
     ],

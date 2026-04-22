@@ -12,6 +12,8 @@ import {
   saveControlPanelSettings,
 } from "../services/controlPanelService";
 
+const BACKUP_PREVIEW_STORAGE_KEY = "workcontrol_uploaded_backup_preview";
+
 const FALLBACK_SETTINGS: ControlPanelSettings = {
   retentionMonths: 2,
   autoBackupEnabled: false,
@@ -26,6 +28,14 @@ const FALLBACK_SETTINGS: ControlPanelSettings = {
   uiAnimations: "full",
   updatedAt: Date.now(),
 };
+
+function openBackupPreviewPage(payload: {
+  summary: ProfessionalBackupView;
+  meta: { fileName: string; exportedAt: number | null };
+}) {
+  sessionStorage.setItem(BACKUP_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+  window.open(`${window.location.origin}/control-panel/backup-preview`, "_blank", "noopener,noreferrer");
+}
 
 function prettyBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -192,11 +202,13 @@ export default function ControlPanelPage() {
       }
 
       setUploadedBackupSummary(professionalView);
-      setUploadedBackupMeta({
+      const parsedMeta = {
         fileName: file.name,
         exportedAt: Number(parsed.meta?.exportedAt ?? 0) || null,
-      });
-      setBackupMessage("Backup-ul a fost încărcat cu succes. Mai jos ai rezumatul complet.");
+      };
+      setUploadedBackupMeta(parsedMeta);
+      openBackupPreviewPage({ summary: professionalView, meta: parsedMeta });
+      setBackupMessage("Backup-ul a fost încărcat cu succes. S-a deschis o pagină nouă cu raportul detaliat.");
     } catch (err) {
       console.error(err);
       setError("Nu am putut citi backup-ul încărcat. Verifică dacă este un JSON valid exportat din aplicație.");
@@ -336,7 +348,20 @@ export default function ControlPanelPage() {
         </div>
         {backupMessage && <div className="tool-message success-message" style={{ marginTop: 12 }}>{backupMessage}</div>}
 
+        {uploadedBackupSummary && uploadedBackupMeta && (
+          <div className="backup-preview-cta">
+            <button
+              className="primary-btn"
+              type="button"
+              onClick={() => openBackupPreviewPage({ summary: uploadedBackupSummary, meta: uploadedBackupMeta })}
+            >
+              Deschide raportul vizual complet în pagină nouă
+            </button>
+          </div>
+        )}
+
         {uploadedBackupSummary && (
+
           <div className="backup-upload-summary">
             <div className="backup-upload-summary__header">
               <strong>Rezumat backup încărcat</strong>
