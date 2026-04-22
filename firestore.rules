@@ -6,6 +6,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdminUser() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
     match /users/{userId} {
       allow read, write: if isSignedIn();
     }
@@ -110,7 +115,9 @@ service cloud.firestore {
     }
 
     match /leaveRequests/{requestId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn() && (isAdminUser() || resource.data.userId == request.auth.uid);
     }
 
     match /leaveBalances/{balanceId} {
@@ -129,7 +136,9 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
         match /leaveRequests/{requestId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn() && (isAdminUser() || resource.data.userId == request.auth.uid);
     }
 
     match /leaveBalances/{balanceId} {

@@ -56,29 +56,43 @@ function shiftDate(baseDate: Date, days: number): Date {
   return new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + days);
 }
 
-function getRomanianPublicHolidaySet(year: number): Set<string> {
+type HolidayLookup = {
+  holidayDates: Set<string>;
+  holidayReasonByDate: Record<string, string>;
+};
+
+function getRomanianPublicHolidayLookup(year: number): HolidayLookup {
+  const holidayReasonByDate: Record<string, string> = {};
+  const addHoliday = (date: Date, reason: string) => {
+    holidayReasonByDate[toIsoDate(date)] = reason;
+  };
+
   const fixedHolidays = [
-    new Date(year, 0, 1),
-    new Date(year, 0, 2),
-    new Date(year, 0, 24),
-    new Date(year, 4, 1),
-    new Date(year, 5, 1),
-    new Date(year, 7, 15),
-    new Date(year, 10, 30),
-    new Date(year, 11, 1),
-    new Date(year, 11, 25),
-    new Date(year, 11, 26),
+    { date: new Date(year, 0, 1), reason: "Anul Nou (prima zi)" },
+    { date: new Date(year, 0, 2), reason: "Anul Nou (a doua zi)" },
+    { date: new Date(year, 0, 6), reason: "Boboteaza" },
+    { date: new Date(year, 0, 7), reason: "Sfantul Ioan Botezatorul" },
+    { date: new Date(year, 0, 24), reason: "Ziua Unirii Principatelor Romane" },
+    { date: new Date(year, 4, 1), reason: "Ziua Muncii" },
+    { date: new Date(year, 5, 1), reason: "Ziua Copilului" },
+    { date: new Date(year, 7, 15), reason: "Adormirea Maicii Domnului" },
+    { date: new Date(year, 10, 30), reason: "Sfantul Andrei" },
+    { date: new Date(year, 11, 1), reason: "Ziua Nationala a Romaniei" },
+    { date: new Date(year, 11, 25), reason: "Craciunul (prima zi)" },
+    { date: new Date(year, 11, 26), reason: "Craciunul (a doua zi)" },
   ];
   const orthodoxEaster = getOrthodoxEasterDate(year);
   const movableHolidays = [
-    shiftDate(orthodoxEaster, -2),
-    orthodoxEaster,
-    shiftDate(orthodoxEaster, 1),
-    shiftDate(orthodoxEaster, 49),
-    shiftDate(orthodoxEaster, 50),
+    { date: shiftDate(orthodoxEaster, -2), reason: "Vinerea Mare (Paste ortodox)" },
+    { date: orthodoxEaster, reason: "Paste ortodox (prima zi)" },
+    { date: shiftDate(orthodoxEaster, 1), reason: "Paste ortodox (a doua zi)" },
+    { date: shiftDate(orthodoxEaster, 49), reason: "Rusalii (prima zi)" },
+    { date: shiftDate(orthodoxEaster, 50), reason: "Rusalii (a doua zi)" },
   ];
 
-  return new Set([...fixedHolidays, ...movableHolidays].map((date) => toIsoDate(date)));
+  [...fixedHolidays, ...movableHolidays].forEach((item) => addHoliday(item.date, item.reason));
+
+  return { holidayDates: new Set(Object.keys(holidayReasonByDate)), holidayReasonByDate };
 }
 
 function defaultForm(userName: string, userEmail: string): LeaveRequestFormValues {
@@ -169,8 +183,6 @@ export default function LeavePlannerPage() {
     timesheetsLoaded: false,
     leaveLoaded: false,
   });
-  const [myRequests, setMyRequests] = useState<LeaveRequestItem[]>([]);
-  const [myRequestsLoaded, setMyRequestsLoaded] = useState(false);
   const [adminRequests, setAdminRequests] = useState<LeaveRequestItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [approvingRequestId, setApprovingRequestId] = useState("");
@@ -251,24 +263,6 @@ export default function LeavePlannerPage() {
   }, [expandedUserId]);
 
   useEffect(() => {
-    if (!user?.uid) {
-      setMyRequests([]);
-      setMyRequestsLoaded(false);
-      return undefined;
-    }
-
-    setMyRequestsLoaded(false);
-
-    return onSnapshot(
-      query(collection(db, "leaveRequests"), where("userId", "==", user.uid), orderBy("createdAt", "desc")),
-      (snap) => {
-        setMyRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
-        setMyRequestsLoaded(true);
-      }
-    );
-  }, [user?.uid]);
-
-  useEffect(() => {
     return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(500)), (snap) => {
       setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
     });
@@ -283,9 +277,9 @@ export default function LeavePlannerPage() {
     () => getLeaveDateSet(calendarData.leaveRequests.filter((request) => request.status === "aprobat")),
     [calendarData.leaveRequests]
   );
-  const romanianPublicHolidays = useMemo(() => getRomanianPublicHolidaySet(visibleMonth.getFullYear()), [visibleMonth]);
+  const holidayLookup = useMemo(() => getRomanianPublicHolidayLookup(visibleMonth.getFullYear()), [visibleMonth]);
   const pendingLeaveRequests = useMemo(() => adminRequests.filter((request) => request.status === "in_asteptare"), [adminRequests]);
-  const approvedMyRequests = useMemo(() => myRequests.filter((request) => request.status === "aprobat"), [myRequests]);
+  const approvedRequests = useMemo(() => adminRequests.filter((request) => request.status === "aprobat"), [adminRequests]);
   const yearMonths = useMemo(
     () => Array.from({ length: 12 }, (_, month) => new Date(visibleMonth.getFullYear(), month, 1)),
     [visibleMonth]
@@ -313,7 +307,8 @@ export default function LeavePlannerPage() {
           const hasWork = minutes > 0;
           const hasLeave = approvedLeaveDateSet.has(iso);
           const outsideMonth = date.getMonth() !== monthDate.getMonth();
-          const isHoliday = romanianPublicHolidays.has(iso);
+          const isHoliday = holidayLookup.holidayDates.has(iso);
+          const holidayReason = holidayLookup.holidayReasonByDate[iso];
 
           const className = [
             "leave-cell",
@@ -323,8 +318,9 @@ export default function LeavePlannerPage() {
           ].join(" ");
 
           return (
-            <div key={`${scopeKey}-${iso}-${index}`} className={className} title={isHoliday ? "Sarbatoare legala (Romania)" : undefined}>
+            <div key={`${scopeKey}-${iso}-${index}`} className={className} title={isHoliday ? holidayReason || "Sarbatoare legala (Romania)" : undefined}>
               <div className="leave-cell-day">{date.getDate()}</div>
+              {isHoliday && holidayReason && !outsideMonth && <div className="leave-cell-holiday-reason">{holidayReason}</div>}
               {minutes > 0 && <div className="leave-cell-minutes">{formatWorkedMinutesLabel(minutes)}</div>}
             </div>
           );
@@ -444,7 +440,7 @@ export default function LeavePlannerPage() {
     setSuccess("");
 
     try {
-      await deleteLeaveRequest(requestId);
+      await deleteLeaveRequest(requestId, user?.uid || "", isAdmin);
       setSuccess("Cererea PDF a fost stearsa.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut sterge cererea.");
@@ -579,7 +575,7 @@ export default function LeavePlannerPage() {
               <canvas
                 ref={signatureCanvasRef}
                 width={420}
-                height={80}
+                height={120}
                 className="leave-signature-pad"
                 onPointerDown={startSignature}
                 onPointerMove={drawSignature}
@@ -635,14 +631,12 @@ export default function LeavePlannerPage() {
 
       <div className="panel">
         <h3 className="panel-title">Istoric cereri aprobate</h3>
-        {!myRequestsLoaded ? (
-          <p className="tools-subtitle">Se incarca cererile...</p>
-        ) : approvedMyRequests.length === 0 ? (
+        {approvedRequests.length === 0 ? (
           <p className="tools-subtitle">Nu exista cereri aprobate momentan.</p>
         ) : (
           <div className="simple-list">
-            {approvedMyRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item">
+            {approvedRequests.map((request) => (
+              <div key={request.id} className="simple-list-item leave-history-item leave-history-item-vertical">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{request.userName} · {requestTypeLabel(request.requestType)}</div>
                   <div className="simple-list-subtitle">
