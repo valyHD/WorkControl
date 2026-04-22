@@ -3528,6 +3528,7 @@ html {
 .leave-dot-worked { background: #c4b5fd; border-color: #8b5cf6; }
 .leave-dot-leave { background: #fde68a; border-color: #f59e0b; }
 .leave-dot-mixed { background: linear-gradient(135deg, #c4b5fd 0%, #c4b5fd 50%, #fde68a 50%, #fde68a 100%); border-color: #a78bfa; }
+.leave-dot-holiday { background: #fecaca; border-color: #ef4444; }
 .leave-user-list {
   display: flex;
   flex-direction: column;
@@ -3555,6 +3556,23 @@ html {
 .leave-user-trigger span { font-weight: 700; }
 .leave-user-trigger small { color: var(--text-muted); font-size: 12px; }
 .leave-user-dropdown { padding-top: 6px; }
+.leave-inline-calendar-header {
+  padding: 0 12px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.leave-inline-calendar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.leave-icon-btn {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px 8px;
+}
 .leave-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -3585,6 +3603,8 @@ html {
 .leave-cell.is-worked { background: #ede9fe; border-color: #c4b5fd; }
 .leave-cell.is-leave { background: #fef9c3; border-color: #facc15; }
 .leave-cell.is-mixed { background: linear-gradient(135deg, #ede9fe 0%, #ede9fe 50%, #fef9c3 50%, #fef9c3 100%); border-color: #a78bfa; }
+.leave-cell.is-holiday { border-color: #ef4444; background: #fff5f5; }
+.leave-cell.is-holiday .leave-cell-day { color: #b91c1c; }
 .leave-cell.is-outside { opacity: .45; }
 .leave-calendar-grid-compact .leave-cell {
   min-height: 44px;
@@ -3616,21 +3636,33 @@ html {
   z-index: 40;
   padding: 16px;
 }
-.leave-year-modal-panel { width: min(980px, 95vw); }
+.leave-year-modal-panel {
+  width: min(1400px, 98vw);
+  max-height: 95vh;
+  overflow: auto;
+}
 .leave-year-grid {
   margin-top: 12px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
-.leave-year-month {
+.leave-year-grid-calendars {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.leave-year-month-calendar {
   border: 1px solid var(--line-mid);
   background: var(--surface);
   color: var(--text);
   border-radius: 10px;
-  padding: 14px 10px;
+  padding: 8px;
+}
+.leave-year-month-title {
   text-transform: capitalize;
   font-weight: 700;
+  color: var(--text-soft);
+  margin: 2px 8px 8px;
 }
 .status-error {
   background: var(--danger-soft);
@@ -3651,6 +3683,11 @@ html {
 
 @media (max-width: 860px) {
   .leave-calendar-nav { flex-direction: column; }
-  .leave-calendar-nav .secondary-btn { width: 100%; }
-  .leave-year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .leave-calendar-nav .secondary-btn,
+  .leave-calendar-nav .primary-btn { width: 100%; }
+  .leave-inline-calendar-header { flex-direction: column; align-items: flex-start; }
+  .leave-inline-calendar-actions { width: 100%; }
+  .leave-inline-calendar-actions .secondary-btn,
+  .leave-inline-calendar-actions .primary-btn { flex: 1; }
+  .leave-year-grid-calendars { grid-template-columns: repeat(1, minmax(0, 1fr)); }
 }
