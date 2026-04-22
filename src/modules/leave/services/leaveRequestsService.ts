@@ -15,6 +15,7 @@ import {
 import { db } from "../../../lib/firebase/firebase";
 import type { LeaveRequestFormValues, LeaveRequestItem, LeaveRequestType } from "../../../types/leave";
 import type { TimesheetItem } from "../../../types/timesheet";
+import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 
 const leaveRequestsCollection = collection(db, "leaveRequests");
 
@@ -199,10 +200,35 @@ export async function saveLeaveRequest(userId: string, values: LeaveRequestFormV
     updatedAtServer: serverTimestamp(),
   });
 
+  const leaveTypeLabel =
+    values.requestType === "concediu_odihna"
+      ? "Concediu de odihna"
+      : values.requestType === "zi_libera_platita"
+        ? "Zi libera platita"
+        : "Zi libera eveniment";
+
+  await dispatchNotificationEvent({
+    module: "leave",
+    eventType: "leave_request_submitted",
+    entityId: refDoc.id,
+    title: "Cerere concediu depusa",
+    message: `${values.userName.trim()} a depus o cerere (${leaveTypeLabel}) pentru perioada ${values.periodStart} - ${values.periodEnd}.`,
+    directUserId: userId,
+    ownerUserId: userId,
+    actorUserId: userId,
+    actorUserName: values.userName.trim(),
+  });
+
   return refDoc.id;
 }
 
-export async function approveLeaveRequest(requestId: string): Promise<void> {
+export async function approveLeaveRequest(params: {
+  requestId: string;
+  actorUserId?: string;
+  actorUserName?: string;
+  actorUserThemeKey?: string | null;
+}): Promise<void> {
+  const { requestId, actorUserId = "", actorUserName = "Administrator", actorUserThemeKey = null } = params;
   const requestRef = doc(db, "leaveRequests", requestId);
   const snap = await getDoc(requestRef);
   const data = snap.data();
@@ -230,9 +256,31 @@ export async function approveLeaveRequest(requestId: string): Promise<void> {
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
+
+  const requestUserId = String(data.userId ?? "");
+  const requestUserName = String(data.userName ?? "Utilizator");
+
+  await dispatchNotificationEvent({
+    module: "leave",
+    eventType: "leave_request_approved",
+    entityId: requestId,
+    title: "Cerere concediu aprobata",
+    message: `Cererea lui ${requestUserName} (${data.periodStart ?? "-"} - ${data.periodEnd ?? "-"}) a fost aprobata.`,
+    directUserId: requestUserId,
+    ownerUserId: requestUserId,
+    actorUserId,
+    actorUserName,
+    actorUserThemeKey,
+  });
 }
 
-export async function deleteLeaveRequest(requestId: string, actorUserId: string, isAdmin: boolean): Promise<void> {
+export async function deleteLeaveRequest(
+  requestId: string,
+  actorUserId: string,
+  isAdmin: boolean,
+  actorUserName = "Utilizator",
+  actorUserThemeKey: string | null = null
+): Promise<void> {
   if (!actorUserId) throw new Error("Utilizator neautentificat.");
   const requestRef = doc(db, "leaveRequests", requestId);
   const snap = await getDoc(requestRef);
@@ -242,6 +290,22 @@ export async function deleteLeaveRequest(requestId: string, actorUserId: string,
     throw new Error("Doar adminul sau creatorul cererii poate sterge PDF-ul.");
   }
   await deleteDoc(requestRef);
+
+  const requestUserId = String(data.userId ?? "");
+  const requestUserName = String(data.userName ?? "Utilizator");
+
+  await dispatchNotificationEvent({
+    module: "leave",
+    eventType: "leave_request_deleted",
+    entityId: requestId,
+    title: "Cerere concediu stearsa",
+    message: `${actorUserName} a sters cererea lui ${requestUserName} (${data.periodStart ?? "-"} - ${data.periodEnd ?? "-"})`,
+    directUserId: requestUserId,
+    ownerUserId: requestUserId,
+    actorUserId,
+    actorUserName,
+    actorUserThemeKey,
+  });
 }
 
 

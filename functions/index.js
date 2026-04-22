@@ -14,6 +14,10 @@ function buildPathFromNotification(data) {
   if (moduleName === 'tools' && entityId) return `/tools/${entityId}`;
   if (moduleName === 'vehicles' && entityId) return `/vehicles/${entityId}`;
   if (moduleName === 'timesheets') return '/timesheets';
+  if (moduleName === 'leave') return '/my-leave';
+  if (moduleName === 'projects') return '/projects';
+  if (moduleName === 'users') return '/users';
+  if (moduleName === 'backup' || moduleName === 'web' || moduleName === 'server' || moduleName === 'system') return '/control-panel';
   if (moduleName === 'notifications') return '/notifications';
 
   return '/notifications';

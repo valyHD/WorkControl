@@ -22,6 +22,7 @@ const moduleOptions: Array<{ value: NotificationRuleModule; label: string; descr
   { value: "tools", label: "Scule", description: "Inventar, stare, responsabil, poze." },
   { value: "vehicles", label: "Mașini", description: "Stare mașini, șofer, comenzi GPS." },
   { value: "timesheets", label: "Pontaje", description: "Pornire/oprire pontaj și ajustări." },
+  { value: "leave", label: "Concedii", description: "Cereri de concediu/liber, aprobare, respingere, ștergere." },
   { value: "projects", label: "Proiecte", description: "Schimbări pe proiecte active/inactive." },
   { value: "users", label: "Utilizatori", description: "Creare cont, rol, activare/dezactivare." },
   { value: "notifications", label: "Notificări", description: "Fluxul notificărilor interne." },
@@ -62,6 +63,11 @@ const eventOptionsByModule: Record<
     { value: "timesheet_started", label: "Pontaj pornit", description: "Utilizatorul a pornit pontajul." },
     { value: "timesheet_stopped", label: "Pontaj oprit", description: "Utilizatorul a închis pontajul." },
     { value: "timesheet_updated", label: "Pontaj editat", description: "Pontaj modificat după înregistrare." },
+  ],
+  leave: [
+    { value: "leave_request_submitted", label: "Cerere depusă", description: "Un utilizator a depus o cerere nouă de concediu/liber." },
+    { value: "leave_request_approved", label: "Cerere aprobată", description: "O cerere de concediu/liber a fost aprobată." },
+    { value: "leave_request_deleted", label: "Cerere ștearsă", description: "O cerere de concediu/liber a fost ștearsă." },
   ],
   projects: [
     { value: "project_created", label: "Proiect creat", description: "A fost adăugat un proiect." },
@@ -123,6 +129,7 @@ export default function NotificationRuleForm({
     values.module === "vehicles" ||
     values.module === "tools" ||
     values.module === "timesheets" ||
+    values.module === "leave" ||
     values.module === "users" ||
     values.module === "projects";
 
@@ -148,7 +155,7 @@ export default function NotificationRuleForm({
       }));
     }
 
-    if (values.module === "users") {
+    if (values.module === "users" || values.module === "leave") {
       return users.map((entry) => ({
         id: entry.id,
         label: entry.fullName,
