@@ -13,6 +13,35 @@ import { db } from "../lib/firebase/firebase";
 import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
 import { runVehicleMaintenanceAlerts } from "../modules/vehicles/services/vehiclesService";
 
+const pagePrefetchers: Record<string, () => Promise<unknown>> = {
+  "/dashboard": () => import("../modules/dashboard/pages/DashboardPage"),
+  "/my-profile": () => import("../modules/users/pages/MyProfilePage"),
+  "/my-leave": () => import("../modules/leave/pages/LeavePlannerPage"),
+  "/notification-rules": () => import("../modules/notifications/pages/NotificationRulesPage"),
+  "/users": () => import("../modules/users/pages/UsersPage"),
+  "/tools": () => import("../modules/tools/pages/ToolsPage"),
+  "/vehicles": () => import("../modules/vehicles/pages/VehiclesPage"),
+  "/my-vehicle": () => import("../modules/vehicles/pages/MyVehiclePage"),
+  "/timesheets": () => import("../modules/timesheets/pages/TimesheetsPage"),
+  "/my-timesheets": () => import("../modules/timesheets/pages/MyTimesheetsPage"),
+  "/projects": () => import("../modules/timesheets/pages/ProjectsPage"),
+  "/notifications": () => import("../modules/notifications/pages/NotificationsPage"),
+  "/control-panel": () => import("../modules/reports/pages/ReportsPage"),
+  "/maintenance": () => import("../modules/maintenance/pages/MaintenancePage"),
+};
+
+const prefetchedPaths = new Set<string>();
+
+function prefetchPage(path: string) {
+  if (prefetchedPaths.has(path)) return;
+  const prefetch = pagePrefetchers[path];
+  if (!prefetch) return;
+  prefetchedPaths.add(path);
+  void prefetch().catch(() => {
+    prefetchedPaths.delete(path);
+  });
+}
+
 type MenuItem = {
   label: string; path: string; Icon: ElementType;
   colorClass: "menu-icon-blue" | "menu-icon-violet" | "menu-icon-cyan" | "menu-icon-orange" | "menu-icon-green" | "menu-icon-rose";
@@ -75,6 +104,9 @@ function NavItems({ onNavigate, unreadCount }: { onNavigate?: () => void; unread
           <div className="nav-section-label">{section.label}</div>
           {section.items.map(({ label, path, Icon, colorClass }) => (
             <NavLink key={path} to={path} onClick={onNavigate}
+              onMouseEnter={() => prefetchPage(path)}
+              onFocus={() => prefetchPage(path)}
+              onTouchStart={() => prefetchPage(path)}
               className={({ isActive }) => {
                 const forceMyVehicleActive = path === "/my-vehicle" && fromMyVehicleView;
                 const suppressVehiclesActive = path === "/vehicles" && fromMyVehicleView;
@@ -168,6 +200,44 @@ export default function AppShell() {
       userThemeKey: user.themeKey ?? null,
     }).catch((err) => console.error("[AppShell][runVehicleMaintenanceAlerts]", err));
   }, [user?.uid, user?.displayName, user?.email, user?.themeKey]);
+
+  // Warm route chunks progressively after login so next navigations feel instant
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    let cancelled = false;
+    let timerId: number | undefined;
+    let idleId: number | undefined;
+    const paths = allItems.map((item) => item.path);
+    let index = 0;
+
+    const preloadNext = () => {
+      if (cancelled || index >= paths.length) return;
+      prefetchPage(paths[index]);
+      index += 1;
+      timerId = window.setTimeout(preloadNext, 180);
+    };
+
+    const start = () => {
+      timerId = window.setTimeout(preloadNext, 0);
+    };
+
+    if ("requestIdleCallback" in window) {
+      idleId = window.requestIdleCallback(start, { timeout: 1_500 });
+    } else {
+      timerId = window.setTimeout(start, 700);
+    }
+
+    return () => {
+      cancelled = true;
+      if (typeof timerId === "number") {
+        window.clearTimeout(timerId);
+      }
+      if (typeof idleId === "number" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId);
+      }
+    };
+  }, [user?.uid]);
 
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
