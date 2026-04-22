@@ -13,6 +13,7 @@ import {
 import MyToolCard from "../components/MyToolCard";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { TimesheetItem } from "../../../types/timesheet";
+import type { LeaveRequestItem } from "../../../types/leave";
 
 type MyNotificationItem = {
   id: string;
@@ -59,6 +60,7 @@ export default function MyProfilePage() {
   const [myVehicles, setMyVehicles] = useState<VehicleItem[]>([]);
   const [myTimesheets, setMyTimesheets] = useState<TimesheetItem[]>([]);
   const [myNotifications, setMyNotifications] = useState<MyNotificationItem[]>([]);
+  const [myLeaveRequests, setMyLeaveRequests] = useState<LeaveRequestItem[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -188,11 +190,51 @@ export default function MyProfilePage() {
         );
       }
     );
+    const leaveUnsubscribe = onSnapshot(
+      query(
+        collection(db, "leaveRequests"),
+        where("userId", "==", user.uid),
+        orderBy("createdAt", "desc"),
+        limit(30)
+      ),
+      (leaveSnap) => {
+        setMyLeaveRequests(
+          leaveSnap.docs
+            .map((docItem) => {
+              const data = docItem.data();
+              return {
+                id: docItem.id,
+                userId: data.userId ?? "",
+                userName: data.userName ?? "",
+                userEmail: data.userEmail ?? "",
+                companyName: data.companyName ?? "",
+                roleTitle: data.roleTitle ?? "",
+                department: data.department ?? "",
+                requestType: data.requestType === "zi_libera_platita" || data.requestType === "zi_libera_eveniment" ? data.requestType : "concediu_odihna",
+                legalReason: data.legalReason ?? "",
+                periodStart: data.periodStart ?? "",
+                periodEnd: data.periodEnd ?? "",
+                requestedDays: Number(data.requestedDays ?? 0),
+                requestedMinutes: Number(data.requestedMinutes ?? 0),
+                reason: data.reason ?? "",
+                signatureData: data.signatureData ?? "",
+                issuedAt: Number(data.issuedAt ?? Date.now()),
+                status: data.status === "aprobat" || data.status === "respins" ? data.status : "in_asteptare",
+                pdfDataUrl: data.pdfDataUrl ?? "",
+                createdAt: Number(data.createdAt ?? Date.now()),
+                updatedAt: Number(data.updatedAt ?? Date.now()),
+              } as LeaveRequestItem;
+            })
+            .filter((request) => request.status === "aprobat")
+        );
+      }
+    );
 
     return () => {
       vehiclesUnsubscribe();
       timesheetsUnsubscribe();
       notificationsUnsubscribe();
+      leaveUnsubscribe();
     };
   }, [user?.uid]);
 
@@ -242,6 +284,43 @@ export default function MyProfilePage() {
           <Link to="/my-leave" className="primary-btn">Calendar concedii & cereri libere</Link>
         </div>
       </div>
+
+      <CompactSection
+        title="Istoric cereri concediu"
+        subtitle="In profil apar cererile aprobate."
+        preview={
+          myLeaveRequests.length === 0 ? (
+            <p className="tools-subtitle">Nu ai cereri aprobate.</p>
+          ) : (
+            <div className="simple-list compact-rows">
+              {myLeaveRequests.slice(0, 2).map((request) => (
+                <div key={request.id} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{request.requestType === "concediu_odihna" ? "Concediu" : request.requestType === "zi_libera_platita" ? "Zi libera platita" : "Zi libera eveniment"}</div>
+                    <div className="simple-list-subtitle">{request.periodStart} - {request.periodEnd}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        }
+      >
+        {myLeaveRequests.length === 0 ? (
+          <p className="tools-subtitle">Nu ai cereri aprobate.</p>
+        ) : (
+          <div className="simple-list">
+            {myLeaveRequests.map((request) => (
+              <div key={request.id} className="simple-list-item leave-history-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">{request.requestType === "concediu_odihna" ? "Concediu de odihna" : request.requestType === "zi_libera_platita" ? "Zi libera platita" : "Zi libera eveniment"}</div>
+                  <div className="simple-list-subtitle">{request.periodStart} - {request.periodEnd} · {request.requestedDays} zile</div>
+                </div>
+                <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">PDF</a>
+              </div>
+            ))}
+          </div>
+        )}
+      </CompactSection>
 
       <CompactSection
         title="Pontajele mele"

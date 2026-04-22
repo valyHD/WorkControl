@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { useAuth } from "../../../providers/AuthProvider";
 import { db } from "../../../lib/firebase/firebase";
@@ -7,6 +7,7 @@ import type { AppUserItem } from "../../../types/user";
 import type { LeaveRequestFormValues, LeaveRequestItem } from "../../../types/leave";
 import {
   approveLeaveRequest,
+  deleteLeaveRequest,
   getLeaveDateSet,
   getWorkedMinutesByDay,
   saveLeaveRequest,
@@ -20,6 +21,8 @@ type UserCalendarData = {
   timesheetsLoaded: boolean;
   leaveLoaded: boolean;
 };
+
+type SignaturePoint = { x: number; y: number };
 
 function toIsoDate(date: Date): string {
   const year = date.getFullYear();
@@ -44,10 +47,12 @@ function defaultForm(userName: string, userEmail: string): LeaveRequestFormValue
     userEmail,
     companyName: "",
     roleTitle: "",
+    department: "",
     requestType: "concediu_odihna",
     periodStart: "",
     periodEnd: "",
     reason: "",
+    signatureData: "",
   };
 }
 
@@ -85,13 +90,15 @@ function mapLeaveDoc(id: string, data: Record<string, any>): LeaveRequestItem {
     userEmail: data.userEmail ?? "",
     companyName: data.companyName ?? "",
     roleTitle: data.roleTitle ?? "",
-    requestType: data.requestType === "invoire" ? "invoire" : "concediu_odihna",
+    department: data.department ?? "",
+    requestType: data.requestType === "zi_libera_platita" || data.requestType === "zi_libera_eveniment" ? data.requestType : "concediu_odihna",
     legalReason: data.legalReason ?? "",
     periodStart: data.periodStart ?? "",
     periodEnd: data.periodEnd ?? "",
     requestedDays: Number(data.requestedDays ?? 0),
     requestedMinutes: Number(data.requestedMinutes ?? 0),
     reason: data.reason ?? "",
+    signatureData: data.signatureData ?? "",
     issuedAt: Number(data.issuedAt ?? Date.now()),
     status: data.status === "aprobat" || data.status === "respins" ? data.status : "in_asteptare",
     pdfDataUrl: data.pdfDataUrl ?? "",
@@ -102,6 +109,12 @@ function mapLeaveDoc(id: string, data: Record<string, any>): LeaveRequestItem {
 
 function buildUserLabel(userItem: AppUserItem): string {
   return userItem.fullName?.trim() || userItem.email || "Utilizator";
+}
+
+function requestTypeLabel(type: LeaveRequestItem["requestType"]): string {
+  if (type === "concediu_odihna") return "Concediu de odihna";
+  if (type === "zi_libera_platita") return "Zi libera platita";
+  return "Zi libera eveniment";
 }
 
 export default function LeavePlannerPage() {
@@ -121,14 +134,21 @@ export default function LeavePlannerPage() {
   const [adminRequests, setAdminRequests] = useState<LeaveRequestItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [approvingRequestId, setApprovingRequestId] = useState("");
+  const [deletingRequestId, setDeletingRequestId] = useState("");
+  const [showYearCalendar, setShowYearCalendar] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  const [drawingSignature, setDrawingSignature] = useState(false);
   const [formValues, setFormValues] = useState<LeaveRequestFormValues>(
     defaultForm(user?.displayName || user?.email || "", user?.email || "")
   );
+  const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const signatureStrokeRef = useRef<SignaturePoint[]>([]);
+  const signatureStrokesRef = useRef<SignaturePoint[][]>([]);
 
   useEffect(() => {
     setFormValues(defaultForm(user?.displayName || user?.email || "", user?.email || ""));
+    signatureStrokesRef.current = [];
   }, [user?.displayName, user?.email]);
 
   useEffect(() => {
@@ -137,9 +157,7 @@ export default function LeavePlannerPage() {
       setExpandedUserId("");
       return undefined;
     }
-    const usersQuery = isAdmin
-      ? query(collection(db, "users"), orderBy("createdAt", "asc"))
-      : query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
+    const usersQuery = query(collection(db, "users"), orderBy("createdAt", "asc"));
 
     return onSnapshot(usersQuery, (snap) => {
       const mapped = snap.docs.map((docItem) => {
@@ -158,30 +176,17 @@ export default function LeavePlannerPage() {
       });
 
       setUsers(mapped);
-
-      if (!expandedUserId) {
-        setExpandedUserId(mapped[0]?.uid ?? "");
-      }
+      if (!expandedUserId) setExpandedUserId(mapped[0]?.uid ?? "");
     });
-  }, [expandedUserId, isAdmin, user?.uid]);
+  }, [expandedUserId, user?.uid]);
 
   useEffect(() => {
     if (!expandedUserId) {
-      setCalendarData({
-        timesheets: [],
-        leaveRequests: [],
-        timesheetsLoaded: false,
-        leaveLoaded: false,
-      });
+      setCalendarData({ timesheets: [], leaveRequests: [], timesheetsLoaded: false, leaveLoaded: false });
       return undefined;
     }
 
-    setCalendarData({
-      timesheets: [],
-      leaveRequests: [],
-      timesheetsLoaded: false,
-      leaveLoaded: false,
-    });
+    setCalendarData({ timesheets: [], leaveRequests: [], timesheetsLoaded: false, leaveLoaded: false });
 
     const timesheetsUnsub = onSnapshot(
       query(collection(db, "timesheets"), where("userId", "==", expandedUserId), orderBy("startAt", "desc"), limit(500)),
@@ -224,15 +229,10 @@ export default function LeavePlannerPage() {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!isAdmin) {
-      setAdminRequests([]);
-      return undefined;
-    }
-
     return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(500)), (snap) => {
       setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
     });
-  }, [isAdmin]);
+  }, []);
 
   const monthCells = useMemo(() => getMonthMatrix(visibleMonth), [visibleMonth]);
   const monthTitle = useMemo(
@@ -244,9 +244,11 @@ export default function LeavePlannerPage() {
     () => getLeaveDateSet(calendarData.leaveRequests.filter((request) => request.status === "aprobat")),
     [calendarData.leaveRequests]
   );
-  const pendingLeaveRequests = useMemo(
-    () => (isAdmin ? adminRequests.filter((request) => request.status === "in_asteptare") : []),
-    [adminRequests, isAdmin]
+  const pendingLeaveRequests = useMemo(() => adminRequests.filter((request) => request.status === "in_asteptare"), [adminRequests]);
+  const approvedMyRequests = useMemo(() => myRequests.filter((request) => request.status === "aprobat"), [myRequests]);
+  const yearMonths = useMemo(
+    () => Array.from({ length: 12 }, (_, month) => new Date(visibleMonth.getFullYear(), month, 1)),
+    [visibleMonth]
   );
 
   function formatWorkedMinutesLabel(minutes: number): string {
@@ -254,6 +256,68 @@ export default function LeavePlannerPage() {
     const hours = Math.floor(safeMinutes / 60);
     const restMinutes = safeMinutes % 60;
     return `${hours}h${restMinutes}m`;
+  }
+
+  function getSignaturePoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(canvas.width, event.clientX - rect.left)),
+      y: Math.max(0, Math.min(canvas.height, event.clientY - rect.top)),
+    };
+  }
+
+  function startSignature(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    canvas.setPointerCapture(event.pointerId);
+    setDrawingSignature(true);
+    signatureStrokeRef.current = [getSignaturePoint(event)];
+  }
+
+  function drawSignature(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawingSignature) return;
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const point = getSignaturePoint(event);
+    const stroke = signatureStrokeRef.current;
+    const previousPoint = stroke[stroke.length - 1];
+    stroke.push(point);
+    ctx.beginPath();
+    ctx.moveTo(previousPoint.x, previousPoint.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 1.5;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  function endSignature(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    if (drawingSignature && signatureStrokeRef.current.length > 0) {
+      signatureStrokesRef.current.push([...signatureStrokeRef.current]);
+      setFormValues((prev) => ({ ...prev, signatureData: JSON.stringify(signatureStrokesRef.current) }));
+    }
+    signatureStrokeRef.current = [];
+    setDrawingSignature(false);
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function clearSignature() {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    signatureStrokesRef.current = [];
+    signatureStrokeRef.current = [];
+    setFormValues((prev) => ({ ...prev, signatureData: "" }));
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -265,13 +329,18 @@ export default function LeavePlannerPage() {
     setSuccess("");
 
     try {
+      if (!formValues.signatureData) {
+        throw new Error("Semnatura este obligatorie.");
+      }
       await saveLeaveRequest(user.uid, formValues);
-      setSuccess("Cererea a fost generata si salvata cu PDF in lista de mai jos.");
+      setSuccess("Cererea a fost trimisa. Va aparea in istoric dupa aprobare.");
       setFormValues((prev) => ({
         ...defaultForm(user.displayName || user.email || "", user.email || ""),
         companyName: prev.companyName,
         roleTitle: prev.roleTitle,
+        department: prev.department,
       }));
+      clearSignature();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut salva cererea.");
     } finally {
@@ -286,11 +355,26 @@ export default function LeavePlannerPage() {
 
     try {
       await approveLeaveRequest(requestId);
-      setSuccess("Cererea a fost aprobata. Zilele aprobate apar acum cu galben in calendar.");
+      setSuccess("Cererea a fost aprobata. PDF-ul contine acum eticheta albastra «Aprobat». ");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut aproba cererea.");
     } finally {
       setApprovingRequestId("");
+    }
+  }
+
+  async function handleDeleteRequest(requestId: string) {
+    setDeletingRequestId(requestId);
+    setError("");
+    setSuccess("");
+
+    try {
+      await deleteLeaveRequest(requestId);
+      setSuccess("Cererea PDF a fost stearsa.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nu am putut sterge cererea.");
+    } finally {
+      setDeletingRequestId("");
     }
   }
 
@@ -318,6 +402,7 @@ export default function LeavePlannerPage() {
           <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))}>Luna anterioara</button>
           <strong className="leave-month-title">{monthTitle}</strong>
           <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))}>Luna urmatoare</button>
+          <button className="secondary-btn" type="button" onClick={() => setShowYearCalendar(true)}>Calendar anual</button>
         </div>
 
         <div className="leave-legend">
@@ -383,8 +468,7 @@ export default function LeavePlannerPage() {
       </div>
 
       <div id="leave-form" className="panel">
-        <h3 className="panel-title">Formular cerere concediu / invoire</h3>
-        <p className="tools-subtitle">Model redactat pentru uz intern HR, cu referinte la Codul muncii (art. 144-151 si art. 152).</p>
+        <h3 className="panel-title">Formular cerere concediu / zi libera</h3>
 
         <form className="tool-form" onSubmit={handleSubmit}>
           <div className="tool-form-grid">
@@ -405,14 +489,20 @@ export default function LeavePlannerPage() {
 
             <label className="tool-form-block">
               <span className="tool-form-label">Functie</span>
-              <input className="tool-input" value={formValues.roleTitle} onChange={(event) => setFormValues((prev) => ({ ...prev, roleTitle: event.target.value }))} placeholder="Ex: Tehnician" />
+              <input className="tool-input" value={formValues.roleTitle} onChange={(event) => setFormValues((prev) => ({ ...prev, roleTitle: event.target.value }))} placeholder="Ex: Tehnician" required />
+            </label>
+
+            <label className="tool-form-block">
+              <span className="tool-form-label">Departament</span>
+              <input className="tool-input" value={formValues.department} onChange={(event) => setFormValues((prev) => ({ ...prev, department: event.target.value }))} placeholder="Ex: Operational" required />
             </label>
 
             <label className="tool-form-block">
               <span className="tool-form-label">Tip solicitare</span>
               <select className="tool-input" value={formValues.requestType} onChange={(event) => setFormValues((prev) => ({ ...prev, requestType: event.target.value as LeaveRequestFormValues["requestType"] }))}>
                 <option value="concediu_odihna">Concediu de odihna</option>
-                <option value="invoire">Invoire / zi libera</option>
+                <option value="zi_libera_platita">Zi libera platita</option>
+                <option value="zi_libera_eveniment">Zi libera eveniment deosebit</option>
               </select>
             </label>
 
@@ -427,8 +517,24 @@ export default function LeavePlannerPage() {
             </label>
 
             <label className="tool-form-block tool-form-block-full">
-              <span className="tool-form-label">Motiv (declarativ)</span>
-              <textarea className="tool-input tool-textarea" value={formValues.reason} onChange={(event) => setFormValues((prev) => ({ ...prev, reason: event.target.value }))} placeholder="Detaliaza pe scurt motivul solicitarii." required />
+              <span className="tool-form-label">Motiv (optional)</span>
+              <textarea className="tool-input tool-textarea" value={formValues.reason} onChange={(event) => setFormValues((prev) => ({ ...prev, reason: event.target.value }))} placeholder="Detaliaza pe scurt motivul solicitarii." />
+            </label>
+
+            <label className="tool-form-block tool-form-block-full">
+              <span className="tool-form-label">Semnatura</span>
+              <canvas
+                ref={signatureCanvasRef}
+                width={420}
+                height={80}
+                className="leave-signature-pad"
+                onPointerDown={startSignature}
+                onPointerMove={drawSignature}
+                onPointerUp={endSignature}
+              />
+              <div className="tool-form-actions" style={{ padding: 0 }}>
+                <button className="secondary-btn" type="button" onClick={clearSignature}>Sterge semnatura</button>
+              </div>
             </label>
           </div>
 
@@ -436,67 +542,94 @@ export default function LeavePlannerPage() {
           {success && <div className="status-ok">{success}</div>}
 
           <div className="tool-form-actions">
-            <button className="primary-btn" type="submit" disabled={submitting}>{submitting ? "Se genereaza..." : "Genereaza cererea PDF"}</button>
+            <button className="primary-btn" type="submit" disabled={submitting}>{submitting ? "Se genereaza..." : "Trimite cererea"}</button>
           </div>
         </form>
       </div>
 
-      {isAdmin && (
-        <div className="panel">
-          <h3 className="panel-title">Cereri in asteptare (admin)</h3>
-          {pendingLeaveRequests.length === 0 ? (
-            <p className="tools-subtitle">Nu exista cereri in asteptare.</p>
-          ) : (
-            <div className="simple-list">
-              {pendingLeaveRequests.map((request) => (
-                <div key={request.id} className="simple-list-item leave-history-item">
-                  <div className="simple-list-text">
-                    <div className="simple-list-label">{request.userName} · {request.requestType === "concediu_odihna" ? "Concediu de odihna" : "Invoire"}</div>
-                    <div className="simple-list-subtitle">
-                      {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile
-                    </div>
-                  </div>
-                  <div className="leave-admin-actions">
-                    <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
-                    <button
-                      className="primary-btn"
-                      type="button"
-                      onClick={() => handleApproveRequest(request.id)}
-                      disabled={approvingRequestId === request.id}
-                    >
-                      {approvingRequestId === request.id ? "Se aproba..." : "Aproba"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="panel">
-        <h3 className="panel-title">Istoric cereri emise</h3>
-        {!myRequestsLoaded ? (
-          <p className="tools-subtitle">Se incarca cererile...</p>
-        ) : myRequests.length === 0 ? (
-          <p className="tools-subtitle">Nu exista cereri emise momentan.</p>
+        <h3 className="panel-title">Cereri in asteptare (admin)</h3>
+        {!isAdmin ? (
+          <p className="tools-subtitle">Doar adminii pot aproba cereri.</p>
+        ) : pendingLeaveRequests.length === 0 ? (
+          <p className="tools-subtitle">Nu exista cereri in asteptare.</p>
         ) : (
           <div className="simple-list">
-            {myRequests.map((request) => (
+            {pendingLeaveRequests.map((request) => (
               <div key={request.id} className="simple-list-item leave-history-item">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">{request.userName} · {request.requestType === "concediu_odihna" ? "Concediu de odihna" : "Invoire"}</div>
+                  <div className="simple-list-label">{request.userName} · {requestTypeLabel(request.requestType)}</div>
                   <div className="simple-list-subtitle">
-                    {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile · emis la {new Date(request.issuedAt).toLocaleString("ro-RO")}
+                    {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile
                   </div>
-                  <div className="simple-list-subtitle">Status: {request.status.replace("_", " ")}</div>
                 </div>
-                <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                <div className="leave-admin-actions">
+                  <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                  <button
+                    className="primary-btn"
+                    type="button"
+                    onClick={() => handleApproveRequest(request.id)}
+                    disabled={approvingRequestId === request.id}
+                  >
+                    {approvingRequestId === request.id ? "Se aproba..." : "Aproba"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <div className="panel">
+        <h3 className="panel-title">Istoric cereri aprobate</h3>
+        {!myRequestsLoaded ? (
+          <p className="tools-subtitle">Se incarca cererile...</p>
+        ) : approvedMyRequests.length === 0 ? (
+          <p className="tools-subtitle">Nu exista cereri aprobate momentan.</p>
+        ) : (
+          <div className="simple-list">
+            {approvedMyRequests.map((request) => (
+              <div key={request.id} className="simple-list-item leave-history-item">
+                <div className="simple-list-text">
+                  <div className="simple-list-label">{request.userName} · {requestTypeLabel(request.requestType)}</div>
+                  <div className="simple-list-subtitle">
+                    {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile · emis la {new Date(request.issuedAt).toLocaleString("ro-RO")}
+                  </div>
+                  <div className="simple-list-subtitle">Status: {request.status.replace("_", " ")}</div>
+                </div>
+                <div className="leave-admin-actions">
+                  <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                  {(isAdmin || request.userId === user.uid) && (
+                    <button className="danger-btn" type="button" onClick={() => handleDeleteRequest(request.id)} disabled={deletingRequestId === request.id}>
+                      {deletingRequestId === request.id ? "Se sterge..." : "Sterge PDF (cerere)"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showYearCalendar && (
+        <div className="leave-year-modal" role="dialog" aria-modal="true">
+          <div className="panel leave-year-modal-panel">
+            <div className="leave-calendar-nav">
+              <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() - 1, visibleMonth.getMonth(), 1))}>An precedent</button>
+              <strong className="leave-month-title">Calendar {visibleMonth.getFullYear()}</strong>
+              <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() + 1, visibleMonth.getMonth(), 1))}>An urmator</button>
+              <button className="primary-btn" type="button" onClick={() => setShowYearCalendar(false)}>Inchide</button>
+            </div>
+            <div className="leave-year-grid">
+              {yearMonths.map((monthDate) => (
+                <button key={monthDate.toISOString()} type="button" className="leave-year-month" onClick={() => { setVisibleMonth(monthDate); setShowYearCalendar(false); }}>
+                  {monthDate.toLocaleDateString("ro-RO", { month: "long" })}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
