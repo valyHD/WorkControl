@@ -15,6 +15,7 @@ import {
   setToolCoverImage,
 } from "../services/toolsService";
 import { useAuth } from "../../../providers/AuthProvider";
+import SafeImage from "../../../components/SafeImage";
 
 function formatDate(ts: number) {
   return new Date(ts).toLocaleString("ro-RO");
@@ -148,12 +149,14 @@ await claimToolForCurrentUser(
           <div className="tool-details-header">
             <div className="tool-details-avatar">
               {tool.coverImageUrl ? (
-<img
-src={tool.coverThumbUrl || tool.coverImageUrl}
-  alt={tool.name}
-  className="tool-details-avatar-image"
-  loading="lazy"
-/>
+                <SafeImage
+                  src={tool.coverThumbUrl || tool.coverImageUrl}
+                  alt={tool.name}
+                  className="tool-details-avatar-image"
+                  loading="eager"
+                  fetchPriority="high"
+                  fallbackText={tool.name}
+                />
               ) : (
                 <span>{tool.name.slice(0, 1).toUpperCase()}</span>
               )}
@@ -286,12 +289,14 @@ src={tool.coverThumbUrl || tool.coverImageUrl}
           <div className="tool-gallery">
             {tool.images.map((image) => (
               <div key={image.id} className="tool-gallery-item">
-                <img
-  src={image.url}
-  alt={image.fileName}
-  className="tool-gallery-image"
-  loading="lazy"
-/>
+                <SafeImage
+                  src={image.thumbUrl || image.url}
+                  alt={image.fileName}
+                  className="tool-gallery-image"
+                  loading="lazy"
+                  decoding="async"
+                  fallbackText={tool.name}
+                />
                 {isOwner && (
                   <div className="tool-gallery-actions">
                     <button

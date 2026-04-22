@@ -7,6 +7,7 @@ type SafeImageProps = {
   fallbackText?: string;
   loading?: "lazy" | "eager";
   decoding?: "async" | "sync" | "auto";
+  fetchPriority?: "high" | "low" | "auto";
   sizes?: string;
   /** Optional wrapper class — useful when you need the skeleton to fill a container */
   wrapperClassName?: string;
@@ -26,6 +27,7 @@ function SafeImageComponent({
   fallbackText,
   loading = "lazy",
   decoding = "async",
+  fetchPriority = "auto",
   sizes,
   wrapperClassName,
 }: SafeImageProps) {
@@ -70,6 +72,7 @@ function SafeImageComponent({
         className={`${className ?? ""} ${loaded ? "" : "safe-image-loading"}`}
         loading={loading}
         decoding={decoding}
+        fetchPriority={fetchPriority}
         sizes={sizes}
         onLoad={() => setLoaded(true)}
         onError={() => {

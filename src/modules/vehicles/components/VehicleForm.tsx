@@ -7,6 +7,7 @@ import type {
   VehicleStatus,
 } from "../../../types/vehicle";
 import VehicleImageUploader from "./VehicleImageUploader";
+import SafeImage from "../../../components/SafeImage";
 
 type Props = {
   initialValues: VehicleFormValues;
@@ -321,7 +322,14 @@ export default function VehicleForm({
             <div className="tool-gallery">
               {values.images.map((image: VehicleImageItem) => (
                 <div key={image.id} className="tool-gallery-item">
-                  <img src={image.url} alt={image.fileName} className="tool-gallery-image" />
+                  <SafeImage
+                    src={image.thumbUrl || image.url}
+                    alt={image.fileName}
+                    className="tool-gallery-image"
+                    loading="lazy"
+                    decoding="async"
+                    fallbackText={values.plateNumber || "V"}
+                  />
                   {values.coverImageUrl === image.url && (
                     <span className="tool-cover-chip">Poza principala</span>
                   )}

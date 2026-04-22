@@ -7,6 +7,7 @@ import type {
   ToolStatus,
 } from "../../../types/tool";
 import ToolImageUploader from "./ToolImageUploader";
+import SafeImage from "../../../components/SafeImage";
 
 type Props = {
   initialValues: ToolFormValues;
@@ -232,7 +233,14 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
             <div className="tool-gallery">
               {values.images.map((image: ToolImageItem) => (
                 <div key={image.id} className="tool-gallery-item">
-                  <img src={image.url} alt={image.fileName} className="tool-gallery-image" />
+                  <SafeImage
+                    src={image.thumbUrl || image.url}
+                    alt={image.fileName}
+                    className="tool-gallery-image"
+                    loading="lazy"
+                    decoding="async"
+                    fallbackText={values.name || "S"}
+                  />
                   {values.coverImageUrl === image.url && (
                     <span className="tool-cover-chip">Poza principala</span>
                   )}

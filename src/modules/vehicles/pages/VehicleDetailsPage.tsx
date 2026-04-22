@@ -587,17 +587,13 @@ export default function VehicleDetailsPage() {
           <div className="tool-gallery">
             {vehicle.images.map((image) => (
               <div key={image.id} className="tool-gallery-item">
-                <img
+                <SafeImage
                   src={image.thumbUrl || image.url}
                   alt={image.fileName || "Poza vehicul"}
                   className="tool-gallery-image"
                   loading="lazy"
                   decoding="async"
-                  onError={(e) => {
-                    if (image.url && e.currentTarget.src !== image.url) {
-                      e.currentTarget.src = image.url;
-                    }
-                  }}
+                  fallbackText={vehicle.plateNumber}
                 />
                 {isOwner && (
                   <div className="tool-gallery-actions">
