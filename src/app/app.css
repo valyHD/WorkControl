@@ -3712,9 +3712,12 @@ html {
   inset: 0;
   background: rgba(15, 23, 42, 0.7);
   display: grid;
-  place-items: center;
+  justify-items: center;
+  align-items: start;
   z-index: 40;
   padding: 16px;
+  padding-block: 24px;
+  height: 100dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
