@@ -3724,10 +3724,8 @@ html {
 }
 .leave-year-modal-panel {
   width: min(1400px, 98vw);
-  max-height: 95vh;
-  overflow: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  max-height: none;
+  overflow: visible;
 }
 .leave-year-grid {
   margin-top: 12px;
