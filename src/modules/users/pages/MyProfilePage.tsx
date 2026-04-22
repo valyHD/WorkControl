@@ -310,12 +310,12 @@ export default function MyProfilePage() {
         ) : (
           <div className="simple-list">
             {myLeaveRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item">
+              <div key={request.id} className="simple-list-item leave-history-item leave-history-item-profile">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{request.requestType === "concediu_odihna" ? "Concediu de odihna" : request.requestType === "zi_libera_platita" ? "Zi libera platita" : "Zi libera eveniment"}</div>
                   <div className="simple-list-subtitle">{request.periodStart} - {request.periodEnd} · {request.requestedDays} zile</div>
                 </div>
-                <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">PDF</a>
+                <a className="secondary-btn leave-history-pdf-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">PDF</a>
               </div>
             ))}
           </div>

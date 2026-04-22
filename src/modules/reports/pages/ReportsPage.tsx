@@ -40,6 +40,7 @@ function prettyBytes(value: number) {
 export default function ControlPanelPage() {
   const { role } = useAuth();
   const [settings, setSettings] = useState<ControlPanelSettings>(FALLBACK_SETTINGS);
+  const [loading, setLoading] = useState(true);
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [lastBackupInfo, setLastBackupInfo] = useState<Record<string, any> | null>(null);
   const [busyMessage, setBusyMessage] = useState("");
@@ -60,24 +61,29 @@ export default function ControlPanelPage() {
   );
 
   async function loadData() {
+    setLoading(true);
     setError("");
-    const [loadedSettings, loadedCounters, backupInfo] = await Promise.all([
-      getControlPanelSettings(),
-      getCollectionCounters(),
-      getLatestBackupJob(),
-    ]);
+    try {
+      const [loadedSettings, loadedCounters, backupInfo] = await Promise.all([
+        getControlPanelSettings(),
+        getCollectionCounters(),
+        getLatestBackupJob(),
+      ]);
 
-    setSettings(loadedSettings);
-    setCounters(loadedCounters);
-    setLastBackupInfo((backupInfo as Record<string, any> | null) ?? null);
+      setSettings(loadedSettings);
+      setCounters(loadedCounters);
+      setLastBackupInfo((backupInfo as Record<string, any> | null) ?? null);
 
-    document.documentElement.style.setProperty("--ui-font-scale", String(loadedSettings.uiFontScale));
-    document.documentElement.dataset.uiFontFamily = loadedSettings.uiFontFamily;
-    document.documentElement.dataset.uiDensity = loadedSettings.uiDensity;
-    document.documentElement.dataset.uiPalette = loadedSettings.uiPalette;
-    document.documentElement.dataset.uiCardStyle = loadedSettings.uiCardStyle;
-    document.documentElement.dataset.uiContrast = loadedSettings.uiContrast;
-    document.documentElement.dataset.uiAnimations = loadedSettings.uiAnimations;
+      document.documentElement.style.setProperty("--ui-font-scale", String(loadedSettings.uiFontScale));
+      document.documentElement.dataset.uiFontFamily = loadedSettings.uiFontFamily;
+      document.documentElement.dataset.uiDensity = loadedSettings.uiDensity;
+      document.documentElement.dataset.uiPalette = loadedSettings.uiPalette;
+      document.documentElement.dataset.uiCardStyle = loadedSettings.uiCardStyle;
+      document.documentElement.dataset.uiContrast = loadedSettings.uiContrast;
+      document.documentElement.dataset.uiAnimations = loadedSettings.uiAnimations;
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -197,6 +203,15 @@ export default function ControlPanelPage() {
       <div className="placeholder-page">
         <h2>Acces restricționat</h2>
         <p>Doar adminul sau managerul pot accesa Control Panel-ul.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="placeholder-page">
+        <h2>Se incarca Control Panel...</h2>
+        <p>Aplicam setarile salvate si incarcam statisticile.</p>
       </div>
     );
   }
