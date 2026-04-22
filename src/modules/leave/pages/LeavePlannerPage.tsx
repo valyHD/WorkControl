@@ -41,6 +41,46 @@ function getMonthMatrix(baseDate: Date): Date[] {
   return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
 }
 
+function getOrthodoxEasterDate(year: number): Date {
+  const a = year % 19;
+  const b = year % 7;
+  const c = year % 4;
+  const d = (19 * a + 16) % 30;
+  const e = (2 * c + 4 * b + 6 * d) % 7;
+  const oldStyleDay = 3 + d + e;
+  const julianToGregorianOffset = year >= 2100 ? 14 : 13;
+  return new Date(year, 3, oldStyleDay + julianToGregorianOffset);
+}
+
+function shiftDate(baseDate: Date, days: number): Date {
+  return new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + days);
+}
+
+function getRomanianPublicHolidaySet(year: number): Set<string> {
+  const fixedHolidays = [
+    new Date(year, 0, 1),
+    new Date(year, 0, 2),
+    new Date(year, 0, 24),
+    new Date(year, 4, 1),
+    new Date(year, 5, 1),
+    new Date(year, 7, 15),
+    new Date(year, 10, 30),
+    new Date(year, 11, 1),
+    new Date(year, 11, 25),
+    new Date(year, 11, 26),
+  ];
+  const orthodoxEaster = getOrthodoxEasterDate(year);
+  const movableHolidays = [
+    shiftDate(orthodoxEaster, -2),
+    orthodoxEaster,
+    shiftDate(orthodoxEaster, 1),
+    shiftDate(orthodoxEaster, 49),
+    shiftDate(orthodoxEaster, 50),
+  ];
+
+  return new Set([...fixedHolidays, ...movableHolidays].map((date) => toIsoDate(date)));
+}
+
 function defaultForm(userName: string, userEmail: string): LeaveRequestFormValues {
   return {
     userName,
@@ -234,7 +274,6 @@ export default function LeavePlannerPage() {
     });
   }, []);
 
-  const monthCells = useMemo(() => getMonthMatrix(visibleMonth), [visibleMonth]);
   const monthTitle = useMemo(
     () => visibleMonth.toLocaleDateString("ro-RO", { month: "long", year: "numeric" }),
     [visibleMonth]
@@ -244,18 +283,54 @@ export default function LeavePlannerPage() {
     () => getLeaveDateSet(calendarData.leaveRequests.filter((request) => request.status === "aprobat")),
     [calendarData.leaveRequests]
   );
+  const romanianPublicHolidays = useMemo(() => getRomanianPublicHolidaySet(visibleMonth.getFullYear()), [visibleMonth]);
   const pendingLeaveRequests = useMemo(() => adminRequests.filter((request) => request.status === "in_asteptare"), [adminRequests]);
   const approvedMyRequests = useMemo(() => myRequests.filter((request) => request.status === "aprobat"), [myRequests]);
   const yearMonths = useMemo(
     () => Array.from({ length: 12 }, (_, month) => new Date(visibleMonth.getFullYear(), month, 1)),
     [visibleMonth]
   );
+  const expandedUser = useMemo(() => users.find((userItem) => userItem.uid === expandedUserId), [expandedUserId, users]);
+  const expandedUserName = expandedUser ? buildUserLabel(expandedUser) : "Utilizator";
 
   function formatWorkedMinutesLabel(minutes: number): string {
     const safeMinutes = Math.max(0, Math.floor(minutes));
     const hours = Math.floor(safeMinutes / 60);
     const restMinutes = safeMinutes % 60;
     return `${hours}h${restMinutes}m`;
+  }
+
+  function renderMonthCalendar(monthDate: Date, scopeKey: string, compact = false) {
+    const cells = getMonthMatrix(monthDate);
+    return (
+      <div className={`leave-calendar-grid ${compact ? "leave-calendar-grid-compact" : ""}`}>
+        {weekDays.map((day) => (
+          <div key={`${scopeKey}-${monthDate.toISOString()}-${day}`} className="leave-cell leave-cell-head">{day}</div>
+        ))}
+        {cells.map((date, index) => {
+          const iso = toIsoDate(date);
+          const minutes = workedMinutesByDay[iso] ?? 0;
+          const hasWork = minutes > 0;
+          const hasLeave = approvedLeaveDateSet.has(iso);
+          const outsideMonth = date.getMonth() !== monthDate.getMonth();
+          const isHoliday = romanianPublicHolidays.has(iso);
+
+          const className = [
+            "leave-cell",
+            outsideMonth ? "is-outside" : "",
+            hasWork && hasLeave ? "is-mixed" : hasWork ? "is-worked" : hasLeave ? "is-leave" : "",
+            isHoliday ? "is-holiday" : "",
+          ].join(" ");
+
+          return (
+            <div key={`${scopeKey}-${iso}-${index}`} className={className} title={isHoliday ? "Sarbatoare legala (Romania)" : undefined}>
+              <div className="leave-cell-day">{date.getDate()}</div>
+              {minutes > 0 && <div className="leave-cell-minutes">{formatWorkedMinutesLabel(minutes)}</div>}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   function getSignaturePoint(event: React.PointerEvent<HTMLCanvasElement>) {
@@ -398,17 +473,11 @@ export default function LeavePlannerPage() {
           <a className="primary-btn" href="#leave-form">Programeaza concediu / cere liber</a>
         </div>
 
-        <div className="leave-calendar-nav">
-          <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))}>Luna anterioara</button>
-          <strong className="leave-month-title">{monthTitle}</strong>
-          <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))}>Luna urmatoare</button>
-          <button className="secondary-btn" type="button" onClick={() => setShowYearCalendar(true)}>Calendar anual</button>
-        </div>
-
         <div className="leave-legend">
           <span><i className="leave-dot leave-dot-worked" /> Zi lucrata (pontaj)</span>
           <span><i className="leave-dot leave-dot-leave" /> Concediu / invoire</span>
           <span><i className="leave-dot leave-dot-mixed" /> Pontaj + concediu in aceeasi zi</span>
+          <span><i className="leave-dot leave-dot-holiday" /> Sarbatoare legala Romania</span>
         </div>
 
         <div className="leave-user-list">
@@ -430,34 +499,18 @@ export default function LeavePlannerPage() {
 
                 {isExpanded && (
                   <div className="leave-user-dropdown">
+                    <div className="leave-inline-calendar-header">
+                      <strong className="leave-month-title">{monthTitle}</strong>
+                      <div className="leave-inline-calendar-actions">
+                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))} aria-label="Luna anterioara">◀</button>
+                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))} aria-label="Luna urmatoare">▶</button>
+                        <button className="secondary-btn" type="button" onClick={() => setShowYearCalendar(true)}>Fullscreen</button>
+                      </div>
+                    </div>
                     {isLoading ? (
                       <p className="tools-subtitle">Se incarca calendarul...</p>
                     ) : (
-                      <div className="leave-calendar-grid leave-calendar-grid-compact">
-                        {weekDays.map((day) => (
-                          <div key={`${uid}-${day}`} className="leave-cell leave-cell-head">{day}</div>
-                        ))}
-                        {monthCells.map((date, index) => {
-                          const iso = toIsoDate(date);
-                          const minutes = workedMinutesByDay[iso] ?? 0;
-                          const hasWork = minutes > 0;
-                          const hasLeave = approvedLeaveDateSet.has(iso);
-                          const outsideMonth = date.getMonth() !== visibleMonth.getMonth();
-
-                          const className = [
-                            "leave-cell",
-                            outsideMonth ? "is-outside" : "",
-                            hasWork && hasLeave ? "is-mixed" : hasWork ? "is-worked" : hasLeave ? "is-leave" : "",
-                          ].join(" ");
-
-                          return (
-                            <div key={`${uid}-${iso}-${index}`} className={className}>
-                              <div className="leave-cell-day">{date.getDate()}</div>
-                              {minutes > 0 && <div className="leave-cell-minutes">{formatWorkedMinutesLabel(minutes)}</div>}
-                            </div>
-                          );
-                        })}
-                      </div>
+                      renderMonthCalendar(visibleMonth, uid, true)
                     )}
                   </div>
                 )}
@@ -615,16 +668,19 @@ export default function LeavePlannerPage() {
         <div className="leave-year-modal" role="dialog" aria-modal="true">
           <div className="panel leave-year-modal-panel">
             <div className="leave-calendar-nav">
-              <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() - 1, visibleMonth.getMonth(), 1))}>An precedent</button>
-              <strong className="leave-month-title">Calendar {visibleMonth.getFullYear()}</strong>
-              <button className="secondary-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() + 1, visibleMonth.getMonth(), 1))}>An urmator</button>
-              <button className="primary-btn" type="button" onClick={() => setShowYearCalendar(false)}>Inchide</button>
+              <strong className="leave-month-title">Calendar fullscreen · {expandedUserName} · {visibleMonth.getFullYear()}</strong>
+              <div className="leave-inline-calendar-actions">
+                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() - 1, visibleMonth.getMonth(), 1))} aria-label="An precedent">◀</button>
+                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() + 1, visibleMonth.getMonth(), 1))} aria-label="An urmator">▶</button>
+                <button className="primary-btn" type="button" onClick={() => setShowYearCalendar(false)}>Exit fullscreen</button>
+              </div>
             </div>
-            <div className="leave-year-grid">
+            <div className="leave-year-grid leave-year-grid-calendars">
               {yearMonths.map((monthDate) => (
-                <button key={monthDate.toISOString()} type="button" className="leave-year-month" onClick={() => { setVisibleMonth(monthDate); setShowYearCalendar(false); }}>
-                  {monthDate.toLocaleDateString("ro-RO", { month: "long" })}
-                </button>
+                <div key={monthDate.toISOString()} className="leave-year-month-calendar">
+                  <div className="leave-year-month-title">{monthDate.toLocaleDateString("ro-RO", { month: "long" })}</div>
+                  {renderMonthCalendar(monthDate, `year-${monthDate.toISOString()}`)}
+                </div>
               ))}
             </div>
           </div>
