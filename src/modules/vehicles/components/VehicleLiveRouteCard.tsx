@@ -222,7 +222,7 @@ function FitRouteBounds({
         //
       }
     };
-  }, [map, trigger, points]);
+  }, [map, trigger]);
 
   return null;
 }

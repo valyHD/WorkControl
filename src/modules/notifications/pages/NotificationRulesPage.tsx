@@ -214,7 +214,7 @@ export default function NotificationRulesPage() {
         ) : (
           <div className="simple-list compact-rows">
             {sortedRules.map((rule) => (
-              <div key={rule.id} className="simple-list-item">
+              <div key={rule.id} className="simple-list-item notification-rule-item">
                 {editingId === rule.id ? (
                   <div style={{ width: "100%" }}>
                     <NotificationRuleForm
@@ -265,7 +265,7 @@ export default function NotificationRulesPage() {
                     </div>
 
                     <button
-                      className="secondary-btn"
+                      className="secondary-btn notification-rule-edit-btn"
                       type="button"
                       onClick={() => {
                         setEditingId(rule.id);

@@ -192,7 +192,7 @@ export default function NotificationsPage() {
             </p>
           </div>
 
-          <div className="tools-header-actions" style={{ display: "grid", gap: 8, justifyItems: "end" }}>
+          <div className="tools-header-actions notifications-activate-box">
             <button
               className="primary-btn"
               type="button"

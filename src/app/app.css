@@ -3706,3 +3706,84 @@ html {
   .leave-inline-calendar-actions .primary-btn { flex: 1; }
   .leave-year-grid-calendars { grid-template-columns: repeat(1, minmax(0, 1fr)); }
 }
+
+.notifications-activate-box {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  max-width: min(100%, 520px);
+}
+
+.notifications-activate-box .badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.leave-user-trigger small {
+  display: block;
+  max-width: min(52vw, 300px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 760px) {
+  .tool-details-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tool-details-header > div:last-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .leave-history-item-profile {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .leave-history-item-profile .leave-history-pdf-btn {
+    align-self: flex-start;
+  }
+
+  .notification-rule-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .notification-rule-item .notification-rule-edit-btn {
+    align-self: flex-start;
+  }
+
+  .notifications-activate-box {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .kpi-card {
+    padding: 12px 14px;
+  }
+
+  .kpi-value {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+
+  .kpi-head {
+    margin-bottom: 8px;
+  }
+
+  .leave-user-trigger {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .leave-user-trigger small {
+    max-width: 100%;
+  }
+}
