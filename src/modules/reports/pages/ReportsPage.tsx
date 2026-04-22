@@ -232,7 +232,14 @@ export default function ControlPanelPage() {
       await loadData();
     } catch (err) {
       console.error(err);
-      setError("Curățarea istoricului a eșuat.");
+      const message = err instanceof Error ? err.message : String(err);
+      if (/quota has been exceeded|quota exceeded|storage/i.test(message)) {
+        setError(
+          "Curățarea a fost oprită din cauza limitei de stocare locală a browserului. Reîncarcă pagina și rulează din nou; ștergerea se face acum în loturi mici."
+        );
+      } else {
+        setError("Curățarea istoricului a eșuat.");
+      }
     } finally {
       setBusyMessage("");
     }
