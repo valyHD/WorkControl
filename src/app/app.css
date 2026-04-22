@@ -3495,3 +3495,127 @@ html {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* ================================================================
+   LEAVE / VACATION PAGE
+   ================================================================ */
+.leave-page { display: flex; flex-direction: column; gap: 16px; }
+.leave-calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 20px 12px;
+}
+.leave-month-title { text-transform: capitalize; color: var(--text-soft); }
+.leave-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 0 20px 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.leave-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+  border: 1px solid var(--line-mid);
+}
+.leave-dot-worked { background: #c4b5fd; border-color: #8b5cf6; }
+.leave-dot-leave { background: #fde68a; border-color: #f59e0b; }
+.leave-dot-mixed { background: linear-gradient(135deg, #c4b5fd 0%, #c4b5fd 50%, #fde68a 50%, #fde68a 100%); border-color: #a78bfa; }
+.leave-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 8px;
+}
+.leave-user-item {
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+.leave-user-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.leave-user-trigger span { font-weight: 700; }
+.leave-user-trigger small { color: var(--text-muted); font-size: 12px; }
+.leave-user-dropdown { padding-top: 6px; }
+.leave-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 20px 20px;
+}
+.leave-calendar-grid-compact {
+  gap: 5px;
+  padding: 0 12px 12px;
+}
+.leave-cell {
+  min-height: 74px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--line-mid);
+  background: var(--surface);
+  padding: 8px;
+}
+.leave-cell-head {
+  min-height: unset;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 6px;
+}
+.leave-cell-day { font-weight: 700; color: var(--text-soft); font-size: 13px; }
+.leave-cell-minutes { margin-top: 6px; font-size: 11.5px; color: var(--text); font-weight: 700; }
+.leave-cell.is-worked { background: #ede9fe; border-color: #c4b5fd; }
+.leave-cell.is-leave { background: #fef9c3; border-color: #facc15; }
+.leave-cell.is-mixed { background: linear-gradient(135deg, #ede9fe 0%, #ede9fe 50%, #fef9c3 50%, #fef9c3 100%); border-color: #a78bfa; }
+.leave-cell.is-outside { opacity: .45; }
+.leave-calendar-grid-compact .leave-cell {
+  min-height: 44px;
+  padding: 5px;
+}
+.leave-calendar-grid-compact .leave-cell-day {
+  font-size: 11px;
+}
+.leave-calendar-grid-compact .leave-cell-minutes {
+  margin-top: 3px;
+  font-size: 10px;
+}
+.leave-history-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.status-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+.status-ok {
+  background: var(--success-soft);
+  color: var(--success);
+  border: 1px solid var(--success-line);
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+@media (max-width: 860px) {
+  .leave-calendar-nav { flex-direction: column; }
+  .leave-calendar-nav .secondary-btn { width: 100%; }
+}
