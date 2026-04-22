@@ -28,6 +28,9 @@ function buildPdfDataUrlProfessional(
   signatureData: string,
   isApproved: boolean
 ): string {
+  const signatureLeftX = 28;
+  const signatureBottomY = 430;
+  const signatureCanvasHeight = 120;
   const safeTitle = escapePdfText(title);
   const content: string[] = [
     "BT",
@@ -52,7 +55,7 @@ function buildPdfDataUrlProfessional(
       "BT",
       "/F1 18 Tf",
       "0 0 1 rg",
-      "1 0 0 1 415 110 Tm",
+      `1 0 0 1 500 ${signatureBottomY + 18} Tm`,
       "(Aprobat) Tj",
       "0 0 0 rg",
       "ET"
@@ -66,9 +69,9 @@ function buildPdfDataUrlProfessional(
       strokes.forEach((stroke) => {
         if (!Array.isArray(stroke) || stroke.length < 2) return;
         const first = stroke[0];
-        content.push(`${56 + first.x} ${128 + (52 - first.y)} m`);
+        content.push(`${signatureLeftX + first.x} ${signatureBottomY + (signatureCanvasHeight - first.y)} m`);
         stroke.slice(1).forEach((point) => {
-          content.push(`${56 + point.x} ${128 + (52 - point.y)} l`);
+          content.push(`${signatureLeftX + point.x} ${signatureBottomY + (signatureCanvasHeight - point.y)} l`);
         });
         content.push("S");
       });
@@ -229,8 +232,16 @@ export async function approveLeaveRequest(requestId: string): Promise<void> {
   });
 }
 
-export async function deleteLeaveRequest(requestId: string): Promise<void> {
-  await deleteDoc(doc(db, "leaveRequests", requestId));
+export async function deleteLeaveRequest(requestId: string, actorUserId: string, isAdmin: boolean): Promise<void> {
+  if (!actorUserId) throw new Error("Utilizator neautentificat.");
+  const requestRef = doc(db, "leaveRequests", requestId);
+  const snap = await getDoc(requestRef);
+  const data = snap.data();
+  if (!data) throw new Error("Cererea nu exista.");
+  if (!isAdmin && data.userId !== actorUserId) {
+    throw new Error("Doar adminul sau creatorul cererii poate sterge PDF-ul.");
+  }
+  await deleteDoc(requestRef);
 }
 
 
