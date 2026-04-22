@@ -36,6 +36,183 @@ export type BackupExportSummary = {
   sizeBytes: number;
 };
 
+export type ProfessionalBackupView = {
+  users: Array<{ userName: string; email: string }>;
+  tools: Array<{ toolName: string; internalCode: string; ownerName: string; ownerEmail: string }>;
+  toolEvents: Array<{
+    userName: string;
+    userEmail: string;
+    events: Array<{ toolName: string; type: string; message: string; dateTime: number }>;
+  }>;
+  vehicles: Array<{ vehicleName: string; plateNumber: string; ownerName: string; ownerEmail: string }>;
+  vehicleEvents: Array<{
+    userName: string;
+    userEmail: string;
+    events: Array<{ vehicleName: string; type: string; message: string; dateTime: number }>;
+  }>;
+  timesheets: Array<{
+    userName: string;
+    userEmail: string;
+    entries: Array<{
+      projectName: string;
+      projectCode: string;
+      startAt: number;
+      stopAt: number | null;
+      workedMinutes: number;
+      status: string;
+    }>;
+  }>;
+  notifications: Array<{ title: string; message: string; dateTime: number; module: string; eventType: string }>;
+};
+
+export function buildProfessionalBackupView(data: Record<string, Array<Record<string, unknown>>>): ProfessionalBackupView {
+  const users = (data.users ?? []).map((item) => ({
+    id: String(item.id ?? item.uid ?? ""),
+    uid: String(item.uid ?? ""),
+    userName: String(item.fullName ?? item.userName ?? "Utilizator necunoscut"),
+    email: String(item.email ?? "-"),
+  }));
+
+  const userById = new Map<string, { userName: string; email: string }>();
+  const userByName = new Map<string, { userName: string; email: string }>();
+  users.forEach((user) => {
+    if (user.id) userById.set(user.id, { userName: user.userName, email: user.email });
+    if (user.uid) userById.set(user.uid, { userName: user.userName, email: user.email });
+    userByName.set(user.userName, { userName: user.userName, email: user.email });
+  });
+
+  const resolveUser = (userId?: unknown, userName?: unknown) => {
+    const byId = userById.get(String(userId ?? ""));
+    if (byId) return byId;
+    const byName = userByName.get(String(userName ?? ""));
+    if (byName) return byName;
+    return {
+      userName: String(userName ?? "Utilizator necunoscut"),
+      email: "-",
+    };
+  };
+
+  const tools = (data.tools ?? []).map((item) => {
+    const owner = resolveUser(item.ownerUserId, item.ownerUserName);
+    return {
+      id: String(item.id ?? ""),
+      toolName: String(item.name ?? "Sculă"),
+      internalCode: String(item.internalCode ?? "-"),
+      ownerName: owner.userName,
+      ownerEmail: owner.email,
+    };
+  });
+  const toolNameById = new Map<string, string>(tools.map((item) => [item.id, item.toolName]));
+
+  const vehicles = (data.vehicles ?? []).map((item) => {
+    const owner = resolveUser(item.ownerUserId, item.ownerUserName);
+    return {
+      id: String(item.id ?? ""),
+      vehicleName: `${String(item.brand ?? "-")} ${String(item.model ?? "-")}`.trim(),
+      plateNumber: String(item.plateNumber ?? "-"),
+      ownerName: owner.userName,
+      ownerEmail: owner.email,
+    };
+  });
+  const vehicleNameById = new Map<string, string>(
+    vehicles.map((item) => [item.id, item.vehicleName === "-" ? item.plateNumber : `${item.vehicleName} · ${item.plateNumber}`])
+  );
+
+  const groupEventsByUser = <
+    T extends {
+      actorUserId?: unknown;
+      actorUserName?: unknown;
+      message?: unknown;
+      type?: unknown;
+      createdAt?: unknown;
+      targetName: string;
+    },
+  >(
+    events: T[]
+  ) => {
+    const grouped = new Map<string, { userName: string; userEmail: string; events: ProfessionalBackupView["toolEvents"][number]["events"] }>();
+    events.forEach((event) => {
+      const actor = resolveUser(event.actorUserId, event.actorUserName);
+      const key = `${actor.userName}__${actor.email}`;
+      if (!grouped.has(key)) grouped.set(key, { userName: actor.userName, userEmail: actor.email, events: [] });
+      grouped.get(key)!.events.push({
+        toolName: event.targetName,
+        type: String(event.type ?? "-"),
+        message: String(event.message ?? "-"),
+        dateTime: Number(event.createdAt ?? 0),
+      });
+    });
+    return [...grouped.values()].map((item) => ({
+      ...item,
+      events: item.events.sort((a, b) => b.dateTime - a.dateTime),
+    }));
+  };
+
+  const toolEvents = groupEventsByUser(
+    (data.toolEvents ?? []).map((item) => ({
+      ...item,
+      targetName: toolNameById.get(String(item.toolId ?? "")) ?? String(item.toolId ?? "Sculă necunoscută"),
+    }))
+  );
+
+  const vehicleEventsRaw = (data.vehicleEvents ?? []).map((item) => ({
+    ...item,
+    targetName: vehicleNameById.get(String(item.vehicleId ?? "")) ?? String(item.vehicleId ?? "Mașină necunoscută"),
+  }));
+  const vehicleEventsGrouped = groupEventsByUser(vehicleEventsRaw).map((item) => ({
+    userName: item.userName,
+    userEmail: item.userEmail,
+    events: item.events.map((event) => ({
+      vehicleName: event.toolName,
+      type: event.type,
+      message: event.message,
+      dateTime: event.dateTime,
+    })),
+  }));
+
+  const timesheetsGroupedMap = new Map<string, ProfessionalBackupView["timesheets"][number]>();
+  (data.timesheets ?? []).forEach((item) => {
+    const owner = resolveUser(item.userId, item.userName);
+    const key = `${owner.userName}__${owner.email}`;
+    if (!timesheetsGroupedMap.has(key)) {
+      timesheetsGroupedMap.set(key, { userName: owner.userName, userEmail: owner.email, entries: [] });
+    }
+    timesheetsGroupedMap.get(key)!.entries.push({
+      projectName: String(item.projectName ?? "-"),
+      projectCode: String(item.projectCode ?? "-"),
+      startAt: Number(item.startAt ?? 0),
+      stopAt: item.stopAt == null ? null : Number(item.stopAt),
+      workedMinutes: Number(item.workedMinutes ?? 0),
+      status: String(item.status ?? "-"),
+    });
+  });
+  const timesheets = [...timesheetsGroupedMap.values()].map((item) => ({
+    ...item,
+    entries: item.entries.sort((a, b) => b.startAt - a.startAt),
+  }));
+
+  const notifications = (data.notifications ?? [])
+    .map((item) => ({
+      title: String(item.title ?? "Notificare"),
+      message: String(item.message ?? "-"),
+      dateTime: Number(item.createdAt ?? 0),
+      createdAt: Number(item.createdAt ?? 0),
+      module: String(item.module ?? "general"),
+      eventType: String(item.eventType ?? "-"),
+    }))
+    .sort((a, b) => b.dateTime - a.dateTime);
+
+  return {
+    users: users.map((item) => ({ userName: item.userName, email: item.email })),
+    tools: tools.map(({ toolName, internalCode, ownerName, ownerEmail }) => ({ toolName, internalCode, ownerName, ownerEmail })),
+    toolEvents,
+    vehicles: vehicles.map(({ vehicleName, plateNumber, ownerName, ownerEmail }) => ({ vehicleName, plateNumber, ownerName, ownerEmail })),
+    vehicleEvents: vehicleEventsGrouped,
+    timesheets,
+    notifications,
+  };
+}
+
 function formatBackupPrettyText(
   exportedAt: number,
   data: Record<string, Array<Record<string, unknown>>>,
@@ -86,12 +263,14 @@ function formatBackupPrettyText(
     "",
   ];
 
-  const notifications = (data.notifications ?? []).map((item) => ({ ...item }));
+  const professionalView = buildProfessionalBackupView(data);
+
+  const notifications = professionalView.notifications;
   lines.push(`=== NOTIFICARI (${counts.notifications ?? notifications.length}) ===`);
   if (notifications.length === 0) {
     lines.push("Fără înregistrări.", "");
   } else {
-    const grouped = groupByUserAndDay(notifications, (item) => String(item.actorUserName || item.userId || "Sistem"));
+    const grouped = groupByUserAndDay(notifications as unknown as Array<Record<string, unknown>>, () => "General");
     grouped.forEach(([userName, byDay]) => {
       lines.push(`## ${userName}`);
       [...byDay.entries()]
@@ -101,8 +280,7 @@ function formatBackupPrettyText(
           dayItems.forEach((item) => {
             lines.push(`  ${String(item.title ?? "Eveniment")}`);
             lines.push(`  ${String(item.message ?? "-")}`);
-            lines.push(`  ${formatTs(item.createdAt)}`);
-            lines.push(`  ${item.read ? "citita" : "noua"}`);
+            lines.push(`  ${String(item.module ?? "general")} · ${String(item.eventType ?? "-")} · ${formatTs(item.dateTime)}`);
             lines.push("");
           });
         });
@@ -110,7 +288,9 @@ function formatBackupPrettyText(
     });
   }
 
-  const timesheets = (data.timesheets ?? []).map((item) => ({ ...item }));
+  const timesheets = professionalView.timesheets.flatMap((item) =>
+    item.entries.map((entry) => ({ ...entry, userName: item.userName, userId: item.userEmail, createdAt: entry.startAt }))
+  );
   lines.push(`=== PONTAJE (${counts.timesheets ?? timesheets.length}) ===`);
   if (timesheets.length === 0) {
     lines.push("Fără înregistrări.", "");
@@ -141,40 +321,46 @@ function formatBackupPrettyText(
     });
   }
 
-  const vehicleEvents = (data.vehicleEvents ?? []).map((item) => ({ ...item }));
+  const vehicleEvents = professionalView.vehicleEvents.flatMap((item) =>
+    item.events.map((entry) => ({ ...entry, createdAt: entry.dateTime, userName: item.userName, message: entry.message }))
+  );
   lines.push(`=== ISTORIC MASINI (${counts.vehicleEvents ?? vehicleEvents.length}) ===`);
   if (vehicleEvents.length === 0) {
     lines.push("Fără înregistrări.", "");
   } else {
-    const grouped = groupByUserAndDay(vehicleEvents, () => "Sistem");
-    grouped.forEach(([, byDay]) => {
+    const grouped = groupByUserAndDay(vehicleEvents, (item) => String(item.userName ?? "Utilizator necunoscut"));
+    grouped.forEach(([userName, byDay]) => {
+      lines.push(`## ${userName}`);
       [...byDay.entries()]
         .sort(([a], [b]) => b.localeCompare(a))
         .forEach(([dayKey, dayItems]) => {
           lines.push(`  ${readableDay(dayKey)}`);
           dayItems.forEach((item) => {
             lines.push(`  ${String(item.message ?? "-")}`);
-            lines.push(`  Sistem · ${formatTs(item.createdAt)}`);
+            lines.push(`  ${String(item.vehicleName ?? "-")} · ${formatTs(item.createdAt)}`);
           });
         });
       lines.push("");
     });
   }
 
-  const toolEvents = (data.toolEvents ?? []).map((item) => ({ ...item }));
+  const toolEvents = professionalView.toolEvents.flatMap((item) =>
+    item.events.map((entry) => ({ ...entry, createdAt: entry.dateTime, userName: item.userName, message: entry.message }))
+  );
   lines.push(`=== ISTORIC SCULE (${counts.toolEvents ?? toolEvents.length}) ===`);
   if (toolEvents.length === 0) {
     lines.push("Fără înregistrări.", "");
   } else {
-    const grouped = groupByUserAndDay(toolEvents, () => "Sistem");
-    grouped.forEach(([, byDay]) => {
+    const grouped = groupByUserAndDay(toolEvents, (item) => String(item.userName ?? "Utilizator necunoscut"));
+    grouped.forEach(([userName, byDay]) => {
+      lines.push(`## ${userName}`);
       [...byDay.entries()]
         .sort(([a], [b]) => b.localeCompare(a))
         .forEach(([dayKey, dayItems]) => {
           lines.push(`  ${readableDay(dayKey)}`);
           dayItems.forEach((item) => {
             lines.push(`  ${String(item.message ?? "-")}`);
-            lines.push(`  Sistem · ${formatTs(item.createdAt)}`);
+            lines.push(`  ${String(item.toolName ?? "-")} · ${formatTs(item.createdAt)}`);
           });
         });
       lines.push("");
@@ -284,6 +470,7 @@ export async function exportBackupDataset(): Promise<{ payload: string; prettyPa
       data[collectionName] = snap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
     }
 
+    const professionalView = buildProfessionalBackupView(data);
     const payloadObject = {
       meta: {
         app: "WorkControl",
@@ -292,6 +479,7 @@ export async function exportBackupDataset(): Promise<{ payload: string; prettyPa
         collections: BACKUP_COLLECTIONS,
       },
       data,
+      professionalView,
     };
 
     const payload = JSON.stringify(payloadObject, null, 2);
