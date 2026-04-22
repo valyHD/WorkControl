@@ -2,8 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import {
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -24,9 +23,7 @@ export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
   experimentalAutoDetectLongPolling: true,
   ignoreUndefinedProperties: true,
-  localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager(),
-  }),
+  localCache: memoryLocalCache(),
 });
 
 export const storage = getStorage(app);
