@@ -547,7 +547,7 @@ export async function cleanupHistory(params: {
   cutoffDate.setMonth(cutoffDate.getMonth() - Math.max(1, params.retentionMonths));
   const cutoffTs = cutoffDate.getTime();
 
-  const deleteTargets: Array<Promise<void>> = [];
+  const deleteTargets: Array<{ collectionName: string; id: string }> = [];
   let deletedCount = 0;
 
   async function purge(collectionName: string, dateField: string) {
@@ -558,7 +558,7 @@ export async function cleanupHistory(params: {
         : await getDocs(query(baseCollection, where(dateField, "<", cutoffTs), limit(2000)));
     snap.docs.forEach((item) => {
       deletedCount += 1;
-      deleteTargets.push(deleteDoc(doc(db, collectionName, item.id)));
+      deleteTargets.push({ collectionName, id: item.id });
     });
   }
 
@@ -575,11 +575,15 @@ export async function cleanupHistory(params: {
           );
     timesheetsSnap.docs.forEach((item) => {
       deletedCount += 1;
-      deleteTargets.push(deleteDoc(doc(db, "timesheets", item.id)));
+      deleteTargets.push({ collectionName: "timesheets", id: item.id });
     });
   }
 
-  await Promise.all(deleteTargets);
+  const DELETE_CHUNK_SIZE = 25;
+  for (let index = 0; index < deleteTargets.length; index += DELETE_CHUNK_SIZE) {
+    const chunk = deleteTargets.slice(index, index + DELETE_CHUNK_SIZE);
+    await Promise.all(chunk.map((item) => deleteDoc(doc(db, item.collectionName, item.id))));
+  }
 
   await dispatchNotificationEvent({
     module: "backup",
