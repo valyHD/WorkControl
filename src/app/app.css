@@ -3528,11 +3528,42 @@ html {
 .leave-dot-worked { background: #c4b5fd; border-color: #8b5cf6; }
 .leave-dot-leave { background: #fde68a; border-color: #f59e0b; }
 .leave-dot-mixed { background: linear-gradient(135deg, #c4b5fd 0%, #c4b5fd 50%, #fde68a 50%, #fde68a 100%); border-color: #a78bfa; }
+.leave-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 20px 8px;
+}
+.leave-user-item {
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+.leave-user-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.leave-user-trigger span { font-weight: 700; }
+.leave-user-trigger small { color: var(--text-muted); font-size: 12px; }
+.leave-user-dropdown { padding-top: 6px; }
 .leave-calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
   padding: 0 20px 20px;
+}
+.leave-calendar-grid-compact {
+  gap: 5px;
+  padding: 0 12px 12px;
 }
 .leave-cell {
   min-height: 74px;
@@ -3555,6 +3586,17 @@ html {
 .leave-cell.is-leave { background: #fef9c3; border-color: #facc15; }
 .leave-cell.is-mixed { background: linear-gradient(135deg, #ede9fe 0%, #ede9fe 50%, #fef9c3 50%, #fef9c3 100%); border-color: #a78bfa; }
 .leave-cell.is-outside { opacity: .45; }
+.leave-calendar-grid-compact .leave-cell {
+  min-height: 44px;
+  padding: 5px;
+}
+.leave-calendar-grid-compact .leave-cell-day {
+  font-size: 11px;
+}
+.leave-calendar-grid-compact .leave-cell-minutes {
+  margin-top: 3px;
+  font-size: 10px;
+}
 .leave-history-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .status-error {
   background: var(--danger-soft);

@@ -12,7 +12,7 @@ function escapePdfText(value: string): string {
 function buildPdfDataUrl(title: string, lines: string[]): string {
   const safeTitle = escapePdfText(title);
   const bodyLines = lines.map((line) => `(${escapePdfText(line)}) Tj`).join(" T*\n");
-  const stream = `BT\n/F1 11 Tf\n1 0 0 1 56 790 Tm\n(${safeTitle}) Tj\n0 -22 Td\n${bodyLines}\nET`;
+  const stream = `BT\n/F1 11 Tf\n14 TL\n1 0 0 1 56 790 Tm\n(${safeTitle}) Tj\n0 -22 Td\n${bodyLines}\nET`;
   const len = stream.length;
 
   const pdf = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n5 0 obj\n<< /Length ${len} >>\nstream\n${stream}\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF`;
