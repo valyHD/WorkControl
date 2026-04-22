@@ -3785,6 +3785,45 @@ html {
   overflow-wrap: anywhere;
 }
 
+/* ================================================================
+   GLOBAL TEXT READABILITY + SAFER WRAPPING
+   ================================================================ */
+:is(
+  h1, h2, h3, h4, h5, h6,
+  p, span, small, strong, em,
+  label, a, button, li,
+  td, th, .badge, .chip
+) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+p,
+li,
+.panel-subtitle,
+.tools-subtitle,
+.topbar-subtitle,
+.simple-list-subtitle,
+.tool-card-meta,
+.tool-card-code {
+  line-height: 1.6;
+}
+
+.panel,
+.kpi-card,
+.tool-card,
+.quick-action-card,
+.collection-card,
+.user-card,
+.auth-card,
+.placeholder-page {
+  overflow: hidden;
+}
+
+.panel-head {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.05), rgba(255, 255, 255, 0));
+}
+
 .leave-user-trigger small {
   display: block;
   max-width: min(52vw, 300px);
@@ -3899,5 +3938,43 @@ html {
 
   .leave-user-trigger small {
     max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-content {
+    padding-inline: 6px;
+    padding-block: 10px;
+  }
+
+  .page-section {
+    gap: 12px;
+  }
+
+  .panel,
+  .kpi-card,
+  .tool-card,
+  .quick-action-card,
+  .collection-card,
+  .user-card,
+  .auth-card,
+  .placeholder-page {
+    border-radius: 16px;
+    border-width: 1.5px;
+  }
+
+  .panel-head {
+    padding: 14px 14px 12px;
+    border-bottom-width: 1px;
+  }
+
+  .panel-body,
+  .panel > div {
+    min-width: 0;
+  }
+
+  .panel-title {
+    font-size: 14px;
+    line-height: 1.35;
   }
 }
