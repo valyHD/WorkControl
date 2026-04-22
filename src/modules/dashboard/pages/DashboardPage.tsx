@@ -97,7 +97,7 @@ function PanelHeader({ icon, children, right }: {
 function DashboardSkeleton() {
   return (
     <section className="page-section">
-      <div className="kpi-grid">
+      <div className="kpi-grid dashboard-kpi-grid">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="kpi-card" style={{ minHeight: 120 }}>
             <div className="skeleton" style={{ height: 12, width: "60%", marginBottom: 16 }} />
@@ -259,7 +259,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── KPI GRID ── */}
-      <div className="kpi-grid">
+      <div className="kpi-grid dashboard-kpi-grid">
         <KpiCard label="Utilizatori activi" value={stats.activeUsers}
           trend={`din ${stats.totalUsers} total`} trendType="positive"
           icon={Users} iconClass="kpi-icon-blue" />

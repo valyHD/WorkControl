@@ -44,7 +44,7 @@ function CompactSection({
           {subtitle && <p className="tools-subtitle">{subtitle}</p>}
           {preview && <div className="profile-collapsible__preview">{preview}</div>}
         </div>
-        <span className="badge">Detalii</span>
+        <span className="badge profile-collapsible__details-badge">Detalii</span>
       </summary>
       <div className="profile-collapsible__body">{children}</div>
     </details>

@@ -64,6 +64,10 @@ const menuSections: { label: string; items: MenuItem[] }[] = [
 const allItems = menuSections.flatMap((s) => s.items);
 
 function NavItems({ onNavigate, unreadCount }: { onNavigate?: () => void; unreadCount: number }) {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const fromMyVehicleView = searchParams.get("view") === "my-vehicle";
+
   return (
     <>
       {menuSections.map((section) => (
@@ -71,7 +75,12 @@ function NavItems({ onNavigate, unreadCount }: { onNavigate?: () => void; unread
           <div className="nav-section-label">{section.label}</div>
           {section.items.map(({ label, path, Icon, colorClass }) => (
             <NavLink key={path} to={path} onClick={onNavigate}
-              className={({ isActive }) => isActive ? "nav-item nav-item-active" : "nav-item"}>
+              className={({ isActive }) => {
+                const forceMyVehicleActive = path === "/my-vehicle" && fromMyVehicleView;
+                const suppressVehiclesActive = path === "/vehicles" && fromMyVehicleView;
+                const active = suppressVehiclesActive ? false : (isActive || forceMyVehicleActive);
+                return active ? "nav-item nav-item-active" : "nav-item";
+              }}>
               <span className={`nav-item-icon-wrap ${colorClass}`}>
                 <Icon size={17} strokeWidth={2.2} className="nav-item-icon" />
               </span>

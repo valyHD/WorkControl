@@ -17,7 +17,7 @@ export default function MyVehiclePage() {
       if (!mounted) return;
 
       if (myVehicle) {
-        navigate(`/vehicles/${myVehicle.id}`, { replace: true });
+        navigate(`/vehicles/${myVehicle.id}?view=my-vehicle`, { replace: true });
         return;
       }
 
