@@ -222,8 +222,11 @@ export default function AppShell() {
       timerId = window.setTimeout(preloadNext, 0);
     };
 
-    if ("requestIdleCallback" in window) {
-      idleId = window.requestIdleCallback(start, { timeout: 1_500 });
+    const requestIdleCallback = window.requestIdleCallback?.bind(window);
+    const cancelIdleCallback = window.cancelIdleCallback?.bind(window);
+
+    if (requestIdleCallback) {
+      idleId = requestIdleCallback(start, { timeout: 1_500 });
     } else {
       timerId = window.setTimeout(start, 700);
     }
@@ -233,8 +236,8 @@ export default function AppShell() {
       if (typeof timerId === "number") {
         window.clearTimeout(timerId);
       }
-      if (typeof idleId === "number" && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleId);
+      if (typeof idleId === "number" && cancelIdleCallback) {
+        cancelIdleCallback(idleId);
       }
     };
   }, [user?.uid]);
