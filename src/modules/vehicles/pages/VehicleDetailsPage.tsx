@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
 import type {
@@ -11,7 +11,6 @@ import SafeImage from "../../../components/SafeImage";
 import { SectionErrorBoundary } from "../../../lib/errors/SectionErrorBoundary";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
-import VehicleLiveRouteCard from "../components/VehicleLiveRouteCard";
 import VehicleControlCard from "../components/VehicleControlCard";
 import {
   acceptVehicleDriverChange,
@@ -31,6 +30,8 @@ import {
   Image as ImageIcon,
   History,
 } from "lucide-react";
+
+const VehicleLiveRouteCard = lazy(() => import("../components/VehicleLiveRouteCard"));
 
 function formatDate(ts?: number) {
   if (!ts) return "—";
@@ -548,11 +549,20 @@ export default function VehicleDetailsPage() {
       )}
 
       <SectionErrorBoundary sectionName="harta GPS">
-        <VehicleLiveRouteCard
-          vehicle={vehicle}
-          showControlCard={false}
-          onKmEstimateChange={setEstimatedCurrentKm}
-        />
+        <Suspense
+          fallback={
+            <div className="panel">
+              <h3 className="panel-title">Harta GPS</h3>
+              <p className="tools-subtitle">Se incarca modulul harta si istoric...</p>
+            </div>
+          }
+        >
+          <VehicleLiveRouteCard
+            vehicle={vehicle}
+            showControlCard={false}
+            onKmEstimateChange={setEstimatedCurrentKm}
+          />
+        </Suspense>
       </SectionErrorBoundary>
 
       <div className="panel">

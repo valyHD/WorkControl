@@ -50,7 +50,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 15000;
 const ROUTE_PAGE_SIZE = 2000;
-const HISTORY_WINDOW_MS = 45 * 24 * 60 * 60 * 1000;
+const HISTORY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 const ROUTE_RENDER_POINTS = 180;
 const ROUTE_ANALYSIS_POINTS = 300;
 const CRUMB_POINTS = 24;
@@ -258,6 +258,7 @@ export default function VehicleLiveRouteCard({
   const [boundsTrigger, setBoundsTrigger] = useState(0);
   const [historyPositions, setHistoryPositions] = useState<VehiclePositionItem[]>([]);
   const [didInitialFit, setDidInitialFit] = useState(false);
+  const [routeReady, setRouteReady] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
   const mountedRef = useRef(true);
@@ -313,6 +314,10 @@ export default function VehicleLiveRouteCard({
       setCommands([]);
       return;
     }
+    if (!showControlCard) {
+      setCommands([]);
+      return;
+    }
 
     const unsubscribe = subscribeVehicleCommands(vehicle.id, (items) => {
       if (!mountedRef.current) return;
@@ -326,10 +331,11 @@ export default function VehicleLiveRouteCard({
         console.error("[VehicleLiveRouteCard][unsubscribeCommands]", error);
       }
     };
-  }, [vehicle.id]);
+  }, [showControlCard, vehicle.id]);
 
   useEffect(() => {
     setDidInitialFit(false);
+    setRouteReady(false);
   }, [fromTs, toTs, vehicle.id]);
 
   useEffect(() => {
@@ -340,6 +346,7 @@ export default function VehicleLiveRouteCard({
 
     if (!user) {
       setLoading(false);
+      setRouteReady(false);
       setPositions([]);
       setStopItems([]);
       setOverspeedItems([]);
@@ -374,6 +381,7 @@ export default function VehicleLiveRouteCard({
 
         routeSignatureRef.current = nextSignature;
         setPositions(clean);
+        setRouteReady(true);
         setLastDataAt(Date.now());
         setLoading(false);
 
@@ -388,6 +396,7 @@ export default function VehicleLiveRouteCard({
         console.error("[VehicleLiveRouteCard][pollRange]", error);
         if (!mountedRef.current) return;
         setLoading(false);
+        setRouteReady(false);
         setIsOffline(typeof navigator !== "undefined" ? !navigator.onLine : false);
       },
       LIVE_REFRESH_MS,
@@ -424,6 +433,7 @@ export default function VehicleLiveRouteCard({
 
   useEffect(() => {
     let interval: number | null = null;
+    let timer: number | null = null;
 
     async function loadHistory() {
       if (!authReady || !user) return;
@@ -464,16 +474,19 @@ export default function VehicleLiveRouteCard({
       }
     }
 
-    void loadHistory();
+    timer = window.setTimeout(() => {
+      void loadHistory();
+    }, routeReady ? 200 : 1200);
 
     interval = window.setInterval(() => {
       void loadHistory();
     }, 60_000);
 
     return () => {
+      if (timer !== null) window.clearTimeout(timer);
       if (interval !== null) window.clearInterval(interval);
     };
-  }, [authReady, user, vehicle.id]);
+  }, [authReady, routeReady, user, vehicle.id]);
 
   const deferredPositions = useDeferredValue(positions);
 
