@@ -107,6 +107,22 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /leaveRequests/{requestId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /leaveBalances/{balanceId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /leaveSettings/{settingId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /holidays/{holidayId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /firmeMentenanta/{brandingId} {
       allow read, write: if isSignedIn();
     }

@@ -3598,6 +3598,7 @@ html {
   font-size: 10px;
 }
 .leave-history-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.leave-admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .status-error {
   background: var(--danger-soft);
   color: var(--danger);

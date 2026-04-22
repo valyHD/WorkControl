@@ -1,4 +1,4 @@
-import { addDoc, collection, getDocs, onSnapshot, orderBy, query, serverTimestamp, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import type { LeaveRequestFormValues, LeaveRequestItem, LeaveRequestType } from "../../../types/leave";
 import type { TimesheetItem } from "../../../types/timesheet";
@@ -125,6 +125,14 @@ export async function saveLeaveRequest(userId: string, values: LeaveRequestFormV
   });
 
   return refDoc.id;
+}
+
+export async function approveLeaveRequest(requestId: string): Promise<void> {
+  await updateDoc(doc(db, "leaveRequests", requestId), {
+    status: "aprobat",
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
 }
 
 

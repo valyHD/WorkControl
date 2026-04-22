@@ -6,6 +6,7 @@ import type { TimesheetItem } from "../../../types/timesheet";
 import type { AppUserItem } from "../../../types/user";
 import type { LeaveRequestFormValues, LeaveRequestItem } from "../../../types/leave";
 import {
+  approveLeaveRequest,
   getLeaveDateSet,
   getWorkedMinutesByDay,
   saveLeaveRequest,
@@ -104,12 +105,22 @@ function buildUserLabel(userItem: AppUserItem): string {
 }
 
 export default function LeavePlannerPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const isAdmin = role === "admin";
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
   const [users, setUsers] = useState<AppUserItem[]>([]);
   const [expandedUserId, setExpandedUserId] = useState<string>("");
-  const [userCalendarData, setUserCalendarData] = useState<Record<string, UserCalendarData>>({});
+  const [calendarData, setCalendarData] = useState<UserCalendarData>({
+    timesheets: [],
+    leaveRequests: [],
+    timesheetsLoaded: false,
+    leaveLoaded: false,
+  });
+  const [myRequests, setMyRequests] = useState<LeaveRequestItem[]>([]);
+  const [myRequestsLoaded, setMyRequestsLoaded] = useState(false);
+  const [adminRequests, setAdminRequests] = useState<LeaveRequestItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [approvingRequestId, setApprovingRequestId] = useState("");
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
   const [formValues, setFormValues] = useState<LeaveRequestFormValues>(
@@ -121,7 +132,14 @@ export default function LeavePlannerPage() {
   }, [user?.displayName, user?.email]);
 
   useEffect(() => {
-    const usersQuery = query(collection(db, "users"), orderBy("createdAt", "asc"));
+    if (!user?.uid) {
+      setUsers([]);
+      setExpandedUserId("");
+      return undefined;
+    }
+    const usersQuery = isAdmin
+      ? query(collection(db, "users"), orderBy("createdAt", "asc"))
+      : query(collection(db, "users"), where("uid", "==", user.uid), limit(1));
 
     return onSnapshot(usersQuery, (snap) => {
       const mapped = snap.docs.map((docItem) => {
@@ -145,86 +163,98 @@ export default function LeavePlannerPage() {
         setExpandedUserId(mapped[0]?.uid ?? "");
       }
     });
+  }, [expandedUserId, isAdmin, user?.uid]);
+
+  useEffect(() => {
+    if (!expandedUserId) {
+      setCalendarData({
+        timesheets: [],
+        leaveRequests: [],
+        timesheetsLoaded: false,
+        leaveLoaded: false,
+      });
+      return undefined;
+    }
+
+    setCalendarData({
+      timesheets: [],
+      leaveRequests: [],
+      timesheetsLoaded: false,
+      leaveLoaded: false,
+    });
+
+    const timesheetsUnsub = onSnapshot(
+      query(collection(db, "timesheets"), where("userId", "==", expandedUserId), orderBy("startAt", "desc"), limit(500)),
+      (snap) => {
+        const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
+        setCalendarData((prev) => ({ ...prev, timesheets: mapped, timesheetsLoaded: true }));
+      }
+    );
+
+    const leaveUnsub = onSnapshot(
+      query(collection(db, "leaveRequests"), where("userId", "==", expandedUserId), orderBy("createdAt", "desc")),
+      (snap) => {
+        const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
+        setCalendarData((prev) => ({ ...prev, leaveRequests: mapped, leaveLoaded: true }));
+      }
+    );
+
+    return () => {
+      timesheetsUnsub();
+      leaveUnsub();
+    };
   }, [expandedUserId]);
 
   useEffect(() => {
-    if (users.length === 0) {
-      setUserCalendarData({});
-      return;
+    if (!user?.uid) {
+      setMyRequests([]);
+      setMyRequestsLoaded(false);
+      return undefined;
     }
 
-    const subscriptions: Array<() => void> = [];
+    setMyRequestsLoaded(false);
 
-    users.forEach((userItem) => {
-      const uid = userItem.uid;
+    return onSnapshot(
+      query(collection(db, "leaveRequests"), where("userId", "==", user.uid), orderBy("createdAt", "desc")),
+      (snap) => {
+        setMyRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+        setMyRequestsLoaded(true);
+      }
+    );
+  }, [user?.uid]);
 
-      setUserCalendarData((prev) => ({
-        ...prev,
-        [uid]: prev[uid] ?? {
-          timesheets: [],
-          leaveRequests: [],
-          timesheetsLoaded: false,
-          leaveLoaded: false,
-        },
-      }));
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminRequests([]);
+      return undefined;
+    }
 
-      const timesheetsUnsub = onSnapshot(
-        query(collection(db, "timesheets"), where("userId", "==", uid), orderBy("startAt", "desc"), limit(500)),
-        (snap) => {
-          const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
-
-          setUserCalendarData((prev) => ({
-            ...prev,
-            [uid]: {
-              ...(prev[uid] ?? { leaveRequests: [], leaveLoaded: false }),
-              timesheets: mapped,
-              timesheetsLoaded: true,
-            },
-          }));
-        }
-      );
-
-      const leaveUnsub = onSnapshot(
-        query(collection(db, "leaveRequests"), where("userId", "==", uid), orderBy("createdAt", "desc")),
-        (snap) => {
-          const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
-
-          setUserCalendarData((prev) => ({
-            ...prev,
-            [uid]: {
-              ...(prev[uid] ?? { timesheets: [], timesheetsLoaded: false }),
-              leaveRequests: mapped,
-              leaveLoaded: true,
-            },
-          }));
-        }
-      );
-
-      subscriptions.push(timesheetsUnsub, leaveUnsub);
+    return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(500)), (snap) => {
+      setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
     });
-
-    return () => {
-      subscriptions.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [users]);
-
-  const myRequests = useMemo(() => {
-    if (!user?.uid) return [];
-    return userCalendarData[user.uid]?.leaveRequests ?? [];
-  }, [user?.uid, userCalendarData]);
-
-  const myRequestsLoading = useMemo(() => {
-    if (!user?.uid) return false;
-    const ownData = userCalendarData[user.uid];
-    if (!ownData) return true;
-    return !ownData.leaveLoaded;
-  }, [user?.uid, userCalendarData]);
+  }, [isAdmin]);
 
   const monthCells = useMemo(() => getMonthMatrix(visibleMonth), [visibleMonth]);
   const monthTitle = useMemo(
     () => visibleMonth.toLocaleDateString("ro-RO", { month: "long", year: "numeric" }),
     [visibleMonth]
   );
+  const workedMinutesByDay = useMemo(() => getWorkedMinutesByDay(calendarData.timesheets), [calendarData.timesheets]);
+  const approvedLeaveDateSet = useMemo(
+    () => getLeaveDateSet(calendarData.leaveRequests.filter((request) => request.status === "aprobat")),
+    [calendarData.leaveRequests]
+  );
+  const pendingLeaveRequests = useMemo(
+    () => (isAdmin ? adminRequests.filter((request) => request.status === "in_asteptare") : []),
+    [adminRequests, isAdmin]
+  );
+
+  function formatWorkedMinutesLabel(minutes: number): string {
+    const safeMinutes = Math.max(0, Math.floor(minutes));
+    const hours = Math.floor(safeMinutes / 60);
+    const restMinutes = safeMinutes % 60;
+    return `${hours}h${restMinutes}m`;
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -246,6 +276,21 @@ export default function LeavePlannerPage() {
       setError(err instanceof Error ? err.message : "Nu am putut salva cererea.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleApproveRequest(requestId: string) {
+    setApprovingRequestId(requestId);
+    setError("");
+    setSuccess("");
+
+    try {
+      await approveLeaveRequest(requestId);
+      setSuccess("Cererea a fost aprobata. Zilele aprobate apar acum cu galben in calendar.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nu am putut aproba cererea.");
+    } finally {
+      setApprovingRequestId("");
     }
   }
 
@@ -284,11 +329,8 @@ export default function LeavePlannerPage() {
         <div className="leave-user-list">
           {users.map((userItem) => {
             const uid = userItem.uid;
-            const userData = userCalendarData[uid];
             const isExpanded = expandedUserId === uid;
-            const isLoading = !userData || !userData.timesheetsLoaded || !userData.leaveLoaded;
-            const workedMinutesByDay = getWorkedMinutesByDay(userData?.timesheets ?? []);
-            const leaveDateSet = getLeaveDateSet(userData?.leaveRequests ?? []);
+            const isLoading = isExpanded && (!calendarData.timesheetsLoaded || !calendarData.leaveLoaded);
 
             return (
               <div key={uid} className="leave-user-item">
@@ -314,7 +356,7 @@ export default function LeavePlannerPage() {
                           const iso = toIsoDate(date);
                           const minutes = workedMinutesByDay[iso] ?? 0;
                           const hasWork = minutes > 0;
-                          const hasLeave = leaveDateSet.has(iso);
+                          const hasLeave = approvedLeaveDateSet.has(iso);
                           const outsideMonth = date.getMonth() !== visibleMonth.getMonth();
 
                           const className = [
@@ -326,7 +368,7 @@ export default function LeavePlannerPage() {
                           return (
                             <div key={`${uid}-${iso}-${index}`} className={className}>
                               <div className="leave-cell-day">{date.getDate()}</div>
-                              {minutes > 0 && <div className="leave-cell-minutes">{minutes} min</div>}
+                              {minutes > 0 && <div className="leave-cell-minutes">{formatWorkedMinutesLabel(minutes)}</div>}
                             </div>
                           );
                         })}
@@ -399,9 +441,42 @@ export default function LeavePlannerPage() {
         </form>
       </div>
 
+      {isAdmin && (
+        <div className="panel">
+          <h3 className="panel-title">Cereri in asteptare (admin)</h3>
+          {pendingLeaveRequests.length === 0 ? (
+            <p className="tools-subtitle">Nu exista cereri in asteptare.</p>
+          ) : (
+            <div className="simple-list">
+              {pendingLeaveRequests.map((request) => (
+                <div key={request.id} className="simple-list-item leave-history-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{request.userName} · {request.requestType === "concediu_odihna" ? "Concediu de odihna" : "Invoire"}</div>
+                    <div className="simple-list-subtitle">
+                      {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile
+                    </div>
+                  </div>
+                  <div className="leave-admin-actions">
+                    <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                    <button
+                      className="primary-btn"
+                      type="button"
+                      onClick={() => handleApproveRequest(request.id)}
+                      disabled={approvingRequestId === request.id}
+                    >
+                      {approvingRequestId === request.id ? "Se aproba..." : "Aproba"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="panel">
         <h3 className="panel-title">Istoric cereri emise</h3>
-        {myRequestsLoading ? (
+        {!myRequestsLoaded ? (
           <p className="tools-subtitle">Se incarca cererile...</p>
         ) : myRequests.length === 0 ? (
           <p className="tools-subtitle">Nu exista cereri emise momentan.</p>
