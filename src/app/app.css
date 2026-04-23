@@ -4225,19 +4225,52 @@ li,
   color: var(--text-muted);
 }
 
+.vehicle-doc-sections {
+  display: grid;
+  gap: 16px;
+}
+
+.vehicle-doc-section {
+  display: grid;
+  gap: 10px;
+}
+
+.vehicle-doc-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 6px;
+}
+
+.vehicle-doc-section__header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.vehicle-doc-section__header span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
 .vehicle-doc-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
 }
 
 .vehicle-doc-card {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background: color-mix(in srgb, var(--surface-card) 92%, transparent);
 }
 
 .vehicle-doc-card__header {
@@ -4262,13 +4295,21 @@ li,
   border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border-soft);
-  min-height: 120px;
+  min-height: 140px;
+  background: var(--surface-soft);
 }
 
 .vehicle-doc-preview img {
   width: 100%;
-  height: 140px;
+  height: 160px;
   object-fit: cover;
+}
+
+.vehicle-doc-preview--embed iframe {
+  width: 100%;
+  height: 180px;
+  border: 0;
+  background: var(--surface-panel);
 }
 
 .vehicle-doc-preview__placeholder {
