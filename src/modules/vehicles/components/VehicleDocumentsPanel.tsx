@@ -1,4 +1,5 @@
 import { ExternalLink, Download, FileText, Trash2 } from "lucide-react";
+import type { MouseEvent } from "react";
 import type { VehicleDocumentCategory, VehicleDocumentItem } from "../../../types/vehicle";
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
@@ -37,6 +38,29 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
+  async function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
+    event.preventDefault();
+
+    try {
+      const response = await fetch(item.url);
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(item.url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   if (!documents.length) {
     return (
       <div className="empty-state">
@@ -114,7 +138,12 @@ export default function VehicleDocumentsPanel({
                       <a className="secondary-btn" href={item.url} target="_blank" rel="noreferrer">
                         <ExternalLink size={14} /> Deschide
                       </a>
-                      <a className="secondary-btn" href={item.url} download={item.name}>
+                      <a
+                        className="secondary-btn"
+                        href={item.url}
+                        download={item.name}
+                        onClick={(event) => void handleDownloadDocument(event, item)}
+                      >
                         <Download size={14} /> Download
                       </a>
                       {isOwner && onDelete ? (
