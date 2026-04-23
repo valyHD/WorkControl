@@ -1801,11 +1801,32 @@ select.tool-input {
   .mobile-menu-button { display: inline-flex; }
   .shell { display: block; }
   .main-area { width: 100%; }
-  .topbar { padding: 0 14px; }
+  .topbar { padding: 0 10px; }
   .topbar-main-row { min-height: 62px; }
   .topbar-title { font-size: 18px; }
   .desktop-logout-btn { display: none; }
-  .page-content { padding: 14px; }
+  .page-content { padding: 12px 10px; }
+  .page-section { gap: 16px; }
+  .panel-head,
+  .panel-body,
+  .panel > p.tools-subtitle,
+  .panel > .tool-form {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .simple-list-item,
+  .tools-subtitle,
+  .tools-header,
+  .tools-header-actions,
+  .tools-filters {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  h2.panel-title,
+  h3.panel-title {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1818,7 +1839,23 @@ select.tool-input {
 }
 
 @media (max-width: 640px) {
-  .page-content { padding: 10px; }
+  .topbar { padding: 0 6px; }
+  .page-content { padding: 8px 6px; }
+  .page-section { gap: 14px; }
+  .panel-head,
+  .panel-body,
+  .panel > p.tools-subtitle,
+  .panel > .tool-form,
+  h2.panel-title,
+  h3.panel-title,
+  .simple-list-item,
+  .tools-subtitle,
+  .tools-header,
+  .tools-header-actions,
+  .tools-filters {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
   .kpi-grid { grid-template-columns: 1fr; }
   .topbar-title { font-size: 17px; }
   .topbar-user-role { display: none; }
