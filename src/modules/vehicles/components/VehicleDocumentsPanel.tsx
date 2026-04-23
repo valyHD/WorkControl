@@ -49,15 +49,37 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
-  function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
+  async function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
     event.preventDefault();
 
-    const link = document.createElement("a");
-    link.href = buildDownloadUrl(item.url, item.name);
-    link.download = item.name;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    const downloadUrl = buildDownloadUrl(item.url, item.name);
+
+    try {
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error(`Unable to download document (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = item.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      return;
+    } catch {
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = item.name;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
   }
 
   if (!documents.length) {
