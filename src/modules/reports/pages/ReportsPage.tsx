@@ -33,7 +33,7 @@ function openBackupPreviewPage(payload: {
   summary: ProfessionalBackupView;
   meta: { fileName: string; exportedAt: number | null };
 }) {
-  sessionStorage.setItem(BACKUP_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+  localStorage.setItem(BACKUP_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
   window.open(`${window.location.origin}/control-panel/backup-preview`, "_blank", "noopener,noreferrer");
 }
 

@@ -12,8 +12,9 @@ const BACKUP_PREVIEW_STORAGE_KEY = "workcontrol_uploaded_backup_preview";
 
 function readPayload(): BackupPreviewPayload | null {
   try {
-    const raw = sessionStorage.getItem(BACKUP_PREVIEW_STORAGE_KEY);
+    const raw = localStorage.getItem(BACKUP_PREVIEW_STORAGE_KEY);
     if (!raw) return null;
+    localStorage.removeItem(BACKUP_PREVIEW_STORAGE_KEY);
     return JSON.parse(raw) as BackupPreviewPayload;
   } catch {
     return null;
