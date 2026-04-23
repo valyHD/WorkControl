@@ -32,9 +32,19 @@ const FALLBACK_SETTINGS: ControlPanelSettings = {
 function openBackupPreviewPage(payload: {
   summary: ProfessionalBackupView;
   meta: { fileName: string; exportedAt: number | null };
-}) {
-  localStorage.setItem(BACKUP_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
-  window.open(`${window.location.origin}/control-panel/backup-preview`, "_blank", "noopener,noreferrer");
+}): "opened" | "storage_quota_exceeded" | "failed" {
+  try {
+    localStorage.setItem(BACKUP_PREVIEW_STORAGE_KEY, JSON.stringify(payload));
+    window.open(`${window.location.origin}/control-panel/backup-preview`, "_blank", "noopener,noreferrer");
+    return "opened";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/quota has been exceeded|quota exceeded|storage/i.test(message)) {
+      return "storage_quota_exceeded";
+    }
+    console.error("Failed to open backup preview page.", error);
+    return "failed";
+  }
 }
 
 function prettyBytes(value: number) {
@@ -207,8 +217,18 @@ export default function ControlPanelPage() {
         exportedAt: Number(parsed.meta?.exportedAt ?? 0) || null,
       };
       setUploadedBackupMeta(parsedMeta);
-      openBackupPreviewPage({ summary: professionalView, meta: parsedMeta });
-      setBackupMessage("Backup-ul a fost încărcat cu succes. S-a deschis o pagină nouă cu raportul detaliat.");
+      const previewOpenStatus = openBackupPreviewPage({ summary: professionalView, meta: parsedMeta });
+      if (previewOpenStatus === "opened") {
+        setBackupMessage("Backup-ul a fost încărcat cu succes. S-a deschis o pagină nouă cu raportul detaliat.");
+      } else if (previewOpenStatus === "storage_quota_exceeded") {
+        setBackupMessage(
+          "Backup-ul a fost încărcat cu succes, dar previzualizarea într-o filă nouă nu a putut fi deschisă deoarece s-a depășit limita de stocare locală a browserului. Poți analiza rezumatul direct pe această pagină."
+        );
+      } else {
+        setBackupMessage(
+          "Backup-ul a fost încărcat cu succes, dar nu am putut deschide previzualizarea într-o filă nouă. Poți analiza rezumatul direct pe această pagină."
+        );
+      }
     } catch (err) {
       console.error(err);
       setError("Nu am putut citi backup-ul încărcat. Verifică dacă este un JSON valid exportat din aplicație.");
