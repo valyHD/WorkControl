@@ -32,33 +32,32 @@ function getPreviewKind(contentType: string): "image" | "embed" | "none" {
   return "none";
 }
 
+function buildDownloadUrl(url: string, filename: string): string {
+  try {
+    const parsedUrl = new URL(url);
+    parsedUrl.searchParams.set("download", "1");
+    parsedUrl.searchParams.set("response-content-disposition", `attachment; filename="${filename}"`);
+    return parsedUrl.toString();
+  } catch {
+    return url;
+  }
+}
+
 export default function VehicleDocumentsPanel({
   documents,
   isOwner,
   deletingDocumentId,
   onDelete,
 }: Props) {
-  async function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
+  function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
     event.preventDefault();
 
-    try {
-      const response = await fetch(item.url);
-      if (!response.ok) {
-        throw new Error(`Download failed with status ${response.status}`);
-      }
-
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = item.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      window.open(item.url, "_blank", "noopener,noreferrer");
-    }
+    const link = document.createElement("a");
+    link.href = buildDownloadUrl(item.url, item.name);
+    link.download = item.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
   }
 
   if (!documents.length) {
