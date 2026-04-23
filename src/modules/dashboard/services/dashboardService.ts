@@ -133,6 +133,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     coverImageUrl: data.coverImageUrl ?? "",
     coverThumbUrl: data.coverThumbUrl ?? "",
     images: Array.isArray(data.images) ? data.images : [],
+    documents: Array.isArray(data.documents) ? data.documents : [],
 
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),

@@ -6,13 +6,20 @@ import type {
   VehicleImageItem,
   VehicleStatus,
 } from "../../../types/vehicle";
+import VehicleDocumentUploader, {
+  type VehiclePendingDocument,
+} from "./VehicleDocumentUploader";
 import VehicleImageUploader from "./VehicleImageUploader";
 import SafeImage from "../../../components/SafeImage";
 
 type Props = {
   initialValues: VehicleFormValues;
   users: AppUser[];
-  onSubmit: (values: VehicleFormValues, selectedFiles: File[]) => Promise<void>;
+  onSubmit: (
+    values: VehicleFormValues,
+    selectedFiles: File[],
+    selectedDocuments: VehiclePendingDocument[]
+  ) => Promise<void>;
   submitting: boolean;
 };
 
@@ -31,9 +38,12 @@ export default function VehicleForm({
 }: Props) {
   const [values, setValues] = useState<VehicleFormValues>(initialValues);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedDocuments, setSelectedDocuments] = useState<VehiclePendingDocument[]>([]);
 
   useEffect(() => {
     setValues(initialValues);
+    setSelectedFiles([]);
+    setSelectedDocuments([]);
   }, [initialValues]);
 
   function updateField<K extends keyof VehicleFormValues>(
@@ -76,7 +86,7 @@ export default function VehicleForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await onSubmit(values, selectedFiles);
+    await onSubmit(values, selectedFiles, selectedDocuments);
   }
 
   const canSubmit = useMemo(() => {
@@ -315,6 +325,15 @@ export default function VehicleForm({
             onFilesChange={setSelectedFiles}
           />
         </div>
+
+        <div className="tool-form-block tool-form-block-full">
+          <label className="tool-form-label">Documente masina</label>
+          <VehicleDocumentUploader
+            selectedDocuments={selectedDocuments}
+            onDocumentsChange={setSelectedDocuments}
+          />
+        </div>
+
 
         {values.images.length > 0 && (
           <div className="tool-form-block tool-form-block-full">

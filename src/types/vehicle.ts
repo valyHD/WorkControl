@@ -17,6 +17,30 @@ export interface VehicleImageItem {
   thumbPath?: string;
 }
 
+
+export const VEHICLE_DOCUMENT_CATEGORIES = [
+  "service",
+  "leasing_rate",
+  "rca_itp",
+  "rovinieta",
+  "amenda",
+  "other",
+] as const;
+
+export type VehicleDocumentCategory = (typeof VEHICLE_DOCUMENT_CATEGORIES)[number];
+
+export interface VehicleDocumentItem {
+  id: string;
+  name: string;
+  url: string;
+  path: string;
+  contentType: string;
+  sizeBytes: number;
+  extension: string;
+  category: VehicleDocumentCategory;
+  createdAt: number;
+}
+
 export interface VehicleGpsSnapshot {
   lat: number;
   lng: number;
@@ -159,6 +183,7 @@ export interface VehicleItem {
   coverImageUrl: string;
   coverThumbUrl: string;
   images: VehicleImageItem[];
+  documents: VehicleDocumentItem[];
 
   gpsSnapshot?: VehicleGpsSnapshot | null;
   tracker?: VehicleTrackerMeta | null;
@@ -202,6 +227,7 @@ export interface VehicleFormValues {
   coverImageUrl: string;
   coverThumbUrl: string;
   images: VehicleImageItem[];
+  documents: VehicleDocumentItem[];
 }
 
 export type VehicleEventType =

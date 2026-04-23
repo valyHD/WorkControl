@@ -130,6 +130,7 @@ export default function MyProfilePage() {
               coverImageUrl: docItem.data().coverImageUrl ?? "",
               coverThumbUrl: docItem.data().coverThumbUrl ?? "",
               images: Array.isArray(docItem.data().images) ? docItem.data().images : [],
+              documents: Array.isArray(docItem.data().documents) ? docItem.data().documents : [],
               createdAt: docItem.data().createdAt ?? Date.now(),
               updatedAt: docItem.data().updatedAt ?? Date.now(),
             }))
