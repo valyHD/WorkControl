@@ -30,6 +30,8 @@ import type {
   VehicleCommandItem,
   VehicleCommandStatus,
   VehicleCommandType,
+  VehicleDocumentCategory,
+  VehicleDocumentItem,
   VehicleEventItem,
   VehicleFormValues,
   VehicleImageItem,
@@ -67,6 +69,12 @@ type RouteCacheItem = {
 };
 
 const routeRangeCache = new Map<string, RouteCacheItem>();
+
+
+type VehicleUploadDocumentInput = {
+  file: File;
+  category: VehicleDocumentCategory;
+};
 
 type PersistedRouteCacheItem = {
   vehicleId: string;
@@ -447,6 +455,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const gpsSnapshotRaw = data.gpsSnapshot ? toSafeObject(data.gpsSnapshot) : null;
   const trackerRaw = data.tracker ? toSafeObject(data.tracker) : null;
   const imagesRaw = Array.isArray(data.images) ? data.images : [];
+  const documentsRaw = Array.isArray(data.documents) ? data.documents : [];
   const gpsOdometerKm = gpsSnapshotRaw ? toOptionalNumber(gpsSnapshotRaw.odometerKm) : undefined;
   const storedCurrentKm = toSafeNumber(data.currentKm, 0);
   const currentKm = gpsOdometerKm ?? storedCurrentKm;
@@ -496,6 +505,19 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
       createdAt: toSafeNumber(item?.createdAt, Date.now()),
       thumbUrl: toSafeString(item?.thumbUrl),
       thumbPath: toSafeString(item?.thumbPath),
+    })),
+    documents: documentsRaw.map((item: any) => ({
+      id: toSafeString(item?.id, `${Date.now()}_${Math.random().toString(36).slice(2)}`),
+      name: toSafeString(item?.name),
+      url: toSafeString(item?.url),
+      path: toSafeString(item?.path),
+      contentType: toSafeString(item?.contentType),
+      sizeBytes: toSafeNumber(item?.sizeBytes, 0),
+      extension: toSafeString(item?.extension),
+      category: ["service", "leasing_rate", "rca_itp", "rovinieta", "amenda", "other"].includes(item?.category)
+        ? item.category
+        : "other",
+      createdAt: toSafeNumber(item?.createdAt, Date.now()),
     })),
 
     gpsSnapshot: gpsSnapshotRaw
@@ -920,6 +942,86 @@ export async function saveVehicleImages(
     "images_updated",
     "Imaginile masinii au fost actualizate."
   );
+}
+
+
+export async function uploadVehicleDocuments(
+  vehicleId: string,
+  files: VehicleUploadDocumentInput[]
+): Promise<VehicleDocumentItem[]> {
+  const uploadedItems: VehicleDocumentItem[] = [];
+
+  for (const item of files) {
+    const file = item.file;
+    const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : "";
+    const safeBaseName = `${Date.now()}_${file.name
+      .replace(/\s+/g, "_")
+      .replace(/[^\w.-]/g, "")}`;
+
+    const fullPath = `vehicles/${vehicleId}/documents/${item.category}/${safeBaseName}`;
+    const fullRef = ref(storage, fullPath);
+    await uploadBytes(fullRef, file, { contentType: file.type || "application/octet-stream" });
+
+    const url = await getDownloadURL(fullRef);
+
+    uploadedItems.push({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      name: file.name,
+      url,
+      path: fullPath,
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: file.size || 0,
+      extension: ext,
+      category: item.category,
+      createdAt: Date.now(),
+    });
+  }
+
+  return uploadedItems;
+}
+
+export async function saveVehicleDocuments(
+  vehicleId: string,
+  currentDocuments: VehicleDocumentItem[],
+  newDocuments: VehicleDocumentItem[]
+): Promise<void> {
+  const merged = [...currentDocuments, ...newDocuments];
+
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    documents: merged,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
+
+  await addVehicleEvent(
+    vehicleId,
+    "updated",
+    "Documentele vehiculului au fost actualizate."
+  );
+}
+
+export async function removeVehicleDocument(
+  vehicleId: string,
+  documents: VehicleDocumentItem[],
+  documentId: string
+): Promise<VehicleDocumentItem[]> {
+  const documentToDelete = documents.find((docItem) => docItem.id === documentId);
+  if (!documentToDelete) return documents;
+
+  if (documentToDelete.path) {
+    await deleteObject(ref(storage, documentToDelete.path)).catch(() => undefined);
+  }
+
+  const updated = documents.filter((docItem) => docItem.id !== documentId);
+
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    documents: updated,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
+
+  await addVehicleEvent(vehicleId, "updated", "Un document al vehiculului a fost sters.");
+  return updated;
 }
 
 export async function setVehicleCoverImage(

@@ -3,14 +3,17 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
 import type { VehicleFormValues } from "../../../types/vehicle";
 import VehicleForm from "../components/VehicleForm";
+import type { VehiclePendingDocument } from "../components/VehicleDocumentUploader";
 import {
   createVehicle,
   getVehicleById,
   getVehicleUsers,
   isPlateNumberUsed,
   saveVehicleImages,
+  saveVehicleDocuments,
   updateVehicle,
   uploadVehicleImages,
+  uploadVehicleDocuments,
 } from "../services/vehiclesService";
 import { useAuth } from "../../../providers/AuthProvider";
 
@@ -44,6 +47,7 @@ const emptyValues: VehicleFormValues = {
   coverImageUrl: "",
   coverThumbUrl: "",
   images: [],
+  documents: [],
 };
 
 export default function VehicleFormPage() {
@@ -108,6 +112,7 @@ export default function VehicleFormPage() {
               coverImageUrl: vehicle.coverImageUrl,
               coverThumbUrl: vehicle.coverThumbUrl,
               images: vehicle.images,
+              documents: vehicle.documents,
             });
           }
         } else {
@@ -133,7 +138,11 @@ export default function VehicleFormPage() {
     void load();
   }, [vehicleId, user]);
 
-  async function handleSubmit(values: VehicleFormValues, selectedFiles: File[]) {
+  async function handleSubmit(
+    values: VehicleFormValues,
+    selectedFiles: File[],
+    selectedDocuments: VehiclePendingDocument[]
+  ) {
     setSubmitting(true);
     setError("");
 
@@ -198,6 +207,11 @@ export default function VehicleFormPage() {
           await saveVehicleImages(newVehicleId, [], uploaded);
         }
 
+        if (selectedDocuments.length > 0) {
+          const uploadedDocs = await uploadVehicleDocuments(newVehicleId, selectedDocuments);
+          await saveVehicleDocuments(newVehicleId, [], uploadedDocs);
+        }
+
         navigate(`/vehicles/${newVehicleId}`);
         return;
       }
@@ -207,6 +221,11 @@ export default function VehicleFormPage() {
       if (selectedFiles.length > 0) {
         const uploaded = await uploadVehicleImages(vehicleId, selectedFiles);
         await saveVehicleImages(vehicleId, normalizedValues.images, uploaded);
+      }
+
+      if (selectedDocuments.length > 0) {
+        const uploadedDocs = await uploadVehicleDocuments(vehicleId, selectedDocuments);
+        await saveVehicleDocuments(vehicleId, normalizedValues.documents, uploadedDocs);
       }
 
       navigate(`/vehicles/${vehicleId}`);
