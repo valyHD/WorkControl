@@ -11,12 +11,14 @@ import SafeImage from "../../../components/SafeImage";
 import { SectionErrorBoundary } from "../../../lib/errors/SectionErrorBoundary";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
+import VehicleDocumentsPanel from "../components/VehicleDocumentsPanel";
 import VehicleControlCard from "../components/VehicleControlCard";
 import {
   acceptVehicleDriverChange,
   claimVehicleForCurrentUser,
   getVehicleEvents,
   getVehicleUsers,
+  removeVehicleDocument,
   removeVehicleImage,
   requestVehicleCommand,
   subscribeVehicleCommands,
@@ -29,6 +31,7 @@ import {
   ArrowLeft,
   Image as ImageIcon,
   History,
+  FileText,
 } from "lucide-react";
 
 const VehicleLiveRouteCard = lazy(() => import("../components/VehicleLiveRouteCard"));
@@ -108,6 +111,7 @@ export default function VehicleDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [metaLoading, setMetaLoading] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
+  const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimMsg, setClaimMsg] = useState("");
   const [estimatedCurrentKm, setEstimatedCurrentKm] = useState<number | null>(null);
@@ -237,6 +241,20 @@ export default function VehicleDetailsPage() {
       console.error("[VehicleDetailsPage][deleteImage]", err);
     } finally {
       setDeletingImageId(null);
+    }
+  }
+
+
+  async function handleDeleteDocument(documentId: string) {
+    if (!vehicle || !user || vehicle.ownerUserId !== user.uid || deletingDocumentId) return;
+
+    setDeletingDocumentId(documentId);
+    try {
+      await removeVehicleDocument(vehicle.id, vehicle.documents, documentId);
+    } catch (err) {
+      console.error("[VehicleDetailsPage][deleteDocument]", err);
+    } finally {
+      setDeletingDocumentId(null);
     }
   }
 
@@ -630,6 +648,33 @@ export default function VehicleDetailsPage() {
             ))}
           </div>
         )}
+      </div>
+
+
+      <div className="panel">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+          }}
+        >
+          <h3 className="panel-title" style={{ margin: 0 }}>
+            <FileText size={15} style={{ verticalAlign: "middle", marginRight: 6 }} />
+            Documente vehicul
+          </h3>
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            {vehicle.documents.length} {vehicle.documents.length === 1 ? "document" : "documente"}
+          </span>
+        </div>
+
+        <VehicleDocumentsPanel
+          documents={vehicle.documents}
+          isOwner={isOwner}
+          deletingDocumentId={deletingDocumentId}
+          onDelete={handleDeleteDocument}
+        />
       </div>
 
       <div className="panel">

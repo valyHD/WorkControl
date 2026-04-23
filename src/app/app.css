@@ -4173,3 +4173,118 @@ li,
   gap: 12px;
   justify-items: center;
 }
+
+.vehicle-doc-uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vehicle-doc-uploader__controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 340px) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.vehicle-doc-counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vehicle-doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vehicle-doc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+}
+
+.vehicle-doc-item__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vehicle-doc-item__name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.vehicle-doc-item__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.vehicle-doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.vehicle-doc-card {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vehicle-doc-card__header {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.vehicle-doc-card__name {
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.vehicle-doc-card__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.vehicle-doc-preview {
+  display: block;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  min-height: 120px;
+}
+
+.vehicle-doc-preview img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+}
+
+.vehicle-doc-preview__placeholder {
+  min-height: 120px;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.vehicle-doc-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
