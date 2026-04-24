@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
-import { createMaintenanceClient, getMaintenanceClients } from "../services/maintenanceService";
+import { createMaintenanceClient, subscribeMaintenanceClients } from "../services/maintenanceService";
 import type { MaintenanceClient } from "../../../types/maintenance";
 
 const initialClientForm = {
@@ -24,21 +24,21 @@ export default function MaintenancePage() {
   const [searchText, setSearchText] = useState("");
   const [clientForm, setClientForm] = useState(initialClientForm);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await getMaintenanceClients();
-      setClients(data);
-    } catch (err) {
-      console.error(err);
-      setError("Nu am putut încărca baza de mentenanță.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    void load();
+    setLoading(true);
+    const unsubscribe = subscribeMaintenanceClients(
+      (data) => {
+        setClients(data);
+        setLoading(false);
+      },
+      (err) => {
+        console.error(err);
+        setError("Nu am putut încărca baza de mentenanță.");
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
   }, []);
 
   const filteredClients = useMemo(() => {
@@ -48,7 +48,17 @@ export default function MaintenancePage() {
     }
 
     return clients.filter((client) => {
-      const fullText = `${client.name} ${client.address} ${client.liftNumber}`.toLowerCase();
+      const addresses = [
+        client.address,
+        ...(client.addresses || []).map((address) => address.label || address.street || ""),
+      ].filter(Boolean);
+      const lifts = [
+        ...((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []),
+        ...(client.addresses || []).flatMap((address) =>
+          (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+        ),
+      ].filter(Boolean);
+      const fullText = `${client.name} ${addresses.join(" ")} ${lifts.join(" ")}`.toLowerCase();
       return fullText.includes(query);
     });
   }, [clients, searchText]);
@@ -77,7 +87,6 @@ export default function MaintenancePage() {
       await createMaintenanceClient(clientForm);
       setClientForm(initialClientForm);
       setMessage("Clientul din mentenanță a fost salvat.");
-      await load();
     } catch (err) {
       console.error(err);
       setError("Nu am putut salva clientul.");
@@ -198,26 +207,56 @@ export default function MaintenancePage() {
           <p className="tools-subtitle">Nu există clienți pentru căutarea curentă.</p>
         ) : (
           <div className="simple-list">
-            {filteredClients.map((client) => (
-              <button
-                key={client.id}
-                className="simple-list-item"
-                type="button"
-                onClick={() => navigate(`/maintenance/${client.id}`)}
-                style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
-                <div className="simple-list-text">
-                  <div className="simple-list-label">{client.name || "Fără nume"}</div>
-                  <div className="simple-list-subtitle">Adresă: {client.address || "-"}</div>
-                  <div className="simple-list-subtitle">
-                    Lift: {client.liftNumber || "-"} · Exp. Date: {client.expiryDate || "-"}
+            {filteredClients.map((client) => {
+              const addresses = Array.from(
+                new Set([client.address, ...(client.addresses || []).map((address) => address.label || address.street || "")].filter(Boolean))
+              );
+              const lifts = Array.from(
+                new Set([
+                  ...((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []),
+                  ...(client.addresses || []).flatMap((address) =>
+                    (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+                  ),
+                ].filter(Boolean))
+              );
+
+              return (
+                <button
+                  key={client.id}
+                  className="simple-list-item"
+                  type="button"
+                  onClick={() => navigate(`/maintenance/${client.id}`)}
+                  style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{client.name || "Fără nume"}</div>
+                    <div className="simple-list-subtitle">Adrese:</div>
+                    {addresses.length ? (
+                      addresses.map((address) => (
+                        <div key={`${client.id}_address_${address}`} className="simple-list-subtitle">
+                          • {address}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="simple-list-subtitle">• -</div>
+                    )}
+                    <div className="simple-list-subtitle">Lifturi:</div>
+                    {lifts.length ? (
+                      lifts.map((lift) => (
+                        <div key={`${client.id}_lift_${lift}`} className="simple-list-subtitle">
+                          • {lift}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="simple-list-subtitle">• -</div>
+                    )}
+                    <div className="simple-list-subtitle">Exp. Date: {client.expiryDate || "-"}</div>
+                    <div className="simple-list-subtitle">Firma mentenanță: {client.maintenanceCompany || "-"}</div>
+                    <div className="simple-list-subtitle">E-mail: {client.email || "-"}</div>
                   </div>
-                  <div className="simple-list-subtitle">
-                    Firma mentenanță: {client.maintenanceCompany || "-"} · E-mail: {client.email || "-"}
-                  </div>
-                </div>
-                <span className="badge badge-blue">client</span>
-              </button>
-            ))}
+                  <span className="badge badge-blue">client</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
