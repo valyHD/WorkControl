@@ -31,21 +31,6 @@ function getPreviewKind(contentType: string): "image" | "embed" | "none" {
   return "none";
 }
 
-function buildDownloadUrl(url: string, filename: string): string {
-  try {
-    const parsedUrl = new URL(url);
-    parsedUrl.searchParams.set("download", "1");
-    const encodedFilename = encodeURIComponent(filename);
-    parsedUrl.searchParams.set(
-      "response-content-disposition",
-      `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`
-    );
-    return parsedUrl.toString();
-  } catch {
-    return url;
-  }
-}
-
 export default function VehicleDocumentsPanel({
   documents,
   isOwner,
@@ -53,9 +38,8 @@ export default function VehicleDocumentsPanel({
   onDelete,
 }: Props) {
   async function handleDownloadDocument(item: VehicleDocumentItem) {
-    const downloadUrl = buildDownloadUrl(item.url, item.name);
     try {
-      const response = await fetch(downloadUrl, { credentials: "omit" });
+      const response = await fetch(item.url, { credentials: "omit" });
       if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -69,7 +53,14 @@ export default function VehicleDocumentsPanel({
       link.remove();
       URL.revokeObjectURL(objectUrl);
     } catch {
-      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      const link = document.createElement("a");
+      link.href = item.url;
+      link.download = item.name;
+      link.rel = "noopener noreferrer";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     }
   }
 
@@ -152,7 +143,7 @@ export default function VehicleDocumentsPanel({
                       </a>
                       <a
                         className="secondary-btn"
-                        href={buildDownloadUrl(item.url, item.name)}
+                        href={item.url}
                         download={item.name}
                         onClick={(event) => {
                           event.preventDefault();
