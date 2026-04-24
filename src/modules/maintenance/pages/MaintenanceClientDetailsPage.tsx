@@ -4,6 +4,62 @@ import { useAuth } from "../../../providers/AuthProvider";
 import type { ClientAddress, MaintenanceClient } from "../../../types/maintenance";
 import { getMaintenanceClientById, updateMaintenanceClient } from "../services/maintenanceService";
 
+type AddressLiftGroup = {
+  key: string;
+  address: string;
+  lifts: string[];
+};
+
+function buildAddressLiftGroups(client: MaintenanceClient): AddressLiftGroup[] {
+  const mainAddress = client.address.trim();
+  const allClientLifts = Array.from(
+    new Set(((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []).filter(Boolean))
+  );
+  const secondaryGroups = (client.addresses || []).map((address) => {
+    const label = (address.label || address.street || "").trim();
+    const lifts = Array.from(
+      new Set((address.lifts || []).map((lift) => lift.serialNumber || lift.label || "").map((item) => item.trim()).filter(Boolean))
+    );
+    return {
+      key: address.id,
+      address: label,
+      lifts,
+    };
+  });
+
+  const secondaryLiftSet = new Set(secondaryGroups.flatMap((group) => group.lifts));
+  const mainLifts = allClientLifts.filter((lift) => !secondaryLiftSet.has(lift));
+  const groups: AddressLiftGroup[] = [];
+
+  if (mainAddress || mainLifts.length) {
+    groups.push({
+      key: `${client.id}_main`,
+      address: mainAddress || "Adresă principală",
+      lifts: mainLifts,
+    });
+  }
+
+  secondaryGroups.forEach((group) => {
+    if (group.address || group.lifts.length) {
+      groups.push({
+        key: group.key,
+        address: group.address || "Adresă secundară",
+        lifts: group.lifts,
+      });
+    }
+  });
+
+  if (groups.length === 0) {
+    groups.push({
+      key: `${client.id}_empty`,
+      address: "-",
+      lifts: [],
+    });
+  }
+
+  return groups;
+}
+
 export default function MaintenanceClientDetailsPage() {
   const { role } = useAuth();
   const { clientId = "" } = useParams();
@@ -15,7 +71,8 @@ export default function MaintenanceClientDetailsPage() {
   const [newEmail, setNewEmail] = useState("");
   const [newLiftNumber, setNewLiftNumber] = useState("");
   const [newAddress, setNewAddress] = useState("");
-  const [newAddressLifts, setNewAddressLifts] = useState("");
+  const [newAddressLiftInput, setNewAddressLiftInput] = useState("");
+  const [newAddressLiftNumbers, setNewAddressLiftNumbers] = useState<string[]>([]);
 
   useEffect(() => {
     async function loadClient() {
@@ -51,13 +108,7 @@ export default function MaintenanceClientDetailsPage() {
     return Array.from(new Set(list));
   }, [client]);
 
-  const displayLifts = useMemo(() => {
-    if (!client) {
-      return [];
-    }
-    const list = client.liftNumbers?.length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : [];
-    return Array.from(new Set(list));
-  }, [client]);
+  const addressLiftGroups = useMemo(() => (client ? buildAddressLiftGroups(client) : []), [client]);
 
   async function savePatch(next: Partial<MaintenanceClient>, successText: string) {
     if (!client) {
@@ -111,10 +162,7 @@ export default function MaintenanceClientDetailsPage() {
       return;
     }
 
-    const liftItems = newAddressLifts
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
+    const liftItems = Array.from(new Set(newAddressLiftNumbers.map((item) => item.trim()).filter(Boolean)));
 
     const addressEntry: ClientAddress = {
       id: `address_${Date.now()}`,
@@ -147,7 +195,21 @@ export default function MaintenanceClientDetailsPage() {
     );
 
     setNewAddress("");
-    setNewAddressLifts("");
+    setNewAddressLiftInput("");
+    setNewAddressLiftNumbers([]);
+  }
+
+  function handleQueueAddressLift() {
+    const value = newAddressLiftInput.trim();
+    if (!value) {
+      return;
+    }
+    setNewAddressLiftNumbers((prev) => Array.from(new Set([...prev, value])));
+    setNewAddressLiftInput("");
+  }
+
+  function handleRemoveQueuedAddressLift(value: string) {
+    setNewAddressLiftNumbers((prev) => prev.filter((item) => item !== value));
   }
 
   if (role !== "admin" && role !== "manager") {
@@ -180,7 +242,20 @@ export default function MaintenanceClientDetailsPage() {
               <div className="simple-list-item">
                 <div className="simple-list-text">
                   <div className="simple-list-label">{client.name || "Fără nume"}</div>
-                  <div className="simple-list-subtitle">Adresă principală: {client.address || "-"}</div>
+                  {addressLiftGroups.map((group) => (
+                    <div key={group.key} style={{ marginTop: 8 }}>
+                      <div className="simple-list-subtitle">Adresă: {group.address || "-"}</div>
+                      {group.lifts.length ? (
+                        group.lifts.map((lift) => (
+                          <div key={`${group.key}_header_lift_${lift}`} className="simple-list-subtitle">
+                            • Lift: {lift}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="simple-list-subtitle">• Lift: -</div>
+                      )}
+                    </div>
+                  ))}
                   <div className="simple-list-subtitle">Firma mentenanță: {client.maintenanceCompany || "-"}</div>
                   <div className="simple-list-subtitle">Exp. Date: {client.expiryDate || "-"}</div>
                 </div>
@@ -223,14 +298,37 @@ export default function MaintenanceClientDetailsPage() {
                   placeholder="Str. Exemplu nr. 10, București"
                 />
                 <label className="tool-form-label" style={{ marginTop: 8 }}>
-                  Lifturi la această adresă (separate prin virgulă)
+                  Adaugă lift la această adresă (unul câte unul)
                 </label>
-                <input
-                  className="tool-input"
-                  value={newAddressLifts}
-                  onChange={(e) => setNewAddressLifts(e.target.value)}
-                  placeholder="210871, 210872"
-                />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="tool-input"
+                    value={newAddressLiftInput}
+                    onChange={(e) => setNewAddressLiftInput(e.target.value)}
+                    placeholder="210871"
+                  />
+                  <button className="secondary-btn" type="button" onClick={handleQueueAddressLift} disabled={saving}>
+                    Adaugă în listă
+                  </button>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  {newAddressLiftNumbers.length ? (
+                    newAddressLiftNumbers.map((lift) => (
+                      <div key={`queued_lift_${lift}`} className="simple-list-subtitle" style={{ display: "flex", gap: 8 }}>
+                        <span>• {lift}</span>
+                        <button
+                          className="secondary-btn"
+                          type="button"
+                          onClick={() => handleRemoveQueuedAddressLift(lift)}
+                          disabled={saving}>
+                          Șterge
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="simple-list-subtitle">Nu ai adăugat încă lifturi pentru această adresă.</div>
+                  )}
+                </div>
                 <button className="secondary-btn" type="button" onClick={() => void handleAddAddress()} disabled={saving}>
                   Adaugă adresă cu lifturi
                 </button>
@@ -239,30 +337,40 @@ export default function MaintenanceClientDetailsPage() {
 
             <div className="panel" style={{ marginTop: 16 }}>
               <h3 className="panel-subtitle">E-mailuri</h3>
-              <p className="tools-subtitle">{displayEmails.length ? displayEmails.join(" · ") : "-"}</p>
-              <h3 className="panel-subtitle" style={{ marginTop: 12 }}>
-                Lifturi
-              </h3>
-              <p className="tools-subtitle">{displayLifts.length ? displayLifts.join(" · ") : "-"}</p>
+              {displayEmails.length ? (
+                displayEmails.map((email) => (
+                  <p className="tools-subtitle" key={`client_email_${email}`}>
+                    {email}
+                  </p>
+                ))
+              ) : (
+                <p className="tools-subtitle">-</p>
+              )}
             </div>
 
             <div className="panel" style={{ marginTop: 16 }}>
-              <h3 className="panel-subtitle">Adrese secundare și lifturi</h3>
-              {client.addresses?.length ? (
+              <h3 className="panel-subtitle">Adrese și lifturi</h3>
+              {addressLiftGroups.length ? (
                 <div className="simple-list">
-                  {client.addresses.map((address) => (
-                    <div className="simple-list-item" key={address.id}>
+                  {addressLiftGroups.map((group) => (
+                    <div className="simple-list-item" key={group.key}>
                       <div className="simple-list-text">
-                        <div className="simple-list-label">{address.label || address.street || "Adresă"}</div>
-                        <div className="simple-list-subtitle">
-                          Lifturi: {address.lifts?.map((lift) => lift.serialNumber || lift.label).filter(Boolean).join(", ") || "-"}
-                        </div>
+                        <div className="simple-list-label">{group.address || "Adresă"}</div>
+                        {group.lifts.length ? (
+                          group.lifts.map((lift) => (
+                            <div className="simple-list-subtitle" key={`${group.key}_lift_${lift}`}>
+                              • {lift}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="simple-list-subtitle">• -</div>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="tools-subtitle">Nu există adrese secundare.</p>
+                <p className="tools-subtitle">Nu există adrese.</p>
               )}
             </div>
           </>

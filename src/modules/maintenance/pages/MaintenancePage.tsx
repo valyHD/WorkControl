@@ -13,6 +13,62 @@ const initialClientForm = {
   maintenanceCompany: "ISL ELEVATOR SOLUTIONS SRL",
 };
 
+type AddressLiftGroup = {
+  key: string;
+  address: string;
+  lifts: string[];
+};
+
+function buildAddressLiftGroups(client: MaintenanceClient): AddressLiftGroup[] {
+  const mainAddress = client.address.trim();
+  const allClientLifts = Array.from(
+    new Set(((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []).filter(Boolean))
+  );
+  const secondaryGroups = (client.addresses || []).map((address) => {
+    const label = (address.label || address.street || "").trim();
+    const lifts = Array.from(
+      new Set((address.lifts || []).map((lift) => lift.serialNumber || lift.label || "").map((item) => item.trim()).filter(Boolean))
+    );
+    return {
+      key: address.id,
+      address: label,
+      lifts,
+    };
+  });
+
+  const secondaryLiftSet = new Set(secondaryGroups.flatMap((group) => group.lifts));
+  const mainLifts = allClientLifts.filter((lift) => !secondaryLiftSet.has(lift));
+  const groups: AddressLiftGroup[] = [];
+
+  if (mainAddress || mainLifts.length) {
+    groups.push({
+      key: `${client.id}_main`,
+      address: mainAddress || "Adresă principală",
+      lifts: mainLifts,
+    });
+  }
+
+  secondaryGroups.forEach((group) => {
+    if (group.address || group.lifts.length) {
+      groups.push({
+        key: group.key,
+        address: group.address || "Adresă secundară",
+        lifts: group.lifts,
+      });
+    }
+  });
+
+  if (groups.length === 0) {
+    groups.push({
+      key: `${client.id}_empty`,
+      address: "-",
+      lifts: [],
+    });
+  }
+
+  return groups;
+}
+
 export default function MaintenancePage() {
   const { role } = useAuth();
   const navigate = useNavigate();
@@ -208,17 +264,8 @@ export default function MaintenancePage() {
         ) : (
           <div className="simple-list">
             {filteredClients.map((client) => {
-              const addresses = Array.from(
-                new Set([client.address, ...(client.addresses || []).map((address) => address.label || address.street || "")].filter(Boolean))
-              );
-              const lifts = Array.from(
-                new Set([
-                  ...((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []),
-                  ...(client.addresses || []).flatMap((address) =>
-                    (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
-                  ),
-                ].filter(Boolean))
-              );
+              const addressLiftGroups = buildAddressLiftGroups(client);
+              const displayEmails = Array.from(new Set(((client.emails || []).length ? client.emails : client.email ? [client.email] : []).filter(Boolean)));
 
               return (
                 <button
@@ -229,21 +276,27 @@ export default function MaintenancePage() {
                   style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
                   <div className="simple-list-text">
                     <div className="simple-list-label">{client.name || "Fără nume"}</div>
-                    <div className="simple-list-subtitle">Adrese:</div>
-                    {addresses.length ? (
-                      addresses.map((address) => (
-                        <div key={`${client.id}_address_${address}`} className="simple-list-subtitle">
-                          • {address}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="simple-list-subtitle">• -</div>
-                    )}
-                    <div className="simple-list-subtitle">Lifturi:</div>
-                    {lifts.length ? (
-                      lifts.map((lift) => (
-                        <div key={`${client.id}_lift_${lift}`} className="simple-list-subtitle">
-                          • {lift}
+                    {addressLiftGroups.map((group) => (
+                      <div key={group.key} style={{ marginTop: 8 }}>
+                        <div className="simple-list-subtitle">Adresă: {group.address || "-"}</div>
+                        {group.lifts.length ? (
+                          group.lifts.map((lift) => (
+                            <div key={`${group.key}_lift_${lift}`} className="simple-list-subtitle">
+                              • Lift: {lift}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="simple-list-subtitle">• Lift: -</div>
+                        )}
+                      </div>
+                    ))}
+                    <div className="simple-list-subtitle" style={{ marginTop: 8 }}>
+                      E-mail:
+                    </div>
+                    {displayEmails.length ? (
+                      displayEmails.map((email) => (
+                        <div key={`${client.id}_email_${email}`} className="simple-list-subtitle">
+                          • {email}
                         </div>
                       ))
                     ) : (
@@ -251,7 +304,6 @@ export default function MaintenancePage() {
                     )}
                     <div className="simple-list-subtitle">Exp. Date: {client.expiryDate || "-"}</div>
                     <div className="simple-list-subtitle">Firma mentenanță: {client.maintenanceCompany || "-"}</div>
-                    <div className="simple-list-subtitle">E-mail: {client.email || "-"}</div>
                   </div>
                   <span className="badge badge-blue">client</span>
                 </button>
