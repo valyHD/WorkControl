@@ -21,7 +21,7 @@ import type {
 } from "../../../types/maintenance";
 
 const maintenanceClientsCollection = collection(db, "maintenanceClients");
-const maintenanceBrandingCollection = collection(db, "maintenanceCompanyBranding");
+const maintenanceBrandingCollection = collection(db, "firmeMentenanta");
 
 function toText(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -247,7 +247,7 @@ export async function saveMaintenanceCompanyBranding(input: {
     throw new Error("Compania este obligatorie.");
   }
 
-  const docRef = doc(db, "maintenanceCompanyBranding", companyKey);
+  const docRef = doc(db, "firmeMentenanta", companyKey);
   const snap = await getDoc(docRef);
   const existing = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
   const now = Date.now();
