@@ -1,4 +1,5 @@
 import type { LiftUnit, MaintenanceClient } from "../../../types/maintenance";
+import type { MaintenanceCompanyBranding } from "../../../types/maintenance";
 
 export type ReportType = "revizie" | "interventie" | string;
 
@@ -31,6 +32,37 @@ export type PdfInput = {
   branding: MaintenanceBranding | null;
   report: Omit<MaintenanceReport, "id" | "pdfUrl">;
 };
+
+function normalizeCompanyKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+export function resolveBrandingForCompany(
+  companyName: string,
+  brandingList: MaintenanceCompanyBranding[]
+): MaintenanceBranding | null {
+  const targetKey = normalizeCompanyKey(companyName);
+  if (!targetKey) {
+    return null;
+  }
+
+  const found = brandingList.find((item) => item.companyKey === targetKey);
+  if (!found) {
+    return null;
+  }
+
+  return {
+    companyName: found.companyName,
+    logoUrl: found.logoUrl,
+    stampUrl: found.stampUrl,
+  };
+}
 
 function getLiftLabel(lift: LiftUnit): string {
   const candidate =
