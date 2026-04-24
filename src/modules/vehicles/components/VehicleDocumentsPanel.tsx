@@ -36,7 +36,11 @@ function buildDownloadUrl(url: string, filename: string): string {
   try {
     const parsedUrl = new URL(url);
     parsedUrl.searchParams.set("download", "1");
-    parsedUrl.searchParams.set("response-content-disposition", `attachment; filename="${filename}"`);
+    const encodedFilename = encodeURIComponent(filename);
+    parsedUrl.searchParams.set(
+      "response-content-disposition",
+      `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`
+    );
     return parsedUrl.toString();
   } catch {
     return url;
@@ -49,37 +53,23 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
-  async function handleDownloadDocument(event: MouseEvent<HTMLAnchorElement>, item: VehicleDocumentItem) {
-    event.preventDefault();
-
+  function handleDownloadDocument(item: VehicleDocumentItem) {
     const downloadUrl = buildDownloadUrl(item.url, item.name);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = item.name;
+    link.rel = "noopener noreferrer";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
 
-    try {
-      const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error(`Unable to download document (${response.status})`);
-      }
-
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = item.name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-      return;
-    } catch {
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = item.name;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    }
+  function buildDownloadHandler(item: VehicleDocumentItem) {
+    return (event: MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      handleDownloadDocument(item);
+    };
   }
 
   if (!documents.length) {
@@ -163,7 +153,7 @@ export default function VehicleDocumentsPanel({
                         className="secondary-btn"
                         href={item.url}
                         download={item.name}
-                        onClick={(event) => void handleDownloadDocument(event, item)}
+                        onClick={buildDownloadHandler(item)}
                       >
                         <Download size={14} /> Download
                       </a>
