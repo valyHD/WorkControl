@@ -380,18 +380,18 @@ export default function VehicleDetailsPage() {
                 })}{" "}
                 km
               </div>
-            </div>
-          </div>
 
-          <div className="tools-header-actions">
-            {isOwner && (
-              <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
-                <Pencil size={14} /> Editeaza
-              </Link>
-            )}
-            <Link to="/vehicles" className="secondary-btn">
-              <ArrowLeft size={14} /> Inapoi
-            </Link>
+              <div className="vehicle-details-actions">
+                {isOwner && (
+                  <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
+                    <Pencil size={14} /> Editeaza
+                  </Link>
+                )}
+                <Link to="/vehicles" className="secondary-btn">
+                  <ArrowLeft size={14} /> Inapoi
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -438,152 +438,158 @@ export default function VehicleDetailsPage() {
         </div>
       )}
 
-      <div className="tool-details-grid">
-        <div className="panel tool-inner-panel">
-          <VehicleControlCard
-            vehicle={vehicle}
-            commands={commands}
-            onRequestCommand={handleRequestCommand}
-            loading={loading}
-          />
-        </div>
+      <details className="panel vehicle-sections-dropdown">
+        <summary className="vehicle-sections-dropdown__summary">
+          <span className="panel-title">Detalii vehicul</span>
+          <span className="tools-subtitle">Apasa pentru a deschide toate sectiunile</span>
+        </summary>
 
-        <div className="panel tool-inner-panel">
-          <h3 className="panel-title">Date generale</h3>
-
-          <div className="tool-detail-line">
-            <strong>Responsabil:</strong> {vehicle.ownerUserName || "—"}
-          </div>
-          <div className="tool-detail-line">
-            <strong>Sofer curent:</strong> {vehicle.currentDriverUserName || "—"}
-          </div>
-          <div className="tool-detail-line">
-            <strong>An fabricatie:</strong> {vehicle.year || "—"}
-          </div>
-          <div className="tool-detail-line">
-            <strong>VIN:</strong>{" "}
-            <span
-              style={{
-                fontFamily: "monospace",
-                fontSize: 12,
-                letterSpacing: "0.5px",
-              }}
-            >
-              {vehicle.vin || "—"}
-            </span>
-          </div>
-          <div className="tool-detail-line">
-            <strong>Combustibil:</strong> {vehicle.fuelType || "—"}
-          </div>
-          <div className="tool-detail-line">
-            <strong>Km curenti:</strong>{" "}
-            {displayedCurrentKm.toLocaleString("ro-RO", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}{" "}
-            km
-          </div>
-          <div className="tool-detail-line">
-            <strong>Km la inregistrare:</strong>{" "}
-            {(vehicle.initialRecordedKm || 0).toLocaleString("ro-RO")} km
-          </div>
-        </div>
-
-        <div className="panel tool-inner-panel">
-          <h3 className="panel-title">Mentenanta</h3>
-
-          <div className="tool-detail-line">
-            <strong>Urmator service la:</strong>{" "}
-            {vehicle.nextServiceKm
-              ? `${vehicle.nextServiceKm.toLocaleString("ro-RO")} km`
-              : "—"}
-          </div>
-          <div className="tool-detail-line">
-            <strong>ITP pana la:</strong>{" "}
-            <span style={{ color: getDateColor(vehicle.nextItpDate) }}>
-              {vehicle.nextItpDate || "—"}
-            </span>
-          </div>
-          <div className="tool-detail-line">
-            <strong>RCA pana la:</strong>{" "}
-            <span style={{ color: getDateColor(vehicle.nextRcaDate) }}>
-              {vehicle.nextRcaDate || "—"}
-            </span>
-          </div>
-          <div className="tool-detail-line">
-            <strong>CASCO pana la:</strong>{" "}
-            <span style={{ color: getDateColor(vehicle.nextCascoDate) }}>
-              {vehicle.nextCascoDate || "—"}
-            </span>
+        <div className="tool-details-grid vehicle-sections-dropdown__body">
+          <div className="panel tool-inner-panel">
+            <VehicleControlCard
+              vehicle={vehicle}
+              commands={commands}
+              onRequestCommand={handleRequestCommand}
+              loading={loading}
+            />
           </div>
 
-          {vehicle.maintenanceNotes && (
-            <div
-              className="tool-detail-line"
-              style={{
-                flexDirection: "column",
-                alignItems: "flex-start",
-                gap: 4,
-              }}
-            >
-              <strong>Note mentenanta:</strong>
+          <div className="panel tool-inner-panel">
+            <h3 className="panel-title">Date generale</h3>
+
+            <div className="tool-detail-line">
+              <strong>Responsabil:</strong> {vehicle.ownerUserName || "—"}
+            </div>
+            <div className="tool-detail-line">
+              <strong>Sofer curent:</strong> {vehicle.currentDriverUserName || "—"}
+            </div>
+            <div className="tool-detail-line">
+              <strong>An fabricatie:</strong> {vehicle.year || "—"}
+            </div>
+            <div className="tool-detail-line">
+              <strong>VIN:</strong>{" "}
               <span
                 style={{
-                  color: "var(--text-soft)",
-                  fontSize: 13,
-                  lineHeight: 1.5,
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  letterSpacing: "0.5px",
                 }}
               >
-                {vehicle.maintenanceNotes}
+                {vehicle.vin || "—"}
               </span>
             </div>
-          )}
+            <div className="tool-detail-line">
+              <strong>Combustibil:</strong> {vehicle.fuelType || "—"}
+            </div>
+            <div className="tool-detail-line">
+              <strong>Km curenti:</strong>{" "}
+              {displayedCurrentKm.toLocaleString("ro-RO", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}{" "}
+              km
+            </div>
+            <div className="tool-detail-line">
+              <strong>Km la inregistrare:</strong>{" "}
+              {(vehicle.initialRecordedKm || 0).toLocaleString("ro-RO")} km
+            </div>
+          </div>
+
+          <div className="panel tool-inner-panel">
+            <h3 className="panel-title">Mentenanta</h3>
+
+            <div className="tool-detail-line">
+              <strong>Urmator service la:</strong>{" "}
+              {vehicle.nextServiceKm
+                ? `${vehicle.nextServiceKm.toLocaleString("ro-RO")} km`
+                : "—"}
+            </div>
+            <div className="tool-detail-line">
+              <strong>ITP pana la:</strong>{" "}
+              <span style={{ color: getDateColor(vehicle.nextItpDate) }}>
+                {vehicle.nextItpDate || "—"}
+              </span>
+            </div>
+            <div className="tool-detail-line">
+              <strong>RCA pana la:</strong>{" "}
+              <span style={{ color: getDateColor(vehicle.nextRcaDate) }}>
+                {vehicle.nextRcaDate || "—"}
+              </span>
+            </div>
+            <div className="tool-detail-line">
+              <strong>CASCO pana la:</strong>{" "}
+              <span style={{ color: getDateColor(vehicle.nextCascoDate) }}>
+                {vehicle.nextCascoDate || "—"}
+              </span>
+            </div>
+
+            {vehicle.maintenanceNotes && (
+              <div
+                className="tool-detail-line"
+                style={{
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 4,
+                }}
+              >
+                <strong>Note mentenanta:</strong>
+                <span
+                  style={{
+                    color: "var(--text-soft)",
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {vehicle.maintenanceNotes}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {isOwner && (
-        <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />
-      )}
+        {isOwner && (
+          <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />
+        )}
 
-      {hasPendingDriverRequest && (
+        {hasPendingDriverRequest && (
+          <div className="panel">
+            <h3 className="panel-title">Solicitare schimbare șofer</h3>
+            <p className="tools-subtitle" style={{ marginBottom: 12 }}>
+              Solicitare pentru: <strong>{vehicle.pendingDriverUserName || "utilizator"}</strong>.
+              {vehicle.pendingDriverRequestedAt
+                ? ` Trimisă la ${formatDate(vehicle.pendingDriverRequestedAt)}.`
+                : ""}
+            </p>
+            {isPendingForCurrentUser ? (
+              <div className="tool-form-actions">
+                <button className="primary-btn" type="button" onClick={() => void handleAcceptPendingDriver()}>
+                  Acceptă și devino șofer curent
+                </button>
+              </div>
+            ) : (
+              <p className="tools-subtitle">În așteptarea acceptării de către utilizatorul selectat.</p>
+            )}
+          </div>
+        )}
+
+        <SectionErrorBoundary sectionName="harta GPS">
+          <Suspense
+            fallback={
+              <div className="panel">
+                <h3 className="panel-title">Harta GPS</h3>
+                <p className="tools-subtitle">Se incarca modulul harta si istoric...</p>
+              </div>
+            }
+          >
+            <VehicleLiveRouteCard
+              vehicle={vehicle}
+              showControlCard={false}
+              onKmEstimateChange={setEstimatedCurrentKm}
+            />
+          </Suspense>
+        </SectionErrorBoundary>
+
         <div className="panel">
-          <h3 className="panel-title">Solicitare schimbare șofer</h3>
-          <p className="tools-subtitle" style={{ marginBottom: 12 }}>
-            Solicitare pentru: <strong>{vehicle.pendingDriverUserName || "utilizator"}</strong>.
-            {vehicle.pendingDriverRequestedAt
-              ? ` Trimisă la ${formatDate(vehicle.pendingDriverRequestedAt)}.`
-              : ""}
-          </p>
-          {isPendingForCurrentUser ? (
-            <div className="tool-form-actions">
-              <button className="primary-btn" type="button" onClick={() => void handleAcceptPendingDriver()}>
-                Acceptă și devino șofer curent
-              </button>
-            </div>
-          ) : (
-            <p className="tools-subtitle">În așteptarea acceptării de către utilizatorul selectat.</p>
-          )}
-        </div>
-      )}
-
-      <SectionErrorBoundary sectionName="harta GPS">
-        <Suspense
-          fallback={
-            <div className="panel">
-              <h3 className="panel-title">Harta GPS</h3>
-              <p className="tools-subtitle">Se incarca modulul harta si istoric...</p>
-            </div>
-          }
-        >
-          <VehicleLiveRouteCard
-            vehicle={vehicle}
-            showControlCard={false}
-            onKmEstimateChange={setEstimatedCurrentKm}
-          />
-        </Suspense>
-      </SectionErrorBoundary>
-
-      <div className="panel">
         <div
           style={{
             display: "flex",
@@ -648,10 +654,10 @@ export default function VehicleDetailsPage() {
             ))}
           </div>
         )}
-      </div>
+        </div>
 
 
-      <div className="panel">
+        <div className="panel">
         <div
           style={{
             display: "flex",
@@ -675,9 +681,9 @@ export default function VehicleDetailsPage() {
           deletingDocumentId={deletingDocumentId}
           onDelete={handleDeleteDocument}
         />
-      </div>
+        </div>
 
-      <div className="panel">
+        <div className="panel">
         <div
           style={{
             display: "flex",
@@ -716,7 +722,8 @@ export default function VehicleDetailsPage() {
             ))}
           </div>
         )}
-      </div>
+        </div>
+      </details>
     </section>
   );
 }
