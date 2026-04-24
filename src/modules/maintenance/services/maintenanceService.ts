@@ -6,14 +6,22 @@ import {
   getDocs,
   onSnapshot,
   orderBy,
+  setDoc,
   query,
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "../../../lib/firebase/firebase";
-import type { ClientAddress, LiftUnit, MaintenanceClient } from "../../../types/maintenance";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { db, storage } from "../../../lib/firebase/firebase";
+import type {
+  ClientAddress,
+  LiftUnit,
+  MaintenanceClient,
+  MaintenanceCompanyBranding,
+} from "../../../types/maintenance";
 
 const maintenanceClientsCollection = collection(db, "maintenanceClients");
+const maintenanceBrandingCollection = collection(db, "maintenanceCompanyBranding");
 
 function toText(value: unknown): string {
   return typeof value === "string" ? value : "";
@@ -74,6 +82,34 @@ function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient
     createdAt: Number(data.createdAt ?? Date.now()),
     updatedAt: Number(data.updatedAt ?? Date.now()),
     addresses: addressesRaw.map((address, addressIndex) => mapAddress(address, addressIndex)),
+  };
+}
+
+function normalizeCompanyKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function mapBranding(
+  id: string,
+  data: Record<string, unknown>
+): MaintenanceCompanyBranding {
+  const companyName = toText(data.companyName);
+  return {
+    id,
+    companyName,
+    companyKey: toText(data.companyKey) || normalizeCompanyKey(companyName) || id,
+    logoUrl: toText(data.logoUrl),
+    stampUrl: toText(data.stampUrl),
+    logoPath: toText(data.logoPath),
+    stampPath: toText(data.stampPath),
+    createdAt: Number(data.createdAt ?? Date.now()),
+    updatedAt: Number(data.updatedAt ?? Date.now()),
   };
 }
 
@@ -163,4 +199,75 @@ export async function updateMaintenanceClient(clientId: string, payload: Partial
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
+}
+
+export function subscribeMaintenanceCompanyBranding(
+  onData: (items: MaintenanceCompanyBranding[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    query(maintenanceBrandingCollection, orderBy("companyName", "asc")),
+    (snap) => {
+      onData(snap.docs.map((docItem) => mapBranding(docItem.id, docItem.data() as Record<string, unknown>)));
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
+}
+
+export async function uploadMaintenanceBrandingAsset(input: {
+  companyName: string;
+  assetType: "logo" | "stamp";
+  file: File;
+}): Promise<{ url: string; path: string }> {
+  const companyKey = normalizeCompanyKey(input.companyName) || "firma";
+  const ext = input.file.name.split(".").pop()?.toLowerCase() || "png";
+  const safeExt = ext.replace(/[^a-z0-9]/g, "") || "png";
+  const fileName = `${input.assetType}_${Date.now()}.${safeExt}`;
+  const path = `maintenance-branding/${companyKey}/${fileName}`;
+  const fileRef = ref(storage, path);
+  await uploadBytes(fileRef, input.file, {
+    contentType: input.file.type || "application/octet-stream",
+  });
+  const url = await getDownloadURL(fileRef);
+  return { url, path };
+}
+
+export async function saveMaintenanceCompanyBranding(input: {
+  companyName: string;
+  logoUrl?: string;
+  stampUrl?: string;
+  logoPath?: string;
+  stampPath?: string;
+}): Promise<string> {
+  const companyName = input.companyName.trim();
+  const companyKey = normalizeCompanyKey(companyName);
+  if (!companyName || !companyKey) {
+    throw new Error("Compania este obligatorie.");
+  }
+
+  const docRef = doc(db, "maintenanceCompanyBranding", companyKey);
+  const snap = await getDoc(docRef);
+  const existing = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+  const now = Date.now();
+
+  await setDoc(
+    docRef,
+    {
+      companyName,
+      companyKey,
+      logoUrl: input.logoUrl ?? toText(existing?.logoUrl),
+      stampUrl: input.stampUrl ?? toText(existing?.stampUrl),
+      logoPath: input.logoPath ?? toText(existing?.logoPath),
+      stampPath: input.stampPath ?? toText(existing?.stampPath),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      updatedAtServer: serverTimestamp(),
+      ...(existing ? {} : { createdAtServer: serverTimestamp() }),
+    },
+    { merge: true }
+  );
+
+  return companyKey;
 }

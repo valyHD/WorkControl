@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
-import { createMaintenanceClient, subscribeMaintenanceClients } from "../services/maintenanceService";
-import type { MaintenanceClient } from "../../../types/maintenance";
+import {
+  createMaintenanceClient,
+  saveMaintenanceCompanyBranding,
+  subscribeMaintenanceClients,
+  subscribeMaintenanceCompanyBranding,
+  uploadMaintenanceBrandingAsset,
+} from "../services/maintenanceService";
+import type { MaintenanceClient, MaintenanceCompanyBranding } from "../../../types/maintenance";
 
 const initialClientForm = {
   name: "Razvan Banescu",
@@ -79,6 +85,13 @@ export default function MaintenancePage() {
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
   const [clientForm, setClientForm] = useState(initialClientForm);
+  const [brandingItems, setBrandingItems] = useState<MaintenanceCompanyBranding[]>([]);
+  const [brandingCompanyName, setBrandingCompanyName] = useState("");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [stampFile, setStampFile] = useState<File | null>(null);
+  const [brandingSaving, setBrandingSaving] = useState(false);
+  const [brandingMessage, setBrandingMessage] = useState("");
+  const [brandingError, setBrandingError] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -91,6 +104,20 @@ export default function MaintenancePage() {
         console.error(err);
         setError("Nu am putut încărca baza de mentenanță.");
         setLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeMaintenanceCompanyBranding(
+      (items) => {
+        setBrandingItems(items);
+      },
+      (err) => {
+        console.error(err);
+        setBrandingError("Nu am putut încărca branding-ul companiilor.");
       }
     );
 
@@ -151,6 +178,74 @@ export default function MaintenancePage() {
     }
   }
 
+  async function handleSaveBranding() {
+    const companyName = brandingCompanyName.trim();
+    if (!companyName) {
+      setBrandingError("Numele firmei este obligatoriu pentru branding.");
+      return;
+    }
+
+    if (!logoFile && !stampFile) {
+      setBrandingError("Încarcă cel puțin un fișier: logo sau ștampilă.");
+      return;
+    }
+
+    try {
+      setBrandingSaving(true);
+      setBrandingError("");
+      setBrandingMessage("");
+
+      const payload: {
+        companyName: string;
+        logoUrl?: string;
+        stampUrl?: string;
+        logoPath?: string;
+        stampPath?: string;
+      } = { companyName };
+
+      if (logoFile) {
+        const uploadedLogo = await uploadMaintenanceBrandingAsset({
+          companyName,
+          assetType: "logo",
+          file: logoFile,
+        });
+        payload.logoUrl = uploadedLogo.url;
+        payload.logoPath = uploadedLogo.path;
+      }
+
+      if (stampFile) {
+        const uploadedStamp = await uploadMaintenanceBrandingAsset({
+          companyName,
+          assetType: "stamp",
+          file: stampFile,
+        });
+        payload.stampUrl = uploadedStamp.url;
+        payload.stampPath = uploadedStamp.path;
+      }
+
+      await saveMaintenanceCompanyBranding(payload);
+
+      setBrandingMessage(
+        `Branding salvat pentru ${companyName}. Raportul PDF va folosi automat logo-ul și ștampila acestei firme.`
+      );
+      setLogoFile(null);
+      setStampFile(null);
+    } catch (err) {
+      console.error(err);
+      setBrandingError("Nu am putut salva branding-ul companiei.");
+    } finally {
+      setBrandingSaving(false);
+    }
+  }
+
+  function handleLoadBrandingCompany(companyName: string) {
+    setBrandingCompanyName(companyName);
+    setBrandingError("");
+    setBrandingMessage(
+      `Ai selectat ${companyName}. Poți încărca logo sau ștampilă noi pentru a le actualiza.`
+    );
+  }
+
   if (role !== "admin" && role !== "manager") {
     return (
       <div className="placeholder-page">
@@ -170,6 +265,82 @@ export default function MaintenancePage() {
         <div className="kpi-card">
           <div className="kpi-label">Rezultate filtrate</div>
           <div className="kpi-value">{filteredClients.length}</div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2 className="panel-title">Branding PDF · Logo + Ștampilă pe firmă</h2>
+        <p className="tools-subtitle">
+          Încarcă fișierele o singură dată pentru fiecare firmă (ex: KLEMAN, BREX). La generarea
+          raportului PDF, aplicația va alege automat logo-ul și ștampila în funcție de firma de
+          mentenanță a clientului.
+        </p>
+
+        {brandingError && <div className="tool-message">{brandingError}</div>}
+        {brandingMessage && <div className="tool-message success-message">{brandingMessage}</div>}
+
+        <div className="tool-form-grid" style={{ marginTop: 12 }}>
+          <div className="tool-form-block">
+            <label className="tool-form-label">Firma mentenanță</label>
+            <input
+              className="tool-input"
+              value={brandingCompanyName}
+              onChange={(e) => setBrandingCompanyName(e.target.value)}
+              placeholder="Ex: KLEMAN sau BREX"
+            />
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Logo firmă</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+            />
+            <div className="simple-list-subtitle">{logoFile ? logoFile.name : "Nu ai selectat logo."}</div>
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Ștampilă firmă</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => setStampFile(e.target.files?.[0] ?? null)}
+            />
+            <div className="simple-list-subtitle">{stampFile ? stampFile.name : "Nu ai selectat ștampilă."}</div>
+          </div>
+        </div>
+
+        <div className="tool-form-actions" style={{ marginTop: 14 }}>
+          <button className="primary-btn" type="button" onClick={() => void handleSaveBranding()} disabled={brandingSaving}>
+            {brandingSaving ? "Se încarcă..." : "Salvează branding firmă"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <h3 className="panel-subtitle">Firme configurate</h3>
+          {brandingItems.length === 0 ? (
+            <p className="tools-subtitle">Nu există branding salvat încă.</p>
+          ) : (
+            <div className="simple-list">
+              {brandingItems.map((item) => (
+                <div key={item.id} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{item.companyName}</div>
+                    <div className="simple-list-subtitle">Logo: {item.logoUrl ? "configurat" : "-"}</div>
+                    <div className="simple-list-subtitle">Ștampilă: {item.stampUrl ? "configurată" : "-"}</div>
+                    <div className="simple-list-subtitle">Cheie internă: {item.companyKey}</div>
+                  </div>
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() => handleLoadBrandingCompany(item.companyName)}>
+                    Editează
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

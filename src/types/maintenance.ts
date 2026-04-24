@@ -35,3 +35,15 @@ export type MaintenanceClient = {
   updatedAt: number;
   addresses: ClientAddress[];
 };
+
+export type MaintenanceCompanyBranding = {
+  id: string;
+  companyName: string;
+  companyKey: string;
+  logoUrl: string;
+  stampUrl: string;
+  logoPath: string;
+  stampPath: string;
+  createdAt: number;
+  updatedAt: number;
+};
