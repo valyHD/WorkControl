@@ -1,5 +1,7 @@
 import type { LiftUnit, MaintenanceClient } from "../../../types/maintenance";
 import type { MaintenanceCompanyBranding } from "../../../types/maintenance";
+import { getBlob, ref } from "firebase/storage";
+import { storage } from "../../../lib/firebase/firebase";
 
 export type ReportType = "revizie" | "interventie" | string;
 
@@ -10,6 +12,8 @@ export type MaintenanceBranding = {
   companyEmail?: string;
   logoUrl?: string;
   stampUrl?: string;
+  logoPath?: string;
+  stampPath?: string;
   signatureUrl?: string;
 };
 
@@ -61,6 +65,8 @@ export function resolveBrandingForCompany(
     companyName: found.companyName,
     logoUrl: found.logoUrl,
     stampUrl: found.stampUrl,
+    logoPath: found.logoPath,
+    stampPath: found.stampPath,
   };
 }
 
@@ -137,18 +143,38 @@ function escapePdfText(value: string): string {
     .replace(/\)/g, "\\)");
 }
 
-async function loadImageAsJpegHex(url?: string): Promise<{ width: number; height: number; hex: string } | null> {
-  if (!url) {
+function parseFirebaseStoragePathFromUrl(url?: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const marker = "/o/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex < 0) return "";
+    const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
+    return decodeURIComponent(encodedPath);
+  } catch {
+    return "";
+  }
+}
+
+async function loadImageAsJpegHex(input: { url?: string; path?: string }): Promise<{ width: number; height: number; hex: string } | null> {
+  const resolvedPath = input.path || parseFirebaseStoragePathFromUrl(input.url);
+  if (!input.url && !resolvedPath) {
     return null;
   }
 
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return null;
+    let blob: Blob | null = null;
+    if (resolvedPath) {
+      blob = await getBlob(ref(storage, resolvedPath));
+    } else if (input.url) {
+      const response = await fetch(input.url);
+      if (!response.ok) {
+        return null;
+      }
+      blob = await response.blob();
     }
-
-    const blob = await response.blob();
+    if (!blob) return null;
     const bitmap = await createImageBitmap(blob);
     const canvas = document.createElement("canvas");
     canvas.width = bitmap.width;
@@ -316,8 +342,8 @@ export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
   ];
 
   const [logo, stamp] = await Promise.all([
-    loadImageAsJpegHex(branding?.logoUrl),
-    loadImageAsJpegHex(branding?.stampUrl),
+    loadImageAsJpegHex({ url: branding?.logoUrl, path: branding?.logoPath }),
+    loadImageAsJpegHex({ url: branding?.stampUrl, path: branding?.stampPath }),
   ]);
 
   return buildPdfDocument({ lines, title, logo, stamp });
