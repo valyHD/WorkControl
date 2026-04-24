@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import { createMaintenanceClient, getMaintenanceClients } from "../services/maintenanceService";
 import type { MaintenanceClient } from "../../../types/maintenance";
@@ -8,12 +9,13 @@ const initialClientForm = {
   email: "catalina.diaconescu@yahoo.com",
   address: "Str. Aurel Vlaicu nr. 91 Sector 2",
   liftNumber: "210869",
-  expiryDate: "04.07.2025",
+  expiryDate: "2025-07-04",
   maintenanceCompany: "ISL ELEVATOR SOLUTIONS SRL",
 };
 
 export default function MaintenancePage() {
   const { role } = useAuth();
+  const navigate = useNavigate();
   const [clients, setClients] = useState<MaintenanceClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -154,9 +156,9 @@ export default function MaintenancePage() {
             <label className="tool-form-label">Exp. Date</label>
             <input
               className="tool-input"
+              type="date"
               value={clientForm.expiryDate}
               onChange={(e) => setClientForm((prev) => ({ ...prev, expiryDate: e.target.value }))}
-              placeholder="04.07.2025"
             />
           </div>
           <div className="tool-form-block">
@@ -197,7 +199,12 @@ export default function MaintenancePage() {
         ) : (
           <div className="simple-list">
             {filteredClients.map((client) => (
-              <div key={client.id} className="simple-list-item">
+              <button
+                key={client.id}
+                className="simple-list-item"
+                type="button"
+                onClick={() => navigate(`/maintenance/${client.id}`)}
+                style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
                 <div className="simple-list-text">
                   <div className="simple-list-label">{client.name || "Fără nume"}</div>
                   <div className="simple-list-subtitle">Adresă: {client.address || "-"}</div>
@@ -209,7 +216,7 @@ export default function MaintenancePage() {
                   </div>
                 </div>
                 <span className="badge badge-blue">client</span>
-              </div>
+              </button>
             ))}
           </div>
         )}

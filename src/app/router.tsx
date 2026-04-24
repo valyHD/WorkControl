@@ -30,6 +30,9 @@ const NotificationRulesPage = lazy(
   () => import("../modules/notifications/pages/NotificationRulesPage")
 );
 const MaintenancePage = lazy(() => import("../modules/maintenance/pages/MaintenancePage"));
+const MaintenanceClientDetailsPage = lazy(
+  () => import("../modules/maintenance/pages/MaintenanceClientDetailsPage")
+);
 
 function RouteLoader() {
   return (
@@ -107,6 +110,7 @@ export const router = createBrowserRouter([
       { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
       { path: "/control-panel/backup-preview", element: withSuspense(<BackupPreviewPage />) },
       { path: "/maintenance", element: withSuspense(<MaintenancePage />) },
+      { path: "/maintenance/:clientId", element: withSuspense(<MaintenanceClientDetailsPage />) },
       { path: "/reports", element: <Navigate to="/control-panel" replace /> },
     ],
   },
