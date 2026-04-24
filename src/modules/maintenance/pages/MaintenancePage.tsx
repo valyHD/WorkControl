@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import {
@@ -8,6 +9,8 @@ import {
   subscribeMaintenanceCompanyBranding,
   uploadMaintenanceBrandingAsset,
 } from "../services/maintenanceService";
+import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
+import { generateReportId, reviewStandardText } from "../utils/reportUtils";
 import type { MaintenanceClient, MaintenanceCompanyBranding } from "../../../types/maintenance";
 
 const initialClientForm = {
@@ -92,6 +95,13 @@ export default function MaintenancePage() {
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingMessage, setBrandingMessage] = useState("");
   const [brandingError, setBrandingError] = useState("");
+  const [reportSearch, setReportSearch] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [reportAddress, setReportAddress] = useState("");
+  const [reportLift, setReportLift] = useState("");
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportMessage, setReportMessage] = useState("");
+  const [reportError, setReportError] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -246,6 +256,141 @@ export default function MaintenancePage() {
     );
   }
 
+
+  const reportSuggestions = useMemo(() => {
+    const query = reportSearch.trim().toLowerCase();
+    if (query.length < 2) {
+      return [] as MaintenanceClient[];
+    }
+
+    return clients
+      .filter((client) => {
+        const addresses = [
+          client.address,
+          ...(client.addresses || []).map((address) => address.label || address.street || ""),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        const lifts = [
+          ...((client.liftNumbers || []).length
+            ? client.liftNumbers
+            : client.liftNumber
+              ? [client.liftNumber]
+              : []),
+          ...(client.addresses || []).flatMap((address) =>
+            (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+          ),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return `${client.name} ${addresses} ${lifts}`.toLowerCase().includes(query);
+      })
+      .slice(0, 8);
+  }, [clients, reportSearch]);
+
+  const selectedClient = useMemo(
+    () => clients.find((item) => item.id === selectedClientId) || null,
+    [clients, selectedClientId]
+  );
+
+  function selectReportClient(client: MaintenanceClient) {
+    const allLifts = [
+      ...((client.liftNumbers || []).length ? client.liftNumbers : client.liftNumber ? [client.liftNumber] : []),
+      ...(client.addresses || []).flatMap((address) =>
+        (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+      ),
+    ]
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const defaultLift = allLifts[0] || "-";
+    setSelectedClientId(client.id);
+    setReportSearch(client.name || client.address || defaultLift);
+    setReportAddress(client.address || client.addresses?.[0]?.label || "-");
+    setReportLift(defaultLift);
+    setReportError("");
+  }
+
+  function handleReportSearchChange(event: ChangeEvent<HTMLInputElement>) {
+    setReportSearch(event.target.value);
+    setReportMessage("");
+    setReportError("");
+  }
+
+  async function handleGenerateReport(type: ReportType) {
+    if (!selectedClient) {
+      setReportError("Selectează un client din sugestii.");
+      return;
+    }
+
+    const liftValue = reportLift.trim();
+    const addressValue = reportAddress.trim();
+    if (!liftValue || !addressValue) {
+      setReportError("Completează adresa și liftul înainte de generare.");
+      return;
+    }
+
+    const branding = resolveBrandingForCompany(selectedClient.maintenanceCompany || "", brandingItems);
+
+    try {
+      setReportGenerating(true);
+      setReportError("");
+      setReportMessage("");
+
+      const now = new Date();
+      const pdfBlob = await buildMaintenancePdfBlob({
+        client: selectedClient,
+        lift: {
+          id: `lift_${liftValue}`,
+          label: `Lift ${liftValue}`,
+          serialNumber: liftValue,
+          manufacturer: "",
+          installYear: "",
+          maintenanceCompany: selectedClient.maintenanceCompany || "",
+          maintenanceEmail: "",
+          inspectionExpiryDate: selectedClient.expiryDate || "",
+          notes: "",
+        },
+        branding,
+        report: {
+          reportType: type,
+          createdAt: now.getTime(),
+          dateText: now.toLocaleDateString("ro-RO"),
+          timeText: now.toLocaleTimeString("ro-RO"),
+          address: addressValue,
+          locationText: addressValue,
+          technicianName: "-",
+          continutRaport:
+            type === "interventie"
+              ? "S-a efectuat interventia conform sesizarii clientului. Instalatia a fost verificata si readusa in stare de functionare in siguranta."
+              : reviewStandardText(liftValue),
+        },
+      });
+
+      const fileType = type === "interventie" ? "interventie" : "revizie";
+      const reportId = generateReportId(now);
+      const fileName = `${fileType}-${selectedClient.name || "client"}-${reportId}.pdf`
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, "-");
+
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      setReportMessage(`Raportul ${fileType} a fost generat.`);
+    } catch (err) {
+      console.error(err);
+      setReportError("Nu am putut genera PDF-ul.");
+    } finally {
+      setReportGenerating(false);
+    }
+  }
   if (role !== "admin" && role !== "manager") {
     return (
       <div className="placeholder-page">
@@ -411,6 +556,74 @@ export default function MaintenancePage() {
         <div className="tool-form-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn" type="button" onClick={() => void handleCreateClient()} disabled={submitting}>
             {submitting ? "Se salvează..." : "Salvează client"}
+          </button>
+        </div>
+      </div>
+
+
+      <div className="panel">
+        <h2 className="panel-title">Generare raport PDF</h2>
+        <p className="tools-subtitle">Scrie minim 2 litere pentru client și selectează din sugestii (nume / adresă / lift). Datele clientului se completează automat, fără e-mail.</p>
+
+        {reportError && <div className="tool-message">{reportError}</div>}
+        {reportMessage && <div className="tool-message success-message">{reportMessage}</div>}
+
+        <div className="tool-form-grid" style={{ marginTop: 12 }}>
+          <div className="tool-form-block" style={{ gridColumn: "1 / -1", position: "relative" }}>
+            <label className="tool-form-label">Client (minim 2 litere)</label>
+            <input
+              className="tool-input"
+              value={reportSearch}
+              onChange={handleReportSearchChange}
+              placeholder="Ex: Razvan / Aurel Vlaicu / 210869"
+            />
+            {reportSuggestions.length > 0 && reportSearch.trim().length >= 2 && (
+              <div className="simple-list" style={{ marginTop: 8, maxHeight: 220, overflowY: "auto" }}>
+                {reportSuggestions.map((client) => (
+                  <button
+                    key={`report_suggestion_${client.id}`}
+                    type="button"
+                    className="simple-list-item"
+                    onClick={() => selectReportClient(client)}
+                    style={{ width: "100%", textAlign: "left", cursor: "pointer" }}>
+                    <div className="simple-list-text">
+                      <div className="simple-list-label">{client.name || "Fără nume"}</div>
+                      <div className="simple-list-subtitle">Adresă: {client.address || "-"}</div>
+                      <div className="simple-list-subtitle">Lift: {client.liftNumber || client.liftNumbers?.[0] || "-"}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Nume client</label>
+            <input className="tool-input" value={selectedClient?.name || ""} readOnly />
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Firma mentenanță</label>
+            <input className="tool-input" value={selectedClient?.maintenanceCompany || ""} readOnly />
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Adresă client</label>
+            <input className="tool-input" value={reportAddress} onChange={(e) => setReportAddress(e.target.value)} placeholder="Adresă client" />
+          </div>
+
+          <div className="tool-form-block">
+            <label className="tool-form-label">Lift</label>
+            <input className="tool-input" value={reportLift} onChange={(e) => setReportLift(e.target.value)} placeholder="Număr lift" />
+          </div>
+        </div>
+
+        <div className="tool-form-actions" style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="primary-btn" type="button" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
+            {reportGenerating ? "Se generează..." : "Generează raport revizie"}
+          </button>
+          <button className="secondary-btn" type="button" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
+            {reportGenerating ? "Se generează..." : "Generează raport intervenție"}
           </button>
         </div>
       </div>
