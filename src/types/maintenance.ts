@@ -25,8 +25,10 @@ export type MaintenanceClient = {
   id: string;
   name: string;
   email: string;
-  phone: string;
-  cif: string;
+  address: string;
+  liftNumber: string;
+  expiryDate: string;
+  maintenanceCompany: string;
   createdAt: number;
   updatedAt: number;
   addresses: ClientAddress[];

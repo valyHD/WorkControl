@@ -44,8 +44,10 @@ function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient
     id,
     name: toText(data.name),
     email: toText(data.email),
-    phone: toText(data.phone),
-    cif: toText(data.cif),
+    address: toText(data.address),
+    liftNumber: toText(data.liftNumber),
+    expiryDate: toText(data.expiryDate),
+    maintenanceCompany: toText(data.maintenanceCompany),
     createdAt: Number(data.createdAt ?? Date.now()),
     updatedAt: Number(data.updatedAt ?? Date.now()),
     addresses: addressesRaw.map((address, addressIndex) => mapAddress(address, addressIndex)),
@@ -60,15 +62,19 @@ export async function getMaintenanceClients(): Promise<MaintenanceClient[]> {
 export async function createMaintenanceClient(input: {
   name: string;
   email: string;
-  phone: string;
-  cif: string;
+  address: string;
+  liftNumber: string;
+  expiryDate: string;
+  maintenanceCompany: string;
 }): Promise<string> {
   const now = Date.now();
   const docRef = await addDoc(maintenanceClientsCollection, {
     name: input.name.trim(),
     email: input.email.trim(),
-    phone: input.phone.trim(),
-    cif: input.cif.trim(),
+    address: input.address.trim(),
+    liftNumber: input.liftNumber.trim(),
+    expiryDate: input.expiryDate.trim(),
+    maintenanceCompany: input.maintenanceCompany.trim(),
     addresses: [],
     createdAt: now,
     updatedAt: now,
