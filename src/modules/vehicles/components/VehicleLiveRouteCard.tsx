@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CircleMarker,
   MapContainer,
@@ -232,6 +232,25 @@ type Props = {
   showControlCard?: boolean;
   onKmEstimateChange?: (km: number) => void;
 };
+
+function GpsSectionDropdown({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details className="vehicle-inline-dropdown" open={defaultOpen}>
+      <summary className="vehicle-inline-dropdown__summary">
+        <span className="panel-title">{title}</span>
+      </summary>
+      <div className="vehicle-inline-dropdown__body">{children}</div>
+    </details>
+  );
+}
 
 export default function VehicleLiveRouteCard({
   vehicle,
@@ -646,7 +665,7 @@ export default function VehicleLiveRouteCard({
         <div>
           <h3 className="panel-title">Harta mare live</h3>
           <p className="tools-subtitle">
-            Traseu complet, stopuri, overspeed, timeline si control vehicul.
+            Traseu complet, stopuri, overspeed si timeline.
           </p>
         </div>
 
@@ -734,6 +753,7 @@ export default function VehicleLiveRouteCard({
         </label>
       </div>
 
+      <GpsSectionDropdown title="Tracker live" defaultOpen>
       <div className="vehicle-live-route-card__mapWrap">
         <MapContainer
           center={mapCenter}
@@ -858,6 +878,7 @@ export default function VehicleLiveRouteCard({
           </div>
         ) : null}
       </div>
+      </GpsSectionDropdown>
 
       <div className="vehicle-gps-stats-grid">
         <div className="vehicle-gps-stat-card">
@@ -912,8 +933,7 @@ export default function VehicleLiveRouteCard({
       </div>
 
       <div className="vehicle-gps-detail-grid">
-        <div className="panel vehicle-info-card">
-          <h4 className="panel-title">Istoric km pe zile</h4>
+        <GpsSectionDropdown title="Istoric km pe zile">
           <div className="simple-list">
             {historyStats.dayBuckets.slice(0, 8).map((item) => (
               <div key={item.id} className="simple-list-item">
@@ -934,10 +954,9 @@ export default function VehicleLiveRouteCard({
               </div>
             )}
           </div>
-        </div>
+        </GpsSectionDropdown>
 
-        <div className="panel vehicle-info-card">
-          <h4 className="panel-title">Istoric km pe saptamani / luni</h4>
+        <GpsSectionDropdown title="Istoric km pe saptamani / luni">
           <div className="simple-list">
             {historyStats.weekBuckets.slice(0, 4).map((item) => (
               <div key={item.id} className="simple-list-item">
@@ -967,7 +986,7 @@ export default function VehicleLiveRouteCard({
               </div>
             )}
           </div>
-        </div>
+        </GpsSectionDropdown>
       </div>
 
       <div className="vehicle-gps-detail-grid">
@@ -976,8 +995,7 @@ export default function VehicleLiveRouteCard({
           odometerKmOverride={historyStats.estimatedCurrentKm}
         />
 
-        <div className="panel vehicle-info-card">
-          <h4 className="panel-title">Opriri & overspeed</h4>
+        <GpsSectionDropdown title="Opriri & overspeed">
           <div className="simple-list">
             {stopItems.slice(0, 6).map((stop) => (
               <div key={stop.id} className="simple-list-item">
@@ -1016,19 +1034,23 @@ export default function VehicleLiveRouteCard({
               </div>
             )}
           </div>
-        </div>
+        </GpsSectionDropdown>
       </div>
 
       <div className="vehicle-gps-detail-grid">
-        <VehicleTripTimeline items={timeline} />
+        <GpsSectionDropdown title="Trip timeline">
+          <VehicleTripTimeline items={timeline} />
+        </GpsSectionDropdown>
 
         {showControlCard ? (
-          <VehicleControlCard
-            vehicle={vehicle}
-            commands={commands}
-            onRequestCommand={handleRequestCommand}
-            loading={loading}
-          />
+          <GpsSectionDropdown title="Control vehicul">
+            <VehicleControlCard
+              vehicle={vehicle}
+              commands={commands}
+              onRequestCommand={handleRequestCommand}
+              loading={loading}
+            />
+          </GpsSectionDropdown>
         ) : null}
       </div>
     </div>
