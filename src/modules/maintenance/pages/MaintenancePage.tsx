@@ -4,10 +4,12 @@ import { createMaintenanceClient, getMaintenanceClients } from "../services/main
 import type { MaintenanceClient } from "../../../types/maintenance";
 
 const initialClientForm = {
-  name: "",
-  email: "",
-  phone: "",
-  cif: "",
+  name: "Razvan Banescu",
+  email: "catalina.diaconescu@yahoo.com",
+  address: "Str. Aurel Vlaicu nr. 91 Sector 2",
+  liftNumber: "210869",
+  expiryDate: "04.07.2025",
+  maintenanceCompany: "ISL ELEVATOR SOLUTIONS SRL",
 };
 
 export default function MaintenancePage() {
@@ -17,6 +19,7 @@ export default function MaintenancePage() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [searchText, setSearchText] = useState("");
   const [clientForm, setClientForm] = useState(initialClientForm);
 
   async function load() {
@@ -36,15 +39,17 @@ export default function MaintenancePage() {
     void load();
   }, []);
 
-  const totals = useMemo(() => {
-    const addresses = clients.reduce((sum, client) => sum + client.addresses.length, 0);
-    const lifts = clients.reduce(
-      (sum, client) => sum + client.addresses.reduce((addressSum, address) => addressSum + address.lifts.length, 0),
-      0
-    );
+  const filteredClients = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    if (!query) {
+      return clients;
+    }
 
-    return { addresses, lifts };
-  }, [clients]);
+    return clients.filter((client) => {
+      const fullText = `${client.name} ${client.address} ${client.liftNumber}`.toLowerCase();
+      return fullText.includes(query);
+    });
+  }, [clients, searchText]);
 
   async function handleCreateClient() {
     setError("");
@@ -55,11 +60,21 @@ export default function MaintenancePage() {
       return;
     }
 
+    if (!clientForm.address.trim()) {
+      setError("Adresa este obligatorie.");
+      return;
+    }
+
+    if (!clientForm.liftNumber.trim()) {
+      setError("Numărul liftului este obligatoriu.");
+      return;
+    }
+
     try {
       setSubmitting(true);
       await createMaintenanceClient(clientForm);
       setClientForm(initialClientForm);
-      setMessage("Clientul a fost adăugat. Următorul pas: adăugare adrese și lifturi.");
+      setMessage("Clientul din mentenanță a fost salvat.");
       await load();
     } catch (err) {
       console.error(err);
@@ -86,36 +101,30 @@ export default function MaintenancePage() {
           <div className="kpi-value">{clients.length}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Adrese în sistem</div>
-          <div className="kpi-value">{totals.addresses}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-label">Lifturi în sistem</div>
-          <div className="kpi-value">{totals.lifts}</div>
+          <div className="kpi-label">Rezultate filtrate</div>
+          <div className="kpi-value">{filteredClients.length}</div>
         </div>
       </div>
 
       <div className="panel">
-        <h2 className="panel-title">Mentenanță · Bază clienți</h2>
-        <p className="tools-subtitle">
-          Pregătire pentru baza de date client → adrese → lifturi. De aici vom genera PDF-uri pe client.
-        </p>
+        <h2 className="panel-title">Mentenanță · Formular client</h2>
+        <p className="tools-subtitle">Completează capurile cerute, salvează și apoi vezi lista clienților mai jos.</p>
 
         {error && <div className="tool-message">{error}</div>}
         {message && <div className="tool-message success-message">{message}</div>}
 
         <div className="tool-form-grid" style={{ marginTop: 12 }}>
           <div className="tool-form-block">
-            <label className="tool-form-label">Nume client</label>
+            <label className="tool-form-label">Nume</label>
             <input
               className="tool-input"
               value={clientForm.name}
               onChange={(e) => setClientForm((prev) => ({ ...prev, name: e.target.value }))}
-              placeholder="Ex: Asociația Magnolia"
+              placeholder="Ex: Razvan Banescu"
             />
           </div>
           <div className="tool-form-block">
-            <label className="tool-form-label">Email</label>
+            <label className="tool-form-label">E-mail</label>
             <input
               className="tool-input"
               value={clientForm.email}
@@ -124,53 +133,82 @@ export default function MaintenancePage() {
             />
           </div>
           <div className="tool-form-block">
-            <label className="tool-form-label">Telefon</label>
+            <label className="tool-form-label">Adresă</label>
             <input
               className="tool-input"
-              value={clientForm.phone}
-              onChange={(e) => setClientForm((prev) => ({ ...prev, phone: e.target.value }))}
-              placeholder="07xx xxx xxx"
+              value={clientForm.address}
+              onChange={(e) => setClientForm((prev) => ({ ...prev, address: e.target.value }))}
+              placeholder="Str. Aurel Vlaicu nr. 91 Sector 2"
             />
           </div>
           <div className="tool-form-block">
-            <label className="tool-form-label">CIF / CUI</label>
+            <label className="tool-form-label">Lift</label>
             <input
               className="tool-input"
-              value={clientForm.cif}
-              onChange={(e) => setClientForm((prev) => ({ ...prev, cif: e.target.value }))}
-              placeholder="RO1234567"
+              value={clientForm.liftNumber}
+              onChange={(e) => setClientForm((prev) => ({ ...prev, liftNumber: e.target.value }))}
+              placeholder="210869"
+            />
+          </div>
+          <div className="tool-form-block">
+            <label className="tool-form-label">Exp. Date</label>
+            <input
+              className="tool-input"
+              value={clientForm.expiryDate}
+              onChange={(e) => setClientForm((prev) => ({ ...prev, expiryDate: e.target.value }))}
+              placeholder="04.07.2025"
+            />
+          </div>
+          <div className="tool-form-block">
+            <label className="tool-form-label">Firma Mentenanță</label>
+            <input
+              className="tool-input"
+              value={clientForm.maintenanceCompany}
+              onChange={(e) => setClientForm((prev) => ({ ...prev, maintenanceCompany: e.target.value }))}
+              placeholder="ISL ELEVATOR SOLUTIONS SRL"
             />
           </div>
         </div>
 
         <div className="tool-form-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn" type="button" onClick={() => void handleCreateClient()} disabled={submitting}>
-            {submitting ? "Se salvează..." : "Adaugă client"}
+            {submitting ? "Se salvează..." : "Salvează client"}
           </button>
         </div>
       </div>
 
       <div className="panel">
-        <h3 className="panel-subtitle">Clienți existenți</h3>
+        <h3 className="panel-subtitle">Clienți mentenanță</h3>
+
+        <div className="tool-form-block" style={{ marginBottom: 12 }}>
+          <label className="tool-form-label">Caută după nume, adresă sau lift</label>
+          <input
+            className="tool-input"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Ex: Razvan / Aurel Vlaicu / 210869"
+          />
+        </div>
 
         {loading ? (
           <p className="tools-subtitle">Se încarcă datele...</p>
-        ) : clients.length === 0 ? (
-          <p className="tools-subtitle">Nu există clienți. Adaugă primul client pentru a porni baza de date.</p>
+        ) : filteredClients.length === 0 ? (
+          <p className="tools-subtitle">Nu există clienți pentru căutarea curentă.</p>
         ) : (
           <div className="simple-list">
-            {clients.map((client) => (
+            {filteredClients.map((client) => (
               <div key={client.id} className="simple-list-item">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">{client.name}</div>
+                  <div className="simple-list-label">{client.name || "Fără nume"}</div>
+                  <div className="simple-list-subtitle">Adresă: {client.address || "-"}</div>
                   <div className="simple-list-subtitle">
-                    {client.email || "fără email"} · {client.phone || "fără telefon"} · {client.cif || "fără CIF"}
+                    Lift: {client.liftNumber || "-"} · Exp. Date: {client.expiryDate || "-"}
                   </div>
                   <div className="simple-list-subtitle">
-                    Adrese: {client.addresses.length} · Lifturi: {client.addresses.reduce((sum, address) => sum + address.lifts.length, 0)}
+                    Firma mentenanță: {client.maintenanceCompany || "-"} · E-mail: {client.email || "-"}
                   </div>
                 </div>
-                <span className="badge badge-blue">pregătit</span>
+                <span className="badge badge-blue">client</span>
               </div>
             ))}
           </div>
