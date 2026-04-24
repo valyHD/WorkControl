@@ -3093,6 +3093,49 @@ html {
   padding: 0 16px 16px;
 }
 
+.vehicle-section-dropdown {
+  padding: 0 !important;
+  overflow: hidden;
+}
+.vehicle-section-dropdown__summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+}
+.vehicle-section-dropdown__summary::-webkit-details-marker {
+  display: none;
+}
+.vehicle-section-dropdown__summary .panel-title {
+  margin-bottom: 0;
+}
+.vehicle-section-dropdown__summary .tools-subtitle {
+  margin: 0;
+}
+.vehicle-section-dropdown__body {
+  padding: 0 16px 16px;
+}
+
+.vehicle-inline-dropdown {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.vehicle-inline-dropdown__summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+}
+.vehicle-inline-dropdown__summary::-webkit-details-marker {
+  display: none;
+}
+.vehicle-inline-dropdown__summary .panel-title {
+  margin: 0;
+  font-size: 15px;
+}
+.vehicle-inline-dropdown__body {
+  padding: 0 14px 14px;
+}
+
 /* ── tool-gallery improvements ── */
 .tool-gallery {
   display: grid;
@@ -3318,6 +3361,18 @@ html {
     padding: 12px;
   }
   .vehicle-sections-dropdown__body {
+    padding: 0 12px 12px;
+  }
+  .vehicle-section-dropdown__summary {
+    padding: 12px;
+  }
+  .vehicle-section-dropdown__body {
+    padding: 0 12px 12px;
+  }
+  .vehicle-inline-dropdown__summary {
+    padding: 10px 12px;
+  }
+  .vehicle-inline-dropdown__body {
     padding: 0 12px 12px;
   }
 }
