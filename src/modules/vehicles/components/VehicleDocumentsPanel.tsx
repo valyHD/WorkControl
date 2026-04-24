@@ -37,9 +37,17 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
+  function getDownloadUrl(item: VehicleDocumentItem): string {
+    const separator = item.url.includes("?") ? "&" : "?";
+    const fileName = encodeURIComponent(item.name);
+    return `${item.url}${separator}response-content-disposition=attachment%3B%20filename%3D%22${fileName}%22`;
+  }
+
   async function handleDownloadDocument(item: VehicleDocumentItem) {
+    const downloadUrl = getDownloadUrl(item);
+
     try {
-      const response = await fetch(item.url, { credentials: "omit" });
+      const response = await fetch(downloadUrl, { credentials: "omit" });
       if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
       const blob = await response.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -54,7 +62,7 @@ export default function VehicleDocumentsPanel({
       URL.revokeObjectURL(objectUrl);
     } catch {
       const link = document.createElement("a");
-      link.href = item.url;
+      link.href = downloadUrl;
       link.download = item.name;
       link.rel = "noopener noreferrer";
       link.style.display = "none";
@@ -117,13 +125,7 @@ export default function VehicleDocumentsPanel({
                     </div>
 
                     {previewKind === "image" ? (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="vehicle-doc-preview"
-                        title="Preview document"
-                      >
+                      <a href={item.url} rel="noreferrer" className="vehicle-doc-preview" title="Preview document">
                         <img src={item.url} alt={item.name} loading="lazy" />
                       </a>
                     ) : previewKind === "embed" ? (
@@ -138,7 +140,7 @@ export default function VehicleDocumentsPanel({
                     )}
 
                     <div className="vehicle-doc-card__actions">
-                      <a className="secondary-btn" href={item.url} target="_blank" rel="noreferrer">
+                      <a className="secondary-btn" href={item.url} rel="noreferrer">
                         <ExternalLink size={14} /> Deschide
                       </a>
                       <a
