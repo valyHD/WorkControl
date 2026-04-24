@@ -1029,14 +1029,7 @@ export default function VehicleLiveRouteCard({
             onRequestCommand={handleRequestCommand}
             loading={loading}
           />
-        ) : (
-          <div className="panel vehicle-info-card">
-            <h4 className="panel-title">Control vehicul mutat sus</h4>
-            <p className="tools-subtitle">
-              Comenzile DOUT1 au fost mutate deasupra sectiunii „Date generale”.
-            </p>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

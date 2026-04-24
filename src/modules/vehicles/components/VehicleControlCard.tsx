@@ -311,8 +311,8 @@ export default function VehicleControlCard({ vehicle, commands, onRequestCommand
         </div>
       )}
 
-      <div className="tool-detail-line" style={{ marginTop: 12, fontSize: 13 }}>
-        <strong>IMEI:</strong> {vehicle.tracker?.imei || "-"}
+      <div className="tool-detail-line vehicle-control-card__imei-row" style={{ marginTop: 12, fontSize: 13 }}>
+        <strong>IMEI:</strong> <span className="vehicle-control-card__imei">{vehicle.tracker?.imei || "-"}</span>
         {vehicle.tracker?.protocol && (
           <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>· {vehicle.tracker.protocol}</span>
         )}

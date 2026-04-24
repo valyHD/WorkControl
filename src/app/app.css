@@ -3051,6 +3051,47 @@ html {
   gap: 12px !important;
   padding: 16px 18px !important;
 }
+.vehicle-control-card__header {
+  align-items: flex-start;
+  gap: 10px;
+}
+.vehicle-control-card__header .vehicle-gps-chip {
+  white-space: nowrap;
+}
+.vehicle-control-card__imei {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.vehicle-details-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.vehicle-sections-dropdown {
+  padding: 0 !important;
+  overflow: hidden;
+}
+.vehicle-sections-dropdown__summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 16px;
+}
+.vehicle-sections-dropdown__summary::-webkit-details-marker {
+  display: none;
+}
+.vehicle-sections-dropdown__summary .panel-title {
+  margin-bottom: 4px;
+}
+.vehicle-sections-dropdown__summary .tools-subtitle {
+  margin: 0;
+}
+.vehicle-sections-dropdown__body {
+  padding: 0 16px 16px;
+}
 
 /* ── tool-gallery improvements ── */
 .tool-gallery {
@@ -3267,6 +3308,18 @@ html {
 @media (max-width: 640px) {
   .tool-gallery { grid-template-columns: repeat(2, 1fr); }
   .vc-auth-panel .tool-form-actions { flex-direction: column; }
+  .vehicle-control-card { padding: 12px !important; }
+  :root[data-ui-density="spacious"] .panel { padding: 14px; }
+  .vehicle-control-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .vehicle-sections-dropdown__summary {
+    padding: 12px;
+  }
+  .vehicle-sections-dropdown__body {
+    padding: 0 12px 12px;
+  }
 }
 @media (max-width: 400px) {
   .tool-gallery { grid-template-columns: 1fr; }
