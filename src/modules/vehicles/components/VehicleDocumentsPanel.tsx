@@ -1,5 +1,4 @@
 import { ExternalLink, Download, FileText, Trash2 } from "lucide-react";
-import type { MouseEvent } from "react";
 import type { VehicleDocumentCategory, VehicleDocumentItem } from "../../../types/vehicle";
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
@@ -53,23 +52,25 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
-  function handleDownloadDocument(item: VehicleDocumentItem) {
+  async function handleDownloadDocument(item: VehicleDocumentItem) {
     const downloadUrl = buildDownloadUrl(item.url, item.name);
-    const link = document.createElement("a");
-    link.href = downloadUrl;
-    link.download = item.name;
-    link.rel = "noopener noreferrer";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  }
-
-  function buildDownloadHandler(item: VehicleDocumentItem) {
-    return (event: MouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      handleDownloadDocument(item);
-    };
+    try {
+      const response = await fetch(downloadUrl, { credentials: "omit" });
+      if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = item.name;
+      link.rel = "noopener noreferrer";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    }
   }
 
   if (!documents.length) {
@@ -151,9 +152,12 @@ export default function VehicleDocumentsPanel({
                       </a>
                       <a
                         className="secondary-btn"
-                        href={item.url}
+                        href={buildDownloadUrl(item.url, item.name)}
                         download={item.name}
-                        onClick={buildDownloadHandler(item)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          void handleDownloadDocument(item);
+                        }}
                       >
                         <Download size={14} /> Download
                       </a>
