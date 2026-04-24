@@ -1,4 +1,15 @@
-import { addDoc, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import type { ClientAddress, LiftUnit, MaintenanceClient } from "../../../types/maintenance";
 
@@ -69,6 +80,21 @@ function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient
 export async function getMaintenanceClients(): Promise<MaintenanceClient[]> {
   const snap = await getDocs(query(maintenanceClientsCollection, orderBy("updatedAt", "desc")));
   return snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>));
+}
+
+export function subscribeMaintenanceClients(
+  onData: (clients: MaintenanceClient[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    query(maintenanceClientsCollection, orderBy("updatedAt", "desc")),
+    (snap) => {
+      onData(snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>)));
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
 }
 
 export async function createMaintenanceClient(input: {
