@@ -380,8 +380,14 @@ export default function MaintenancePage() {
       const link = document.createElement("a");
       link.href = url;
       link.download = fileName;
+      link.rel = "noopener";
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+        link.remove();
+      }, 0);
 
       setReportMessage(`Raportul ${fileType} a fost generat.`);
     } catch (err) {

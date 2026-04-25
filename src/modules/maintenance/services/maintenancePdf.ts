@@ -341,10 +341,13 @@ export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
     "Semnatura tehnician: _____________________",
   ];
 
-  const [logo, stamp] = await Promise.all([
+  const [logoResult, stampResult] = await Promise.allSettled([
     loadImageAsJpegHex({ url: branding?.logoUrl, path: branding?.logoPath }),
     loadImageAsJpegHex({ url: branding?.stampUrl, path: branding?.stampPath }),
   ]);
+
+  const logo = logoResult.status === "fulfilled" ? logoResult.value : null;
+  const stamp = stampResult.status === "fulfilled" ? stampResult.value : null;
 
   return buildPdfDocument({ lines, title, logo, stamp });
 }
