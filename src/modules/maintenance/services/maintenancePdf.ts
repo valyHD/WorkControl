@@ -145,13 +145,30 @@ function escapePdfText(value: string): string {
 
 function parseFirebaseStoragePathFromUrl(url?: string): string {
   if (!url) return "";
+  if (url.startsWith("gs://")) {
+    const slashIndex = url.indexOf("/", "gs://".length);
+    return slashIndex >= 0 ? url.slice(slashIndex + 1) : "";
+  }
+
   try {
     const parsed = new URL(url);
     const marker = "/o/";
     const markerIndex = parsed.pathname.indexOf(marker);
-    if (markerIndex < 0) return "";
-    const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
-    return decodeURIComponent(encodedPath);
+    if (markerIndex >= 0) {
+      const encodedPath = parsed.pathname.slice(markerIndex + marker.length);
+      return decodeURIComponent(encodedPath);
+    }
+
+    const bucketMarker = "/b/";
+    const bucketIndex = parsed.pathname.indexOf(bucketMarker);
+    if (bucketIndex >= 0) {
+      const objectStart = parsed.pathname.indexOf("/", bucketIndex + bucketMarker.length);
+      if (objectStart >= 0 && objectStart + 1 < parsed.pathname.length) {
+        return decodeURIComponent(parsed.pathname.slice(objectStart + 1));
+      }
+    }
+
+    return "";
   } catch {
     return "";
   }
@@ -159,21 +176,12 @@ function parseFirebaseStoragePathFromUrl(url?: string): string {
 
 async function loadImageAsJpegHex(input: { url?: string; path?: string }): Promise<{ width: number; height: number; hex: string } | null> {
   const resolvedPath = input.path || parseFirebaseStoragePathFromUrl(input.url);
-  if (!input.url && !resolvedPath) {
+  if (!resolvedPath) {
     return null;
   }
 
   try {
-    let blob: Blob | null = null;
-    if (resolvedPath) {
-      blob = await getBlob(ref(storage, resolvedPath));
-    } else if (input.url) {
-      const response = await fetch(input.url);
-      if (!response.ok) {
-        return null;
-      }
-      blob = await response.blob();
-    }
+    const blob = await getBlob(ref(storage, resolvedPath));
     if (!blob) return null;
     const bitmap = await createImageBitmap(blob);
     const canvas = document.createElement("canvas");
