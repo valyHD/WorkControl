@@ -2033,6 +2033,38 @@ async function resolveVehicleQuickUpdateAction(
     fieldsToUpdate: {
       [field.label]: displayValue,
     },
+    executionPlan: [
+      {
+        id: "resolve-vehicle",
+        type: "resolve_entity",
+        label: `Identific masina: ${label || "masina selectata"}.`,
+        target: resolved.vehicle.id,
+      },
+      {
+        id: "validate-field",
+        type: "validate_fields",
+        label: `Validez campul ${field.label} si valoarea ${displayValue}.`,
+        fields: [String(field.key)],
+      },
+      {
+        id: "confirm",
+        type: "confirm",
+        label: "Astept confirmarea ta inainte de modificare.",
+        requiresConfirmation: true,
+      },
+      {
+        id: "update-vehicle",
+        type: "service_update",
+        label: "Actualizez masina prin serviciul vehicles.",
+        target: resolved.vehicle.id,
+        fields: [String(field.key)],
+      },
+      {
+        id: "audit",
+        type: "audit",
+        label: "Salvez actiunea in auditul asistentului.",
+      },
+    ],
     changeSummaries: [
       {
         label: field.label,
@@ -3574,6 +3606,22 @@ export default function VoiceCommandAssistant() {
     const classification = classifyAssistantCommand(command);
     const agentPipelineRequired = isMutationLikeAssistantCommand(classification, normalized);
     let structuredInterpretationTried = false;
+    const resolveControlledServiceBackedAction = async () => {
+      const profileQuickUpdateAction = resolveProfileQuickUpdateAction(command, user, (path) => navigate(path));
+      if (profileQuickUpdateAction) return profileQuickUpdateAction;
+
+      const vehicleQuickUpdateAction = await resolveVehicleQuickUpdateAction(
+        command,
+        user?.uid,
+        location.pathname,
+        (path) => navigate(path),
+        conversationContextRef.current.lastVehicleId
+      );
+      if (vehicleQuickUpdateAction) return vehicleQuickUpdateAction;
+
+      return null;
+    };
+
     const resolveStructuredAction = async () => {
       structuredInterpretationTried = true;
       const rawInterpretation = await interpretAssistantCommand(command, {
@@ -3594,6 +3642,9 @@ export default function VoiceCommandAssistant() {
       );
 
       if (structuredIsMutation && interpretation.confidence < ASSISTANT_AGENT_CONFIDENCE_THRESHOLD) {
+        const serviceBackedAction = await resolveControlledServiceBackedAction();
+        if (serviceBackedAction) return serviceBackedAction;
+
         return buildAgentClarificationAction(
           "Nu sunt destul de sigur ca am inteles corect. Spune comanda mai concret, cu entitatea si valoarea exacta.",
           interpretation.confidence
@@ -3721,6 +3772,9 @@ export default function VoiceCommandAssistant() {
       } catch (error) {
         console.warn("[VoiceCommandAssistant][structured interpret]", error);
         if (agentPipelineRequired) {
+          const serviceBackedAction = await resolveControlledServiceBackedAction();
+          if (serviceBackedAction) return serviceBackedAction;
+
           return buildAgentClarificationAction(
             "Nu pot verifica sigur comanda cu agentul acum. Nu execut modificari sau completari fara interpretare structurata.",
             classification.confidence
@@ -3748,6 +3802,9 @@ export default function VoiceCommandAssistant() {
     }
 
     if (agentPipelineRequired) {
+      const serviceBackedAction = await resolveControlledServiceBackedAction();
+      if (serviceBackedAction) return serviceBackedAction;
+
       return buildAgentClarificationAction(
         "Comanda pare sa modifice sau sa completeze date. Am oprit executia fiindca nu exista un plan valid confirmat.",
         classification.confidence

@@ -316,14 +316,8 @@ const ASSISTANT_COMMAND_SCHEMA = {
         shouldNavigate: { type: 'boolean' },
         path: { type: 'string' },
         section: { type: 'string' },
-        params: {
-          type: 'object',
-          additionalProperties: {
-            anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
-          },
-        },
       },
-      required: ['shouldNavigate', 'path', 'section', 'params'],
+      required: ['shouldNavigate', 'path', 'section'],
     },
     targetText: {
       type: 'string',
