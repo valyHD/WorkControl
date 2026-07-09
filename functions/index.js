@@ -222,8 +222,26 @@ const ASSISTANT_COMMAND_SCHEMA = {
         'fill_current_page',
         'update_current_page_field',
         'submit_current_form',
+        'open_dashboard',
+        'open_my_vehicle',
+        'open_my_timesheets',
+        'open_vehicle_tracker',
+        'open_vehicle_live',
+        'open_gps_maps',
+        'open_leave',
+        'open_expense_scan',
+        'open_expense_invoices',
+        'open_maintenance_report',
+        'update_vehicle_field',
+        'update_profile_field',
+        'open_user_activity',
+        'create_manual_notification',
         'unknown',
       ],
+    },
+    targetModule: {
+      type: 'string',
+      description: 'Modulul principal WorkControl: vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, navigation, assistant.',
     },
     entityType: {
       type: 'string',
@@ -232,6 +250,28 @@ const ASSISTANT_COMMAND_SCHEMA = {
     entityQuery: {
       type: 'string',
       description: 'Textul folosit pentru cautare: numar masina, marca/model, nume scula, proiect sau user.',
+    },
+    formSchemaId: {
+      type: 'string',
+      description: 'Schema formularului controlat, ex: maintenance-client, leave-request, vehicle, tool, user, timesheet sau string gol.',
+    },
+    fields: {
+      type: 'object',
+      description: 'Campuri normalizate pentru agent, identice cu fieldsToUpdate cand se modifica sau completeaza date.',
+      additionalProperties: {
+        anyOf: [
+          { type: 'string' },
+          { type: 'number' },
+          { type: 'boolean' },
+          { type: 'null' },
+          {
+            type: 'array',
+            items: {
+              anyOf: [{ type: 'string' }, { type: 'number' }],
+            },
+          },
+        ],
+      },
     },
     fieldsToUpdate: {
       type: 'object',
@@ -269,6 +309,22 @@ const ASSISTANT_COMMAND_SCHEMA = {
     shouldUpdateFirestore: {
       type: 'boolean',
     },
+    navigation: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        shouldNavigate: { type: 'boolean' },
+        path: { type: 'string' },
+        section: { type: 'string' },
+        params: {
+          type: 'object',
+          additionalProperties: {
+            anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+          },
+        },
+      },
+      required: ['shouldNavigate', 'path', 'section', 'params'],
+    },
     targetText: {
       type: 'string',
       description: 'Text secundar pentru compatibilitate: pagina, raport, client sau mesaj.',
@@ -298,6 +354,16 @@ const ASSISTANT_COMMAND_SCHEMA = {
       type: 'string',
       enum: ['low', 'medium', 'high'],
     },
+    confirmation: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        required: { type: 'boolean' },
+        reason: { type: 'string' },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'] },
+      },
+      required: ['required', 'reason', 'risk'],
+    },
     needsConfirmation: {
       type: 'boolean',
     },
@@ -305,17 +371,41 @@ const ASSISTANT_COMMAND_SCHEMA = {
       type: 'string',
       description: 'Rezumat scurt pentru confirmarea din UI.',
     },
+    reasoning: {
+      type: 'string',
+      description: 'Motiv scurt pentru debug. Nu include explicatii lungi.',
+    },
+    executionPlan: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          type: { type: 'string' },
+          label: { type: 'string' },
+          target: { type: 'string' },
+          fields: { type: 'array', items: { type: 'string' } },
+          requiresConfirmation: { type: 'boolean' },
+        },
+        required: ['id', 'type', 'label', 'target', 'fields', 'requiresConfirmation'],
+      },
+    },
   },
   required: [
     'commandType',
     'intent',
+    'targetModule',
     'entityType',
     'entityQuery',
+    'formSchemaId',
+    'fields',
     'fieldsToUpdate',
     'dateRange',
     'shouldNavigate',
     'shouldFillForm',
     'shouldUpdateFirestore',
+    'navigation',
     'targetText',
     'targetPage',
     'pageHint',
@@ -323,8 +413,11 @@ const ASSISTANT_COMMAND_SCHEMA = {
     'missingFields',
     'confidence',
     'risk',
+    'confirmation',
     'needsConfirmation',
     'spokenSummary',
+    'reasoning',
+    'executionPlan',
   ],
 };
 
@@ -1584,6 +1677,174 @@ async function runTimesheetReminderAlertsJob() {
   };
 }
 
+function buildWorkControlAssistantExamples() {
+  return [
+    '1. "du-ma la dashboard" => navigation/open_page /dashboard.',
+    '2. "deschide masina mea" => navigation/open_my_vehicle /my-vehicle.',
+    '3. "du-ma la pontajul meu" => navigation/open_my_timesheets /my-timesheets, fara start pontaj.',
+    '4. "arata pontajele" => navigation/open_page /timesheets.',
+    '5. "deschide proiecte" => navigation/open_page /projects.',
+    '6. "deschide concedii" => navigation/open_leave /my-leave.',
+    '7. "du-ma la bonuri" => navigation/open_expense_scan /expenses/scan?assistant=upload.',
+    '8. "deschide facturi" => navigation/open_expense_invoices /expenses/invoices.',
+    '9. "du-ma la mentenanta" => navigation/open_page /maintenance.',
+    '10. "deschide piese mentenanta" => navigation/open_page /maintenance?tab=parts.',
+    '11. "deschide firme mentenanta" => navigation/open_page /maintenance?tab=companies.',
+    '12. "arata istoricul rapoartelor" => navigation/open_page /maintenance?tab=history.',
+    '13. "verifica reviziile lunare" => navigation/open_page /maintenance?tab=checks.',
+    '14. "genereaza raport revizie" => navigation/open_maintenance_report /maintenance?tab=report&assistant=report.',
+    '15. "deschide toate gpsurile" => navigation/open_gps_maps /vehicles/gps-map.',
+    '16. "harta cu toate gps in dreptul dacia spring" => navigation/open_gps_maps, entityType vehicle, entityQuery "dacia spring".',
+    '17. "du-ma la gpsul dubei cu 04" => navigation/open_vehicle_tracker, entityQuery "04".',
+    '18. "deschide tracker live la B 33 LGR" => navigation/open_vehicle_tracker, entityQuery "B33LGR".',
+    '19. "deschide detalii live Logan" => navigation/open_vehicle_live, entityQuery "Logan".',
+    '20. "arata masina condusa de Razvan" => navigation/open_vehicle, entityQuery "Razvan".',
+    '21. "schimba kilometrii Loganului la 6200" => entity_update/update_vehicle vehicle "Logan" fields {"kilometri":6200}.',
+    '22. "pune km la B 33 LGR 6180" => entity_update/update_vehicle vehicle "B33LGR" fields {"kilometri":6180}.',
+    '23. "modifica ITP la Logan pe 20 septembrie 2026" => entity_update/update_vehicle fields {"ITP":"2026-09-20"}.',
+    '24. "schimba RCA la B44ABC pe 01.08.2026" => entity_update/update_vehicle fields {"RCA":"2026-08-01"}.',
+    '25. "pune rovinieta la Toyota pe 15 august" => entity_update/update_vehicle fields {"rovinieta":"2026-08-15"}.',
+    '26. "seteaza casco la dacia pana pe 10 octombrie" => entity_update/update_vehicle fields {"casco":"2026-10-10"}.',
+    '27. "schimba soferul la B33LGR pe Mihai" => entity_update/update_vehicle fields {"sofer":"Mihai"}.',
+    '28. "pune masina lui Razvan in service" => entity_update/update_vehicle entityQuery "Razvan" fields {"status":"in_service"}.',
+    '29. "marcheaza masina B44ABC avariata" => entity_update/update_vehicle fields {"status":"avariata"}.',
+    '30. "schimba numarul masinii Toyota in B99XYZ" => entity_update/update_vehicle fields {"numar inmatriculare":"B99XYZ"}.',
+    '31. "modifica marca masinii B33LGR in Dacia" => entity_update/update_vehicle fields {"marca":"Dacia"}.',
+    '32. "schimba modelul la B33LGR in Logan" => entity_update/update_vehicle fields {"model":"Logan"}.',
+    '33. "seteaza VIN la B33LGR UU1..." => entity_update/update_vehicle fields {"vin":"UU1..."}.',
+    '34. "pune urmatorul service la 90000 km" => entity_update/update_vehicle, daca entitatea lipseste confidence sub 0.85 si missingFields ["vehicle"].',
+    '35. "editeaza km masinii in 6180" => entity_update/update_vehicle numai daca exista masina in context, altfel clarificare.',
+    '36. "creeaza masina B55ABC Dacia Logan" => create_entity/create_vehicle fields {"plateNumber":"B55ABC","brand":"Dacia","model":"Logan"}.',
+    '37. "adauga masina Toyota Corolla B10ABC" => create_entity/create_vehicle fields plateNumber brand model.',
+    '38. "deschide formular masina noua" => navigation/open_page /vehicles/new, nu completa campuri.',
+    '39. "deschide scule" => navigation/open_page /tools.',
+    '40. "deschide scula Bosch" => navigation/open_tool entityQuery "Bosch".',
+    '41. "arata flexul Bosh" => navigation/open_tool entityQuery "Bosh"; fuzzy poate gasi Bosch.',
+    '42. "marcheaza flexul Bosch defect" => entity_update/update_tool tool "flex Bosch" fields {"status":"defecta"}.',
+    '43. "muta bormasina la Ionut" => entity_update/update_tool fields {"detinator":"Ionut"}.',
+    '44. "schimba responsabilul la Hilti pe Mihai" => entity_update/update_tool fields {"responsabil":"Mihai"}.',
+    '45. "pune cod intern la flex Bosch F123" => entity_update/update_tool fields {"cod intern":"F123"}.',
+    '46. "schimba locatia sculei Hilti in depozit" => entity_update/update_tool fields {"locatie":"depozit"}.',
+    '47. "adauga observatii la bormasina verificata" => entity_update/update_tool fields {"observatii":"verificata"}.',
+    '48. "seteaza garantia la Hilti pe 01.12.2026" => entity_update/update_tool fields {"garantie":"2026-12-01"}.',
+    '49. "creeaza scula flex Bosch cod F123" => create_entity/create_tool fields {"name":"flex Bosch","internalCode":"F123"}.',
+    '50. "adauga unealta Bosh mare" => create_entity/create_tool fields {"name":"Bosh mare"}.',
+    '51. "deschide pontajul meu" => navigation/open_my_timesheets, fara start.',
+    '52. "porneste pontajul" => timesheet_action/start_timesheet, confirmation required.',
+    '53. "porneste pontaj pe proiect Vali Mare Boss" => timesheet_action/start_timesheet targetText "Vali Mare Boss".',
+    '54. "selecteaza proiectul Vali Mare Boss si dai start pontaj" => timesheet_action/start_timesheet targetText "Vali Mare Boss".',
+    '55. "creeaza proiect Service 2 si porneste pontaj" => timesheet_action/start_timesheet fields {"project":"Service 2","createProjectIfMissing":true}.',
+    '56. "opreste pontajul" => timesheet_action/stop_timesheet.',
+    '57. "inchide pontajul activ" => timesheet_action/stop_timesheet.',
+    '58. "arata ultimul pontaj al lui Razvan" => navigation/open_user_activity sau open_latest_timesheet entityQuery "Razvan".',
+    '59. "du-ma la pontaje si cauta Mihai" => navigation/open_page /timesheets?assistantSearch=Mihai.',
+    '60. "creeaza proiect Revizie Lifturi Sector 3" => create_entity/create_project fields {"name":"Revizie Lifturi Sector 3"}.',
+    '61. "schimba proiectul Service Lifturi in finalizat" => entity_update/update_project fields {"status":"finalizat"}.',
+    '62. "seteaza proiectul Vali inactiv" => entity_update/update_project fields {"status":"inactiv"}.',
+    '63. "schimba numele proiectului Service 2 in Service 2026" => entity_update/update_project fields {"name":"Service 2026"}.',
+    '64. "programeaza concediu maine" => form_fill/schedule_leave formSchemaId leave-request fields startDate/endDate maine.',
+    '65. "programeaza concediu din 24 august pana pe 30 august" => form_fill/schedule_leave fields {"startDate":"2026-08-24","endDate":"2026-08-30"}.',
+    '66. "completeaza concediu motiv medical pe 12 august" => form_fill/fill_leave_form fields {"startDate":"2026-08-12","endDate":"2026-08-12","reason":"medical"}.',
+    '67. "trimite cererea de concediu" => submit_current_form, confirmation required, nu apasa fara confirmare.',
+    '68. "du-ma la calendar concedii" => navigation/open_leave.',
+    '69. "adauga client mentenanta Isomat lift 210869" => create_entity/create_maintenance_client formSchemaId maintenance-client fields {"name":"Isomat","liftNumbers":["210869"]}.',
+    '70. "adauga client nou Isomat email office@isomat.ro lift 210869" => create_maintenance_client fields name email liftNumbers.',
+    '71. "completeaza client mentenanta Isomat adresa Aurel Vlaicu 91 lift 210869" => fill_maintenance_client_form.',
+    '72. "adauga client mentenanta Isomat cu firma ISL Elevator" => create_maintenance_client fields maintenanceCompany.',
+    '73. "adauga doua lifturi 123 si 456 la client Isomat" => create_maintenance_client fields {"name":"Isomat","liftNumbers":["123","456"]}.',
+    '74. "deschide clientul Isomat" => navigation/open_page sau open_page /maintenance cu entityQuery Isomat.',
+    '75. "genereaza raport revizie pentru Isomat" => navigation/open_maintenance_report fields {"reportType":"revizie","client":"Isomat"}.',
+    '76. "genereaza raport interventie pentru clientul X" => navigation/open_maintenance_report reportType interventie.',
+    '77. "deschide piese la mentenanta" => navigation/open_page /maintenance?tab=parts.',
+    '78. "adauga client mentenanta" fara nume => create_entity cu confidence sub 0.85 si missingFields ["name","liftNumbers"].',
+    '79. "deschide firme branding" => navigation/open_page /maintenance?tab=companies.',
+    '80. "arata verificari lunare" => navigation/open_page /maintenance?tab=checks.',
+    '81. "deschide istoric rapoarte" => navigation/open_page /maintenance?tab=history.',
+    '82. "incarca poza la bon" => navigation/open_expense_scan /expenses/scan?assistant=upload.',
+    '83. "deschide bonuri si scoate in fata butonul de incarcare" => navigation/open_expense_scan.',
+    '84. "scaneaza bon" => navigation/open_expense_scan, nu poti alege fisier automat.',
+    '85. "deschide rapoarte cheltuieli" => navigation/open_page /expenses/reports.',
+    '86. "deschide facturi neplatite" => navigation/open_expense_invoices.',
+    '87. "completeaza proiectul bonului cu Service 2" => form_fill doar daca pagina/schema bonuri exista; altfel clarificare.',
+    '88. "deschide profilul meu" => navigation/open_page /my-profile.',
+    '89. "completeaza functia cu tehnician lifturi" => entity_update/update_user user context current or current user fields {"functie":"tehnician lifturi"}.',
+    '90. "schimba functia lui Ionut in tehnician lifturi" => entity_update/update_user entityQuery Ionut fields {"functie":"tehnician lifturi"}.',
+    '91. "pune departamentul lui Mihai la interventii" => entity_update/update_user fields {"departament":"interventii"}.',
+    '92. "schimba rolul lui Razvan in manager" => entity_update/update_user risk high confirmation required.',
+    '93. "salveaza utilizatorul" => submit_current_form confirmation required, nu scrie in input.',
+    '94. "arata ultima activitate a lui Ionut" => navigation/open_user_activity entityQuery Ionut.',
+    '95. "deschide istoricul lui Mihai" => navigation/open_user_activity entityQuery Mihai.',
+    '96. "creeaza notificare pentru Razvan mesaj verifica pontajul" => create_entity/create_manual_notification fields {"target":"Razvan","message":"verifica pontajul"}.',
+    '97. "marcheaza toate notificarile citite" => navigation/open_page /notifications; executia reala necesita actiune controlata si confirmare.',
+    '98. "deschide notificari" => navigation/open_page /notifications.',
+    '99. "du-ma la firme" => navigation/open_page /companies.',
+    '100. "deschide panou control" => navigation/open_page /control-panel.',
+    '101. "cauta client Isomat in mentenanta" => navigation/open_page /maintenance?tab=clients&assistantSearch=Isomat.',
+    '102. "cauta scula bosh" => navigation/open_tool entityQuery bosh.',
+    '103. "cauta masina cu 04 in numar" => navigation/open_vehicle entityQuery 04.',
+    '104. "duba cu YRA tracker" => navigation/open_vehicle_tracker entityQuery YRA.',
+    '105. "schimba si telefonul in 0722" => update numai daca lastEntity este user/client cu camp telefon; altfel missingFields ["entity"].',
+    '106. "schimba si departamentul in service" => update_user daca lastEntity user; altfel missingFields ["user"].',
+    '107. "pune si ITP pe 10 august" => update_vehicle daca lastEntity vehicle; altfel missingFields ["vehicle"].',
+    '108. "deschide unde am ramas" => navigation catre lastPage daca exista context, altfel unknown.',
+    '109. "sterge proiectul X" => commandType unknown sau high risk cu confirmation required; daca nu exista intent sigur, intreaba.',
+    '110. "adauga client cu numele text lung confuz fara lift" => create_maintenance_client confidence sub 0.85 si missingFields ["liftNumbers"].',
+    '111. "deschide pagina mentenanta la formularul de client si adauga Isomat lift 210869" => create_maintenance_client, nu navigation simplu.',
+    '112. "du-ma la pagina mentenanta la formularul de client" => navigation/open_page /maintenance?tab=clients&assistant=client, fara fields.',
+  ];
+}
+
+function buildAssistantPrompt(today, context) {
+  const safeContext = context && typeof context === 'object' && !Array.isArray(context) ? context : {};
+  const memory = safeContext.memory && typeof safeContext.memory === 'object' && !Array.isArray(safeContext.memory) ? safeContext.memory : {};
+  const contextText = JSON.stringify({
+    currentPathname: toSafeString(safeContext.currentPathname),
+    currentSearch: toSafeString(safeContext.currentSearch),
+    currentHash: toSafeString(safeContext.currentHash),
+    userRole: toSafeString(safeContext.userRole),
+    memory: {
+      lastEntity: memory.lastEntity || null,
+      lastVehicleId: toSafeString(memory.lastVehicleId),
+      lastToolId: toSafeString(memory.lastToolId),
+      lastProjectId: toSafeString(memory.lastProjectId),
+      lastUserId: toSafeString(memory.lastUserId),
+      lastPage: toSafeString(memory.lastPage),
+      lastCommand: toSafeString(memory.lastCommand),
+    },
+  });
+
+  return [
+    'Esti interpretul AI pentru WorkControl. Functionezi ca agent, nu ca autocomplete, script sau clicker.',
+    'FAZA 1: primesti transcriptul. Nu executi nimic.',
+    'FAZA 2: intelegi intentia si intorci STRICT JSON conform schemei. Nu adauga explicatii in afara JSON.',
+    'FAZA 3: pregatesti date pentru validare: modul, entitate, campuri, navigare, confirmare, confidence, reasoning si executionPlan.',
+    'FAZA 4: daca nu esti sigur, NU ghici. Pune confidence sub 0.85, missingFields potrivite si intent unknown sau intentul sigur incomplet.',
+    'FAZA 5: executia se face doar in frontend dupa validare si confirmare. Tu nu executi.',
+    `Data curenta este ${today}. Converteste azi/maine/poimaine si datele relative in YYYY-MM-DD.`,
+    `Context pagina si memorie: ${contextText}. Foloseste contextul doar cand comanda se refera clar la "asta", "acesta", "si", "tot aici".`,
+    'Returneaza doar JSON. Campurile fields si fieldsToUpdate trebuie sa fie identice pentru modificari/completari.',
+    'commandType valori: navigation, form_fill, entity_update, create_entity, timesheet_action, question, unknown.',
+    'intent valori permise sunt exact cele din schema. Nu inventa intentii.',
+    'targetModule valori recomandate: navigation, vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, projects, assistant.',
+    'entityType valori: vehicle, tool, project, user, maintenanceClient, page, currentPage, none.',
+    'formSchemaId valori: maintenance-client, leave-request, vehicle, tool, user, timesheet sau string gol.',
+    'Nu transforma navigarea in completare. "du-ma la pontajul meu" nu porneste pontajul.',
+    'Nu transforma textul comenzii in valoare de input. Nu exista regula "daca gasesc input scriu acolo".',
+    'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
+    'entity_update inseamna update prin servicii Firestore dupa resolve entity, nu prin formular si nu prin DOM.',
+    'form_fill inseamna trimitere de obiect catre schema formularului, fara salvare automata.',
+    'create_entity inseamna creare dupa confirmare sau completare formular controlat, nu click arbitrar.',
+    'timesheet_action porneste/opreste pontaj doar daca exista verb explicit: porneste, start, incepe, opreste, stop, inchide.',
+    'Pentru rezultate multiple sau entitati slabe, confidence sub 0.85 si missingFields ["entity"].',
+    'Pentru stergeri, roluri si valori sensibile, risk high si confirmation.required true; daca nu exista intent sigur, unknown.',
+    'navigation.ruta trebuie completata in navigation.path si targetPage. Daca nu navigheaza, path gol.',
+    'confirmation.required este true pentru orice create/entity_update/timesheet_action/submit_current_form si pentru orice risc medium/high.',
+    'executionPlan trebuie sa contina pasi concreti: understand, navigate, resolve_entity, validate_fields, service_update/form_event, highlight, confirm, audit.',
+    'Exemple reale WorkControl:',
+    ...buildWorkControlAssistantExamples(),
+  ].join('\n');
+}
+
 exports.interpretAssistantCommand = onCall(
   {
     region: 'europe-west1',
@@ -1609,55 +1870,7 @@ exports.interpretAssistantCommand = onCall(
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const prompt = [
-      'Interpreteaza o comanda vocala in romana pentru aplicatia WorkControl.',
-      'Nu executa niciodata actiunea. Intoarce doar JSON-ul structurii cerute.',
-      `Data curenta este ${today}. Converteste datele relative precum azi/maine in YYYY-MM-DD.`,
-      'Clasifica obligatoriu comanda in commandType: navigation, form_fill, entity_update, create_entity, timesheet_action, question sau unknown.',
-      'Regula critica: daca utilizatorul cere doar navigare ("du-te/deschide/arata pagina concedii"), commandType navigation, shouldNavigate true, shouldFillForm false, shouldUpdateFirestore false si fieldsToUpdate gol.',
-      'Regula critica: navigation nu modifica niciodata campuri. Nu transforma "pagina concedii" in valoare de input.',
-      'form_fill completeaza doar formulare explicite si nu salveaza/trimite fara confirmare separata.',
-      'entity_update inseamna modificare prin servicii Firestore, nu prin DOM.',
-      'create_entity inseamna formular nou sau creare dupa confirmare; pune datele extrase in fieldsToUpdate.',
-      'Extrage intentia, tipul entitatii, textul de cautare al entitatii si toate campurile cerute in fieldsToUpdate.',
-      'Nu folosi editField/editValue. Pentru editari pune toate campurile in fieldsToUpdate.',
-      'Normalizeaza numerele auto fara spatii: "B 33 LGR" devine "B33LGR".',
-      'Normalizeaza datele in YYYY-MM-DD. Pentru valori necunoscute pastreaza textul rostit.',
-      'Pune intervalul de concediu si in dateRange: {startDate,endDate}. Daca nu exista interval, dateRange are stringuri goale.',
-      'Daca lipseste entitatea sau valoarea, adauga numele lipsa in missingFields.',
-      'Daca nu esti sigur, pune confidence sub 0.65 si intent unknown sau missingFields potrivit.',
-      'Risk: low pentru navigare/cautare, medium pentru editari/pontaj/creare, high pentru stergeri sau roluri.',
-      'needsConfirmation este true pentru orice medium/high si false pentru navigare simpla.',
-      'shouldNavigate este true doar cand trebuie deschisa o pagina. shouldFillForm este true doar pentru formular. shouldUpdateFirestore este true doar pentru update_vehicle/update_tool/update_project/update_user.',
-      'Pentru comenzi care completeaza formulare, pune ruta in targetPage si datele in fieldsToUpdate. Nu te opri la open_page daca utilizatorul a dictat datele formularului.',
-      'Intentii disponibile: update_vehicle, update_tool, update_project, update_user, start_timesheet, stop_timesheet, create_project, create_vehicle, create_tool, create_maintenance_client, fill_maintenance_client_form, schedule_leave, fill_leave_form, open_vehicle, open_tool, open_project, open_page, click_button, fill_current_page, update_current_page_field, submit_current_form, unknown.',
-      'entityType disponibil: vehicle, tool, project, user, maintenanceClient, page, currentPage, none.',
-      'Daca utilizatorul spune doar "du-ma/deschide pontajul meu", foloseste open_page cu pageHint "/my-timesheets", nu start_timesheet.',
-      'Foloseste start_timesheet doar pentru verbe clare de pornire: porneste, incepe, start, da start.',
-      'Foloseste stop_timesheet doar pentru verbe clare de oprire: opreste, stop, inchide pontajul, termina pontajul.',
-      'Exemple:',
-      '"Du-te pe pagina concedii" => commandType navigation, intent open_page, entityType page, targetPage "/my-leave", shouldNavigate true, shouldFillForm false, shouldUpdateFirestore false, fieldsToUpdate {}.',
-      '"schimba kilometrii la B 33 LGR la 6180" => commandType entity_update, intent update_vehicle, entityType vehicle, entityQuery B33LGR, fieldsToUpdate {"kilometri":6180}, shouldUpdateFirestore true.',
-      '"La Logan schimba kilometrii la 6200 si ITP-ul pe 20 septembrie 2026" => update_vehicle, vehicle, entityQuery Logan, fieldsToUpdate {"kilometri":6200,"ITP":"2026-09-20"}.',
-      '"seteaza ITP la Logan pe 20 septembrie 2026" => update_vehicle, vehicle, entityQuery Logan, fieldsToUpdate {"ITP":"2026-09-20"}.',
-      '"pune masina lui Razvan in service" => update_vehicle, vehicle, entityQuery Razvan, fieldsToUpdate {"status":"in_service"}.',
-      '"schimba soferul la B123ABC pe Mihai" => update_vehicle, vehicle, entityQuery B123ABC, fieldsToUpdate {"sofer":"Mihai"}.',
-      '"Schimba kilometrii masinii B33LGR la 6180" => update_vehicle, vehicle, entityQuery B33LGR, fieldsToUpdate {"kilometri":6180}.',
-      '"La Logan pune km 7000" => update_vehicle, vehicle, entityQuery Logan, fieldsToUpdate {"kilometri":7000}.',
-      '"marcheaza flexul Bosch defect" => update_tool, tool, entityQuery flex Bosch, fieldsToUpdate {"status":"defecta"}.',
-      '"muta bormasina la Ionut" => update_tool, tool, entityQuery bormasina, fieldsToUpdate {"detinator":"Ionut"}.',
-      '"schimba proiectul Service Lifturi in finalizat" => update_project, project, entityQuery Service Lifturi, fieldsToUpdate {"status":"finalizat"}.',
-      '"schimba functia lui Ionut in tehnician lifturi" => update_user, user, entityQuery Ionut, fieldsToUpdate {"functie":"tehnician lifturi"}.',
-      '"pune departamentul lui Mihai la interventii" => update_user, user, entityQuery Mihai, fieldsToUpdate {"departament":"interventii"}.',
-      '"creeaza proiect Revizie Lifturi Sector 3" => create_project, project, entityQuery Revizie Lifturi Sector 3.',
-      '"Adauga in mentenanta client nou Isomat cu lift 210869" => commandType create_entity, intent create_maintenance_client, maintenanceClient, entityQuery Isomat, fieldsToUpdate {"name":"Isomat","liftNumber":"210869"}, targetPage "/maintenance?tab=clients&assistant=client", shouldNavigate true, shouldFillForm true.',
-      '"Completeaza client nou in mentenanta nume Isomat, email office@isomat.ro, adresa Aurel Vlaicu 91, lift 210869, expira pe 20 august 2026" => create_maintenance_client, maintenanceClient, fieldsToUpdate {"name":"Isomat","email":"office@isomat.ro","address":"Aurel Vlaicu 91","liftNumber":"210869","expiryDate":"2026-08-20"}, targetPage "/maintenance?tab=clients&assistant=client".',
-      '"Adauga client mentenanta Isomat cu firma ISL Elevator si doua lifturi 123 si 456" => create_maintenance_client, maintenanceClient, entityQuery Isomat, fieldsToUpdate {"name":"Isomat","maintenanceCompany":"ISL Elevator","liftNumbers":["123","456"]}, targetPage "/maintenance?tab=clients&assistant=client".',
-      '"Programeaza concediu ultima saptamana din august" => commandType form_fill, intent schedule_leave, currentPage, fieldsToUpdate {"startDate":"2026-08-24","endDate":"2026-08-30"}, dateRange {"startDate":"2026-08-24","endDate":"2026-08-30"}, targetPage "/my-leave?assistant=leave#leave-form", shouldNavigate true, shouldFillForm true.',
-      '"Programeaza concediu din 24 august pana pe 30 august" => schedule_leave, currentPage, fieldsToUpdate {"startDate":"2026-08-24","endDate":"2026-08-30"}, targetPage "/my-leave?assistant=leave#leave-form".',
-      '"apasa salveaza" => click_button, currentPage, buttonHint salveaza.',
-      '"completeaza telefon cu 0722" => fill_current_page, currentPage, fieldsToUpdate {"telefon":"0722"}.',
-    ].join(' ');
+    const prompt = buildAssistantPrompt(today, request.data?.context);
 
     const openaiResponse = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -1705,10 +1918,14 @@ exports.interpretAssistantCommand = onCall(
     const outputText = extractResponseText(parsedResponse);
     try {
       const interpreted = JSON.parse(outputText);
+      const fields =
+        interpreted.fields && typeof interpreted.fields === 'object' && !Array.isArray(interpreted.fields)
+          ? interpreted.fields
+          : {};
       const fieldsToUpdate =
         interpreted.fieldsToUpdate && typeof interpreted.fieldsToUpdate === 'object' && !Array.isArray(interpreted.fieldsToUpdate)
           ? interpreted.fieldsToUpdate
-          : {};
+          : fields;
       const missingFields = Array.isArray(interpreted.missingFields)
         ? interpreted.missingFields.map((item) => toSafeString(item)).filter(Boolean)
         : [];
@@ -1728,13 +1945,28 @@ exports.interpretAssistantCommand = onCall(
       return {
         commandType,
         intent: toSafeString(interpreted.intent) || 'unknown',
+        targetModule: toSafeString(interpreted.targetModule),
         entityType: toSafeString(interpreted.entityType) || 'none',
         entityQuery: toSafeString(interpreted.entityQuery),
+        formSchemaId: toSafeString(interpreted.formSchemaId),
+        fields,
         fieldsToUpdate,
         dateRange,
         shouldNavigate: Boolean(interpreted.shouldNavigate),
         shouldFillForm: Boolean(interpreted.shouldFillForm),
         shouldUpdateFirestore: Boolean(interpreted.shouldUpdateFirestore),
+        navigation:
+          interpreted.navigation && typeof interpreted.navigation === 'object' && !Array.isArray(interpreted.navigation)
+            ? {
+                shouldNavigate: Boolean(interpreted.navigation.shouldNavigate),
+                path: toSafeString(interpreted.navigation.path),
+                section: toSafeString(interpreted.navigation.section),
+                params:
+                  interpreted.navigation.params && typeof interpreted.navigation.params === 'object' && !Array.isArray(interpreted.navigation.params)
+                    ? interpreted.navigation.params
+                    : {},
+              }
+            : { shouldNavigate: Boolean(interpreted.shouldNavigate), path: toSafeString(interpreted.targetPage), section: '', params: {} },
         targetText: toSafeString(interpreted.targetText),
         targetPage: toSafeString(interpreted.targetPage),
         pageHint: toSafeString(interpreted.pageHint),
@@ -1745,8 +1977,29 @@ exports.interpretAssistantCommand = onCall(
             ? Math.max(0, Math.min(1, interpreted.confidence))
             : 0,
         risk,
+        confirmation:
+          interpreted.confirmation && typeof interpreted.confirmation === 'object' && !Array.isArray(interpreted.confirmation)
+            ? {
+                required: Boolean(interpreted.confirmation.required),
+                reason: toSafeString(interpreted.confirmation.reason),
+                risk: ['low', 'medium', 'high'].includes(toSafeString(interpreted.confirmation.risk))
+                  ? toSafeString(interpreted.confirmation.risk)
+                  : risk,
+              }
+            : { required: Boolean(interpreted.needsConfirmation), reason: '', risk },
         needsConfirmation: Boolean(interpreted.needsConfirmation),
         spokenSummary: toSafeString(interpreted.spokenSummary),
+        reasoning: toSafeString(interpreted.reasoning),
+        executionPlan: Array.isArray(interpreted.executionPlan)
+          ? interpreted.executionPlan.slice(0, 8).map((step, index) => ({
+              id: toSafeString(step.id) || `step-${index + 1}`,
+              type: toSafeString(step.type),
+              label: toSafeString(step.label),
+              target: toSafeString(step.target),
+              fields: Array.isArray(step.fields) ? step.fields.map((field) => toSafeString(field)).filter(Boolean) : [],
+              requiresConfirmation: Boolean(step.requiresConfirmation),
+            }))
+          : [],
       };
     } catch (error) {
       logger.error('[interpretAssistantCommand][parse output]', error, outputText);

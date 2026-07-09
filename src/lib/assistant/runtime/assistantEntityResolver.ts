@@ -83,8 +83,13 @@ function buildResolution<T>(
 }
 
 async function resolveContextEntity(entityType: AssistantRuntimeEntityType, context: AssistantRuntimeContext) {
+  const lastEntity =
+    context.memory?.lastEntity?.entityType === entityType && context.memory.lastEntity.entityId
+      ? context.memory.lastEntity
+      : null;
+
   if (entityType === "vehicle") {
-    const id = getVehicleIdFromAssistantPath(context.currentPathname) || context.memory?.lastVehicleId || "";
+    const id = getVehicleIdFromAssistantPath(context.currentPathname) || context.memory?.lastVehicleId || lastEntity?.entityId || "";
     if (id) {
       const vehicle = await getVehicleById(id);
       if (vehicle) {
@@ -104,7 +109,7 @@ async function resolveContextEntity(entityType: AssistantRuntimeEntityType, cont
   }
 
   if (entityType === "tool") {
-    const id = getToolIdFromAssistantPath(context.currentPathname) || context.memory?.lastToolId || "";
+    const id = getToolIdFromAssistantPath(context.currentPathname) || context.memory?.lastToolId || lastEntity?.entityId || "";
     if (id) {
       const tools = await getToolsList();
       const tool = tools.find((item) => item.id === id);
@@ -120,6 +125,48 @@ async function resolveContextEntity(entityType: AssistantRuntimeEntityType, cont
           },
           options: [],
         } satisfies AssistantEntityResolution<ToolItem>;
+      }
+    }
+  }
+
+  if (entityType === "project") {
+    const id = context.memory?.lastProjectId || lastEntity?.entityId || "";
+    if (id) {
+      const projects = await getProjectsList();
+      const project = projects.find((item) => item.id === id);
+      if (project) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType,
+            entityId: project.id,
+            label: projectLabel(project),
+            score: 1,
+            data: project,
+          },
+          options: [],
+        } satisfies AssistantEntityResolution<ProjectItem>;
+      }
+    }
+  }
+
+  if (entityType === "user") {
+    const id = context.memory?.lastUserId || lastEntity?.entityId || "";
+    if (id) {
+      const users = await getAllUsers();
+      const user = users.find((item) => item.id === id);
+      if (user) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType,
+            entityId: user.id,
+            label: userLabel(user),
+            score: 1,
+            data: user,
+          },
+          options: [],
+        } satisfies AssistantEntityResolution<AppUserItem>;
       }
     }
   }

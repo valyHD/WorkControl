@@ -52,12 +52,62 @@ export type AssistantCommandEntityType =
 
 export type AssistantCommandFieldValue = string | number | boolean | null | string[] | number[];
 
+export type AssistantCommandContext = {
+  currentPathname?: string;
+  currentSearch?: string;
+  currentHash?: string;
+  userRole?: string;
+  memory?: {
+    lastEntity?: {
+      entityType?: string;
+      entityId?: string;
+      label?: string;
+      query?: string;
+    };
+    lastVehicleId?: string;
+    lastToolId?: string;
+    lastProjectId?: string;
+    lastUserId?: string;
+    lastPage?: string;
+    lastCommand?: string;
+  };
+};
+
+export type AssistantCommandNavigation = {
+  shouldNavigate?: boolean;
+  path?: string;
+  section?: string;
+  params?: Record<string, string | number | boolean>;
+};
+
+export type AssistantCommandConfirmation = {
+  required?: boolean;
+  reason?: string;
+  risk?: "low" | "medium" | "high";
+};
+
+export type AssistantCommandPlanStep = {
+  id?: string;
+  type: string;
+  label: string;
+  target?: string;
+  fields?: string[];
+  requiresConfirmation?: boolean;
+};
+
 export type AssistantCommandInterpretation = {
   commandType?: AssistantCommandType;
   intent: AssistantCommandIntent;
+  targetModule?: string;
   entityType: AssistantCommandEntityType;
   entityQuery: string;
+  fields?: Record<string, AssistantCommandFieldValue>;
   fieldsToUpdate: Record<string, AssistantCommandFieldValue>;
+  formSchemaId?: string;
+  navigation?: AssistantCommandNavigation;
+  confirmation?: AssistantCommandConfirmation;
+  reasoning?: string;
+  executionPlan?: AssistantCommandPlanStep[];
   dateRange?: {
     startDate: string;
     endDate: string;
@@ -82,14 +132,17 @@ export type AssistantCommandInterpretation = {
   response?: string;
 };
 
-export async function interpretAssistantCommand(command: string): Promise<AssistantCommandInterpretation | null> {
+export async function interpretAssistantCommand(
+  command: string,
+  context?: AssistantCommandContext
+): Promise<AssistantCommandInterpretation | null> {
   const cleanCommand = command.trim();
   if (!cleanCommand) return null;
 
-  const interpretCommand = httpsCallable<{ command: string }, AssistantCommandInterpretation>(
+  const interpretCommand = httpsCallable<{ command: string; context?: AssistantCommandContext }, AssistantCommandInterpretation>(
     functions,
     "interpretAssistantCommand"
   );
-  const result = await interpretCommand({ command: cleanCommand });
+  const result = await interpretCommand({ command: cleanCommand, context });
   return result.data || null;
 }

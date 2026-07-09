@@ -65,6 +65,15 @@ export type AssistantValidationResult = {
   missingFields?: string[];
 };
 
+export type AssistantExecutionPlanStep = {
+  id: string;
+  type: "navigate" | "resolve_entity" | "validate_fields" | "service_update" | "form_event" | "highlight" | "confirm" | "audit";
+  label: string;
+  target?: string;
+  fields?: string[];
+  requiresConfirmation?: boolean;
+};
+
 export type AssistantRuntimePlan = {
   intent: AssistantCommandInterpretation["intent"];
   entityType: AssistantRuntimeEntityType;
@@ -81,6 +90,7 @@ export type AssistantRuntimePlan = {
   spokenSummary: string;
   status: "ready" | "needs_clarification" | "not_supported";
   message: string;
+  executionPlan?: AssistantExecutionPlanStep[];
   run?: () => Promise<{ result: string; afterData?: Record<string, unknown> | null }>;
 };
 

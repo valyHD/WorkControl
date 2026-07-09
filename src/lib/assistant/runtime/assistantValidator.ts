@@ -4,6 +4,7 @@ import { checkAssistantPermission } from "./assistantPermissions";
 const VALID_VEHICLE_STATUSES = new Set(["activa", "in_service", "indisponibila", "avariata"]);
 const VALID_TOOL_STATUSES = new Set(["depozit", "atribuita", "defecta", "pierduta"]);
 const VALID_PROJECT_STATUSES = new Set(["activ", "inactiv", "finalizat"]);
+export const ASSISTANT_SAFE_CONFIDENCE_THRESHOLD = 0.85;
 
 function isDateField(fieldKey: string) {
   return /date|Until/i.test(fieldKey);
@@ -16,10 +17,10 @@ function validIsoDate(value: unknown) {
 export function validateAssistantPlan(plan: AssistantRuntimePlan, roleContext: Parameters<typeof checkAssistantPermission>[0]): AssistantValidationResult {
   const missingFields = [...(plan.parsedIntent.missingFields || [])];
 
-  if (plan.confidence < 0.65) {
+  if (plan.confidence < ASSISTANT_SAFE_CONFIDENCE_THRESHOLD) {
     return {
       ok: false,
-      message: "Nu sunt destul de sigur ce trebuie sa fac. Spune comanda mai concret.",
+      message: "Nu sunt destul de sigur ce trebuie sa fac. Confirmarea minima este 85%, deci mai bine intreab decat sa modific gresit.",
       missingFields,
     };
   }

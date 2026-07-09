@@ -12,10 +12,17 @@ import type { AppUserItem, UserRole } from "../../../types/user";
 import type { VehicleFormValues, VehicleItem } from "../../../types/vehicle";
 import { resolveAssistantEntity } from "./assistantEntityResolver";
 import { parseAssistantDate, resolveAssistantFieldChanges } from "./assistantFieldResolver";
-import { fillCurrentPageFields, fillLeaveForm, fillMaintenanceClientForm } from "./assistantFormFill";
-import { validateAssistantPlan } from "./assistantValidator";
+import { fillLeaveForm, fillMaintenanceClientForm } from "./assistantFormFill";
+import {
+  getAssistantFormSchemaById,
+  getAssistantFormSchemaForPage,
+  getMissingAssistantFormFields,
+  normalizeAssistantFormFields,
+} from "./assistantFormSchemas";
+import { ASSISTANT_SAFE_CONFIDENCE_THRESHOLD, validateAssistantPlan } from "./assistantValidator";
 import { normalizeAssistantText, scoreAssistantText } from "./assistantFuzzy";
 import type {
+  AssistantExecutionPlanStep,
   AssistantFieldChange,
   AssistantRuntimeContext,
   AssistantRuntimePlan,
@@ -118,6 +125,57 @@ function compactDataForAudit(data: Record<string, unknown>, changes: AssistantFi
     result[change.fieldKey] = data[change.fieldKey] ?? null;
   });
   return result;
+}
+
+function planStep(
+  id: string,
+  type: AssistantExecutionPlanStep["type"],
+  label: string,
+  options: Omit<AssistantExecutionPlanStep, "id" | "type" | "label"> = {}
+): AssistantExecutionPlanStep {
+  return { id, type, label, ...options };
+}
+
+function clarificationPlan(message: string): AssistantExecutionPlanStep[] {
+  return [
+    planStep("understand", "validate_fields", "Analizez comanda structurata."),
+    planStep("stop", "confirm", message, { requiresConfirmation: false }),
+  ];
+}
+
+function formPlan(params: {
+  title: string;
+  targetPage: string;
+  fields: Record<string, unknown>;
+  submitAction?: string;
+  needsConfirmation?: boolean;
+}): AssistantExecutionPlanStep[] {
+  const fieldNames = Object.keys(params.fields);
+  return [
+    planStep("navigate", "navigate", `Navighez la ${params.title}.`, { target: params.targetPage }),
+    planStep("validate-form", "validate_fields", `Validez schema formularului ${params.title}.`, { fields: fieldNames }),
+    planStep("fill-form", "form_event", `Trimit datele catre state-ul formularului ${params.title}.`, { fields: fieldNames }),
+    planStep("highlight-submit", "highlight", params.submitAction ? `Evidentiez actiunea ${params.submitAction}.` : "Evidentiez urmatorul pas."),
+    planStep("confirm", "confirm", "Astept confirmarea utilizatorului inainte de executie.", { requiresConfirmation: params.needsConfirmation !== false }),
+  ];
+}
+
+function updatePlan(entityLabel: string, changes: AssistantFieldChange[]): AssistantExecutionPlanStep[] {
+  return [
+    planStep("resolve", "resolve_entity", `Gasesc entitatea: ${entityLabel}.`, { target: entityLabel }),
+    planStep("validate-fields", "validate_fields", "Validez campurile si valorile cerute.", {
+      fields: changes.map((change) => change.fieldKey),
+    }),
+    planStep("confirm", "confirm", "Astept confirmarea utilizatorului.", { requiresConfirmation: true }),
+    planStep("service-update", "service_update", "Actualizez prin serviciul aplicatiei, nu prin DOM.", {
+      fields: changes.map((change) => change.fieldKey),
+    }),
+    planStep("audit", "audit", "Scriu auditul comenzii AI."),
+  ];
+}
+
+function confidenceNeedsClarification(confidence: number) {
+  return confidence < ASSISTANT_SAFE_CONFIDENCE_THRESHOLD;
 }
 
 function buildChangeMessage(entityLabel: string, changes: AssistantFieldChange[]) {
@@ -275,6 +333,7 @@ async function applyUserChanges(entity: AssistantResolvedEntity, changes: Assist
 }
 
 function fieldsObject(parsed: AssistantCommandInterpretation) {
+  if (parsed.fields && typeof parsed.fields === "object") return parsed.fields;
   return parsed.fieldsToUpdate && typeof parsed.fieldsToUpdate === "object" ? parsed.fieldsToUpdate : {};
 }
 
@@ -485,6 +544,7 @@ export async function buildAssistantRuntimePlan(
     : "none";
 
   if (parsed.intent === "create_maintenance_client" || parsed.intent === "fill_maintenance_client_form") {
+    const schema = getAssistantFormSchemaById("maintenance-client");
     const formFields = normalizeMaintenanceClientFields(parsed);
     const missingFields = (parsed.missingFields || []).filter((field) => {
       const normalized = normalizeAssistantText(field);
@@ -492,27 +552,46 @@ export async function buildAssistantRuntimePlan(
       if (formFields.liftNumbers.length && ["lift", "liftnumber", "numar lift", "numarlift"].includes(normalized)) return false;
       return true;
     });
-    if (!formFields.name) missingFields.push("name");
-    if (formFields.liftNumbers.length === 0) missingFields.push("liftNumber");
+    if (schema) {
+      const normalizedSchemaFields = normalizeAssistantFormFields(schema, formFields);
+      missingFields.push(...getMissingAssistantFormFields(schema, normalizedSchemaFields.fields));
+      missingFields.push(...normalizedSchemaFields.unknownFields);
+    } else {
+      if (!formFields.name) missingFields.push("name");
+      if (formFields.liftNumbers.length === 0) missingFields.push("liftNumber");
+    }
     const targetPage = parsed.targetPage || "/maintenance?tab=clients&assistant=client";
-    const message = missingFields.length
-      ? `Lipsesc date pentru clientul de mentenanta: ${Array.from(new Set(missingFields)).join(", ")}.`
+    const uniqueMissingFields = Array.from(new Set(missingFields));
+    const lowConfidence = confidenceNeedsClarification(parsed.confidence || 0);
+    const message = uniqueMissingFields.length
+      ? `Lipsesc date pentru clientul de mentenanta: ${uniqueMissingFields.join(", ")}.`
+      : lowConfidence
+        ? "Nu sunt destul de sigur pe clientul de mentenanta. Spune numele clientului si liftul in aceeasi comanda."
       : buildMaintenanceClientFormMessage(formFields);
 
     return {
       intent: parsed.intent,
       entityType: "maintenanceClient",
-      parsedIntent: { ...parsed, targetPage, missingFields: Array.from(new Set(missingFields)) },
+      parsedIntent: { ...parsed, targetPage, missingFields: uniqueMissingFields },
       fieldsToUpdate: formFields,
       changes: [],
       afterData: formFields,
       risk: "medium",
       confidence: parsed.confidence || 0.82,
-      needsConfirmation: false,
-      spokenSummary: missingFields.length ? message : `Completez clientul ${formFields.name} in mentenanta.`,
-      status: missingFields.length ? "needs_clarification" : "ready",
+      needsConfirmation: true,
+      spokenSummary: uniqueMissingFields.length || lowConfidence ? message : `Completez clientul ${formFields.name} in mentenanta.`,
+      status: uniqueMissingFields.length || lowConfidence ? "needs_clarification" : "ready",
       message,
-      run: missingFields.length
+      executionPlan: uniqueMissingFields.length || lowConfidence
+        ? clarificationPlan(message)
+        : formPlan({
+            title: schema?.title || "Client mentenanta",
+            targetPage,
+            fields: formFields,
+            submitAction: schema?.submitAction,
+            needsConfirmation: true,
+          }),
+      run: uniqueMissingFields.length || lowConfidence
         ? undefined
         : async () => {
             await fillMaintenanceClientForm(formFields);
@@ -522,6 +601,7 @@ export async function buildAssistantRuntimePlan(
   }
 
   if (parsed.intent === "schedule_leave" || parsed.intent === "fill_leave_form") {
+    const schema = getAssistantFormSchemaById("leave-request");
     const formFields = normalizeLeaveFields(parsed);
     const missingFields = (parsed.missingFields || []).filter((field) => {
       const normalized = normalizeAssistantText(field);
@@ -529,27 +609,46 @@ export async function buildAssistantRuntimePlan(
       if (formFields.endDate && ["enddate", "periodend", "datasfarsit", "sfarsit"].includes(normalized)) return false;
       return true;
     });
-    if (!formFields.startDate) missingFields.push("startDate");
-    if (!formFields.endDate) missingFields.push("endDate");
+    if (schema) {
+      const normalizedSchemaFields = normalizeAssistantFormFields(schema, formFields);
+      missingFields.push(...getMissingAssistantFormFields(schema, normalizedSchemaFields.fields));
+      missingFields.push(...normalizedSchemaFields.unknownFields);
+    } else {
+      if (!formFields.startDate) missingFields.push("startDate");
+      if (!formFields.endDate) missingFields.push("endDate");
+    }
     const targetPage = parsed.targetPage || "/my-leave?assistant=leave#leave-form";
-    const message = missingFields.length
-      ? `Lipsesc date pentru concediu: ${Array.from(new Set(missingFields)).join(", ")}.`
+    const uniqueMissingFields = Array.from(new Set(missingFields));
+    const lowConfidence = confidenceNeedsClarification(parsed.confidence || 0);
+    const message = uniqueMissingFields.length
+      ? `Lipsesc date pentru concediu: ${uniqueMissingFields.join(", ")}.`
+      : lowConfidence
+        ? "Nu sunt destul de sigur pe perioada concediului. Spune data de inceput si data de sfarsit."
       : buildLeaveFormMessage(formFields);
 
     return {
       intent: parsed.intent,
       entityType: "currentPage",
-      parsedIntent: { ...parsed, targetPage, missingFields: Array.from(new Set(missingFields)) },
+      parsedIntent: { ...parsed, targetPage, missingFields: uniqueMissingFields },
       fieldsToUpdate: formFields,
       changes: [],
       afterData: formFields,
       risk: "medium",
       confidence: parsed.confidence || 0.82,
-      needsConfirmation: false,
-      spokenSummary: missingFields.length ? message : "Completez formularul de concediu.",
-      status: missingFields.length ? "needs_clarification" : "ready",
+      needsConfirmation: true,
+      spokenSummary: uniqueMissingFields.length || lowConfidence ? message : "Completez formularul de concediu.",
+      status: uniqueMissingFields.length || lowConfidence ? "needs_clarification" : "ready",
       message,
-      run: missingFields.length
+      executionPlan: uniqueMissingFields.length || lowConfidence
+        ? clarificationPlan(message)
+        : formPlan({
+            title: schema?.title || "Cerere concediu",
+            targetPage,
+            fields: formFields,
+            submitAction: schema?.submitAction,
+            needsConfirmation: true,
+          }),
+      run: uniqueMissingFields.length || lowConfidence
         ? undefined
         : async () => {
             await fillLeaveForm(formFields);
@@ -560,6 +659,10 @@ export async function buildAssistantRuntimePlan(
 
   if (parsed.intent === "fill_current_page" || parsed.intent === "update_current_page_field") {
     const targetPage = parsed.targetPage || parsed.pageHint || "";
+    const pageSchema = getAssistantFormSchemaById(parsed.formSchemaId) || getAssistantFormSchemaForPage(context.currentPathname);
+    const message = pageSchema
+      ? `Pagina are schema ${pageSchema.title}, dar foloseste comenzi specifice formularului ca sa completez sigur.`
+      : "Pagina curenta nu are schema AI pentru completare sigura. Nu completez campuri arbitrar.";
     return {
       intent: parsed.intent,
       entityType: "currentPage",
@@ -568,23 +671,17 @@ export async function buildAssistantRuntimePlan(
       changes: [],
       risk: parsed.risk || "medium",
       confidence: parsed.confidence || 0.76,
-      needsConfirmation: parsed.needsConfirmation !== false,
+      needsConfirmation: false,
       spokenSummary: parsed.spokenSummary || "Completez campurile cerute pe pagina curenta.",
-      status: Object.keys(fieldsToUpdate).length ? "ready" : "needs_clarification",
-      message: Object.keys(fieldsToUpdate).length
-        ? "Completez campurile cerute pe pagina curenta. Confirmi?"
-        : "Spune ce camp si ce valoare trebuie completate.",
-      run: Object.keys(fieldsToUpdate).length
-        ? async () => {
-            await fillCurrentPageFields(fieldsToUpdate);
-            return { result: "Am trimis datele catre formularul curent.", afterData: fieldsToUpdate };
-          }
-        : undefined,
+      status: "needs_clarification",
+      message,
+      executionPlan: clarificationPlan(message),
     };
   }
 
   if (parsed.intent === "create_project") {
     const projectName = parsed.entityQuery || parsed.targetText || String(fieldsToUpdate.name || "");
+    const lowConfidence = confidenceNeedsClarification(parsed.confidence || 0);
     if (!projectName.trim()) {
       return {
         intent: parsed.intent,
@@ -598,6 +695,24 @@ export async function buildAssistantRuntimePlan(
         spokenSummary: parsed.spokenSummary,
         status: "needs_clarification",
         message: "Spune numele proiectului.",
+        executionPlan: clarificationPlan("Spune numele proiectului."),
+      };
+    }
+    if (lowConfidence) {
+      const message = `Nu sunt destul de sigur ca proiectul de creat este "${projectName}". Spune mai clar numele proiectului.`;
+      return {
+        intent: parsed.intent,
+        entityType: "project",
+        parsedIntent: parsed,
+        fieldsToUpdate,
+        changes: [],
+        risk: "medium",
+        confidence: parsed.confidence,
+        needsConfirmation: false,
+        spokenSummary: message,
+        status: "needs_clarification",
+        message,
+        executionPlan: clarificationPlan(message),
       };
     }
     return {
@@ -612,6 +727,12 @@ export async function buildAssistantRuntimePlan(
       spokenSummary: parsed.spokenSummary || `Creez proiectul ${projectName}.`,
       status: "ready",
       message: `Creez proiectul ${projectName}. Confirmi?`,
+      executionPlan: [
+        planStep("validate-fields", "validate_fields", "Validez numele proiectului.", { fields: ["name", "status"] }),
+        planStep("confirm", "confirm", "Astept confirmarea utilizatorului.", { requiresConfirmation: true }),
+        planStep("service-create", "service_update", "Creez proiectul prin serviciul de pontaje.", { fields: ["name", "status"] }),
+        planStep("audit", "audit", "Scriu auditul comenzii AI."),
+      ],
       run: async () => {
         await createProject({ name: projectName, status: "activ" });
         return { result: `Am creat proiectul ${projectName}.`, afterData: { name: projectName, status: "activ" } };
@@ -638,6 +759,7 @@ export async function buildAssistantRuntimePlan(
       spokenSummary: parsed.spokenSummary,
       status: "needs_clarification",
       message: resolution.message || "Nu am gasit entitatea ceruta.",
+      executionPlan: clarificationPlan(resolution.message || "Nu am gasit entitatea ceruta."),
     };
   }
 
@@ -658,6 +780,7 @@ export async function buildAssistantRuntimePlan(
     spokenSummary: parsed.spokenSummary || buildChangeMessage(resolution.entity.label, changes),
     status: "ready",
     message: buildChangeMessage(resolution.entity.label, changes),
+    executionPlan: updatePlan(resolution.entity.label, changes),
   };
 
   const validation = validateAssistantPlan(basePlan, {
@@ -672,6 +795,7 @@ export async function buildAssistantRuntimePlan(
       status: "needs_clarification",
       message: validation.message || "Comanda are nevoie de clarificare.",
       needsConfirmation: false,
+      executionPlan: clarificationPlan(validation.message || "Comanda are nevoie de clarificare."),
     };
   }
 

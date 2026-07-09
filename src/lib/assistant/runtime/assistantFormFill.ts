@@ -2,7 +2,6 @@ export const ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT = "workcontrol:assistant-fi
 export const ASSISTANT_FILL_LEAVE_EVENT = "workcontrol:assistant-fill-leave";
 export const ASSISTANT_FILL_VEHICLE_FORM_EVENT = "workcontrol:assistant-fill-vehicle-form";
 export const ASSISTANT_FILL_TOOL_FORM_EVENT = "workcontrol:assistant-fill-tool-form";
-export const ASSISTANT_FILL_CURRENT_PAGE_EVENT = "workcontrol:assistant-fill-current-page";
 
 export type AssistantFormFields = Record<string, unknown>;
 
@@ -51,8 +50,4 @@ export async function fillVehicleForm(fields: AssistantFormFields) {
 export async function fillToolForm(fields: AssistantFormFields) {
   await waitForSelector("[data-assistant-field='name'], [data-assistant-field='internalCode']");
   return dispatchAssistantFormFill(ASSISTANT_FILL_TOOL_FORM_EVENT, fields);
-}
-
-export async function fillCurrentPageFields(fields: AssistantFormFields) {
-  return dispatchAssistantFormFill(ASSISTANT_FILL_CURRENT_PAGE_EVENT, fields);
 }

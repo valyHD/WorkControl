@@ -12,6 +12,8 @@ function inferCommandType(intent: AssistantCommandInterpretation["intent"]): Ass
 
 export function normalizeAssistantInterpretation(command: string, input: Partial<AssistantCommandInterpretation> | null): AssistantCommandInterpretation {
   const intent = input?.intent || "unknown";
+  const navigationPath = input?.navigation?.path || "";
+  const fieldsToUpdate = input?.fields || input?.fieldsToUpdate || {};
   const dateRange = input?.dateRange || {
     startDate: input?.startDate || "",
     endDate: input?.endDate || input?.startDate || "",
@@ -20,20 +22,34 @@ export function normalizeAssistantInterpretation(command: string, input: Partial
   return {
     commandType: input?.commandType || inferCommandType(intent),
     intent,
+    targetModule: input?.targetModule || "",
     entityType: input?.entityType || "none",
     entityQuery: input?.entityQuery || input?.targetText || "",
-    fieldsToUpdate: input?.fieldsToUpdate || {},
+    fields: input?.fields || fieldsToUpdate,
+    fieldsToUpdate,
+    formSchemaId: input?.formSchemaId || "",
+    navigation: input?.navigation || {
+      shouldNavigate: input?.shouldNavigate ?? Boolean(input?.targetPage || input?.pageHint),
+      path: input?.targetPage || input?.pageHint || "",
+    },
+    confirmation: input?.confirmation || {
+      required: input?.needsConfirmation,
+      risk: input?.risk,
+      reason: "",
+    },
+    reasoning: input?.reasoning || "",
+    executionPlan: input?.executionPlan || [],
     dateRange,
-    shouldNavigate: input?.shouldNavigate ?? Boolean(input?.targetPage || inferCommandType(intent) === "navigation"),
+    shouldNavigate: input?.shouldNavigate ?? input?.navigation?.shouldNavigate ?? Boolean(navigationPath || input?.targetPage || inferCommandType(intent) === "navigation"),
     shouldFillForm: input?.shouldFillForm ?? ["form_fill", "create_entity"].includes(input?.commandType || inferCommandType(intent)),
     shouldUpdateFirestore: input?.shouldUpdateFirestore ?? inferCommandType(intent) === "entity_update",
     targetText: input?.targetText || "",
-    targetPage: input?.targetPage || input?.pageHint || "",
-    pageHint: input?.pageHint || "",
+    targetPage: input?.targetPage || navigationPath || input?.pageHint || "",
+    pageHint: input?.pageHint || navigationPath || "",
     buttonHint: input?.buttonHint || "",
     missingFields: Array.isArray(input?.missingFields) ? input.missingFields : [],
     risk: input?.risk || "low",
-    needsConfirmation: input?.needsConfirmation ?? (input?.risk === "medium" || input?.risk === "high"),
+    needsConfirmation: input?.needsConfirmation ?? input?.confirmation?.required ?? (input?.risk === "medium" || input?.risk === "high"),
     spokenSummary: input?.spokenSummary || input?.response || `Am inteles comanda: ${command}.`,
     reportType: input?.reportType || "",
     editField: input?.editField || "",

@@ -32,18 +32,17 @@ import {
 import { logAssistantAudit } from "../lib/assistant/runtime/assistantAudit";
 import { createAssistantConversationMemory } from "../lib/assistant/runtime/assistantConversationMemory";
 import { buildAssistantRuntimePlan } from "../lib/assistant/runtime/assistantExecutor";
-import { fillLeaveForm, fillMaintenanceClientForm } from "../lib/assistant/runtime/assistantFormFill";
 import { normalizeAssistantInterpretation } from "../lib/assistant/runtime/assistantIntentParser";
 import { scheduleAssistantNextStepHighlight } from "../lib/assistant/runtime/assistantButtonHighlighter";
 import {
   classifyAssistantCommand,
   hasAssistantNavigationSafetyIntent,
+  type AssistantCommandClassification,
 } from "../lib/assistant/runtime/assistantClassifier";
-import { canUseAssistantDomFallback } from "../lib/assistant/runtime/assistantDomFallback";
 import { getAssistantNextStepMessage } from "../lib/assistant/runtime/assistantPageFlow";
 import { resolveAssistantKnownPageNavigation } from "../lib/assistant/runtime/assistantNavigation";
 import { resolveAssistantControlledPageAction } from "../lib/assistant/runtime/assistantPageActions";
-import type { AssistantResolvedEntity, AssistantRuntimePlan } from "../lib/assistant/runtime/assistantTypes";
+import type { AssistantExecutionPlanStep, AssistantResolvedEntity, AssistantRuntimePlan } from "../lib/assistant/runtime/assistantTypes";
 import { db } from "../lib/firebase/firebase";
 import { getAllUsers, updateUserWorkDetails } from "../modules/users/services/usersService";
 import { getToolsList, updateTool } from "../modules/tools/services/toolsService";
@@ -108,6 +107,7 @@ type AssistantActionBase = {
   choices?: AssistantChoiceOption[];
   auditBeforeData?: Record<string, unknown> | null;
   auditAfterData?: Record<string, unknown> | null;
+  executionPlan?: AssistantExecutionPlanStep[];
 };
 
 type AssistantChangeSummary = {
@@ -152,6 +152,7 @@ type AssistantConversationContext = {
   lastEntity?: AiEntityContext;
   lastVehicleId?: string;
   lastToolId?: string;
+  lastProjectId?: string;
   lastUserId?: string;
 };
 
@@ -174,10 +175,12 @@ type AssistantDebugInfo = {
   targetPage: string;
   confidence: number;
   nextAction: string;
+  executionPlan?: AssistantExecutionPlanStep[];
 };
 
 type AssistantState = "idle" | "listening" | "thinking" | "confirming" | "executing";
 const TIMESHEETS_CHANGED_EVENT = "workcontrol:timesheets-changed";
+const ASSISTANT_AGENT_CONFIDENCE_THRESHOLD = 0.85;
 
 const MONTHS_RO: Record<string, number> = {
   ianuarie: 1,
@@ -320,6 +323,43 @@ function formatCapabilitySections(sections: typeof ASSISTANT_CAPABILITY_SECTIONS
   ].join("\n");
 }
 
+function isMutationLikeAssistantCommand(classification: AssistantCommandClassification, normalized: string) {
+  if (["entity_update", "form_fill", "create_entity", "timesheet_action"].includes(classification.type)) return true;
+  return (
+    /\b(schimb|modific|seteaz|pune|actualizeaz|editeaz|corecteaz|completeaz|creeaz|creaz|adauga|porneste|opreste|start|stop)\w*/.test(
+      normalized
+    ) &&
+    !/\b(doar|numai)\s+(deschide|arata|du|navigheaza)\b/.test(normalized)
+  );
+}
+
+function buildAgentClarificationAction(message: string, confidence = 0): AssistantAction {
+  return {
+    type: "info",
+    commandName: "clarify",
+    risk: "low",
+    needsConfirmation: false,
+    confidence,
+    label: message,
+    result: message,
+    executionPlan: [
+      {
+        id: "stop-unsafe",
+        type: "confirm",
+        label: "Nu execut fara plan sigur.",
+        requiresConfirmation: false,
+      },
+    ],
+    structuredIntent: buildStructuredAssistantIntent({
+      intent: "clarify",
+      entityType: "unknown",
+      confidence,
+      missingFields: ["safeExecutionPlan"],
+      spokenSummary: message,
+    }),
+  };
+}
+
 function inferEntityTypeFromAction(action: AssistantAction): AiEntityType {
   if (action.entityContext?.entityType) return action.entityContext.entityType;
   if (action.commandName?.includes("vehicle")) return "vehicle";
@@ -425,16 +465,20 @@ function parseAssistantNavigationTarget(path: string) {
 
 function getAssistantPreview(action: AssistantAction) {
   if (!action.structuredIntent) return action.note ? `${action.label} ${action.note}` : action.label;
+  const planText = action.executionPlan?.length
+    ? `Plan:\n${action.executionPlan.map((step, index) => `${index + 1}. ${step.label}`).join("\n")}`
+    : "";
   if (action.auditBeforeData || action.label.includes("->")) {
     return [
       action.label,
+      planText,
       `Risc: ${action.risk || action.structuredIntent.risk}. Incredere: ${Math.round((action.confidence ?? action.structuredIntent.confidence) * 100)}%.`,
       action.note || "",
       action.needsConfirmation !== false ? "Confirmi?" : "",
     ].filter(Boolean).join("\n");
   }
   const preview = buildAssistantConfirmationMessage(action.structuredIntent, action.entityContext?.label);
-  return action.note ? `${preview}\n${action.note}` : preview;
+  return [preview, planText, action.note || ""].filter(Boolean).join("\n");
 }
 
 function getAssistantConfirmationRows(action: AssistantAction) {
@@ -451,6 +495,12 @@ function getAssistantConfirmationRows(action: AssistantAction) {
     },
     { label: "Risc", value: action.risk || action.structuredIntent?.risk || "low" },
     { label: "Incredere", value: `${Math.round((action.confidence ?? action.structuredIntent?.confidence ?? 0.7) * 100)}%` },
+    {
+      label: "Plan executie",
+      value: action.executionPlan?.length
+        ? action.executionPlan.map((step, index) => `${index + 1}. ${step.label}`).join("\n")
+        : "Plan simplu fara pasi suplimentari",
+    },
     {
       label: "De ce confirmare",
       value:
@@ -500,6 +550,7 @@ function actionFromRuntimePlan(plan: AssistantRuntimePlan): AssistantAction {
         ...(plan.options || []).map((option, index) => `${index + 1}. ${option.label}`),
       ].filter(Boolean).join("\n"),
       choices: (plan.options || []).slice(0, 5).map(assistantChoiceFromResolvedEntity),
+      executionPlan: plan.executionPlan,
     };
   }
 
@@ -525,6 +576,7 @@ function actionFromRuntimePlan(plan: AssistantRuntimePlan): AssistantAction {
       newValue: change.displayNewValue,
     })),
     auditBeforeData: plan.beforeData || null,
+    executionPlan: plan.executionPlan,
     structuredIntent: buildStructuredAssistantIntent({
       intent: commandName,
       entityType: plan.entityType === "none" ? "unknown" : plan.entityType,
@@ -552,13 +604,14 @@ function actionFromRuntimePlan(plan: AssistantRuntimePlan): AssistantAction {
       type: "sequence",
       commandName,
       risk: plan.risk,
-      needsConfirmation: false,
+      needsConfirmation: plan.needsConfirmation,
       confidence: plan.confidence,
       entityContext: action.entityContext,
       fieldsToUpdate: plan.fieldsToUpdate,
       auditBeforeData: plan.beforeData || null,
       auditAfterData: plan.afterData || null,
       structuredIntent: action.structuredIntent,
+      executionPlan: plan.executionPlan,
       label: plan.spokenSummary || plan.message,
       result: plan.message,
       actions: [
@@ -928,8 +981,6 @@ function resolveKnownPageNavigation(normalized: string): AssistantAction | null 
   return null;
 }
 
-type EditableControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-
 type FieldTarget = {
   key: string;
   fieldLabel: string;
@@ -937,191 +988,8 @@ type FieldTarget = {
   transform?: (value: string) => string;
 };
 
-const FIELD_TARGETS: FieldTarget[] = [
-  { key: "project", fieldLabel: "proiect", aliases: ["proiect", "proiectul", "proiecte", "poriect", "proect", "project"] },
-  {
-    key: "driver",
-    fieldLabel: "sofer",
-    aliases: ["sofer", "soferul", "sofer curent", "sofer nou", "driver", "conducator", "numele soferului"],
-  },
-  {
-    key: "plate",
-    fieldLabel: "numar inmatriculare",
-    aliases: ["numar inmatriculare", "numarul de inmatriculare", "nr inmatriculare", "placuta", "numarul masinii"],
-    transform: (value) => value.toUpperCase(),
-  },
-  { key: "name", fieldLabel: "nume", aliases: ["nume", "numele", "denumire", "titlu"] },
-  { key: "email", fieldLabel: "email", aliases: ["email", "e-mail", "mail"] },
-  { key: "phone", fieldLabel: "telefon", aliases: ["telefon", "numar telefon", "mobil"] },
-  { key: "company", fieldLabel: "firma", aliases: ["firma", "companie", "societate"] },
-  {
-    key: "roleTitle",
-    fieldLabel: "functie",
-    aliases: ["functie", "functia", "rol profesional", "meserie", "post", "postul"],
-  },
-  {
-    key: "department",
-    fieldLabel: "departament",
-    aliases: ["departament", "departamentul", "sectie", "echipa"],
-  },
-  { key: "address", fieldLabel: "adresa", aliases: ["adresa", "adresa client", "strada", "locatie"] },
-  { key: "lift", fieldLabel: "numar lift", aliases: ["numar lift", "lift", "liftul", "seria liftului"] },
-  {
-    key: "currentKm",
-    fieldLabel: "km curenti",
-    aliases: ["km", "kilometri", "kilometraj", "km curenti", "km actuali", "kilometraj actual", "kilometraj curent"],
-  },
-  {
-    key: "initialRecordedKm",
-    fieldLabel: "km la inregistrare",
-    aliases: ["km la inregistrare", "km initiali", "kilometri initiali", "kilometraj initial"],
-  },
-  {
-    key: "nextItpDate",
-    fieldLabel: "data ITP",
-    aliases: ["itp", "data itp", "itp pana la", "expirare itp"],
-  },
-  {
-    key: "nextRcaDate",
-    fieldLabel: "data RCA",
-    aliases: ["rca", "data rca", "rca pana la", "expirare rca"],
-  },
-  {
-    key: "nextCascoDate",
-    fieldLabel: "data CASCO",
-    aliases: ["casco", "data casco", "casco pana la", "expirare casco"],
-  },
-  {
-    key: "nextRovinietaDate",
-    fieldLabel: "data rovinieta",
-    aliases: ["rovinieta", "data rovinieta", "rovinieta pana la", "expirare rovinieta"],
-  },
-  {
-    key: "serviceIntervalKm",
-    fieldLabel: "interval service",
-    aliases: ["interval service", "revizie la fiecare", "service la fiecare"],
-  },
-  {
-    key: "nextServiceKm",
-    fieldLabel: "prag service",
-    aliases: ["prag service", "service la km", "urmatorul service", "urmator service"],
-  },
-  {
-    key: "nextOilServiceKm",
-    fieldLabel: "revizie ulei",
-    aliases: ["revizie ulei", "ulei la km", "service ulei", "schimb ulei"],
-  },
-  {
-    key: "internalCode",
-    fieldLabel: "cod intern",
-    aliases: ["cod intern", "codul intern", "cod scula", "cod unealta"],
-    transform: (value) => value.toUpperCase(),
-  },
-  {
-    key: "qrCodeValue",
-    fieldLabel: "cod QR",
-    aliases: ["cod qr", "qr", "codul qr"],
-    transform: (value) => value.toUpperCase(),
-  },
-  {
-    key: "warrantyUntil",
-    fieldLabel: "garantie pana la",
-    aliases: ["garantie pana la", "data garantie", "expirare garantie"],
-  },
-  { key: "description", fieldLabel: "descriere", aliases: ["descriere", "observatii", "note"] },
-  { key: "reason", fieldLabel: "motiv", aliases: ["motiv", "motiv concediu", "explicatie"] },
-  { key: "requestType", fieldLabel: "tip cerere", aliases: ["tip cerere", "tip concediu", "concediu tip"] },
-  { key: "expiry", fieldLabel: "data expirare", aliases: ["data expirare", "expirare", "exp date", "iscir"] },
-  { key: "revisionType", fieldLabel: "tip revizie", aliases: ["tip revizie", "revizie", "r1", "r2"] },
-];
-
 function isFieldEditCommand(normalized: string) {
   return /\b(modific|schimb|edit|editeaz|actualizeaz|corecteaz|select|aleg|seteaz|setez|pune|pun|completeaz|completez|alege|scrie|introdu|bifeaz|debifeaz)\w*/.test(normalized);
-}
-
-function isVisibleControl(control: EditableControl) {
-  if (control.disabled) return false;
-  if (control instanceof HTMLInputElement && control.type === "hidden") return false;
-  const rect = control.getBoundingClientRect();
-  const style = window.getComputedStyle(control);
-  return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-}
-
-function getControlLabelText(control: EditableControl) {
-  const parts: string[] = [];
-  const labelledBy = control.getAttribute("aria-labelledby");
-
-  if ("labels" in control && control.labels) {
-    parts.push(...Array.from(control.labels).map((label) => label.textContent || ""));
-  }
-
-  if (labelledBy) {
-    labelledBy.split(/\s+/).forEach((id) => {
-      const label = document.getElementById(id);
-      if (label?.textContent) parts.push(label.textContent);
-    });
-  }
-
-  parts.push(
-    control.getAttribute("aria-label") || "",
-    control.getAttribute("placeholder") || "",
-    control.getAttribute("name") || "",
-    control.id || ""
-  );
-
-  const block = control.closest(".tool-form-block, .form-field, .field, label");
-  if (block) {
-    const label = block.querySelector("label, .tool-form-label");
-    if (label?.textContent) parts.push(label.textContent);
-  }
-
-  return normalizeText(parts.filter(Boolean).join(" "));
-}
-
-function scoreControlForTarget(control: EditableControl, target: FieldTarget) {
-  const labelText = getControlLabelText(control);
-  if (!labelText) return 0;
-
-  let score = 0;
-  target.aliases.forEach((alias) => {
-    const normalizedAlias = normalizeText(alias);
-    if (labelText.includes(normalizedAlias)) score += 70;
-    wordsFromText(normalizedAlias).forEach((token) => {
-      if (textMatchesToken(labelText, token)) score += 18;
-    });
-  });
-
-  if (target.key === "project" && control instanceof HTMLSelectElement) {
-    const optionText = normalizeText(Array.from(control.options).map((option) => option.textContent || "").join(" "));
-    if (optionText.includes("mentenanta") || optionText.includes("proiect")) score += 12;
-  }
-
-  return score;
-}
-
-function findEditableControl(target: FieldTarget) {
-  const controls = Array.from(document.querySelectorAll("input, select, textarea"))
-    .filter((item): item is EditableControl =>
-      item instanceof HTMLInputElement || item instanceof HTMLSelectElement || item instanceof HTMLTextAreaElement
-    )
-    .filter(isVisibleControl);
-
-  return controls
-    .map((control) => ({ control, score: scoreControlForTarget(control, target) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.control || null;
-}
-
-function setNativeControlValue(control: EditableControl, value: string) {
-  const prototype = Object.getPrototypeOf(control) as { value?: string };
-  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-  if (descriptor?.set) {
-    descriptor.set.call(control, value);
-  } else {
-    control.value = value;
-  }
-  control.dispatchEvent(new Event("input", { bubbles: true }));
-  control.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
 function cleanFieldValue(value: string) {
@@ -1295,328 +1163,6 @@ function parseSpokenNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function detectFieldTarget(normalized: string) {
-  return FIELD_TARGETS.find((target) =>
-    target.aliases.some((alias) => {
-      const normalizedAlias = normalizeText(alias);
-      return normalized.includes(normalizedAlias) || wordsFromText(normalizedAlias).every((token) => textMatchesToken(normalized, token));
-    })
-  ) || null;
-}
-
-function findSelectOption(select: HTMLSelectElement, requestedValue: string) {
-  const options = Array.from(select.options).filter((option) => !option.disabled);
-  const currentValue = select.value;
-  const normalizedValue = normalizeText(requestedValue);
-
-  if (requestedValue === "__NEXT__") {
-    const currentIndex = Math.max(0, options.findIndex((option) => option.value === currentValue));
-    return (
-      options.slice(currentIndex + 1).find((option) => option.value && option.value !== currentValue) ||
-      options.find((option) => option.value && option.value !== currentValue) ||
-      null
-    );
-  }
-
-  return (
-    options
-      .map((option) => {
-        const label = normalizeText(option.textContent || option.label || option.value);
-        const tokens = wordsFromText(normalizedValue).filter((token) => token.length >= 2);
-        let score = 0;
-        if (label === normalizedValue) score += 100;
-        if (label.includes(normalizedValue)) score += 70;
-        tokens.forEach((token) => {
-          if (textMatchesToken(label, token)) score += 20;
-        });
-        return { option, score };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score)[0]?.option || null
-  );
-}
-
-function findSaveButtonNear(control: EditableControl) {
-  const scope = control.closest("form, .panel, .tool-inner-panel, .tool-form-grid") || document;
-  const buttons = Array.from(scope.querySelectorAll("button"))
-    .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement)
-    .filter((button) => !button.disabled && button.offsetParent !== null);
-
-  return buttons.find((button) => {
-    const text = normalizeText(button.textContent || button.getAttribute("aria-label") || "");
-    return /\b(salveaza|actualizeaza|trimite)\b/.test(text) && !/\b(porneste|sterge|anuleaza)\b/.test(text);
-  }) || null;
-}
-
-async function waitForEditableControl(target: FieldTarget, timeoutMs = 4500) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const control = findEditableControl(target);
-    if (control) return control;
-    await delay(140);
-  }
-  return null;
-}
-
-function valueForControl(control: EditableControl, target: FieldTarget, requestedRawValue: string, command: string) {
-  let nextValue = requestedRawValue;
-  let nextLabel = requestedRawValue;
-
-  if (control instanceof HTMLSelectElement) {
-    const option = findSelectOption(control, requestedRawValue);
-    if (!option) return null;
-    nextValue = option.value;
-    nextLabel = (option.textContent || option.label || option.value).trim();
-  } else if (requestedRawValue === "__NEXT__") {
-    return null;
-  } else if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) {
-    const wantsOff = /\b(debifeaz|dezactiveaz|opreste|scoate)\w*/.test(normalizeText(command));
-    nextValue = wantsOff ? "false" : "true";
-    nextLabel = wantsOff ? "debifat" : "bifat";
-  } else if (control instanceof HTMLInputElement && control.type === "date") {
-    const dateValue = parseDateHints(requestedRawValue)[0] || parseDateHints(command)[0] || "";
-    if (!dateValue) return null;
-    nextValue = dateValue;
-    nextLabel = dateValue;
-  } else if (control instanceof HTMLInputElement && control.type === "number") {
-    const numberValue = parseSpokenNumber(requestedRawValue);
-    if (numberValue === null) return null;
-    nextValue = String(numberValue);
-    nextLabel = nextValue;
-  } else if (target.transform) {
-    nextValue = target.transform(requestedRawValue);
-    nextLabel = nextValue;
-  }
-
-  return { nextValue, nextLabel };
-}
-
-function shouldSaveFieldCommand(normalized: string) {
-  return /\b(salveaz|actualizeaz|aplica|confirma|trimite)\w*/.test(normalized);
-}
-
-function buildFieldUpdateAction(command: string, target: FieldTarget, options?: { waitForControl?: boolean }): AssistantAction | null {
-  const normalized = normalizeText(command);
-  const requestedRawValue = extractRequestedValueForTarget(command, target);
-  if (!requestedRawValue) return null;
-
-  const immediateControl = options?.waitForControl ? null : findEditableControl(target);
-  if (!options?.waitForControl && !immediateControl) return null;
-
-  const preview = immediateControl
-    ? valueForControl(immediateControl, target, requestedRawValue, command)
-    : { nextValue: requestedRawValue, nextLabel: requestedRawValue };
-
-  if (!preview) return null;
-  const shouldSave = shouldSaveFieldCommand(normalized);
-
-  const action: AssistantAction = {
-    type: "field-update",
-    commandName: shouldSave ? "click_button" : "update_current_page",
-    risk: "medium",
-    needsConfirmation: true,
-    confidence: 0.76,
-    fieldsToUpdate: {
-      [target.fieldLabel]: preview.nextLabel,
-    },
-    label: shouldSave
-      ? `Setez ${target.fieldLabel} la ${preview.nextLabel} si apas salvare daca exista buton de salvare.`
-      : `Setez ${target.fieldLabel} la ${preview.nextLabel}.`,
-    result: `Am setat ${target.fieldLabel} la ${preview.nextLabel}.`,
-    note: shouldSave ? undefined : "Verifica valoarea si salveaza daca pagina cere salvare.",
-    run: async () => {
-      const control = immediateControl || (await waitForEditableControl(target));
-      if (!control) {
-        throw new Error(`Nu am gasit campul pentru ${target.fieldLabel} in pagina curenta.`);
-      }
-
-      const resolvedValue = valueForControl(control, target, requestedRawValue, command);
-      if (!resolvedValue) {
-        throw new Error(`Nu am putut potrivi valoarea pentru ${target.fieldLabel}.`);
-      }
-
-      control.scrollIntoView({ behavior: "smooth", block: "center" });
-      control.focus();
-      if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) {
-        control.checked = resolvedValue.nextValue === "true";
-        control.dispatchEvent(new Event("input", { bubbles: true }));
-        control.dispatchEvent(new Event("change", { bubbles: true }));
-      } else {
-        setNativeControlValue(control, resolvedValue.nextValue);
-      }
-
-      if (shouldSave) {
-        window.setTimeout(() => {
-          findSaveButtonNear(control)?.click();
-        }, 120);
-        return `Am setat ${target.fieldLabel} la ${resolvedValue.nextLabel} si am incercat sa apas salvare.`;
-      }
-
-      return `Am setat ${target.fieldLabel} la ${resolvedValue.nextLabel}.`;
-    },
-  };
-
-  return action;
-}
-
-function resolveContextualFieldAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  if (!isFieldEditCommand(normalized)) return null;
-
-  const target = detectFieldTarget(normalized);
-  if (!target) return null;
-
-  return buildFieldUpdateAction(command, target);
-}
-
-function resolveDeferredFieldAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  if (!isFieldEditCommand(normalized)) return null;
-
-  const target = detectFieldTarget(normalized);
-  if (!target) return null;
-
-  return buildFieldUpdateAction(command, target, { waitForControl: true });
-}
-
-function isVisibleButton(button: HTMLButtonElement) {
-  if (button.disabled) return false;
-  const rect = button.getBoundingClientRect();
-  const style = window.getComputedStyle(button);
-  return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-}
-
-function findVisibleButtonByText(targetText: string) {
-  const normalizedTarget = normalizeText(targetText);
-  const targetTokens = wordsFromText(normalizedTarget).filter((token) => token.length >= 2);
-  if (targetTokens.length === 0) return null;
-
-  return Array.from(document.querySelectorAll("button"))
-    .filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement)
-    .filter(isVisibleButton)
-    .map((button) => {
-      const label = normalizeText(button.textContent || button.getAttribute("aria-label") || "");
-      let score = 0;
-      if (label === normalizedTarget) score += 100;
-      if (label.includes(normalizedTarget)) score += 75;
-      targetTokens.forEach((token) => {
-        if (textMatchesToken(label, token)) score += 22;
-      });
-      if (/\b(sterge|delete)\b/.test(label) && !/\b(sterge|delete)\b/.test(normalizedTarget)) score -= 120;
-      return { button, score };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.button || null;
-}
-
-async function waitForSearchControl(timeoutMs = 4500) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const control = findSearchControl();
-    if (control) return control;
-    await delay(140);
-  }
-  return null;
-}
-
-async function waitForVisibleButtonByText(targetText: string, timeoutMs = 4500) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const button = findVisibleButtonByText(targetText);
-    if (button) return button;
-    await delay(140);
-  }
-  return null;
-}
-
-function resolveButtonClickAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  const quickTargets: Array<{ terms: string[]; buttonText: string; label: string; result: string }> = [
-    {
-      terms: ["adauga lift", "adaug lift", "lift nou", "nou lift"],
-      buttonText: "lift",
-      label: "Apas butonul pentru adaugare lift.",
-      result: "Am apasat adaugare lift.",
-    },
-    {
-      terms: ["adauga adresa", "adaug adresa", "adresa noua", "noua adresa"],
-      buttonText: "adresa",
-      label: "Apas butonul pentru adaugare adresa.",
-      result: "Am apasat adaugare adresa.",
-    },
-    {
-      terms: ["salveaza client", "salveaza formular", "salveaza modificarile"],
-      buttonText: "salveaza",
-      label: "Apas butonul de salvare vizibil.",
-      result: "Am apasat salvare.",
-    },
-    {
-      terms: ["salveaza", "aplica", "confirma"],
-      buttonText: "salveaza",
-      label: "Apas butonul de salvare vizibil.",
-      result: "Am apasat salvare.",
-    },
-    {
-      terms: ["trimite", "trimite formular", "trimite cerere", "trimite cererea", "trimite solicitare"],
-      buttonText: "trimite",
-      label: "Apas butonul de trimitere vizibil.",
-      result: "Am apasat trimitere.",
-    },
-    {
-      terms: ["trimite raport"],
-      buttonText: "raport",
-      label: "Apas butonul pentru raportul vizibil.",
-      result: "Am apasat butonul pentru raport.",
-    },
-  ];
-
-  const matchedQuickTarget = quickTargets
-    .map((target) => ({
-      target,
-      score: Math.max(...target.terms.map((term) => (normalized.includes(normalizeText(term)) ? normalizeText(term).length : 0))),
-    }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.target;
-  let buttonText = matchedQuickTarget?.buttonText || "";
-  let label = matchedQuickTarget?.label || "";
-  let result = matchedQuickTarget?.result || "";
-
-  if (!buttonText) {
-    const clickMatch = normalized.match(/\b(?:apasa|apas|click|da\s+click)\s+(?:pe\s+)?(.+)$/);
-    const targetText = cleanFieldValue(clickMatch?.[1] || "");
-    if (targetText) {
-      buttonText = targetText;
-      label = `Apas butonul ${targetText}.`;
-      result = `Am apasat ${targetText}.`;
-    }
-  }
-
-  if (!buttonText) return null;
-
-  const action: AssistantAction = {
-    type: "field-update",
-    commandName: "click_button",
-    risk: "medium",
-    needsConfirmation: true,
-    confidence: 0.78,
-    fieldsToUpdate: {
-      button: buttonText,
-    },
-    label,
-    result,
-    run: async () => {
-      const button = await waitForVisibleButtonByText(buttonText);
-      if (!button) throw new Error(`Nu am gasit butonul ${buttonText}.`);
-      button.scrollIntoView({ behavior: "smooth", block: "center" });
-      button.focus();
-      window.setTimeout(() => button.click(), 80);
-      return result;
-    },
-  };
-
-  return action;
-}
-
 function resolveAssistantHelpAction(command: string): AssistantAction | null {
   const normalized = normalizeText(command);
   const asksForHelp =
@@ -1652,320 +1198,6 @@ function resolveAssistantHelpAction(command: string): AssistantAction | null {
     label: "Arat ce poate face asistentul.",
     result: formatCapabilitySections(sections),
   };
-}
-
-function getElementTextForAssistant(element: HTMLElement) {
-  return normalizeText(
-    [
-      element.textContent || "",
-      element.getAttribute("aria-label") || "",
-      element.getAttribute("title") || "",
-      element.id || "",
-      element.getAttribute("name") || "",
-      element.getAttribute("placeholder") || "",
-    ]
-      .filter(Boolean)
-      .join(" ")
-  );
-}
-
-function isVisibleElement(element: HTMLElement) {
-  const rect = element.getBoundingClientRect();
-  const style = window.getComputedStyle(element);
-  return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-}
-
-function scoreElementText(label: string, targetText: string) {
-  const normalizedTarget = normalizeText(targetText);
-  const tokens = wordsFromText(normalizedTarget).filter((token) => token.length >= 2);
-  if (!label || tokens.length === 0) return 0;
-
-  let score = 0;
-  if (label === normalizedTarget) score += 120;
-  if (label.includes(normalizedTarget)) score += 80;
-  tokens.forEach((token) => {
-    if (textMatchesToken(label, token)) score += 22;
-  });
-  if (tokens.every((token) => textMatchesToken(label, token))) score += 35;
-  return score;
-}
-
-function findSearchControl() {
-  const controls = Array.from(document.querySelectorAll("input, textarea"))
-    .filter((item): item is HTMLInputElement | HTMLTextAreaElement =>
-      item instanceof HTMLInputElement || item instanceof HTMLTextAreaElement
-    )
-    .filter((control) => isVisibleControl(control));
-
-  return controls
-    .map((control) => {
-      const label = getControlLabelText(control);
-      let score = 0;
-      if (control instanceof HTMLInputElement && control.type === "search") score += 90;
-      if (/\b(cauta|search|filtru|filtreaza|gaseste)\b/.test(label)) score += 85;
-      if (control.placeholder && /\b(cauta|search|filtru|filtreaza|gaseste)\b/.test(normalizeText(control.placeholder))) score += 60;
-      return { control, score };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.control || null;
-}
-
-function extractSearchValue(command: string) {
-  const normalized = normalizeText(command);
-  const match = normalized.match(/\b(?:cauta|filtreaza|gaseste)\w*\s+(?:dupa|textul|termenul|in lista|pe)?\s*(.+)$/);
-  return cleanFieldValue(
-    (match?.[1] || "")
-      .replace(/\b(?:in pagina|in lista|acum|te rog)\b/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-function resolveSearchAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  if (!/\b(cauta|filtreaza|gaseste)\w*/.test(normalized)) return null;
-
-  const searchValue = extractSearchValue(command);
-  if (!searchValue) return null;
-
-  const action: AssistantAction = {
-    type: "field-update",
-    commandName: "search_current_page",
-    risk: "low",
-    needsConfirmation: false,
-    confidence: 0.8,
-    fieldsToUpdate: {
-      query: searchValue,
-    },
-    label: `Caut ${searchValue} in pagina curenta.`,
-    result: `Am cautat ${searchValue}.`,
-    run: async () => {
-      const control = await waitForSearchControl();
-      if (!control) throw new Error("Nu am gasit un camp de cautare in pagina curenta.");
-      control.scrollIntoView({ behavior: "smooth", block: "center" });
-      control.focus();
-      setNativeControlValue(control, searchValue);
-      await delay(260);
-      return `Am cautat ${searchValue}.`;
-    },
-  };
-
-  return action;
-}
-
-function findContentTarget(targetText: string) {
-  const selectors = [
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "summary",
-    "legend",
-    "label",
-    ".panel-title",
-    ".simple-list-label",
-    ".quick-action-title",
-    "[id]",
-  ].join(",");
-
-  return Array.from(document.querySelectorAll(selectors))
-    .filter((item): item is HTMLElement => item instanceof HTMLElement)
-    .filter((item) => !["HTML", "BODY", "MAIN"].includes(item.tagName))
-    .filter(isVisibleElement)
-    .map((element) => ({ element, score: scoreElementText(getElementTextForAssistant(element), targetText) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.element || null;
-}
-
-function isClickableElement(element: HTMLElement) {
-  if (!isVisibleElement(element)) return false;
-  if (element instanceof HTMLButtonElement && element.disabled) return false;
-  return Boolean(
-    element.closest("a[href], button, [role='button'], summary") ||
-      element.matches("a[href], button, [role='button'], summary")
-  );
-}
-
-function findClickableTarget(targetText: string) {
-  const normalizedTarget = normalizeText(targetText);
-  const wantsFirst = /\b(primul|prima|first|rezultat)\b/.test(normalizedTarget);
-  const selectors = [
-    "a[href]",
-    "button",
-    "[role='button']",
-    "summary",
-    ".simple-list-item",
-    ".quick-action-card",
-  ].join(",");
-
-  const candidates = Array.from(document.querySelectorAll(selectors))
-    .filter((item): item is HTMLElement => item instanceof HTMLElement)
-    .filter(isClickableElement)
-    .filter((element) => !element.closest(".app-sidebar, .sidebar, nav, .voice-assistant"));
-
-  if (wantsFirst) {
-    const preferredSelectors = [
-      ".simple-list-item",
-      ".user-history-row",
-      ".tool-card",
-      ".vehicle-card",
-      ".quick-action-card",
-      "article a[href]",
-      "main a[href]",
-    ];
-
-    for (const selector of preferredSelectors) {
-      const match = candidates.find((element) => element.matches(selector) || Boolean(element.closest(selector)));
-      if (match) {
-        return (match.closest("a[href], button, [role='button'], summary") as HTMLElement | null) || match;
-      }
-    }
-
-    return candidates[0] || null;
-  }
-
-  return candidates
-    .map((element) => ({ element, score: scoreElementText(getElementTextForAssistant(element), targetText) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.element || null;
-}
-
-async function waitForClickableTarget(targetText: string, timeoutMs = 4500) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const element = findClickableTarget(targetText);
-    if (element) return element;
-    await delay(140);
-  }
-  return null;
-}
-
-function extractClickableTarget(command: string) {
-  const normalized = normalizeText(command);
-  const match = normalized.match(/\b(?:deschide|intra|click|apasa|apas|selecteaza|alege|vezi)\w*\s+(?:pe\s+|la\s+)?(.+)$/);
-  return cleanFieldValue(
-    (match?.[1] || "")
-      .replace(/\b(?:te rog|acum|pagina|cardul|randul|rezultatul)\b/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-function resolveClickableAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  if (!/\b(deschide|intra|click|apasa|apas|selecteaza|alege|vezi)\w*/.test(normalized)) return null;
-
-  const targetText = extractClickableTarget(command);
-  if (!targetText) return null;
-
-  const action: AssistantAction = {
-    type: "field-update",
-    commandName: "click_button",
-    risk: "medium",
-    needsConfirmation: true,
-    confidence: 0.74,
-    fieldsToUpdate: {
-      target: targetText,
-    },
-    label: `Deschid ${targetText}.`,
-    result: `Am deschis ${targetText}.`,
-    run: async () => {
-      const element = await waitForClickableTarget(targetText);
-      if (!element) throw new Error(`Nu am gasit elementul ${targetText}.`);
-      const target = (element.closest("a[href], button, [role='button'], summary") as HTMLElement | null) || element;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      target.focus?.();
-      window.setTimeout(() => target.click(), 80);
-      return `Am deschis ${targetText}.`;
-    },
-  };
-
-  return action;
-}
-
-async function waitForContentTarget(targetText: string, timeoutMs = 4500) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const element = findContentTarget(targetText);
-    if (element) return element;
-    await delay(140);
-  }
-  return null;
-}
-
-function extractScrollTarget(command: string) {
-  const normalized = normalizeText(command);
-  const match = normalized.match(
-    /\b(?:du|duc|duma|du ma|merg|sari|scroll|arata|afiseaza|vezi)\w*\s+(?:ma\s+)?(?:la|in|pe|catre|pana la)?\s*(?:sectiunea|zona|formularul|formular|campul|camp|panoul|tabelul|lista)?\s+(.+)$/
-  );
-  return cleanFieldValue(
-    (match?.[1] || "")
-      .replace(/\b(?:pagina|te rog|acum)\b/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-}
-
-function resolveScrollToAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  const hasScrollIntent =
-    /\b(sectiune|zona|formular|camp|panou|tabel|lista|documente|harta|istoric)\b/.test(normalized) ||
-    /\b(scroll|sari|pana la)\b/.test(normalized);
-  if (!hasScrollIntent) return null;
-
-  const targetText = extractScrollTarget(command);
-  if (!targetText || targetText.length < 2) return null;
-
-  return {
-    type: "field-update",
-    commandName: "search_current_page",
-    risk: "low",
-    needsConfirmation: false,
-    confidence: 0.76,
-    fieldsToUpdate: {
-      target: targetText,
-    },
-    label: `Merg la ${targetText} in pagina curenta.`,
-    result: `Am mers la ${targetText}.`,
-    run: async () => {
-      const element = await waitForContentTarget(targetText);
-      if (!element) throw new Error(`Nu am gasit sectiunea ${targetText}.`);
-      const details = element.closest("details") as HTMLDetailsElement | null;
-      if (details) details.open = true;
-      element.scrollIntoView({ behavior: "smooth", block: "center" });
-      element.focus?.();
-      return `Am mers la ${targetText}.`;
-    },
-  };
-}
-
-function resolveDynamicFieldAction(command: string): AssistantAction | null {
-  const normalized = normalizeText(command);
-  if (!isFieldEditCommand(normalized)) return null;
-
-  const patterns = [
-    /\b(?:completeaza|completez|scrie|introdu|pune|pun|seteaza|setez|modifica|modific|schimba|schimb|editeaza|editez|actualizeaza|actualizez)\w*\s+(?:campul|rubrica|valoarea|la)?\s*(.+?)\s+(?:cu|in|la)\s+(.+)$/,
-    /\b(?:bifeaza|debifeaza)\w*\s+(?:campul|optiunea|checkboxul)?\s*(.+)$/,
-  ];
-
-  let targetText = "";
-  let requestedValue = "";
-
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (!match?.[1]) continue;
-    targetText = cleanFieldValue(match[1]);
-    requestedValue = cleanFieldValue(match[2] || (normalized.includes("debifeaz") ? "nu" : "da"));
-    break;
-  }
-
-  if (!targetText || !requestedValue) return null;
-
-  return buildFieldUpdateAction(`${targetText} cu ${requestedValue}`, {
-    key: `dynamic:${targetText}`,
-    fieldLabel: targetText,
-    aliases: [targetText],
-  }, { waitForControl: true });
 }
 
 function isCreateCommand(normalized: string) {
@@ -2103,122 +1335,6 @@ function extractMaintenanceClientParams(command: string) {
     company: cleanFieldValue(companyMatch?.[1] || ""),
     contactPerson: cleanFieldValue(contactMatch?.[1] || ""),
     contactPhone: cleanFieldValue(phoneMatch?.[1] || ""),
-  };
-}
-
-function buildMaintenanceClientFormFillAction(command: string, confidence = 0.78): AssistantAction | null {
-  const draft = extractMaintenanceClientParams(command);
-  if (!draft.name && draft.liftNumbers.length === 0) return null;
-
-  const fieldsToUpdate = {
-    ...(draft.name ? { name: draft.name } : {}),
-    ...(draft.email ? { email: draft.email } : {}),
-    ...(draft.company ? { maintenanceCompany: draft.company } : {}),
-    ...(draft.address ? { address: draft.address } : {}),
-    ...(draft.contactPerson ? { contactPerson: draft.contactPerson } : {}),
-    ...(draft.contactPhone ? { contactPhone: draft.contactPhone } : {}),
-    ...(draft.liftNumbers.length ? { liftNumbers: draft.liftNumbers } : {}),
-  };
-
-  const fillAction: AssistantAction = {
-    type: "field-update",
-    commandName: "create_maintenance_client",
-    risk: "medium",
-    needsConfirmation: false,
-    confidence,
-    entityContext: draft.name
-      ? {
-          entityType: "maintenanceClient",
-          entityId: "",
-          label: draft.name,
-          query: command,
-        }
-      : undefined,
-    fieldsToUpdate,
-    label: draft.name
-      ? `Completez clientul ${draft.name}${draft.liftNumbers.length ? ` cu liftul ${draft.liftNumbers.join(", ")}` : ""}.`
-      : "Completez formularul de client mentenanta.",
-    result: "Am completat formularul de client mentenanta.",
-    run: async () => {
-      await fillMaintenanceClientForm(fieldsToUpdate);
-      return draft.name && draft.liftNumbers.length
-        ? `Am completat clientul ${draft.name} cu liftul ${draft.liftNumbers.join(", ")}. Verifica si confirma salvarea.`
-        : "Am completat formularul de client mentenanta. Verifica si confirma salvarea.";
-    },
-  };
-
-  return {
-    type: "sequence",
-    commandName: "create_maintenance_client",
-    risk: "medium",
-    needsConfirmation: false,
-    confidence,
-    entityContext: fillAction.entityContext,
-    fieldsToUpdate,
-    label: fillAction.label,
-    result: fillAction.result,
-    actions: [
-      {
-        type: "navigate",
-        commandName: "open_page",
-        risk: "low",
-        needsConfirmation: false,
-        confidence,
-        label: "Deschid clientii de mentenanta.",
-        path: "/maintenance?tab=clients&assistant=client#maintenance-client-form",
-        result: "Am deschis clientii de mentenanta.",
-      },
-      fillAction,
-    ],
-  };
-}
-
-function buildLeaveFormFillAction(command: string, confidence = 0.78): AssistantAction | null {
-  const range = parseLeaveRangeFallback(command);
-  if (!range.startDate || !range.endDate) return null;
-  const fieldsToUpdate = {
-    startDate: range.startDate,
-    endDate: range.endDate,
-    spokenText: command,
-  };
-
-  const fillAction: AssistantAction = {
-    type: "field-update",
-    commandName: "schedule_leave",
-    risk: "medium",
-    needsConfirmation: false,
-    confidence,
-    fieldsToUpdate,
-    label: `Completez concediul ${range.startDate} - ${range.endDate}.`,
-    result: "Am completat formularul de concediu.",
-    run: async () => {
-      await fillLeaveForm(fieldsToUpdate);
-      return `Am completat concediul ${range.startDate} - ${range.endDate}. Verifica semnatura si confirma trimiterea.`;
-    },
-  };
-
-  return {
-    type: "sequence",
-    commandName: "schedule_leave",
-    risk: "medium",
-    needsConfirmation: false,
-    confidence,
-    fieldsToUpdate,
-    label: fillAction.label,
-    result: fillAction.result,
-    actions: [
-      {
-        type: "navigate",
-        commandName: "open_page",
-        risk: "low",
-        needsConfirmation: false,
-        confidence,
-        label: "Deschid concediile.",
-        path: "/my-leave?assistant=leave#leave-form",
-        result: "Am deschis Concedii.",
-      },
-      fillAction,
-    ],
   };
 }
 
@@ -2455,68 +1571,6 @@ function parseDateHints(command: string) {
   }
 
   return Array.from(new Set(dates));
-}
-
-function parseLeaveRangeFallback(command: string) {
-  const normalized = normalizeText(command);
-  const currentYear = new Date().getFullYear();
-
-  const explicitDates = parseDateHints(command);
-  if (explicitDates.length >= 2) return { startDate: explicitDates[0], endDate: explicitDates[1] };
-  if (explicitDates.length === 1) return { startDate: explicitDates[0], endDate: explicitDates[0] };
-
-  if (normalized.includes("poimaine")) {
-    const date = new Date();
-    date.setDate(date.getDate() + 2);
-    const iso = toIsoDate(date);
-    return { startDate: iso, endDate: iso };
-  }
-
-  const weekFromMonth = normalized.match(/\b(prima|ultima)\s+saptamana\s+(?:din|de|in)?\s*([a-z]+)/);
-  if (weekFromMonth) {
-    const month = MONTHS_RO[weekFromMonth[2]];
-    if (month) {
-      if (weekFromMonth[1] === "prima") {
-        const start = new Date(currentYear, month - 1, 1);
-        while (start.getDay() !== 1) start.setDate(start.getDate() + 1);
-        const end = new Date(start);
-        end.setDate(start.getDate() + 4);
-        return { startDate: toIsoDate(start), endDate: toIsoDate(end) };
-      }
-
-      const end = new Date(currentYear, month, 0);
-      while (end.getDay() !== 5) end.setDate(end.getDate() - 1);
-      const start = new Date(end);
-      start.setDate(end.getDate() - 4);
-      return { startDate: toIsoDate(start), endDate: toIsoDate(end) };
-    }
-  }
-
-  if (normalized.includes("luni") && normalized.includes("vineri")) {
-    const today = new Date();
-    const day = today.getDay() || 7;
-    const start = new Date(today);
-    start.setDate(today.getDate() + (day <= 1 ? 1 - day : 8 - day));
-    const end = new Date(start);
-    end.setDate(start.getDate() + 4);
-    return { startDate: toIsoDate(start), endDate: toIsoDate(end) };
-  }
-
-  const spokenRange = normalized.match(
-    /(?:intre|din)?\s*(\d{1,2})(?:\s+[a-z]+)?\s+(?:si|pana\s+pe|pana\s+la|pana|-)\s+(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?/
-  );
-  if (spokenRange) {
-    const month = MONTHS_RO[spokenRange[3]];
-    const year = spokenRange[4] ? Number(spokenRange[4].length === 2 ? `20${spokenRange[4]}` : spokenRange[4]) : currentYear;
-    if (month) {
-      return {
-        startDate: parseDateCandidate(Number(spokenRange[1]), month, year),
-        endDate: parseDateCandidate(Number(spokenRange[2]), month, year),
-      };
-    }
-  }
-
-  return { startDate: "", endDate: "" };
 }
 
 type AssistantProfileContext = {
@@ -4176,37 +3230,15 @@ async function actionFromAiInterpretation(
       return null;
     }
     case "click_button":
-      return resolveButtonClickAction(`apasa ${interpretation.buttonHint || interpretation.targetText || originalCommand}`);
+      return null;
     case "fill_current_page": {
-      if (blocksUnsafeCurrentPageWrite) return null;
-      const [fieldName, fieldValue] = Object.entries(interpretation.fieldsToUpdate || {})[0] || [];
-      if (!fieldName || fieldValue === undefined || fieldValue === null) return null;
-      return buildFieldUpdateAction(
-        `${fieldName} cu ${String(fieldValue)}`,
-        {
-          key: `ai:${fieldName}`,
-          fieldLabel: fieldName,
-          aliases: [fieldName],
-        },
-        { waitForControl: true }
-      );
+      return buildAgentClarificationAction("Nu completez campuri arbitrar. Pagina trebuie sa aiba schema AI si executor controlat.", interpretation.confidence);
     }
     case "update_vehicle_field":
     case "update_profile_field":
     case "update_current_page_field":
       if (blocksUnsafeCurrentPageWrite) return null;
-      if (interpretation.editField && interpretation.editValue) {
-        return buildFieldUpdateAction(
-          `${interpretation.editField} cu ${interpretation.editValue}`,
-          {
-            key: `ai:${interpretation.editField}`,
-            fieldLabel: interpretation.editField,
-            aliases: [interpretation.editField],
-          },
-          { waitForControl: true }
-        );
-      }
-      return null;
+      return buildAgentClarificationAction("Nu modific pagina curenta prin DOM. Foloseste o comanda pe entitate sau o pagina cu schema AI.", interpretation.confidence);
     case "open_dashboard":
       return {
         type: "navigate",
@@ -4229,12 +3261,7 @@ async function actionFromAiInterpretation(
         result: "Am deschis Pontajul meu.",
       };
     case "open_gps_maps":
-      return {
-        type: "navigate",
-        label: interpretation.response || "Deschid pagina cu toate hartile GPS.",
-        path: "/vehicles/gps-map",
-        result: "Am deschis hartile GPS.",
-      };
+      return resolveFleetGpsMapNavigation(interpretation.entityQuery || interpretation.targetText || originalCommand);
     case "open_expense_scan":
       return {
         type: "navigate",
@@ -4293,18 +3320,27 @@ async function actionFromAiInterpretation(
     case "open_vehicle_live":
       return resolveVehicleNavigation(interpretation.targetText || originalCommand, true);
     case "start_timesheet":
+    {
+      const startFields = { ...(interpretation.fieldsToUpdate || {}), ...(interpretation.fields || {}) } as Record<string, unknown>;
+      const projectQuery =
+        String(startFields.project || startFields.proiect || interpretation.targetText || "").trim() ||
+        extractProjectQueryForTimesheet(originalCommand) ||
+        undefined;
+      const createProjectIfMissing = Boolean(startFields.createProjectIfMissing || startFields.creeazaDacaLipseste);
       return {
         type: "start-timesheet",
         commandName: "start_timesheet",
         risk: "medium",
         needsConfirmation: true,
         confidence: interpretation.confidence,
-        label: interpretation.targetText
-          ? `Pornesc pontajul pe proiectul ${interpretation.targetText}.`
+        label: projectQuery
+          ? `Pornesc pontajul pe proiectul ${projectQuery}${createProjectIfMissing ? " si il creez daca lipseste" : ""}.`
           : interpretation.response || "Pornesc pontajul cu proiectul tau implicit sau ultimul proiect folosit.",
         result: "Pontaj pornit.",
-        projectQuery: interpretation.targetText || extractProjectQueryForTimesheet(originalCommand) || undefined,
+        projectQuery,
+        createProjectIfMissing,
       };
+    }
     case "stop_timesheet":
       return {
         type: "stop-timesheet",
@@ -4441,6 +3477,9 @@ export default function VoiceCommandAssistant() {
     if (entity.entityType === "tool") {
       conversationContextRef.current.lastToolId = entity.entityId;
     }
+    if (entity.entityType === "project") {
+      conversationContextRef.current.lastProjectId = entity.entityId;
+    }
     if (entity.entityType === "user") {
       conversationContextRef.current.lastUserId = entity.entityId;
     }
@@ -4533,11 +3572,33 @@ export default function VoiceCommandAssistant() {
     if (helpAction) return helpAction;
 
     const classification = classifyAssistantCommand(command);
+    const agentPipelineRequired = isMutationLikeAssistantCommand(classification, normalized);
     let structuredInterpretationTried = false;
     const resolveStructuredAction = async () => {
       structuredInterpretationTried = true;
-      const rawInterpretation = await interpretAssistantCommand(command);
+      const rawInterpretation = await interpretAssistantCommand(command, {
+        currentPathname: location.pathname,
+        currentSearch: location.search,
+        currentHash: location.hash,
+        userRole: role,
+        memory: conversationMemoryRef.current.getSnapshot(),
+      });
       const interpretation = normalizeAssistantInterpretation(command, rawInterpretation);
+      const structuredIsMutation = agentPipelineRequired || isMutationLikeAssistantCommand(
+        {
+          type: interpretation.commandType || "unknown",
+          confidence: interpretation.confidence,
+          reason: interpretation.reasoning || "Interpretare OpenAI.",
+        },
+        normalized
+      );
+
+      if (structuredIsMutation && interpretation.confidence < ASSISTANT_AGENT_CONFIDENCE_THRESHOLD) {
+        return buildAgentClarificationAction(
+          "Nu sunt destul de sigur ca am inteles corect. Spune comanda mai concret, cu entitatea si valoarea exacta.",
+          interpretation.confidence
+        );
+      }
 
       if (classification.type === "navigation" || interpretation.commandType === "navigation") {
         if (interpretation.targetPage) {
@@ -4582,27 +3643,76 @@ export default function VoiceCommandAssistant() {
         return actionFromRuntimePlan(runtimePlan);
       }
 
-      return actionFromAiInterpretation(interpretation, command);
+      const aiAction = await actionFromAiInterpretation(interpretation, command);
+      if (!aiAction && interpretation.intent === "create_manual_notification") {
+        const fields = { ...(interpretation.fieldsToUpdate || {}), ...(interpretation.fields || {}) } as Record<string, unknown>;
+        const messageText = String(fields.message || fields.mesaj || interpretation.targetText || "").trim();
+        const targetText = String(fields.target || fields.destinatar || interpretation.entityQuery || "").trim();
+        if (!messageText) {
+          return buildAgentClarificationAction("Spune mesajul notificarii speciale.", interpretation.confidence);
+        }
+        return {
+          type: "field-update" as const,
+          commandName: "create_notification" as const,
+          risk: "medium" as const,
+          needsConfirmation: true,
+          confidence: interpretation.confidence,
+          entityContext: {
+            entityType: "notification" as const,
+            entityId: "",
+            label: targetText || "notificare pentru tine",
+            query: command,
+          },
+          fieldsToUpdate: {
+            message: messageText,
+            target: targetText || "eu",
+          },
+          executionPlan: [
+            { id: "validate", type: "validate_fields" as const, label: "Validez destinatarul si mesajul.", fields: ["message", "target"] },
+            { id: "confirm", type: "confirm" as const, label: "Astept confirmarea utilizatorului.", requiresConfirmation: true },
+            { id: "create", type: "service_update" as const, label: "Creez notificarea prin Firestore.", fields: ["message", "target"] },
+            { id: "audit", type: "audit" as const, label: "Scriu auditul comenzii AI." },
+          ],
+          label: targetText ? `Creez notificarea pentru ${targetText}: ${messageText}.` : `Creez notificarea pentru tine: ${messageText}.`,
+          result: "Am creat notificarea.",
+          run: async () => {
+            if (!user?.uid) throw new Error("Trebuie sa fii autentificat.");
+            const users = await getAllUsers();
+            const targetUser = targetText ? findUserMatch(users, targetText) : null;
+            const recipientId = targetUser?.id || user.uid;
+            const recipientName = targetUser?.fullName || targetUser?.email || user.displayName || user.email || "Utilizator";
+
+            await addDoc(collection(db, "notifications"), {
+              userId: recipientId,
+              targetUserThemeKey: targetUser?.themeKey ?? null,
+              actorUserId: user.uid,
+              actorUserName: user.displayName || user.email || "WorkControl",
+              actorUserThemeKey: user.themeKey ?? null,
+              title: "Notificare speciala",
+              message: messageText,
+              module: "notifications",
+              eventType: "notification_created",
+              entityId: "",
+              notificationPath: "/notifications",
+              soundEnabled: true,
+              read: false,
+              createdAt: Date.now(),
+              createdAtServer: serverTimestamp(),
+            });
+
+            navigate("/notifications");
+            return `Am creat notificarea pentru ${recipientName}.`;
+          },
+        };
+      }
+      if (!aiAction && structuredIsMutation) {
+        return buildAgentClarificationAction(
+          "Nu am putut genera un plan sigur pentru comanda asta. Nu execut nimic fara plan valid.",
+          interpretation.confidence
+        );
+      }
+      return aiAction;
     };
-
-    if (
-      includesAny(normalized, ["client", "clienti"]) &&
-      includesAny(normalized, ["mentenanta", "maintenance", "lift", "lifturi", "revizie", "revizii"]) &&
-      (classification.type === "create_entity" ||
-        classification.type === "form_fill" ||
-        includesAny(normalized, ["adauga", "adaug", "creeaza", "creaza", "completeaza", "formular"]))
-    ) {
-      const maintenanceFillAction = buildMaintenanceClientFormFillAction(command, classification.confidence);
-      if (maintenanceFillAction) return maintenanceFillAction;
-    }
-
-    if (
-      classification.type === "form_fill" &&
-      includesAny(normalized, ["concediu", "concedii", "zi libera", "liber"])
-    ) {
-      const leaveFillAction = buildLeaveFormFillAction(command, classification.confidence);
-      if (leaveFillAction) return leaveFillAction;
-    }
 
     if (classification.type !== "question" && classification.type !== "unknown") {
       try {
@@ -4610,6 +3720,12 @@ export default function VoiceCommandAssistant() {
         if (structuredAction) return structuredAction;
       } catch (error) {
         console.warn("[VoiceCommandAssistant][structured interpret]", error);
+        if (agentPipelineRequired) {
+          return buildAgentClarificationAction(
+            "Nu pot verifica sigur comanda cu agentul acum. Nu execut modificari sau completari fara interpretare structurata.",
+            classification.confidence
+          );
+        }
       }
     }
 
@@ -4629,6 +3745,13 @@ export default function VoiceCommandAssistant() {
       const knownPageAction = resolveKnownPageNavigation(normalized);
       if (knownPageAction) return knownPageAction;
       return null;
+    }
+
+    if (agentPipelineRequired) {
+      return buildAgentClarificationAction(
+        "Comanda pare sa modifice sau sa completeze date. Am oprit executia fiindca nu exista un plan valid confirmat.",
+        classification.confidence
+      );
     }
 
     const shouldPreferDetailedResolver =
@@ -4966,36 +4089,6 @@ export default function VoiceCommandAssistant() {
       };
     }
 
-    const domFallbackFields = Object.keys(
-      (resolveDynamicFieldAction(command)?.fieldsToUpdate || resolveContextualFieldAction(command)?.fieldsToUpdate || {}) as Record<string, unknown>
-    );
-    const domFallbackAllowed = canUseAssistantDomFallback({
-      command,
-      commandType: classification.type,
-      pathname: location.pathname,
-      fields: domFallbackFields,
-    });
-
-    if (domFallbackAllowed) {
-      const buttonClickAction = resolveButtonClickAction(command);
-      if (buttonClickAction) return buttonClickAction;
-
-      const searchAction = resolveSearchAction(command);
-      if (searchAction) return searchAction;
-
-      const contextualFieldAction = resolveContextualFieldAction(command);
-      if (contextualFieldAction) return contextualFieldAction;
-
-      const dynamicFieldAction = resolveDynamicFieldAction(command);
-      if (dynamicFieldAction) return dynamicFieldAction;
-
-      const deferredFieldAction = resolveDeferredFieldAction(command);
-      if (deferredFieldAction) return deferredFieldAction;
-
-      const scrollToAction = resolveScrollToAction(command);
-      if (scrollToAction) return scrollToAction;
-    }
-
     if (
       includesAny(normalized, ["client", "clientul", "clientului", "lift", "liftul"]) &&
       includesAny(normalized, ["mentenanta", "editeaza", "modifica", "schimba", "adauga lift", "adaug lift"])
@@ -5095,9 +4188,6 @@ export default function VoiceCommandAssistant() {
         includesAny(normalized, ["detalii live", "date live", "obd", "functionare", "senzori"])
       );
     }
-
-    const clickableAction = resolveClickableAction(command);
-    if (clickableAction) return clickableAction;
 
     return null;
   }, [location.pathname, navigate, role, user]);
@@ -5228,6 +4318,7 @@ export default function VoiceCommandAssistant() {
         targetPage: "",
         confidence: classification.confidence,
         nextAction: "Se interpreteaza comanda.",
+        executionPlan: [],
       });
       conversationMemoryRef.current.rememberCommand(cleanCommand);
       setPendingAction(null);
@@ -5250,6 +4341,7 @@ export default function VoiceCommandAssistant() {
           targetPage: action?.type === "navigate" ? action.path : action?.type === "sequence" ? action.actions.find((item) => item.type === "navigate")?.path || "" : "",
           confidence: action?.confidence ?? current?.confidence ?? classification.confidence,
           nextAction: action?.label || "Nu exista actiune sigura.",
+          executionPlan: action?.executionPlan || [],
         }));
         if (!action) {
           setState("idle");
@@ -5776,6 +4868,14 @@ export default function VoiceCommandAssistant() {
                   <div>
                     <dt>Actiune</dt>
                     <dd>{assistantDebug.nextAction || "-"}</dd>
+                  </div>
+                  <div>
+                    <dt>Execution plan</dt>
+                    <dd>
+                      {assistantDebug.executionPlan?.length
+                        ? assistantDebug.executionPlan.map((step, index) => `${index + 1}. ${step.label}`).join("\n")
+                        : "-"}
+                    </dd>
                   </div>
                   <div>
                     <dt>Motiv</dt>
