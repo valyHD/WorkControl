@@ -105,7 +105,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Nume scula *</label>
           <input
+            id="tool-name"
             className="tool-input"
+            data-assistant-field="name"
             value={values.name}
             onChange={(e) => updateField("name", e.target.value)}
             placeholder="Ex: Bormasina Bosch"
@@ -115,7 +117,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Cod intern *</label>
           <input
+            id="tool-internalCode"
             className="tool-input"
+            data-assistant-field="internalCode"
             value={values.internalCode}
             onChange={(e) => updateField("internalCode", e.target.value)}
             placeholder="Ex: SC-001"
@@ -125,7 +129,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Cod QR asociat</label>
           <input
+            id="tool-qrCodeValue"
             className="tool-input"
+            data-assistant-field="qrCodeValue"
             value={values.qrCodeValue}
             onChange={(e) => updateField("qrCodeValue", e.target.value)}
             placeholder="Ex: codul citit de pe eticheta QR"
@@ -135,7 +141,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Status</label>
           <select
+            id="tool-status"
             className="tool-input"
+            data-assistant-field="status"
             value={values.status}
             onChange={(e) => updateField("status", e.target.value as ToolStatus)}
           >
@@ -150,7 +158,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Responsabil principal</label>
           <select
+            id="tool-ownerUserId"
             className="tool-input"
+            data-assistant-field="ownerUserId"
             value={values.ownerUserId}
             onChange={handleOwnerChange}
           >
@@ -168,7 +178,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Detinator curent</label>
           <select
+            id="tool-currentHolderUserId"
             className="tool-input"
+            data-assistant-field="currentHolderUserId"
             value={values.currentHolderUserId}
             onChange={handleCurrentHolderChange}
           >
@@ -186,7 +198,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Locatie curenta / cine o are</label>
           <input
+            id="tool-locationLabel"
             className="tool-input"
+            data-assistant-field="locationLabel"
             value={values.locationLabel}
             onChange={(e) => updateField("locationLabel", e.target.value)}
             placeholder="Ex: Depozit / La Marian / In masina service 2"
@@ -196,7 +210,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Garantie manuala</label>
           <input
+            id="tool-warrantyText"
             className="tool-input"
+            data-assistant-field="warrantyText"
             value={values.warrantyText}
             onChange={(e) => updateField("warrantyText", e.target.value)}
             placeholder="Ex: Garantie extinsa 36 luni"
@@ -206,7 +222,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block">
           <label className="tool-form-label">Garantie pana la</label>
           <input
+            id="tool-warrantyUntil"
             className="tool-input"
+            data-assistant-field="warrantyUntil"
             type="date"
             value={values.warrantyUntil}
             onChange={(e) => updateField("warrantyUntil", e.target.value)}
@@ -216,7 +234,9 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
         <div className="tool-form-block tool-form-block-full">
           <label className="tool-form-label">Descriere</label>
           <textarea
+            id="tool-description"
             className="tool-input tool-textarea"
+            data-assistant-field="description"
             value={values.description}
             onChange={(e) => updateField("description", e.target.value)}
             placeholder="Detalii manuale despre scula"
@@ -252,7 +272,7 @@ export default function ToolForm({ initialValues, users, onSubmit, submitting }:
       </div>
 
       <div className="tool-form-actions">
-        <button className="primary-btn" type="submit" disabled={!canSubmit || submitting}>
+        <button id="tool-save" className="primary-btn" data-assistant-action="save-tool" type="submit" title="Salveaza scula" disabled={!canSubmit || submitting}>
           {submitting ? "Se salveaza..." : "Salveaza scula"}
         </button>
       </div>

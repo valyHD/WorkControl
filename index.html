@@ -1,12 +1,72 @@
 <!doctype html>
-<html lang="en">
+<html lang="ro">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>workcontrol</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=3" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-icons/workcontrol-control-192-v3.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-icons/workcontrol-control-512-v3.png" />
+    <link rel="shortcut icon" href="/pwa-icons/workcontrol-control-192-v3.png" />
+    <link rel="manifest" href="/manifest.webmanifest?v=6" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/pwa-icons/workcontrol-control-180-v3.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f0f4f9" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#f0f4f9" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f0f4f9" />
+    <meta name="color-scheme" content="only light" />
+    <meta name="supported-color-schemes" content="light" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="HandheldFriendly" content="true" />
+    <meta name="msapplication-TileColor" content="#2563eb" />
+    <meta name="application-name" content="WorkControl" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="WorkControl" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <style>
+      html,
+      body,
+      #root {
+        background: #f0f4f9 !important;
+        background-color: #f0f4f9 !important;
+        background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") !important;
+        background-repeat: repeat !important;
+        color: #0c1728 !important;
+        color-scheme: only light !important;
+        forced-color-adjust: none !important;
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      #wc-light-bg {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background: #f0f4f9 url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") repeat !important;
+        forced-color-adjust: none !important;
+      }
+
+      #root {
+        position: relative;
+        z-index: 1;
+      }
+    </style>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        root.classList.add("wc-force-light");
+        root.style.background = "#f0f4f9";
+        root.style.colorScheme = "only light";
+        root.style.forcedColorAdjust = "none";
+      })();
+    </script>
+    <title>WorkControl</title>
   </head>
   <body>
+    <div id="wc-light-bg" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

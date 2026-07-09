@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -28,6 +29,13 @@ function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem
     entityId: data.entityId ?? "",
     entityLabel: data.entityLabel ?? "",
     enabled: data.enabled ?? true,
+    scheduleTime: data.scheduleTime ?? "08:30",
+    stopTime: data.stopTime ?? "17:00",
+    weekdays: Array.isArray(data.weekdays) && data.weekdays.length > 0 ? data.weekdays : [1, 2, 3, 4, 5],
+    reminderDelayHours: Number(data.reminderDelayHours ?? 8),
+    reminderRepeatMinutes: Math.max(5, Math.min(720, Number(data.reminderRepeatMinutes ?? 60))),
+    reminderActiveMinutes: Math.max(0, Math.min(1440, Number(data.reminderActiveMinutes ?? 120))),
+    soundEnabled: data.soundEnabled ?? true,
     recipients: {
       notifyDirectUser: data.recipients?.notifyDirectUser ?? false,
       notifyOwner: data.recipients?.notifyOwner ?? false,
@@ -85,11 +93,12 @@ export async function createNotificationRule(
   });
 
   await dispatchNotificationEvent({
-    module: "system",
-    eventType: "notification_rule_changed",
+    module: "notifications",
+    eventType: "notification_rule_created",
     entityId: refDoc.id,
     title: "Regulă notificări creată",
     message: `Regula "${values.name}" a fost creată.`,
+    notificationPath: "/notification-rules",
   });
 
   return refDoc.id;
@@ -106,10 +115,24 @@ export async function updateNotificationRule(
   });
 
   await dispatchNotificationEvent({
-    module: "system",
-    eventType: "notification_rule_changed",
+    module: "notifications",
+    eventType: "notification_rule_updated",
     entityId: ruleId,
     title: "Regulă notificări actualizată",
     message: `Regula "${values.name}" a fost actualizată.`,
+    notificationPath: "/notification-rules",
+  });
+}
+
+export async function deleteNotificationRule(rule: NotificationRuleItem): Promise<void> {
+  await deleteDoc(doc(db, "notificationRules", rule.id));
+
+  await dispatchNotificationEvent({
+    module: "notifications",
+    eventType: "notification_rule_deleted",
+    entityId: rule.id,
+    title: "Regula notificari stearsa",
+    message: `Regula "${rule.name}" a fost stearsa.`,
+    notificationPath: "/notification-rules",
   });
 }

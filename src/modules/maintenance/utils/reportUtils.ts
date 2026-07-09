@@ -25,11 +25,12 @@ export function generateReportId(now = new Date()): string {
   return `RPT_${buildReportFolderDate(now)}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
-export function reviewStandardText(liftNumber: string): string {
+export function reviewStandardText(liftNumber: string, revisionType?: string): string {
+  const normalizedType = (revisionType || "").toUpperCase();
   const firstChar = liftNumber.trim()[0] ?? "";
-  if (["1", "2", "7"].includes(firstChar)) {
-    return "Declar ca am controlat echipamentul efectuand in conformitate cu P.T. ISCIR – R2, toate lucrarile necesare pentru a asigura bunul mers si siguranta functionarii. La terminarea reviziei am facut 5 (cinci) curse in ambele sensuri ale instalatiei si am constatat: Ascensorul functioneaza normal. Prezentul document atesta indeplinirea conditiilor de calitate a lucrarilor efectuate in conformitate cu legislatia in vigoare.";
+  if (normalizedType === "R2" || (!normalizedType && ["1", "2", "7"].includes(firstChar))) {
+    return "Declar ca am controlat echipamentul efectuand in conformitate cu P.T. ISCIR - R2, toate lucrarile necesare pentru a asigura bunul mers si siguranta functionarii. La terminarea reviziei am facut 5 (cinci) curse in ambele sensuri ale instalatiei si am constatat: Ascensorul functioneaza normal. Prezentul document atesta indeplinirea conditiilor de calitate a lucrarilor efectuate in conformitate cu legislatia in vigoare.";
   }
 
-  return "Declar ca am controlat echipamentul efectuand in conformitate cu P.T. ISCIR – R1, toate lucrarile necesare pentru a asigura bunul mers si siguranta functionarii. La terminarea reviziei am efectuat 2 curse in ambele sensuri ale instalatiei si am constatat: Platforma functioneaza normal. Prezentul document atesta indeplinirea conditiilor de calitate a lucrarilor efectuate in conformitate cu legislatia in vigoare.";
+  return "Declar ca am controlat echipamentul efectuand in conformitate cu P.T. ISCIR - R1, toate lucrarile necesare pentru a asigura bunul mers si siguranta functionarii. La terminarea reviziei am efectuat 2 curse in ambele sensuri ale instalatiei si am constatat: Platforma functioneaza normal. Prezentul document atesta indeplinirea conditiilor de calitate a lucrarilor efectuate in conformitate cu legislatia in vigoare.";
 }

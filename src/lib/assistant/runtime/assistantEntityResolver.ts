@@ -1,0 +1,169 @@
+import { getProjectsList } from "../../../modules/timesheets/services/timesheetsService";
+import { getToolsList } from "../../../modules/tools/services/toolsService";
+import { getAllUsers } from "../../../modules/users/services/usersService";
+import { getVehicleById, getVehiclesList } from "../../../modules/vehicles/services/vehiclesService";
+import type { ProjectItem } from "../../../types/timesheet";
+import type { ToolItem } from "../../../types/tool";
+import type { AppUserItem } from "../../../types/user";
+import type { VehicleItem } from "../../../types/vehicle";
+import { compactVehiclePlate, rankAssistantMatches, scoreAssistantText } from "./assistantFuzzy";
+import { getToolIdFromAssistantPath, getVehicleIdFromAssistantPath } from "./assistantConversationMemory";
+import type {
+  AssistantEntityResolution,
+  AssistantResolvedEntity,
+  AssistantRuntimeContext,
+  AssistantRuntimeEntityType,
+} from "./assistantTypes";
+
+function vehicleLabel(vehicle: VehicleItem) {
+  return [
+    vehicle.plateNumber,
+    vehicle.brand,
+    vehicle.model,
+    vehicle.vin,
+    vehicle.currentDriverUserName,
+    vehicle.ownerUserName,
+  ].filter(Boolean).join(" ");
+}
+
+function toolLabel(tool: ToolItem) {
+  return [
+    tool.name,
+    tool.internalCode,
+    tool.qrCodeValue,
+    tool.status,
+    tool.currentHolderUserName,
+    tool.ownerUserName,
+    tool.locationLabel,
+  ].filter(Boolean).join(" ");
+}
+
+function projectLabel(project: ProjectItem) {
+  return [project.name, project.code, project.status].filter(Boolean).join(" ");
+}
+
+function userLabel(user: AppUserItem) {
+  return [user.fullName, user.email, user.roleTitle, user.department].filter(Boolean).join(" ");
+}
+
+function buildResolution<T>(
+  entityType: AssistantRuntimeEntityType,
+  query: string,
+  ranked: Array<{ item: T; score: number }>,
+  getId: (item: T) => string,
+  getLabel: (item: T) => string
+): AssistantEntityResolution<T> {
+  const options: AssistantResolvedEntity<T>[] = ranked.slice(0, 5).map((entry) => ({
+    entityType,
+    entityId: getId(entry.item),
+    label: getLabel(entry.item),
+    query,
+    score: entry.score,
+    data: entry.item,
+  }));
+
+  if (options.length === 0) {
+    return { status: "not_found", options, message: `Nu am gasit ${entityType} pentru "${query}".` };
+  }
+
+  const [first, second] = options;
+  if (first.score >= 0.85 && (!second || first.score - second.score >= 0.08)) {
+    return { status: "resolved", entity: first, options };
+  }
+
+  if (options.length >= 2 && first.score >= 0.3) {
+    return { status: "ambiguous", options, message: "Am gasit mai multe rezultate posibile. Alege varianta corecta." };
+  }
+
+  if (first.score >= 0.55 && (!second || first.score - second.score >= 0.15)) {
+    return { status: "resolved", entity: first, options };
+  }
+
+  return { status: "not_found", options, message: `Nu am gasit ${entityType} pentru "${query}".` };
+}
+
+async function resolveContextEntity(entityType: AssistantRuntimeEntityType, context: AssistantRuntimeContext) {
+  if (entityType === "vehicle") {
+    const id = getVehicleIdFromAssistantPath(context.currentPathname) || context.memory?.lastVehicleId || "";
+    if (id) {
+      const vehicle = await getVehicleById(id);
+      if (vehicle) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType,
+            entityId: vehicle.id,
+            label: vehicleLabel(vehicle),
+            score: 1,
+            data: vehicle,
+          },
+          options: [],
+        } satisfies AssistantEntityResolution<VehicleItem>;
+      }
+    }
+  }
+
+  if (entityType === "tool") {
+    const id = getToolIdFromAssistantPath(context.currentPathname) || context.memory?.lastToolId || "";
+    if (id) {
+      const tools = await getToolsList();
+      const tool = tools.find((item) => item.id === id);
+      if (tool) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType,
+            entityId: tool.id,
+            label: toolLabel(tool),
+            score: 1,
+            data: tool,
+          },
+          options: [],
+        } satisfies AssistantEntityResolution<ToolItem>;
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function resolveAssistantEntity(
+  entityType: AssistantRuntimeEntityType,
+  query: string,
+  context: AssistantRuntimeContext
+): Promise<AssistantEntityResolution> {
+  const cleanQuery = query.trim();
+  const contextEntity = await resolveContextEntity(entityType, context);
+  if (contextEntity && (!cleanQuery || ["vehicle", "tool"].includes(entityType))) return contextEntity;
+
+  if (entityType === "vehicle") {
+    const vehicles = await getVehiclesList();
+    const ranked = vehicles
+      .map((vehicle) => {
+        const compactPlate = compactVehiclePlate(vehicle.plateNumber);
+        const compactQuery = compactVehiclePlate(cleanQuery);
+        const plateBoost = compactPlate && compactQuery && compactPlate.includes(compactQuery) ? 0.35 : 0;
+        return { item: vehicle, score: Math.min(1, scoreAssistantText(vehicleLabel(vehicle), cleanQuery) + plateBoost) };
+      })
+      .filter((entry) => entry.score >= 0.25)
+      .sort((a, b) => b.score - a.score);
+    return buildResolution("vehicle", cleanQuery, ranked, (vehicle) => vehicle.id, vehicleLabel);
+  }
+
+  if (entityType === "tool") {
+    const ranked = rankAssistantMatches(await getToolsList(), cleanQuery, toolLabel, 0.25);
+    return buildResolution("tool", cleanQuery, ranked, (tool) => tool.id, toolLabel);
+  }
+
+  if (entityType === "project") {
+    const ranked = rankAssistantMatches(await getProjectsList(), cleanQuery, projectLabel, 0.25);
+    return buildResolution("project", cleanQuery, ranked, (project) => project.id, projectLabel);
+  }
+
+  if (entityType === "user") {
+    const ranked = rankAssistantMatches(await getAllUsers(), cleanQuery, userLabel, 0.25);
+    return buildResolution("user", cleanQuery, ranked, (user) => user.id, userLabel);
+  }
+
+  return { status: "not_found", options: [], message: "Nu am gasit entitatea ceruta." };
+}

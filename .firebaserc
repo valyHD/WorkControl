@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "workcontrol-53b1d"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

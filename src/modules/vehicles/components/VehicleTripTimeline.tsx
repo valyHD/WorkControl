@@ -1,19 +1,20 @@
 import {
+  Activity,
   Gauge,
   LogIn,
   LogOut,
   PauseCircle,
   PlayCircle,
   Route,
-  Activity,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useMemo } from "react";
 import type { VehicleGeoEvent } from "../../../types/vehicle";
 
 type Props = { items: VehicleGeoEvent[] };
 
 function formatDate(ts: number) {
-  if (!ts || !Number.isFinite(ts)) return "—";
+  if (!ts || !Number.isFinite(ts)) return "-";
   return new Date(ts).toLocaleString("ro-RO");
 }
 
@@ -77,32 +78,42 @@ function getConfig(type: VehicleGeoEvent["type"]): EventConfigItem {
 }
 
 export default function VehicleTripTimeline({ items }: Props) {
-  if (!Array.isArray(items)) return null;
+  const safeItems = Array.isArray(items) ? items : [];
+  const visibleItems = useMemo(
+    () => (safeItems.length > 80 ? safeItems.slice(safeItems.length - 80) : safeItems),
+    [safeItems]
+  );
 
   return (
     <div className="panel vehicle-timeline-card">
-      <h4 className="panel-title">Trip timeline</h4>
+      <div className="vehicle-timeline-header">
+        <div>
+          <h4 className="panel-title">Trip timeline</h4>
+          <span className="tools-subtitle">
+            {visibleItems.length} evenimente in intervalul selectat
+          </span>
+        </div>
+        <Activity size={18} />
+      </div>
 
-      {items.length === 0 ? (
-        <div className="empty-state" style={{ padding: "24px 16px" }}>
-          <div className="empty-state-icon" style={{ width: 40, height: 40 }}>
+      {visibleItems.length === 0 ? (
+        <div className="empty-state vehicle-timeline-empty">
+          <div className="empty-state-icon">
             <Activity size={18} strokeWidth={1.7} />
           </div>
-          <div className="empty-state-title" style={{ fontSize: 13 }}>
+          <div className="empty-state-title">
             Nu exista evenimente pentru intervalul selectat
           </div>
         </div>
       ) : (
         <div className="vehicle-timeline-list">
-          {items.map((item, idx) => {
+          {visibleItems.map((item, idx) => {
             const { Icon, colorClass, chipLabel } = getConfig(item.type);
-            const isLast = idx === items.length - 1;
-
+            const isLast = idx === visibleItems.length - 1;
             const speedKmh =
               typeof item.metadata?.speedKmh === "number"
                 ? item.metadata.speedKmh
                 : null;
-
             const durationMs =
               typeof item.metadata?.durationMs === "number"
                 ? item.metadata.durationMs
@@ -112,7 +123,7 @@ export default function VehicleTripTimeline({ items }: Props) {
               <div
                 key={item.id}
                 className="vehicle-timeline-item"
-                style={{ paddingBottom: isLast ? 0 : undefined }}
+                data-last={isLast ? "true" : "false"}
               >
                 <div className="vehicle-timeline-item__track">
                   <span className={`vehicle-timeline-dot ${colorClass}`}>
@@ -122,14 +133,7 @@ export default function VehicleTripTimeline({ items }: Props) {
                 </div>
 
                 <div className="vehicle-timeline-item__body">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      flexWrap: "wrap",
-                    }}
-                  >
+                  <div className="vehicle-timeline-item__head">
                     <span className="vehicle-timeline-item__title">
                       {item.label}
                     </span>
@@ -143,14 +147,11 @@ export default function VehicleTripTimeline({ items }: Props) {
                   </div>
 
                   {(speedKmh !== null || durationMs !== null) && (
-                    <div
-                      className="vehicle-timeline-item__meta"
-                      style={{ marginTop: 2 }}
-                    >
+                    <div className="vehicle-timeline-item__meta vehicle-timeline-item__details">
                       {speedKmh !== null && <span>{speedKmh} km/h</span>}
                       {durationMs !== null && (
                         <span>
-                          {speedKmh !== null ? " · " : ""}
+                          {speedKmh !== null ? " - " : ""}
                           {Math.round(durationMs / 60000)} min
                         </span>
                       )}

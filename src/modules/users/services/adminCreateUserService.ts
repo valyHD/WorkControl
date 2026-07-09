@@ -18,6 +18,8 @@ export async function adminCreateUserWithEmail(params: {
   email: string;
   password: string;
   role: "admin" | "manager" | "angajat";
+  roleTitle?: string;
+  department?: string;
   themeKey: string;
 }) {
 const {
@@ -27,6 +29,8 @@ const {
   email,
   password,
   role,
+  roleTitle = "",
+  department = "",
   themeKey,
 } = params;
 
@@ -39,6 +43,8 @@ await setDoc(doc(db, "users", createdUser.uid), {
   email,
   active: true,
   role,
+  roleTitle: roleTitle.trim(),
+  department: department.trim(),
   themeKey, // 🔥 FOARTE IMPORTANT
   createdAt: Date.now(),
   createdAtServer: serverTimestamp(),

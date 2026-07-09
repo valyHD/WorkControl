@@ -5,7 +5,8 @@ const chunkGroups: Record<string, string[]> = {
   react: ["react", "react-dom", "react-router-dom"],
   firebase: ["firebase/app", "firebase/auth", "firebase/firestore", "firebase/messaging"],
   leaflet: ["leaflet", "react-leaflet"],
-  qr: ["html5-qrcode", "qrcode.react"],
+  qrReader: ["html5-qrcode"],
+  qrCode: ["qrcode.react"],
 };
 
 // https://vite.dev/config/
@@ -29,6 +30,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["react", "react-dom", "react-router-dom", "leaflet", "react-leaflet"],
+    include: ["react", "react-dom", "react-router-dom"],
   },
 });

@@ -1,0 +1,77 @@
+{
+  "name": "WorkControl",
+  "short_name": "WorkControl",
+  "description": "Aplicatia WorkControl pentru management firma.",
+  "lang": "ro-RO",
+  "dir": "ltr",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "categories": ["business", "productivity", "utilities"],
+  "prefer_related_applications": false,
+  "background_color": "#f0f4f9",
+  "theme_color": "#f0f4f9",
+  "icons": [
+    {
+      "src": "/pwa-icons/workcontrol-control-180-v3.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/workcontrol-control-192-v3.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/workcontrol-control-192-v3.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/pwa-icons/workcontrol-control-512-v3.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icons/workcontrol-control-512-v3.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Pontajul meu",
+      "short_name": "Pontaj",
+      "description": "Porneste sau opreste pontajul.",
+      "url": "/my-timesheets?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-icons/workcontrol-control-192-v3.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Notificari",
+      "short_name": "Notificari",
+      "description": "Vezi notificarile WorkControl.",
+      "url": "/notifications?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-icons/workcontrol-control-192-v3.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

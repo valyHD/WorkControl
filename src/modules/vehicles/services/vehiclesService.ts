@@ -19,48 +19,95 @@ import {
   type QueryConstraint,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import {
-  deleteObject,
+  getBlob,
   getDownloadURL,
   ref,
   uploadBytes,
 } from "firebase/storage";
-import { db, storage } from "../../../lib/firebase/firebase";
+import { db, functions, storage } from "../../../lib/firebase/firebase";
 import type {
   VehicleCommandItem,
   VehicleCommandStatus,
   VehicleCommandType,
+  VehicleDailyDiagnosticEvent,
+  VehicleDailyDiagnosticSample,
+  VehicleDailyDiagnosticSeverity,
+  VehicleDailyDiagnosticsSummary,
   VehicleDocumentCategory,
   VehicleDocumentItem,
   VehicleEventItem,
   VehicleFormValues,
+  VehicleGpsDataUsagePeriod,
   VehicleImageItem,
   VehicleItem,
+  VehicleLiveDiagnostics,
+  VehicleLiveIoGroup,
+  VehicleLiveIoItem,
   VehiclePositionItem,
   VehicleStatus,
   VehicleTrackerEventItem,
 } from "../../../types/vehicle";
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 
 const vehiclesCollection = collection(db, "vehicles");
 const vehicleEventsCollection = collection(db, "vehicleEvents");
 const usersCollection = collection(db, "users");
+const vehicleGpsVisibilityRef = doc(db, "systemSettings", "vehicleGpsVisibility");
+
+export const VEHICLE_GPS_VISIBILITY_OWNER_EMAIL = "ionut.matura23@gmail.com";
+
+export type VehicleGpsVisibilityState = {
+  blocked: boolean;
+  updatedAt: number;
+  updatedBy: string;
+  updatedByName: string;
+};
 
 const VEHICLE_STATUSES = ["activa", "in_service", "indisponibila", "avariata"] as const;
 const VEHICLE_COMMAND_TYPES = ["pulse_dout1", "allow_start", "block_start"] as const;
 const VEHICLE_COMMAND_STATUSES = ["requested", "pending", "completed", "failed"] as const;
+const vehicleAuditFields: AuditFieldDescriptor<VehicleFormValues>[] = [
+  { key: "plateNumber", label: "Numar masina" },
+  { key: "brand", label: "Marca" },
+  { key: "model", label: "Model" },
+  { key: "year", label: "An" },
+  { key: "vin", label: "VIN" },
+  { key: "fuelType", label: "Combustibil" },
+  { key: "status", label: "Status" },
+  { key: "currentKm", label: "Km curenti", format: (value) => `${toSafeNumber(value, 0)} km` },
+  { key: "initialRecordedKm", label: "Km initiali", format: (value) => `${toSafeNumber(value, 0)} km` },
+  { key: "ownerUserName", label: "Responsabil" },
+  { key: "currentDriverUserName", label: "Sofer" },
+  { key: "maintenanceNotes", label: "Observatii mentenanta" },
+  { key: "serviceStrategy", label: "Tip revizie" },
+  { key: "serviceIntervalKm", label: "Interval service", format: (value) => `${toSafeNumber(value, 0)} km` },
+  { key: "nextServiceKm", label: "Urmatorul service", format: (value) => `${toSafeNumber(value, 0)} km` },
+  { key: "nextOilServiceKm", label: "Urmatorul schimb ulei", format: (value) => `${toSafeNumber(value, 0)} km` },
+  { key: "nextItpDate", label: "ITP" },
+  { key: "nextRcaDate", label: "RCA" },
+  { key: "nextCascoDate", label: "CASCO" },
+  { key: "nextRovinietaDate", label: "Rovinieta" },
+];
 
 const MAX_TOTAL_ROUTE_POINTS = 250000;
 const DEFAULT_ROUTE_PAGE_SIZE = 2000;
 const DEFAULT_ROUTE_MAX_PAGES = 500;
 const ROUTE_INCREMENTAL_OVERLAP_MS = 60_000;
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 20_000;
+const ROUTE_QUERY_TIMEOUT_MS = 45_000;
+const LIVE_ROUTE_WINDOW_GRACE_MS = 2 * 60 * 1000;
+const PROGRESSIVE_ROUTE_RANGE_MS = 30 * 60 * 1000;
+const PROGRESSIVE_ROUTE_CHUNK_MS = 30 * 60 * 1000;
 const MAX_POLL_BACKOFF_MS = 90_000;
 const ROUTE_CACHE_TTL_MS = 10_000;
-const DAY_QUERY_CONCURRENCY = 3;
+const DAY_QUERY_CONCURRENCY = 1;
 const PERSISTED_ROUTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PERSISTED_ROUTE_CACHE_MAX_ITEMS = 12_000;
+const ARCHIVED_ROUTE_LOOKBACK_MS = 29 * 24 * 60 * 60 * 1000;
 
 type RouteCacheItem = {
   key: string;
@@ -69,11 +116,78 @@ type RouteCacheItem = {
 };
 
 const routeRangeCache = new Map<string, RouteCacheItem>();
+const vehiclePositionArchiveCache = new Map<string, VehiclePositionItem[]>();
+const missingVehiclePositionArchiveCache = new Set<string>();
+
+export function canControlVehicleGpsVisibility(email?: string | null): boolean {
+  return (
+    typeof email === "string" &&
+    email.trim().toLowerCase() === VEHICLE_GPS_VISIBILITY_OWNER_EMAIL
+  );
+}
+
+export function subscribeVehicleGpsVisibility(
+  callback: (state: VehicleGpsVisibilityState) => void
+) {
+  return onSnapshot(
+    vehicleGpsVisibilityRef,
+    (snap) => {
+      const data = snap.exists() ? snap.data() : {};
+      callback({
+        blocked: toSafeBoolean(data.blocked, false),
+        updatedAt: toSafeNumber(data.updatedAt, 0),
+        updatedBy: toSafeString(data.updatedBy),
+        updatedByName: toSafeString(data.updatedByName),
+      });
+    },
+    (error) => {
+      console.error("[subscribeVehicleGpsVisibility]", error);
+      callback({
+        blocked: false,
+        updatedAt: 0,
+        updatedBy: "",
+        updatedByName: "",
+      });
+    }
+  );
+}
+
+export async function setVehicleGpsVisibilityBlocked(
+  blocked: boolean,
+  actor?: { email?: string | null; displayName?: string | null }
+) {
+  if (!canControlVehicleGpsVisibility(actor?.email)) {
+    throw new Error("Nu ai dreptul sa modifici vizibilitatea GPS.");
+  }
+
+  await setDoc(
+    vehicleGpsVisibilityRef,
+    {
+      blocked,
+      updatedAt: Date.now(),
+      updatedBy: actor?.email || "",
+      updatedByName: actor?.displayName || actor?.email || "",
+    },
+    { merge: true }
+  );
+}
 
 
 type VehicleUploadDocumentInput = {
   file: File;
   category: VehicleDocumentCategory;
+  expiryDate?: string;
+};
+
+type VehicleDocumentAiAnalysis = {
+  documentType?: VehicleDocumentCategory | "unknown";
+  expiryDate?: string;
+  issueDate?: string;
+  policyNumber?: string;
+  providerName?: string;
+  vehiclePlateNumber?: string;
+  confidence?: number;
+  notes?: string;
 };
 
 type PersistedRouteCacheItem = {
@@ -82,6 +196,16 @@ type PersistedRouteCacheItem = {
   toTs: number;
   savedAt: number;
   items: VehiclePositionItem[];
+};
+
+type VehiclePositionArchivePayload = {
+  vehicleId?: string;
+  dayKey?: string;
+  points?: Array<Record<string, unknown>>;
+};
+
+type RoutePollingOptions = {
+  usePersistedCache?: boolean;
 };
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
@@ -150,10 +274,172 @@ function toSafeBoolean(value: unknown, fallback = false): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function toOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function toSafeObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function toVehicleLiveIoGroup(value: unknown): VehicleLiveIoGroup {
+  const groups: VehicleLiveIoGroup[] = [
+    "gps",
+    "obd",
+    "power",
+    "connectivity",
+    "input_output",
+    "bluetooth",
+    "system",
+    "unknown",
+  ];
+
+  return groups.includes(value as VehicleLiveIoGroup)
+    ? (value as VehicleLiveIoGroup)
+    : "unknown";
+}
+
+function toVehicleDailyDiagnosticSeverity(value: unknown): VehicleDailyDiagnosticSeverity {
+  const severities: VehicleDailyDiagnosticSeverity[] = ["info", "warning", "critical"];
+  return severities.includes(value as VehicleDailyDiagnosticSeverity)
+    ? (value as VehicleDailyDiagnosticSeverity)
+    : "info";
+}
+
+function mapVehicleLiveIoItem(data: Record<string, unknown>): VehicleLiveIoItem {
+  return {
+    id: toSafeNumber(data.id, 0),
+    key: toSafeString(data.key, String(data.id ?? "")),
+    label: toSafeString(data.label, `AVL ${String(data.id ?? "")}`),
+    group: toVehicleLiveIoGroup(data.group),
+    value:
+      typeof data.value === "string" ||
+      typeof data.value === "number" ||
+      typeof data.value === "boolean" ||
+      data.value === null
+        ? data.value
+        : toSafeString(data.value),
+    rawValue: data.rawValue,
+    displayValue: toSafeString(data.displayValue, String(data.value ?? data.rawValue ?? "-")),
+    unit: toSafeString(data.unit),
+    description: toSafeString(data.description),
+  };
+}
+
+function mapVehicleLiveDiagnostics(value: unknown): VehicleLiveDiagnostics | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  const data = value as Record<string, unknown>;
+  const gpsRaw = toSafeObject(data.gps);
+  const decodedRaw = Array.isArray(data.decodedIo) ? data.decodedIo : [];
+
+  return {
+    source: toSafeString(data.source),
+    imei: toSafeString(data.imei),
+    protocol: toSafeString(data.protocol),
+    online: toSafeBoolean(data.online, false),
+    recordTimestamp: toSafeNumber(data.recordTimestamp, 0),
+    serverTimestamp: toSafeNumber(data.serverTimestamp, 0),
+    expiresAt: toOptionalNumber(data.expiresAt),
+    eventIoId: toOptionalNumber(data.eventIoId),
+    totalIo: toOptionalNumber(data.totalIo),
+    priority: toOptionalNumber(data.priority),
+    bluetoothObdConnected: toOptionalBoolean(data.bluetoothObdConnected) ?? null,
+    obdConnected: toOptionalBoolean(data.obdConnected) ?? null,
+    gps: Object.keys(gpsRaw).length
+      ? {
+          lat: toSafeNumber(gpsRaw.lat, 0),
+          lng: toSafeNumber(gpsRaw.lng, 0),
+          speedKmh: toOptionalNumber(gpsRaw.speedKmh),
+          altitude: toOptionalNumber(gpsRaw.altitude),
+          angle: toOptionalNumber(gpsRaw.angle),
+          satellites: toOptionalNumber(gpsRaw.satellites),
+        }
+      : undefined,
+    obd: toSafeObject(data.obd),
+    decodedIo: decodedRaw.map((item) => mapVehicleLiveIoItem(toSafeObject(item))),
+    rawIo: toSafeObject(data.rawIo),
+  };
+}
+
+function mapVehicleDailyDiagnosticEvent(
+  index: number,
+  value: unknown
+): VehicleDailyDiagnosticEvent {
+  const data = toSafeObject(value);
+
+  return {
+    id: toSafeString(data.id, `event-${index}`),
+    key: toSafeString(data.key),
+    type: toSafeString(data.type, "diagnostic_event"),
+    label: toSafeString(data.label, "Eveniment diagnostic"),
+    timestamp: toSafeNumber(data.timestamp, 0),
+    severity: toVehicleDailyDiagnosticSeverity(data.severity),
+    value:
+      typeof data.value === "string" ||
+      typeof data.value === "number" ||
+      typeof data.value === "boolean" ||
+      data.value === null
+        ? data.value
+        : undefined,
+    unit: toSafeString(data.unit),
+    details: toSafeString(data.details),
+  };
+}
+
+function mapVehicleDailyDiagnosticSample(value: unknown): VehicleDailyDiagnosticSample | null {
+  const data = toSafeObject(value);
+  const timestamp = toSafeNumber(data.timestamp, 0);
+  if (!timestamp) return null;
+
+  return {
+    timestamp,
+    speedKmh: toOptionalNumber(data.speedKmh) ?? null,
+    engineRpm: toOptionalNumber(data.engineRpm) ?? null,
+    totalOdometerKm: toOptionalNumber(data.totalOdometerKm) ?? null,
+    tripOdometerKm: toOptionalNumber(data.tripOdometerKm) ?? null,
+    coolantTemperatureC: toOptionalNumber(data.coolantTemperatureC) ?? null,
+    engineOilTemperatureC: toOptionalNumber(data.engineOilTemperatureC) ?? null,
+    externalVoltageV: toOptionalNumber(data.externalVoltageV) ?? null,
+    batteryVoltageV: toOptionalNumber(data.batteryVoltageV) ?? null,
+    fuelLevelPct: toOptionalNumber(data.fuelLevelPct) ?? null,
+    fuelRateLh: toOptionalNumber(data.fuelRateLh) ?? null,
+    engineLoadPct: toOptionalNumber(data.engineLoadPct) ?? null,
+    throttlePositionPct: toOptionalNumber(data.throttlePositionPct) ?? null,
+  };
+}
+
+function mapVehicleDailyDiagnosticsSummary(
+  id: string,
+  data: Record<string, unknown>
+): VehicleDailyDiagnosticsSummary {
+  const eventsRaw = Array.isArray(data.events) ? data.events : [];
+  const samplesRaw = Array.isArray(data.samples) ? data.samples : [];
+  const sensorKeysRaw = Array.isArray(data.availableSensorKeys) ? data.availableSensorKeys : [];
+
+  return {
+    id,
+    vehicleId: toSafeString(data.vehicleId),
+    dayKey: toSafeString(data.dayKey, id),
+    imei: toSafeString(data.imei),
+    firstRecordAt: toOptionalNumber(data.firstRecordAt),
+    lastRecordAt: toOptionalNumber(data.lastRecordAt),
+    updatedAt: toOptionalNumber(data.updatedAt),
+    packetsCount: toSafeNumber(data.packetsCount, 0),
+    summaryText: toSafeString(data.summaryText),
+    stats: toSafeObject(data.stats),
+    latestObd: toSafeObject(data.latestObd),
+    availableSensorKeys: sensorKeysRaw.map((item) => toSafeString(item)).filter(Boolean),
+    events: eventsRaw
+      .map((item, index) => mapVehicleDailyDiagnosticEvent(index, item))
+      .sort((a, b) => b.timestamp - a.timestamp),
+    samples: samplesRaw
+      .map((item) => mapVehicleDailyDiagnosticSample(item))
+      .filter((item): item is VehicleDailyDiagnosticSample => Boolean(item))
+      .sort((a, b) => b.timestamp - a.timestamp),
+  };
 }
 
 function isValidLatLng(lat: number, lng: number): boolean {
@@ -256,6 +542,15 @@ function setRouteCache(
     const now = Date.now();
     for (const [cacheKey, value] of routeRangeCache.entries()) {
       if (value.expiresAt < now) routeRangeCache.delete(cacheKey);
+    }
+  }
+}
+
+/** Invalideaza cache-ul de rute pentru un vehicul (folosit de simulator) */
+export function clearVehicleRouteCache(vehicleId: string): void {
+  for (const [key] of routeRangeCache.entries()) {
+    if (key.startsWith(`${vehicleId}:`)) {
+      routeRangeCache.delete(key);
     }
   }
 }
@@ -384,6 +679,72 @@ function getDayStartTs(dayKey: string): number {
   return new Date(`${dayKey}T00:00:00.000Z`).getTime();
 }
 
+function shouldTryArchivedPositions(dayKey: string): boolean {
+  const dayStart = getDayStartTs(dayKey);
+  return Number.isFinite(dayStart) && dayStart < Date.now() - ARCHIVED_ROUTE_LOOKBACK_MS;
+}
+
+function buildVehiclePositionArchivePath(vehicleId: string, dayKey: string): string {
+  return `vehicle-position-archives/${vehicleId}/${dayKey}.json`;
+}
+
+async function getVehicleArchivedPositionsForDay(
+  vehicleId: string,
+  dayKey: string,
+  fromTs: number,
+  toTs: number
+): Promise<VehiclePositionItem[]> {
+  if (!shouldTryArchivedPositions(dayKey)) return [];
+
+  try {
+    const cacheKey = `${vehicleId}:${dayKey}`;
+    if (missingVehiclePositionArchiveCache.has(cacheKey)) return [];
+
+    const cached = vehiclePositionArchiveCache.get(cacheKey);
+    if (cached) {
+      return cached.filter((point) => point.gpsTimestamp >= fromTs && point.gpsTimestamp <= toTs);
+    }
+
+    const archiveRef = ref(storage, buildVehiclePositionArchivePath(vehicleId, dayKey));
+    const blob = await getBlob(archiveRef);
+    const payload = JSON.parse(await blob.text()) as VehiclePositionArchivePayload;
+    const points = Array.isArray(payload.points) ? payload.points : [];
+
+    const normalized = normalizePositionItems(
+      points
+        .map((point, index) =>
+          mapVehiclePositionDoc(
+            toSafeString(point.id, `${dayKey}-archive-${index}`),
+            {
+              ...point,
+              vehicleId: toSafeString(point.vehicleId, vehicleId),
+            }
+          )
+        )
+    );
+
+    vehiclePositionArchiveCache.set(cacheKey, normalized);
+    if (vehiclePositionArchiveCache.size > 120) {
+      const firstKey = vehiclePositionArchiveCache.keys().next().value;
+      if (firstKey) vehiclePositionArchiveCache.delete(firstKey);
+    }
+
+    return normalized.filter((point) => point.gpsTimestamp >= fromTs && point.gpsTimestamp <= toTs);
+  } catch (error: any) {
+    const code = toSafeString(error?.code);
+    if (code === "storage/object-not-found") {
+      missingVehiclePositionArchiveCache.add(`${vehicleId}:${dayKey}`);
+      if (missingVehiclePositionArchiveCache.size > 500) {
+        missingVehiclePositionArchiveCache.clear();
+      }
+    }
+    if (code && code !== "storage/object-not-found") {
+      console.warn("[getVehicleArchivedPositionsForDay]", vehicleId, dayKey, error);
+    }
+    return [];
+  }
+}
+
 function addDays(dayKey: string, days: number): string {
   const ts = getDayStartTs(dayKey) + days * 24 * 60 * 60 * 1000;
   return new Date(ts).toISOString().slice(0, 10);
@@ -412,6 +773,23 @@ function enumerateDayKeysWithNeighbors(fromTs: number, toTs: number): string[] {
   const last = base[base.length - 1];
 
   return dedupeDayKeys([addDays(first, -1), ...base, addDays(last, 1)]);
+}
+
+function enumerateLocalDayKeysWithUtcNeighbors(fromTs: number, toTs: number): string[] {
+  const result: string[] = [];
+  const cursor = new Date(fromTs);
+  cursor.setHours(0, 0, 0, 0);
+  const end = new Date(toTs);
+  end.setHours(23, 59, 59, 999);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const localStart = cursor.getTime();
+    const localEnd = localStart + 24 * 60 * 60 * 1000 - 1;
+    result.push(...enumerateDayKeysWithNeighbors(localStart, localEnd));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dedupeDayKeys(result);
 }
 
 function dedupeDayKeys(dayKeys: string[]): string[] {
@@ -454,11 +832,30 @@ async function runWithConcurrency<T, R>(
 function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const gpsSnapshotRaw = data.gpsSnapshot ? toSafeObject(data.gpsSnapshot) : null;
   const trackerRaw = data.tracker ? toSafeObject(data.tracker) : null;
+  const gpsDataUsageRaw = data.gpsDataUsage ? toSafeObject(data.gpsDataUsage) : null;
+  const gpsDataUsageMonthsRaw = gpsDataUsageRaw ? toSafeObject(gpsDataUsageRaw.months) : {};
+  const gpsDataUsageMonths = Object.entries(gpsDataUsageMonthsRaw).reduce(
+    (acc, [monthKey, monthValue]) => {
+      const monthRaw = toSafeObject(monthValue);
+      acc[monthKey] = {
+        rxBytes: toSafeNumber(monthRaw.rxBytes, 0),
+        txBytes: toSafeNumber(monthRaw.txBytes, 0),
+        totalBytes: toSafeNumber(monthRaw.totalBytes, 0),
+        recordsCount: toSafeNumber(monthRaw.recordsCount, 0),
+        frameCount: toSafeNumber(monthRaw.frameCount, 0),
+        lastRxBytes: toSafeNumber(monthRaw.lastRxBytes, 0),
+        lastTxBytes: toSafeNumber(monthRaw.lastTxBytes, 0),
+        lastTotalBytes: toSafeNumber(monthRaw.lastTotalBytes, 0),
+        updatedAt: toSafeNumber(monthRaw.updatedAt, 0),
+      };
+      return acc;
+    },
+    {} as Record<string, VehicleGpsDataUsagePeriod>
+  );
   const imagesRaw = Array.isArray(data.images) ? data.images : [];
   const documentsRaw = Array.isArray(data.documents) ? data.documents : [];
-  const gpsOdometerKm = gpsSnapshotRaw ? toOptionalNumber(gpsSnapshotRaw.odometerKm) : undefined;
   const storedCurrentKm = toSafeNumber(data.currentKm, 0);
-  const currentKm = gpsOdometerKm ?? storedCurrentKm;
+  const currentKm = storedCurrentKm;
   const initialRecordedKm = toSafeNumber(data.initialRecordedKm, storedCurrentKm || currentKm);
   const serviceStrategy = data.serviceStrategy === "absolute" ? "absolute" : "interval";
   const serviceIntervalKm = toSafeNumber(data.serviceIntervalKm, 15000);
@@ -494,6 +891,8 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     nextItpDate: toSafeString(data.nextItpDate),
     nextRcaDate: toSafeString(data.nextRcaDate),
     nextCascoDate: toSafeString(data.nextCascoDate),
+    nextRovinietaDate: toSafeString(data.nextRovinietaDate),
+    nextOilServiceKm: toSafeNumber(data.nextOilServiceKm, 0),
 
     coverImageUrl: toSafeString(data.coverImageUrl),
     coverThumbUrl: toSafeString(data.coverThumbUrl),
@@ -514,9 +913,25 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
       contentType: toSafeString(item?.contentType),
       sizeBytes: toSafeNumber(item?.sizeBytes, 0),
       extension: toSafeString(item?.extension),
-      category: ["service", "leasing_rate", "rca_itp", "rovinieta", "amenda", "other"].includes(item?.category)
-        ? item.category
+      category: ["service", "itp", "rca", "casco", "leasing_rate", "rca_itp", "rovinieta", "amenda", "other"].includes(item?.category)
+         ? item.category === "rca_itp" ? "itp" : item.category
         : "other",
+      expiryDate: toSafeString(item?.expiryDate),
+      aiAnalysis: item?.aiAnalysis && typeof item.aiAnalysis === "object"
+         ? {
+            documentType: ["service", "itp", "rca", "casco", "leasing_rate", "rovinieta", "amenda", "other", "unknown"].includes(item.aiAnalysis.documentType)
+               ? item.aiAnalysis.documentType
+              : undefined,
+            expiryDate: toSafeString(item.aiAnalysis.expiryDate),
+            issueDate: toSafeString(item.aiAnalysis.issueDate),
+            policyNumber: toSafeString(item.aiAnalysis.policyNumber),
+            providerName: toSafeString(item.aiAnalysis.providerName),
+            vehiclePlateNumber: toSafeString(item.aiAnalysis.vehiclePlateNumber),
+            confidence: toSafeNumber(item.aiAnalysis.confidence, 0),
+            notes: toSafeString(item.aiAnalysis.notes),
+            analyzedAt: toSafeNumber(item.aiAnalysis.analyzedAt, 0),
+          }
+        : undefined,
       createdAt: toSafeNumber(item?.createdAt, Date.now()),
     })),
 
@@ -530,10 +945,31 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
           satellites: toOptionalNumber(gpsSnapshotRaw.satellites),
           gpsTimestamp: toSafeNumber(gpsSnapshotRaw.gpsTimestamp, 0),
           serverTimestamp: toSafeNumber(gpsSnapshotRaw.serverTimestamp, 0),
+          expiresAt: toOptionalNumber(gpsSnapshotRaw.expiresAt),
           ignitionOn: toSafeBoolean(gpsSnapshotRaw.ignitionOn, false),
           odometerKm: toOptionalNumber(gpsSnapshotRaw.odometerKm),
+          tripOdometerKm: toOptionalNumber(gpsSnapshotRaw.tripOdometerKm),
           imei: toSafeString(gpsSnapshotRaw.imei),
           online: toSafeBoolean(gpsSnapshotRaw.online, false),
+          rawIo: toSafeObject(gpsSnapshotRaw.rawIo),
+        }
+      : null,
+
+    liveDiagnostics: mapVehicleLiveDiagnostics(data.liveDiagnostics),
+
+    gpsDataUsage: gpsDataUsageRaw
+      ? {
+          rxBytes: toSafeNumber(gpsDataUsageRaw.rxBytes, 0),
+          txBytes: toSafeNumber(gpsDataUsageRaw.txBytes, 0),
+          totalBytes: toSafeNumber(gpsDataUsageRaw.totalBytes, 0),
+          recordsCount: toSafeNumber(gpsDataUsageRaw.recordsCount, 0),
+          frameCount: toSafeNumber(gpsDataUsageRaw.frameCount, 0),
+          lastRxBytes: toSafeNumber(gpsDataUsageRaw.lastRxBytes, 0),
+          lastTxBytes: toSafeNumber(gpsDataUsageRaw.lastTxBytes, 0),
+          lastTotalBytes: toSafeNumber(gpsDataUsageRaw.lastTotalBytes, 0),
+          updatedAt: toSafeNumber(gpsDataUsageRaw.updatedAt, 0),
+          currentMonthKey: toSafeString(gpsDataUsageRaw.currentMonthKey),
+          months: gpsDataUsageMonths,
         }
       : null,
 
@@ -548,6 +984,71 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
 
     createdAt: toSafeNumber(data.createdAt, Date.now()),
     updatedAt: toSafeNumber(data.updatedAt, Date.now()),
+    gpsSim: (() => {
+      const s = data.gpsSim;
+      if (!s || typeof s !== "object") return null;
+      const pts = Array.isArray(s.points) ? s.points : [];
+      return {
+        active: Boolean(s.active),
+        status:
+          s.status === "paused" || s.status === "done" || s.status === "running"
+             ? s.status
+            : Boolean(s.active)
+               ? "running"
+              : "done",
+        startedAt: toSafeNumber(s.startedAt, 0),
+        resumedAt: toSafeNumber(s.resumedAt, 0),
+        pausedAt: s.pausedAt === null ? null : toSafeNumber(s.pausedAt, 0),
+        elapsedBeforePauseMs: toSafeNumber(s.elapsedBeforePauseMs, 0),
+        totalDurationMs: toSafeNumber(s.totalDurationMs, 0),
+        totalDistanceKm: toSafeNumber(s.totalDistanceKm, 0),
+        destinationQuery: toSafeString(s.destinationQuery),
+        destinationDisplay: toSafeString(s.destinationDisplay),
+        startLat: toOptionalNumber(s.startLat),
+        startLng: toOptionalNumber(s.startLng),
+        endLat: toOptionalNumber(s.endLat),
+        endLng: toOptionalNumber(s.endLng),
+        points: pts.map((p: Record<string, unknown>) => ({
+          lat: toSafeNumber(p.lat, 0),
+          lng: toSafeNumber(p.lng, 0),
+          speedKmh: toSafeNumber(p.speedKmh, 0),
+          angle: toSafeNumber(p.angle, 0),
+          odometerKm: toSafeNumber(p.odometerKm, 0),
+          ts: toSafeNumber(p.ts, 0),
+          ignitionOn: Boolean(p.ignitionOn),
+        })),
+      };
+    })(),
+    gpsSimHistory: (() => {
+      const history = Array.isArray(data.gpsSimHistory) ? data.gpsSimHistory : [];
+      return history.map((entry: Record<string, unknown>, index) => {
+        const pts = Array.isArray(entry.points) ? entry.points : [];
+        return {
+          id: toSafeString(entry.id) || `sim-history-${index}`,
+          active: false,
+          status: "done" as const,
+          startedAt: toSafeNumber(entry.startedAt, 0),
+          stoppedAt: toSafeNumber(entry.stoppedAt, 0),
+          totalDistanceKm: toSafeNumber(entry.totalDistanceKm, 0),
+          totalDurationMs: toSafeNumber(entry.totalDurationMs, 0),
+          destinationQuery: toSafeString(entry.destinationQuery),
+          destinationDisplay: toSafeString(entry.destinationDisplay),
+          startLat: toOptionalNumber(entry.startLat),
+          startLng: toOptionalNumber(entry.startLng),
+          endLat: toOptionalNumber(entry.endLat),
+          endLng: toOptionalNumber(entry.endLng),
+          points: pts.map((p: Record<string, unknown>) => ({
+            lat: toSafeNumber(p.lat, 0),
+            lng: toSafeNumber(p.lng, 0),
+            speedKmh: toSafeNumber(p.speedKmh, 0),
+            angle: toSafeNumber(p.angle, 0),
+            odometerKm: toSafeNumber(p.odometerKm, 0),
+            ts: toSafeNumber(p.ts, 0),
+            ignitionOn: Boolean(p.ignitionOn),
+          })),
+        };
+      });
+    })(),
   };
 }
 
@@ -628,13 +1129,13 @@ export async function getVehicleUsers(): Promise<AppUser[]> {
 }
 
 export async function getVehiclesList(): Promise<VehicleItem[]> {
-  const snap = await getDocs(query(vehiclesCollection, orderBy("updatedAt", "desc")));
+  const snap = await getDocs(query(vehiclesCollection, orderBy("plateNumber", "asc")));
   return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
 }
 
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
   return onSnapshot(
-    query(vehiclesCollection, orderBy("updatedAt", "desc")),
+    query(vehiclesCollection, orderBy("plateNumber", "asc")),
     (snap) => {
       onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
     },
@@ -708,6 +1209,63 @@ export function subscribeVehicleById(
   );
 }
 
+export function subscribeVehicleDailyDiagnostics(
+  vehicleId: string,
+  dayKey: string,
+  onData: (item: VehicleDailyDiagnosticsSummary | null) => void
+): () => void {
+  if (!vehicleId || !dayKey) {
+    onData(null);
+    return () => undefined;
+  }
+
+  return onSnapshot(
+    doc(db, "vehicles", vehicleId, "diagnosticDays", dayKey),
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+
+      onData(mapVehicleDailyDiagnosticsSummary(snap.id, snap.data() as Record<string, unknown>));
+    },
+    (error) => {
+      console.error("[subscribeVehicleDailyDiagnostics]", error);
+      onData(null);
+    }
+  );
+}
+
+export function subscribeVehicleDiagnosticHistory(
+  vehicleId: string,
+  onData: (items: VehicleDailyDiagnosticsSummary[]) => void,
+  daysLimit = 14
+): () => void {
+  if (!vehicleId) {
+    onData([]);
+    return () => undefined;
+  }
+
+  return onSnapshot(
+    query(
+      collection(db, "vehicles", vehicleId, "diagnosticDays"),
+      orderBy("dayKey", "desc"),
+      limit(daysLimit)
+    ),
+    (snap) => {
+      onData(
+        snap.docs.map((docItem) =>
+          mapVehicleDailyDiagnosticsSummary(docItem.id, docItem.data() as Record<string, unknown>)
+        )
+      );
+    },
+    (error) => {
+      console.error("[subscribeVehicleDiagnosticHistory]", error);
+      onData([]);
+    }
+  );
+}
+
 export async function isPlateNumberUsed(
   plateNumber: string,
   excludeVehicleId?: string
@@ -725,11 +1283,14 @@ export async function isPlateNumberUsed(
 
 export async function createVehicle(values: VehicleFormValues): Promise<string> {
   const now = Date.now();
-
-  const refDoc = await addDoc(vehiclesCollection, {
+  const savedValues = {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
     initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
+  };
+
+  const refDoc = await addDoc(vehiclesCollection, {
+    ...savedValues,
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -753,6 +1314,10 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
     actorUserId: values.ownerUserId || "",
     actorUserName: values.ownerUserName || "Responsabil",
     actorUserThemeKey: values.ownerThemeKey ?? null,
+    metadata: {
+      fieldsText: buildAuditSnapshot(savedValues, vehicleAuditFields),
+      fieldsCount: buildAuditSnapshot(savedValues, vehicleAuditFields).length,
+    },
   });
 
   return refDoc.id;
@@ -767,11 +1332,19 @@ export async function updateVehicle(
 
   const previousStatus = toVehicleStatus(existingData?.status);
   const previousOwnerUserId = toSafeString(existingData?.ownerUserId);
-
-  await updateDoc(doc(db, "vehicles", vehicleId), {
+  const savedValues = {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
     initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
+  };
+  const changesText = buildAuditChanges(
+    existingData as Partial<VehicleFormValues> | null,
+    savedValues,
+    vehicleAuditFields
+  );
+
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    ...savedValues,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -793,6 +1366,10 @@ export async function updateVehicle(
     actorUserId: values.ownerUserId || "",
     actorUserName: values.ownerUserName || "Responsabil",
     actorUserThemeKey: values.ownerThemeKey ?? null,
+    metadata: {
+      changesText,
+      changesCount: changesText.length,
+    },
   });
 
   if (previousStatus !== values.status) {
@@ -813,8 +1390,18 @@ export async function updateVehicle(
       actorUserId: values.ownerUserId || "",
       actorUserName: values.ownerUserName || "Responsabil",
       actorUserThemeKey: values.ownerThemeKey ?? null,
+      metadata: {
+        changesText: [`Status: ${previousStatus || "-"} -> ${values.status}`],
+        changesCount: 1,
+      },
     });
   }
+
+  await runVehicleMaintenanceAlerts({
+    userId: values.ownerUserId,
+    userName: values.ownerUserName || "Responsabil",
+    userThemeKey: values.ownerThemeKey ?? null,
+  }).catch((error) => console.error("[updateVehicle][maintenanceAlerts]", error));
 }
 
 export async function addVehicleEvent(
@@ -844,7 +1431,8 @@ function toVehicleEventType(value: unknown): VehicleEventItem["type"] {
     value === "updated" ||
     value === "driver_changed" ||
     value === "images_updated" ||
-    value === "claimed"
+    value === "claimed" ||
+    value === "comment"
     ? value
     : "updated";
 }
@@ -868,6 +1456,43 @@ export async function getVehicleEvents(vehicleId: string): Promise<VehicleEventI
   }));
 
   return events.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function addVehicleComment(
+  vehicleId: string,
+  comment: string,
+  actor: {
+    actorUserId?: string;
+    actorUserName?: string;
+    actorUserThemeKey?: string | null;
+  }
+): Promise<void> {
+  const cleanComment = comment.trim();
+  if (!vehicleId || !cleanComment) return;
+
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
+  const plateNumber = data?.plateNumber ?? vehicleId;
+
+  await addVehicleEvent(vehicleId, "comment", `Comentariu: ${cleanComment}`, actor);
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_updated",
+    entityId: vehicleId,
+    title: "Comentariu masina",
+    message: `${actor.actorUserName || "Utilizator"} a adaugat un comentariu la masina ${plateNumber}: ${cleanComment}`,
+    notificationPath: `/vehicles/${vehicleId}`,
+    directUserId: toSafeString(data?.currentDriverUserId),
+    ownerUserId: toSafeString(data?.ownerUserId),
+    actorUserId: actor.actorUserId ?? "",
+    actorUserName: actor.actorUserName ?? "Utilizator",
+    actorUserThemeKey: actor.actorUserThemeKey ?? null,
+    metadata: {
+      fieldsText: [`Comentariu: ${cleanComment}`],
+      fieldsCount: 1,
+    },
+  });
 }
 
 export async function uploadVehicleImages(
@@ -900,8 +1525,14 @@ export async function uploadVehicleImages(
       quality: 0.72,
     });
 
-    await uploadBytes(fullRef, fullBlob, { contentType: "image/jpeg" });
-    await uploadBytes(thumbRef, thumbBlob, { contentType: "image/jpeg" });
+    await uploadBytes(fullRef, fullBlob, {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=31536000,immutable",
+    });
+    await uploadBytes(thumbRef, thumbBlob, {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=31536000,immutable",
+    });
 
     const fullUrl = await getDownloadURL(fullRef);
     const thumbUrl = await getDownloadURL(thumbRef);
@@ -942,6 +1573,22 @@ export async function saveVehicleImages(
     "images_updated",
     "Imaginile masinii au fost actualizate."
   );
+
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_images_updated",
+    entityId: vehicleId,
+    title: "Poze masina actualizate",
+    message: `Au fost adaugate ${newImages.length} poze pentru masina ${data?.plateNumber ?? vehicleId}.`,
+    directUserId: toSafeString(data?.currentDriverUserId),
+    ownerUserId: toSafeString(data?.ownerUserId),
+  });
+}
+
+function isRequestTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("request_timeout_");
 }
 
 
@@ -973,11 +1620,81 @@ export async function uploadVehicleDocuments(
       sizeBytes: file.size || 0,
       extension: ext,
       category: item.category,
+      expiryDate: item.expiryDate || "",
       createdAt: Date.now(),
     });
   }
 
   return uploadedItems;
+}
+
+function normalizeAiCategory(value?: string): VehicleDocumentCategory | null {
+  const safeValue = String(value || "").trim().toLowerCase();
+  if (["service", "itp", "rca", "casco", "leasing_rate", "rovinieta", "amenda", "other"].includes(safeValue)) {
+    return safeValue as VehicleDocumentCategory;
+  }
+  return null;
+}
+
+function isDateString(value?: string): value is string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+export async function analyzeVehicleDocumentWithAi(
+  item: VehicleDocumentItem
+): Promise<VehicleDocumentAiAnalysis | null> {
+  if (!item.path) return null;
+
+  const analyzeDocument = httpsCallable<
+    { storagePath: string; fileName: string; contentType: string },
+    VehicleDocumentAiAnalysis
+  >(functions, "analyzeVehicleDocument");
+
+  const result = await analyzeDocument({
+    storagePath: item.path,
+    fileName: item.name,
+    contentType: item.contentType,
+  });
+
+  return result.data ?? null;
+}
+
+export async function enrichVehicleDocumentsWithAi(
+  documents: VehicleDocumentItem[]
+): Promise<VehicleDocumentItem[]> {
+  const enriched: VehicleDocumentItem[] = [];
+
+  for (const item of documents) {
+    try {
+      const analysis = await analyzeVehicleDocumentWithAi(item);
+      if (!analysis) {
+        enriched.push(item);
+        continue;
+      }
+
+      const detectedCategory = normalizeAiCategory(analysis.documentType);
+      const detectedExpiryDate = isDateString(analysis.expiryDate) ? analysis.expiryDate : "";
+      const confidence = Number(analysis.confidence || 0);
+
+      enriched.push({
+        ...item,
+        category: confidence >= 0.55 && detectedCategory ? detectedCategory : item.category,
+        expiryDate: detectedExpiryDate || item.expiryDate || "",
+        aiAnalysis: {
+          ...analysis,
+          documentType: detectedCategory || analysis.documentType || "unknown",
+          expiryDate: detectedExpiryDate,
+          confidence,
+          analyzedAt: Date.now(),
+        },
+      });
+    } catch (error) {
+      console.warn("[enrichVehicleDocumentsWithAi]", item.name, error);
+      enriched.push(item);
+    }
+  }
+
+  return enriched;
 }
 
 export async function saveVehicleDocuments(
@@ -986,9 +1703,19 @@ export async function saveVehicleDocuments(
   newDocuments: VehicleDocumentItem[]
 ): Promise<void> {
   const merged = [...currentDocuments, ...newDocuments];
+  const newestExpiryByCategory = newDocuments.reduce<Record<string, string>>((acc, item) => {
+    if (item.expiryDate && ["itp", "rca", "casco", "rovinieta"].includes(item.category)) {
+      acc[item.category] = item.expiryDate;
+    }
+    return acc;
+  }, {});
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
     documents: merged,
+    ...(newestExpiryByCategory.itp ? { nextItpDate: newestExpiryByCategory.itp } : {}),
+    ...(newestExpiryByCategory.rca ? { nextRcaDate: newestExpiryByCategory.rca } : {}),
+    ...(newestExpiryByCategory.casco ? { nextCascoDate: newestExpiryByCategory.casco } : {}),
+    ...(newestExpiryByCategory.rovinieta ? { nextRovinietaDate: newestExpiryByCategory.rovinieta } : {}),
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -998,6 +1725,20 @@ export async function saveVehicleDocuments(
     "updated",
     "Documentele vehiculului au fost actualizate."
   );
+
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_documents_updated",
+    entityId: vehicleId,
+    title: "Documente masina actualizate",
+    message: `Au fost actualizate documentele masinii ${data?.plateNumber ?? vehicleId}.`,
+    directUserId: toSafeString(data?.currentDriverUserId),
+    ownerUserId: toSafeString(data?.ownerUserId),
+  });
+
+  await runVehicleMaintenanceAlerts().catch((error) => console.error("[saveVehicleDocuments][maintenanceAlerts]", error));
 }
 
 export async function removeVehicleDocument(
@@ -1008,10 +1749,6 @@ export async function removeVehicleDocument(
   const documentToDelete = documents.find((docItem) => docItem.id === documentId);
   if (!documentToDelete) return documents;
 
-  if (documentToDelete.path) {
-    await deleteObject(ref(storage, documentToDelete.path)).catch(() => undefined);
-  }
-
   const updated = documents.filter((docItem) => docItem.id !== documentId);
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
@@ -1021,7 +1758,30 @@ export async function removeVehicleDocument(
   });
 
   await addVehicleEvent(vehicleId, "updated", "Un document al vehiculului a fost sters.");
+
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_document_deleted",
+    entityId: vehicleId,
+    title: "Document masina sters",
+    message: `Un document al masinii ${data?.plateNumber ?? vehicleId} a fost sters.`,
+    directUserId: toSafeString(data?.currentDriverUserId),
+    ownerUserId: toSafeString(data?.ownerUserId),
+  });
   return updated;
+}
+
+export async function restoreVehicleDocuments(
+  vehicleId: string,
+  documents: VehicleDocumentItem[]
+): Promise<void> {
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    documents,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
 }
 
 export async function setVehicleCoverImage(
@@ -1047,6 +1807,29 @@ export async function setVehicleCoverImage(
     "images_updated",
     "Poza principala a masinii a fost schimbata."
   );
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_cover_changed",
+    entityId: vehicleId,
+    title: "Poza principala masina schimbata",
+    message: `Poza principala pentru masina ${data.plateNumber ?? vehicleId} a fost schimbata.`,
+    directUserId: toSafeString(data.currentDriverUserId),
+    ownerUserId: toSafeString(data.ownerUserId),
+  });
+}
+
+export async function restoreVehicleCoverImage(
+  vehicleId: string,
+  coverImageUrl: string,
+  coverThumbUrl: string
+): Promise<void> {
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    coverImageUrl,
+    coverThumbUrl,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
 }
 
 export async function removeVehicleImage(
@@ -1056,14 +1839,6 @@ export async function removeVehicleImage(
 ): Promise<VehicleImageItem[]> {
   const imageToDelete = images.find((img) => img.id === imageId);
   if (!imageToDelete) return images;
-
-  if (imageToDelete.path) {
-    await deleteObject(ref(storage, imageToDelete.path)).catch(() => undefined);
-  }
-
-  if (imageToDelete.thumbPath) {
-    await deleteObject(ref(storage, imageToDelete.thumbPath)).catch(() => undefined);
-  }
 
   const updated = images.filter((img) => img.id !== imageId);
   const coverImageUrl = updated[0]?.url ?? "";
@@ -1078,7 +1853,34 @@ export async function removeVehicleImage(
   });
 
   await addVehicleEvent(vehicleId, "images_updated", "O imagine a fost stearsa.");
+
+  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
+  const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_image_deleted",
+    entityId: vehicleId,
+    title: "Poza masina stearsa",
+    message: `O poza a masinii ${data?.plateNumber ?? vehicleId} a fost stearsa.`,
+    directUserId: toSafeString(data?.currentDriverUserId),
+    ownerUserId: toSafeString(data?.ownerUserId),
+  });
   return updated;
+}
+
+export async function restoreVehicleImages(
+  vehicleId: string,
+  images: VehicleImageItem[],
+  coverImageUrl: string,
+  coverThumbUrl: string
+): Promise<void> {
+  await updateDoc(doc(db, "vehicles", vehicleId), {
+    images,
+    coverImageUrl,
+    coverThumbUrl,
+    updatedAt: Date.now(),
+    updatedAtServer: serverTimestamp(),
+  });
 }
 
 export async function changeVehicleDriver(
@@ -1222,6 +2024,19 @@ export async function claimVehicleForCurrentUser(
     "claimed",
     `Masina a fost preluata in responsabilitate de ${userName}.`
   );
+
+  await dispatchNotificationEvent({
+    module: "vehicles",
+    eventType: "vehicle_claimed",
+    entityId: vehicleId,
+    title: "Masina preluata",
+    message: `Masina a fost preluata de ${userName}.`,
+    directUserId: userId,
+    ownerUserId: userId,
+    actorUserId: userId,
+    actorUserName: userName,
+    actorUserThemeKey: userThemeKey,
+  });
 }
 
 export async function deleteVehicle(vehicleId: string): Promise<void> {
@@ -1254,8 +2069,9 @@ function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePo
     gpsTimestamp: toSafeNumber(data.gpsTimestamp, 0),
     serverTimestamp: toSafeNumber(data.serverTimestamp, 0),
     eventIoId: toSafeNumber(data.eventIoId, 0),
-    ignitionOn: toSafeBoolean(data.ignitionOn, false),
+    ignitionOn: toOptionalBoolean(data.ignitionOn),
     odometerKm: toOptionalNumber(data.odometerKm),
+    rawIo: toSafeObject(data.rawIo),
   };
 }
 
@@ -1317,45 +2133,90 @@ async function getVehiclePositionsForDay(
     "points"
   ) as CollectionReference<DocumentData>;
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const constraints: QueryConstraint[] = [
-      where("gpsTimestamp", ">=", fromTs),
-      where("gpsTimestamp", "<=", toTs),
-      orderBy("gpsTimestamp", "asc"),
-      limit(pageSize),
-    ];
+  let firestoreError: unknown = null;
 
-    if (lastDoc) {
-      constraints.push(startAfter(lastDoc));
-    }
+  try {
+    for (let page = 0; page < maxPages; page += 1) {
+      const constraints: QueryConstraint[] = [
+        where("gpsTimestamp", ">=", fromTs),
+        where("gpsTimestamp", "<=", toTs),
+        orderBy("gpsTimestamp", "asc"),
+        limit(pageSize),
+      ];
 
-    const q = query(pointsRef, ...constraints);
-    const snap = await withTimeout(getDocs(q));
+      if (lastDoc) {
+        constraints.push(startAfter(lastDoc));
+      }
 
-    if (snap.empty) break;
+      const q = query(pointsRef, ...constraints);
+      const snap = await withTimeout(getDocs(q), ROUTE_QUERY_TIMEOUT_MS);
 
-    const pageItems: VehiclePositionItem[] = snap.docs.map((docItem) =>
-      mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
-    );
+      if (snap.empty) break;
 
-    allItems.push(...pageItems);
-
-    if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
-      console.warn(
-        `[getVehiclePositionsForDay] limita atinsa vehicleId=${vehicleId} dayKey=${dayKey} points=${allItems.length}`
+      const pageItems: VehiclePositionItem[] = snap.docs.map((docItem) =>
+        mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
       );
-      break;
-    }
 
-    if (snap.docs.length < pageSize) {
-      break;
-    }
+      allItems.push(...pageItems);
 
-    lastDoc = snap.docs[snap.docs.length - 1] ?? null;
-    if (!lastDoc) break;
+      if (allItems.length >= MAX_TOTAL_ROUTE_POINTS) {
+        console.warn(
+          `[getVehiclePositionsForDay] limita atinsa vehicleId=${vehicleId} dayKey=${dayKey} points=${allItems.length}`
+        );
+        break;
+      }
+
+      if (snap.docs.length < pageSize) {
+        break;
+      }
+
+      lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+      if (!lastDoc) break;
+    }
+  } catch (error) {
+    firestoreError = error;
   }
 
-  return allItems;
+  const archivedItems = await getVehicleArchivedPositionsForDay(vehicleId, dayKey, fromTs, toTs);
+  if (firestoreError && !archivedItems.length) throw firestoreError;
+
+  return normalizePositionItems([...allItems, ...archivedItems]);
+}
+
+async function getVehicleLatestPositionsForDay(
+  vehicleId: string,
+  dayKey: string,
+  fromTs: number,
+  toTs: number,
+  maxItems: number
+): Promise<VehiclePositionItem[]> {
+  const pointsRef = collection(
+    db,
+    "vehicles",
+    vehicleId,
+    "positionDays",
+    dayKey,
+    "points"
+  ) as CollectionReference<DocumentData>;
+
+  const snap = await withTimeout(
+    getDocs(
+      query(
+        pointsRef,
+        where("gpsTimestamp", ">=", fromTs),
+        where("gpsTimestamp", "<=", toTs),
+        orderBy("gpsTimestamp", "desc"),
+        limit(maxItems)
+      )
+    ),
+    ROUTE_QUERY_TIMEOUT_MS
+  );
+
+  return normalizePositionItems(
+    snap.docs.map((docItem) =>
+      mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
+    )
+  );
 }
 
 async function getVehiclePositionsFromFlatCollection(
@@ -1385,7 +2246,7 @@ async function getVehiclePositionsFromFlatCollection(
     }
 
     const q = query(pointsRef, ...constraints);
-    const snap = await withTimeout(getDocs(q));
+    const snap = await withTimeout(getDocs(q), ROUTE_QUERY_TIMEOUT_MS);
     if (snap.empty) break;
 
     allItems.push(
@@ -1407,6 +2268,167 @@ async function getVehiclePositionsFromFlatCollection(
   }
 
   return allItems;
+}
+
+async function getVehicleLatestPositionsFromFlatCollection(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  maxItems: number
+): Promise<VehiclePositionItem[]> {
+  const pointsRef = collection(db, "vehicles", vehicleId, "positions") as CollectionReference<
+    DocumentData
+  >;
+
+  const snap = await withTimeout(
+    getDocs(
+      query(
+        pointsRef,
+        where("gpsTimestamp", ">=", fromTs),
+        where("gpsTimestamp", "<=", toTs),
+        orderBy("gpsTimestamp", "desc"),
+        limit(maxItems)
+      )
+    ),
+    ROUTE_QUERY_TIMEOUT_MS
+  );
+
+  return normalizePositionItems(
+    snap.docs.map((docItem) =>
+      mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
+    )
+  );
+}
+
+async function getVehicleLatestPositionsRange(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  maxItems: number
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const dayKeys = dedupeDayKeys([getDayKeyFromTs(toTs), getDayKeyFromTs(fromTs)]).sort((a, b) =>
+    b.localeCompare(a)
+  );
+  const dayResults = await runWithConcurrency(
+    dayKeys,
+    DAY_QUERY_CONCURRENCY,
+    async (dayKey) =>
+      getVehicleLatestPositionsForDay(vehicleId, dayKey, fromTs, toTs, maxItems).catch(
+        (error) => {
+          console.warn("[getVehicleLatestPositionsRange][positionDays]", dayKey, error);
+          return [] as VehiclePositionItem[];
+        }
+      )
+  );
+
+  const flatItems = await getVehicleLatestPositionsFromFlatCollection(
+    vehicleId,
+    fromTs,
+    toTs,
+    maxItems
+  ).catch((error) => {
+    console.warn("[getVehicleLatestPositionsRange][flatCollection]", error);
+    return [] as VehiclePositionItem[];
+  });
+
+  const normalized = normalizePositionItems([...dayResults.flat(), ...flatItems]);
+  return normalized.slice(Math.max(0, normalized.length - maxItems));
+}
+
+function enumerateTimeChunks(
+  fromTs: number,
+  toTs: number,
+  chunkMs = PROGRESSIVE_ROUTE_CHUNK_MS,
+  newestFirst = false
+) {
+  const chunks: Array<{ fromTs: number; toTs: number }> = [];
+  if (!Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) return chunks;
+
+  for (let chunkFromTs = fromTs; chunkFromTs <= toTs; chunkFromTs += chunkMs) {
+    chunks.push({
+      fromTs: chunkFromTs,
+      toTs: Math.min(toTs, chunkFromTs + chunkMs - 1),
+    });
+  }
+
+  return newestFirst ? chunks.reverse() : chunks;
+}
+
+async function getVehiclePositionsForDayInChunks(
+  vehicleId: string,
+  dayKey: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  const dayStart = getDayStartTs(dayKey);
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
+  const safeFromTs = Math.max(fromTs, dayStart);
+  const safeToTs = Math.min(toTs, dayEnd);
+  if (safeFromTs > safeToTs) return [];
+
+  const items: VehiclePositionItem[] = [];
+
+  for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs)) {
+    try {
+      items.push(
+        ...(await getVehiclePositionsForDay(
+          vehicleId,
+          dayKey,
+          chunk.fromTs,
+          chunk.toTs,
+          pageSize,
+          maxPages
+        ))
+      );
+    } catch (error) {
+      console.warn(
+        "[getVehiclePositionsForDayInChunks]",
+        dayKey,
+        new Date(chunk.fromTs).toISOString(),
+        error
+      );
+    }
+  }
+
+  return normalizePositionItems(items);
+}
+
+async function getVehiclePositionsFromFlatCollectionInChunks(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  const items: VehiclePositionItem[] = [];
+
+  for (const chunk of enumerateTimeChunks(fromTs, toTs)) {
+    try {
+      items.push(
+        ...(await getVehiclePositionsFromFlatCollection(
+          vehicleId,
+          chunk.fromTs,
+          chunk.toTs,
+          pageSize,
+          maxPages
+        ))
+      );
+    } catch (error) {
+      console.warn(
+        "[getVehiclePositionsFromFlatCollectionInChunks]",
+        new Date(chunk.fromTs).toISOString(),
+        error
+      );
+    }
+  }
+
+  return normalizePositionItems(items);
 }
 
 export function subscribeVehiclePositions(
@@ -1477,14 +2499,21 @@ export async function getVehiclePositionsRange(
   const cached = getRouteCache(vehicleId, fromTs, toTs);
   if (cached) return cached;
 
-  let normalized: VehiclePositionItem[] = [];
-  const dayKeys = enumerateDayKeysWithNeighbors(fromTs, toTs);
+  const rangeItems: VehiclePositionItem[] = [];
+  const dayKeys = enumerateLocalDayKeysWithUtcNeighbors(fromTs, toTs).sort((a, b) =>
+    b.localeCompare(a)
+  );
   if (dayKeys.length > 0) {
     const dayResults = await runWithConcurrency(
       dayKeys,
       DAY_QUERY_CONCURRENCY,
       async (dayKey) =>
-        getVehiclePositionsForDay(vehicleId, dayKey, fromTs, toTs, pageSize, maxPages)
+        getVehiclePositionsForDayInChunks(vehicleId, dayKey, fromTs, toTs, pageSize, maxPages).catch(
+          (error) => {
+            console.warn("[getVehiclePositionsRange][positionDays]", dayKey, error);
+            return [] as VehiclePositionItem[];
+          }
+        )
     );
 
     const allItems = dayResults.flat();
@@ -1493,26 +2522,188 @@ export async function getVehiclePositionsRange(
         `[getVehiclePositionsRange] limita atinsa vehicleId=${vehicleId} points=${allItems.length}`
       );
     }
-    normalized = normalizePositionItems(allItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+    rangeItems.push(...allItems);
   }
 
-  if (!normalized.length) {
-    try {
-      const flatItems = await getVehiclePositionsFromFlatCollection(
-        vehicleId,
-        fromTs,
-        toTs,
-        pageSize,
-        maxPages
-      );
-      normalized = normalizePositionItems(flatItems);
-    } catch (error) {
-      console.warn("[getVehiclePositionsRange][flatCollectionFallback]", error);
-    }
+  try {
+    const flatItems = await getVehiclePositionsFromFlatCollectionInChunks(
+      vehicleId,
+      fromTs,
+      toTs,
+      pageSize,
+      maxPages
+    );
+    rangeItems.push(...flatItems);
+  } catch (error) {
+    console.warn("[getVehiclePositionsRange][flatCollectionMerge]", error);
   }
+
+  const normalized = normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
 
   setRouteCache(vehicleId, fromTs, toTs, normalized);
   return normalized;
+}
+
+async function getVehiclePositionsRangeProgressive(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  onProgress: (items: VehiclePositionItem[]) => void,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const isProgressiveRange = toTs - fromTs >= PROGRESSIVE_ROUTE_RANGE_MS;
+  const cached = isProgressiveRange ? null : getRouteCache(vehicleId, fromTs, toTs);
+  if (cached) {
+    onProgress(cached);
+    return cached;
+  }
+
+  let mergedItems: VehiclePositionItem[] = [];
+  const dayKeys = enumerateLocalDayKeysWithUtcNeighbors(fromTs, toTs).sort((a, b) =>
+    b.localeCompare(a)
+  );
+
+  for (const dayKey of dayKeys) {
+    const dayStart = getDayStartTs(dayKey);
+    const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
+    const dayFromTs = Math.max(fromTs, dayStart);
+    const dayToTs = Math.min(toTs, dayEnd);
+    if (dayFromTs > dayToTs) continue;
+
+    for (const chunk of enumerateTimeChunks(dayFromTs, dayToTs, PROGRESSIVE_ROUTE_CHUNK_MS, true)) {
+      try {
+        const [dayItems, flatItems] = await Promise.all([
+          getVehiclePositionsForDay(
+            vehicleId,
+            dayKey,
+            chunk.fromTs,
+            chunk.toTs,
+            pageSize,
+            maxPages
+          ).catch((error) => {
+            console.warn(
+              "[getVehiclePositionsRangeProgressive][positionDays]",
+              dayKey,
+              error
+            );
+            return [] as VehiclePositionItem[];
+          }),
+          getVehiclePositionsFromFlatCollection(
+            vehicleId,
+            chunk.fromTs,
+            chunk.toTs,
+            pageSize,
+            maxPages
+          ).catch((error) => {
+            console.warn(
+              "[getVehiclePositionsRangeProgressive][flatCollection]",
+              dayKey,
+              error
+            );
+            return [] as VehiclePositionItem[];
+          }),
+        ]);
+
+        const incoming = normalizePositionItems([...dayItems, ...flatItems]);
+        if (!incoming.length) continue;
+
+        mergedItems = mergePositionItems(mergedItems, incoming).slice(0, MAX_TOTAL_ROUTE_POINTS);
+        onProgress(mergedItems);
+      } catch (error) {
+        console.warn("[getVehiclePositionsRangeProgressive][chunk]", dayKey, error);
+      }
+    }
+  }
+
+  setRouteCache(vehicleId, fromTs, toTs, mergedItems);
+  return mergedItems;
+}
+
+function mapGpsSnapshotToPosition(vehicle: VehicleItem): VehiclePositionItem | null {
+  const snapshot = vehicle.gpsSnapshot;
+  if (!snapshot || !isValidLatLng(snapshot.lat, snapshot.lng) || !snapshot.gpsTimestamp) {
+    return null;
+  }
+
+  return {
+    id: `gpsSnapshot-${vehicle.id}-${snapshot.gpsTimestamp}`,
+    vehicleId: vehicle.id,
+    imei: snapshot.imei,
+    lat: snapshot.lat,
+    lng: snapshot.lng,
+    speedKmh: snapshot.speedKmh || 0,
+    altitude: snapshot.altitude,
+    angle: snapshot.angle,
+    satellites: snapshot.satellites,
+    gpsTimestamp: snapshot.gpsTimestamp,
+    serverTimestamp: snapshot.serverTimestamp || snapshot.gpsTimestamp,
+    ignitionOn: snapshot.ignitionOn,
+    odometerKm: snapshot.odometerKm,
+  };
+}
+
+export async function getLatestVehiclePosition(
+  vehicle: VehicleItem | null
+): Promise<VehiclePositionItem | null> {
+  if (!vehicle?.id) return null;
+
+  const candidates: VehiclePositionItem[] = [];
+  const snapshotPosition = mapGpsSnapshotToPosition(vehicle);
+  if (snapshotPosition) candidates.push(snapshotPosition);
+
+  const now = Date.now();
+  const snapshotTs = vehicle.gpsSnapshot?.gpsTimestamp || 0;
+  const dayKeys = dedupeDayKeys([
+    getDayKeyFromTs(now),
+    snapshotTs ? getDayKeyFromTs(snapshotTs) : "",
+    addDays(getDayKeyFromTs(now), -1),
+  ]);
+
+  for (const dayKey of dayKeys) {
+    try {
+      const pointsRef = collection(
+        db,
+        "vehicles",
+        vehicle.id,
+        "positionDays",
+        dayKey,
+        "points"
+      ) as CollectionReference<DocumentData>;
+
+      const snap = await withTimeout(
+        getDocs(query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)))
+      );
+      const docItem = snap.docs[0];
+      if (docItem) {
+        candidates.push(mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>));
+      }
+    } catch (error) {
+      console.warn("[getLatestVehiclePosition][positionDays]", dayKey, error);
+    }
+  }
+
+  try {
+    const pointsRef = collection(db, "vehicles", vehicle.id, "positions") as CollectionReference<
+      DocumentData
+    >;
+    const snap = await withTimeout(
+      getDocs(query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)))
+    );
+    const docItem = snap.docs[0];
+    if (docItem) {
+      candidates.push(mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>));
+    }
+  } catch (error) {
+    console.warn("[getLatestVehiclePosition][flatCollection]", error);
+  }
+
+  const clean = normalizePositionItems(candidates);
+  return clean.sort((a, b) => b.gpsTimestamp - a.gpsTimestamp)[0] ?? null;
 }
 
 export async function getVehiclePositionsRangeChunked(
@@ -1525,6 +2716,52 @@ export async function getVehiclePositionsRangeChunked(
   return getVehiclePositionsRange(vehicleId, fromTs, toTs, pageSize, maxPages);
 }
 
+export async function getVehiclePositionsForSelectedDay(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const rangeItems: VehiclePositionItem[] = [];
+  const dayKeys = enumerateDayKeys(fromTs, toTs);
+
+  for (const dayKey of dayKeys) {
+    try {
+      const items = await getVehiclePositionsForDay(
+        vehicleId,
+        dayKey,
+        fromTs,
+        toTs,
+        pageSize,
+        maxPages
+      );
+      rangeItems.push(...items);
+    } catch (error) {
+      console.warn("[getVehiclePositionsForSelectedDay][positionDays]", dayKey, error);
+    }
+  }
+
+  try {
+    const flatItems = await getVehiclePositionsFromFlatCollection(
+      vehicleId,
+      fromTs,
+      toTs,
+      pageSize,
+      maxPages
+    );
+    rangeItems.push(...flatItems);
+  } catch (error) {
+    console.warn("[getVehiclePositionsForSelectedDay][flatCollection]", error);
+  }
+
+  return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+}
+
 export function pollVehiclePositionsRange(
   vehicleId: string,
   fromTs: number,
@@ -1533,7 +2770,8 @@ export function pollVehiclePositionsRange(
   onError?: (error: unknown) => void,
   refreshMs = 15000,
   pageSize = DEFAULT_ROUTE_PAGE_SIZE,
-  maxPages = DEFAULT_ROUTE_MAX_PAGES
+  maxPages = DEFAULT_ROUTE_MAX_PAGES,
+  options: RoutePollingOptions = {}
 ): () => void {
   if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
     onData([]);
@@ -1546,11 +2784,15 @@ export function pollVehiclePositionsRange(
   let lastLoadedToTs = fromTs;
   let errorStreak = 0;
   let forceFastRetry = false;
+  const usePersistedCache = options.usePersistedCache !== false;
 
-  const isPastWindow = toTs < Date.now() - 30_000;
+  const startedAt = Date.now();
+  const followsLiveTail = toTs >= startedAt - LIVE_ROUTE_WINDOW_GRACE_MS;
+  const getEffectiveToTs = () => (followsLiveTail ? Date.now() : toTs);
+  const isPastWindow = () => !followsLiveTail && toTs < Date.now() - 30_000;
 
   const scheduleNext = () => {
-    if (stopped || isPastWindow) return;
+    if (stopped || isPastWindow()) return;
     if (forceFastRetry) {
       forceFastRetry = false;
       timer = window.setTimeout(loadIncremental, 250);
@@ -1569,8 +2811,32 @@ export function pollVehiclePositionsRange(
   };
 
   const loadInitial = async () => {
+    let useProgressiveLoad = false;
     try {
-      const persisted = readBestPersistedRouteCache(vehicleId, fromTs, toTs);
+      const effectiveToTs = getEffectiveToTs();
+      useProgressiveLoad = effectiveToTs - fromTs >= PROGRESSIVE_ROUTE_RANGE_MS;
+      if (followsLiveTail) {
+        onData(currentItems);
+
+        const latestItems = await getVehicleLatestPositionsRange(
+          vehicleId,
+          fromTs,
+          effectiveToTs,
+          Math.min(pageSize, 700)
+        ).catch(() => []);
+
+        if (!stopped && latestItems.length > 0) {
+          currentItems = mergePositionItems(currentItems, latestItems);
+          lastLoadedToTs =
+            currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+          errorStreak = 0;
+          onData(currentItems);
+        }
+      }
+
+      const persisted = !usePersistedCache || useProgressiveLoad
+        ? null
+        : readBestPersistedRouteCache(vehicleId, fromTs, toTs);
       if (persisted && persisted.length > 0) {
         currentItems = persisted;
         lastLoadedToTs =
@@ -1578,8 +2844,31 @@ export function pollVehiclePositionsRange(
         errorStreak = 0;
         onData(currentItems);
 
-        const now = Date.now();
-        const effectiveToTs = Math.min(now, toTs > now ? now : toTs);
+        if (useProgressiveLoad) {
+          const items = await getVehiclePositionsRangeProgressive(
+            vehicleId,
+            fromTs,
+            effectiveToTs,
+            (partialItems) => {
+              if (stopped) return;
+              currentItems = mergePositionItems(currentItems, partialItems);
+              lastLoadedToTs =
+                currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+              onData(currentItems);
+            },
+            pageSize,
+            maxPages
+          );
+
+          if (stopped) return;
+          currentItems = mergePositionItems(currentItems, items);
+          lastLoadedToTs =
+            currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+          onData(currentItems);
+          writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
+          return;
+        }
+
         const incrementalFromTs = Math.max(
           fromTs,
           lastLoadedToTs - ROUTE_INCREMENTAL_OVERLAP_MS
@@ -1602,13 +2891,28 @@ export function pollVehiclePositionsRange(
         return;
       }
 
-      const items = await getVehiclePositionsRange(
-        vehicleId,
-        fromTs,
-        toTs,
-        pageSize,
-        maxPages
-      );
+      const items = useProgressiveLoad
+        ? await getVehiclePositionsRangeProgressive(
+            vehicleId,
+            fromTs,
+            effectiveToTs,
+            (partialItems) => {
+              if (stopped) return;
+              currentItems = partialItems;
+              lastLoadedToTs =
+                partialItems[partialItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+              onData(currentItems);
+            },
+            pageSize,
+            maxPages
+          )
+        : await getVehiclePositionsRange(
+            vehicleId,
+            fromTs,
+            effectiveToTs,
+            pageSize,
+            maxPages
+          );
 
       if (stopped) return;
 
@@ -1620,9 +2924,19 @@ export function pollVehiclePositionsRange(
       onData(currentItems);
       writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
     } catch (error) {
-      console.error("[pollVehiclePositionsRange][initial]", error);
+      if (isRequestTimeout(error)) {
+        console.warn(
+          useProgressiveLoad
+             ? "[pollVehiclePositionsRange][initial-progressive-timeout]"
+            : "[pollVehiclePositionsRange][initial-timeout]",
+          error
+        );
+      } else {
+        console.error("[pollVehiclePositionsRange][initial]", error);
+      }
       errorStreak += 1;
-      if (!stopped) onError?.(error);
+      if (!stopped && !useProgressiveLoad) onError?.(error);
+      if (!stopped) onData(currentItems);
     } finally {
       scheduleNext();
     }
@@ -1636,8 +2950,7 @@ export function pollVehiclePositionsRange(
         return;
       }
 
-      const now = Date.now();
-      const effectiveToTs = Math.min(now, toTs > now ? now : toTs);
+      const effectiveToTs = getEffectiveToTs();
       const incrementalFromTs = Math.max(
         fromTs,
         lastLoadedToTs - ROUTE_INCREMENTAL_OVERLAP_MS
@@ -1649,13 +2962,29 @@ export function pollVehiclePositionsRange(
         return;
       }
 
-      const incoming = await getVehiclePositionsRange(
-        vehicleId,
-        incrementalFromTs,
-        effectiveToTs,
-        pageSize,
-        maxPages
-      );
+      const useProgressiveLoad = effectiveToTs - incrementalFromTs >= PROGRESSIVE_ROUTE_RANGE_MS;
+      const incoming = useProgressiveLoad
+        ? await getVehiclePositionsRangeProgressive(
+            vehicleId,
+            incrementalFromTs,
+            effectiveToTs,
+            (partialItems) => {
+              if (stopped || !partialItems.length) return;
+              currentItems = mergePositionItems(currentItems, partialItems);
+              lastLoadedToTs =
+                currentItems[currentItems.length - 1]?.gpsTimestamp ?? lastLoadedToTs;
+              onData(currentItems);
+            },
+            pageSize,
+            maxPages
+          )
+        : await getVehiclePositionsRange(
+            vehicleId,
+            incrementalFromTs,
+            effectiveToTs,
+            pageSize,
+            maxPages
+          );
 
       if (stopped) return;
 
@@ -1677,7 +3006,11 @@ export function pollVehiclePositionsRange(
       onData(currentItems);
       writePersistedRouteCache(vehicleId, fromTs, toTs, currentItems);
     } catch (error) {
-      console.error("[pollVehiclePositionsRange][incremental]", error);
+      if (isRequestTimeout(error)) {
+        console.warn("[pollVehiclePositionsRange][incremental-timeout]", error);
+      } else {
+        console.error("[pollVehiclePositionsRange][incremental]", error);
+      }
       errorStreak += 1;
       if (!stopped) onError?.(error);
       onData(currentItems);
@@ -1687,7 +3020,7 @@ export function pollVehiclePositionsRange(
   };
 
   const handleBackOnline = () => {
-    if (stopped || isPastWindow) return;
+    if (stopped || isPastWindow()) return;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     forceFastRetry = true;
     if (timer !== null) {
@@ -1843,20 +3176,27 @@ export async function runVehicleMaintenanceAlerts(
     const ownerUserId = vehicle.ownerUserId || "";
     const directUserId = vehicle.currentDriverUserId || ownerUserId;
 
-    if (vehicle.nextServiceKm > 0) {
-      const remainingKm = vehicle.nextServiceKm - vehicle.currentKm;
+    const effectiveKm = Math.max(vehicle.currentKm || 0, vehicle.gpsSnapshot?.odometerKm || 0);
+    const serviceTargets = [
+      { key: "service", label: "Revizie", value: vehicle.nextServiceKm, eventType: "vehicle_service_due_soon" as const },
+      { key: "oil", label: "Revizie ulei", value: vehicle.nextOilServiceKm, eventType: "vehicle_oil_service_due_soon" as const },
+    ];
+
+    for (const serviceInfo of serviceTargets) {
+      if (serviceInfo.value <= 0) continue;
+      const remainingKm = serviceInfo.value - effectiveKm;
       if (remainingKm <= 500) {
-        const markerId = `${vehicle.id}_service_${todayKey}`;
+        const markerId = `${vehicle.id}_${serviceInfo.key}_${todayKey}`;
         const markerRef = doc(db, "vehicleMaintenanceAlerts", markerId);
         const marker = await getDoc(markerRef);
 
         if (!marker.exists()) {
           await dispatchNotificationEvent({
             module: "vehicles",
-            eventType: "vehicle_service_due_soon",
+            eventType: serviceInfo.eventType,
             entityId: vehicle.id,
-            title: "Service aproape scadent",
-            message: `Masina ${vehicle.plateNumber} se apropie de revizie (mai sunt ${Math.max(
+            title: `${serviceInfo.label} aproape scadenta`,
+            message: `Masina ${vehicle.plateNumber} se apropie de ${serviceInfo.label.toLowerCase()} (mai sunt ${Math.max(
               remainingKm,
               0
             )} km).`,
@@ -1868,7 +3208,7 @@ export async function runVehicleMaintenanceAlerts(
           });
           await setDoc(markerRef, {
             createdAt: Date.now(),
-            type: "service",
+            type: serviceInfo.key,
             vehicleId: vehicle.id,
           });
         }
@@ -1876,13 +3216,14 @@ export async function runVehicleMaintenanceAlerts(
     }
 
     const expiringDocs: Array<{
-      label: "ITP" | "RCA" | "CASCO";
+      label: "ITP" | "RCA" | "CASCO" | "Rovinieta";
       value: string;
       key: string;
     }> = [
       { label: "ITP", value: vehicle.nextItpDate, key: "itp" },
       { label: "RCA", value: vehicle.nextRcaDate, key: "rca" },
       { label: "CASCO", value: vehicle.nextCascoDate, key: "casco" },
+      { label: "Rovinieta", value: vehicle.nextRovinietaDate, key: "rovinieta" },
     ];
 
     for (const docInfo of expiringDocs) {
@@ -1905,7 +3246,9 @@ export async function runVehicleMaintenanceAlerts(
             ? "vehicle_document_itp_due_soon"
             : docInfo.key === "rca"
               ? "vehicle_document_rca_due_soon"
-              : "vehicle_document_casco_due_soon",
+              : docInfo.key === "casco"
+                 ? "vehicle_document_casco_due_soon"
+                : "vehicle_document_rovinieta_due_soon",
         entityId: vehicle.id,
         title: `${docInfo.label} aproape de expirare`,
         message: `Masina ${vehicle.plateNumber}: ${docInfo.label} expira in ${Math.max(

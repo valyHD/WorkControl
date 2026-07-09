@@ -3,16 +3,19 @@ import { useAuth } from "../../../providers/AuthProvider";
 import type { AppUser, ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem } from "../../../types/timesheet";
+import type { MaintenanceClient } from "../../../types/maintenance";
 import type { NotificationRuleFormValues, NotificationRuleItem } from "../../../types/notification-rule";
 import { getToolsList, getUsersList } from "../../tools/services/toolsService";
 import NotificationRuleForm from "../components/NotificationRuleForm";
 import {
   createNotificationRule,
+  deleteNotificationRule,
   subscribeNotificationRules,
   updateNotificationRule,
 } from "../services/notificationRulesService";
 import { getVehiclesList } from "../../vehicles/services/vehiclesService";
 import { getProjectsList } from "../../timesheets/services/timesheetsService";
+import { getMaintenanceClients } from "../../maintenance/services/maintenanceService";
 
 const emptyValues: NotificationRuleFormValues = {
   name: "",
@@ -21,6 +24,13 @@ const emptyValues: NotificationRuleFormValues = {
   entityId: "",
   entityLabel: "",
   enabled: true,
+  scheduleTime: "08:30",
+  stopTime: "17:00",
+  weekdays: [1, 2, 3, 4, 5],
+  reminderDelayHours: 8,
+  reminderRepeatMinutes: 60,
+  reminderActiveMinutes: 120,
+  soundEnabled: true,
   recipients: {
     notifyDirectUser: true,
     notifyOwner: false,
@@ -30,6 +40,21 @@ const emptyValues: NotificationRuleFormValues = {
   },
 };
 
+const weekdayShortLabels: Record<number, string> = {
+  1: "L",
+  2: "Ma",
+  3: "Mi",
+  4: "J",
+  5: "V",
+  6: "S",
+  7: "D",
+};
+
+function formatWeekdays(weekdays: number[] | undefined) {
+  const selected = weekdays?.length ? weekdays : [1, 2, 3, 4, 5];
+  return selected.map((day) => weekdayShortLabels[day] || String(day)).join(", ");
+}
+
 export default function NotificationRulesPage() {
   const { role } = useAuth();
 
@@ -38,10 +63,12 @@ export default function NotificationRulesPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [maintenanceClients, setMaintenanceClients] = useState<MaintenanceClient[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
   const [editingValues, setEditingValues] = useState<NotificationRuleFormValues>(emptyValues);
   const isMountedRef = useRef(true);
 
@@ -52,11 +79,12 @@ export default function NotificationRulesPage() {
     setLoading(true);
 
     try {
-      const [usersData, toolsData, vehiclesData, projectsData] = await Promise.all([
+      const [usersData, toolsData, vehiclesData, projectsData, maintenanceClientsData] = await Promise.all([
         getUsersList(),
         getToolsList(),
         getVehiclesList(),
         getProjectsList(),
+        getMaintenanceClients(),
       ]);
 
       if (!isMountedRef.current) return;
@@ -64,6 +92,7 @@ export default function NotificationRulesPage() {
       setTools(toolsData);
       setVehicles(vehiclesData);
       setProjects(projectsData);
+      setMaintenanceClients(maintenanceClientsData);
     } catch (err) {
       console.error("[NotificationRulesPage][loadDependencies]", err);
       if (!isMountedRef.current) return;
@@ -133,21 +162,21 @@ export default function NotificationRulesPage() {
     }
   }
 
-  async function handleSaveEdit() {
+  async function handleSaveEdit(values: NotificationRuleFormValues) {
     if (!editingId || submitting) return;
 
     setSubmitting(true);
     setError("");
 
     try {
-      if (!editingValues.name.trim()) {
+      if (!values.name.trim()) {
         setError("Completeaza numele regulii.");
         return;
       }
 
       await updateNotificationRule(editingId, {
-        ...editingValues,
-        name: editingValues.name.trim(),
+        ...values,
+        name: values.name.trim(),
       });
 
       setEditingId("");
@@ -157,6 +186,28 @@ export default function NotificationRulesPage() {
       setError("Nu am putut salva regula.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteRule(rule: NotificationRuleItem) {
+    if (deletingId || submitting) return;
+    const confirmed = window.confirm(`Stergi regula "${rule.name}"?`);
+    if (!confirmed) return;
+
+    setDeletingId(rule.id);
+    setError("");
+
+    try {
+      await deleteNotificationRule(rule);
+      if (editingId === rule.id) {
+        setEditingId("");
+        setEditingValues(emptyValues);
+      }
+    } catch (err) {
+      console.error("[NotificationRulesPage][handleDeleteRule]", err);
+      setError("Nu am putut sterge regula.");
+    } finally {
+      setDeletingId("");
     }
   }
 
@@ -200,6 +251,7 @@ export default function NotificationRulesPage() {
             tools={tools}
             vehicles={vehicles}
             projects={projects}
+            maintenanceClients={maintenanceClients}
             submitting={submitting}
             onSubmit={handleCreate}
           />
@@ -223,9 +275,10 @@ export default function NotificationRulesPage() {
                       tools={tools}
                       vehicles={vehicles}
                       projects={projects}
+                      maintenanceClients={maintenanceClients}
                       submitting={submitting}
-                      onSubmit={async () => {
-                        await handleSaveEdit();
+                      onSubmit={async (values) => {
+                        await handleSaveEdit(values);
                       }}
                     />
 
@@ -250,6 +303,27 @@ export default function NotificationRulesPage() {
                         modul: {rule.module} · eveniment: {rule.eventType} · status:{" "}
                         {rule.enabled ? "activa" : "inactiva"}
                       </div>
+                      {(rule.eventType === "timesheet_work_interval_reminder" ||
+                        rule.eventType === "timesheet_start_daily_reminder" ||
+                        rule.eventType === "timesheet_stop_after_8h_reminder") && (
+                        <div className="simple-list-subtitle chip-list">
+                          {rule.eventType === "timesheet_work_interval_reminder" && (
+                            <span className="inline-setting-chip">
+                              interval: {rule.scheduleTime || "08:30"} - {rule.stopTime || "17:00"}
+                            </span>
+                          )}
+                          {rule.eventType === "timesheet_start_daily_reminder" && (
+                            <span className="inline-setting-chip">pornire: {rule.scheduleTime || "08:30"}</span>
+                          )}
+                          {rule.eventType === "timesheet_stop_after_8h_reminder" && (
+                            <span className="inline-setting-chip">oprire: {rule.stopTime || "17:00"}</span>
+                          )}
+                          <span className="inline-setting-chip">zile: {formatWeekdays(rule.weekdays)}</span>
+                          <span className="inline-setting-chip">repeta: {rule.reminderRepeatMinutes || 60} min</span>
+                          <span className="inline-setting-chip">maxim: {rule.reminderActiveMinutes ?? 120} min</span>
+                          <span className="inline-setting-chip">sunet: {rule.soundEnabled === false ? "nu" : "da"}</span>
+                        </div>
+                      )}
                       {rule.entityId && (
                         <div className="simple-list-subtitle">
                           entitate: {rule.entityLabel || rule.entityId}
@@ -264,27 +338,47 @@ export default function NotificationRulesPage() {
                       </div>
                     </div>
 
-                    <button
-                      className="secondary-btn notification-rule-edit-btn"
-                      type="button"
-                      onClick={() => {
-                        setEditingId(rule.id);
-                        setEditingValues({
-                          name: rule.name,
-                          module: rule.module,
-                          eventType: rule.eventType,
-                          entityId: rule.entityId,
-                          entityLabel: rule.entityLabel,
-                          enabled: rule.enabled,
-                          recipients: {
-                            ...rule.recipients,
-                            specificUserIds: [...rule.recipients.specificUserIds],
-                          },
-                        });
-                      }}
+                    <div
+                      className="notification-rule-actions"
+                      style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}
                     >
-                      Editeaza
-                    </button>
+                      <button
+                        className="secondary-btn notification-rule-edit-btn"
+                        type="button"
+                        onClick={() => {
+                          setEditingId(rule.id);
+                          setEditingValues({
+                            name: rule.name,
+                            module: rule.module,
+                            eventType: rule.eventType,
+                            entityId: rule.entityId,
+                            entityLabel: rule.entityLabel,
+                            enabled: rule.enabled,
+                            scheduleTime: rule.scheduleTime || "08:30",
+                            stopTime: rule.stopTime || "17:00",
+                            weekdays: rule.weekdays?.length ? [...rule.weekdays] : [1, 2, 3, 4, 5],
+                            reminderDelayHours: rule.reminderDelayHours || 8,
+                            reminderRepeatMinutes: rule.reminderRepeatMinutes || 60,
+                            reminderActiveMinutes: rule.reminderActiveMinutes ?? 120,
+                            soundEnabled: rule.soundEnabled !== false,
+                            recipients: {
+                              ...rule.recipients,
+                              specificUserIds: [...rule.recipients.specificUserIds],
+                            },
+                          });
+                        }}
+                      >
+                        Editeaza
+                      </button>
+                      <button
+                        className="secondary-btn notification-rule-delete-btn"
+                        type="button"
+                        disabled={deletingId === rule.id || submitting}
+                        onClick={() => void handleDeleteRule(rule)}
+                      >
+                        {deletingId === rule.id ? "Se sterge..." : "Sterge"}
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

@@ -304,7 +304,7 @@ function formatBackupPrettyText(
           lines.push(`  ${readableDay(dayKey)}`);
           dayItems.forEach((item) => {
             lines.push(
-              `  ${String(item.userName || userName)} · ${String(item.projectCode ?? "-")} - ${String(item.projectName ?? "-")}`
+              `  ${String(item.userName || userName)} · ${String(item.projectName || item.projectCode || "Fara proiect")}`
             );
             lines.push(
               `  Start: ${formatTs(item.startAt)} · Stop: ${formatTs(item.stopAt)} · Durata: ${String(
@@ -449,6 +449,14 @@ export async function saveControlPanelSettings(values: ControlPanelSettings): Pr
     },
     { merge: true }
   );
+
+  await dispatchNotificationEvent({
+    module: "system",
+    eventType: "control_panel_settings_updated",
+    title: "Setari control panel actualizate",
+    message: "Setarile aplicatiei din Control Panel au fost actualizate.",
+    notificationPath: "/control-panel",
+  });
 }
 
 export async function exportBackupDataset(): Promise<{ payload: string; prettyPayload: string; summary: BackupExportSummary }> {

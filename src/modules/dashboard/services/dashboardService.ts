@@ -18,7 +18,9 @@ export type DashboardNotificationItem = {
   read: boolean;
   createdAt: number;
   module?: string;
+  eventType?: string;
   entityId?: string;
+  notificationPath?: string;
   targetUserThemeKey?: string | null;
   actorUserId?: string;
   actorUserName?: string;
@@ -63,8 +65,19 @@ function mapUserDoc(id: string, data: Record<string, any>): AppUserItem {
     email: data.email ?? "",
     active: data.active ?? true,
     role: data.role ?? "angajat",
+    themeKey: data.themeKey ?? null,
+    avatarUrl: data.avatarUrl ?? "",
+    avatarThumbUrl: data.avatarThumbUrl ?? "",
+    roleTitle: data.roleTitle ?? "",
+    department: data.department ?? "",
+    primaryCompanyId: data.primaryCompanyId ?? "",
+    primaryCompanyName: data.primaryCompanyName ?? "",
     createdAt: data.createdAt ?? undefined,
     updatedAt: data.updatedAt ?? undefined,
+    lastSeenAt: data.lastSeenAt ?? undefined,
+    lastActiveAt: data.lastActiveAt ?? undefined,
+    lastSiteEnteredAt: data.lastSiteEnteredAt ?? undefined,
+    isOnline: data.isOnline ?? false,
   };
 }
 
@@ -113,7 +126,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     vin: data.vin ?? "",
     fuelType: data.fuelType ?? "",
     status: data.status ?? "activa",
-    currentKm: Number(data.currentKm ?? 0),
+    currentKm: Math.max(Number(data.currentKm ?? 0), Number(data.gpsSnapshot?.odometerKm ?? 0)),
     initialRecordedKm: Number(data.initialRecordedKm ?? data.currentKm ?? 0),
 
     ownerUserId: data.ownerUserId ?? "",
@@ -126,14 +139,18 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     serviceStrategy: data.serviceStrategy === "absolute" ? "absolute" : "interval",
     serviceIntervalKm: Number(data.serviceIntervalKm ?? 15000),
     nextServiceKm: Number(data.nextServiceKm ?? 0),
+    nextOilServiceKm: Number(data.nextOilServiceKm ?? 0),
     nextItpDate: data.nextItpDate ?? "",
     nextRcaDate: data.nextRcaDate ?? "",
     nextCascoDate: data.nextCascoDate ?? "",
+    nextRovinietaDate: data.nextRovinietaDate ?? "",
 
     coverImageUrl: data.coverImageUrl ?? "",
     coverThumbUrl: data.coverThumbUrl ?? "",
     images: Array.isArray(data.images) ? data.images : [],
     documents: Array.isArray(data.documents) ? data.documents : [],
+    gpsSnapshot: data.gpsSnapshot ?? null,
+    tracker: data.tracker ?? null,
 
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),
@@ -204,7 +221,9 @@ function mapNotificationDoc(
     read: data.read ?? false,
     createdAt: data.createdAt ?? Date.now(),
     module: data.module ?? "",
+    eventType: data.eventType ?? "",
     entityId: data.entityId ?? "",
+    notificationPath: data.notificationPath ?? "",
     targetUserThemeKey: data.targetUserThemeKey ?? null,
     actorUserId: data.actorUserId ?? "",
     actorUserName: data.actorUserName ?? "",

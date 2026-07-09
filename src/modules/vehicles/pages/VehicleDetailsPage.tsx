@@ -1,23 +1,34 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
 import type {
+  VehicleDocumentItem,
   VehicleEventItem,
+  VehicleImageItem,
   VehicleItem,
+  VehiclePositionItem,
 } from "../../../types/vehicle";
 import { useAuth } from "../../../providers/AuthProvider";
 import SafeImage from "../../../components/SafeImage";
 import { SectionErrorBoundary } from "../../../lib/errors/SectionErrorBoundary";
+import UserProfileLink from "../../../components/UserProfileLink";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleDocumentsPanel from "../components/VehicleDocumentsPanel";
+import GpsSimulatorPanel from "../components/GpsSimulatorPanel";
+import { canUseGpsSimulator } from "../hooks/useGpsSimulator";
 import {
   acceptVehicleDriverChange,
+  addVehicleComment,
   claimVehicleForCurrentUser,
+  deleteVehicle,
   getVehicleEvents,
   getVehicleUsers,
   removeVehicleDocument,
   removeVehicleImage,
+  restoreVehicleCoverImage,
+  restoreVehicleDocuments,
+  restoreVehicleImages,
   setVehicleCoverImage,
   subscribeVehicleById,
 } from "../services/vehiclesService";
@@ -28,13 +39,29 @@ import {
   Image as ImageIcon,
   History,
   FileText,
+  Navigation,
+  RotateCcw,
+  Activity,
 } from "lucide-react";
 
 const VehicleLiveRouteCard = lazy(() => import("../components/VehicleLiveRouteCard"));
+const KM_ESTIMATE_REFRESH_MS = 3_000;
+
+interface VehicleUndoAction {
+  id: string;
+  label: string;
+  run: () => Promise<void>;
+}
 
 function formatDate(ts?: number) {
-  if (!ts) return "—";
+  if (!ts) return "?";
   return new Date(ts).toLocaleString("ro-RO");
+}
+
+function getTrustedTotalOdometerKm(value: unknown, initialRecordedKm: number) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+  if (initialRecordedKm > 0 && value < initialRecordedKm) return 0;
+  return value;
 }
 
 function MaintenanceAlert({ label, date }: { label: string; date?: string }) {
@@ -106,20 +133,30 @@ function VehicleSectionDropdown({
   children: ReactNode;
   defaultOpen?: boolean;
 }) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    if (defaultOpen) {
+      setIsOpen(true);
+    }
+  }, [defaultOpen]);
+
   return (
-    <details className="panel vehicle-section-dropdown" open={defaultOpen}>
+    <details className="panel vehicle-section-dropdown" open={isOpen} onToggle={(event) => setIsOpen(event.currentTarget.open)}>
       <summary className="vehicle-section-dropdown__summary">
         <span className="panel-title">{title}</span>
         {subtitle ? <span className="tools-subtitle">{subtitle}</span> : null}
       </summary>
-      <div className="vehicle-section-dropdown__body">{children}</div>
+      {isOpen ? <div className="vehicle-section-dropdown__body">{children}</div> : null}
     </details>
   );
 }
 
 export default function VehicleDetailsPage() {
   const { vehicleId = "" } = useParams();
-  const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { role, user } = useAuth();
   const mountedRef = useRef(true);
 
   const [vehicle, setVehicle] = useState<VehicleItem | null>(null);
@@ -129,9 +166,19 @@ export default function VehicleDetailsPage() {
   const [metaLoading, setMetaLoading] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<string | null>(null);
+  const [deletingVehicle, setDeletingVehicle] = useState(false);
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimMsg, setClaimMsg] = useState("");
   const [estimatedCurrentKm, setEstimatedCurrentKm] = useState<number | null>(null);
+  const [showSimulator, setShowSimulator] = useState(false);
+  const [simulationPositions, setSimulationPositions] = useState<VehiclePositionItem[]>([]);
+  const [simulationPlannedPositions, setSimulationPlannedPositions] = useState<VehiclePositionItem[]>([]);
+  const [simulationActive, setSimulationActive] = useState(false);
+  const [undoStack, setUndoStack] = useState<VehicleUndoAction[]>([]);
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const estimatedKmUpdateRef = useRef({ km: 0, updatedAt: 0 });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -219,21 +266,36 @@ export default function VehicleDetailsPage() {
   }
 
   async function handleSetCover(url: string) {
-    if (!vehicle || !user || vehicle.ownerUserId !== user.uid) return;
+    if (!vehicle || !user || !canManageVehicle) return;
+
+    const previousCoverImageUrl = vehicle.coverImageUrl || "";
+    const previousCoverThumbUrl = vehicle.coverThumbUrl || "";
+    if (previousCoverImageUrl === url) return;
 
     try {
       await setVehicleCoverImage(vehicle.id, url);
+      pushUndoAction({
+        label: "Poza principala a fost schimbata.",
+        run: () => restoreVehicleCoverImage(vehicle.id, previousCoverImageUrl, previousCoverThumbUrl),
+      });
     } catch (err) {
       console.error("[VehicleDetailsPage][setCover]", err);
     }
   }
 
   async function handleDeleteImage(imageId: string) {
-    if (!vehicle || !user || vehicle.ownerUserId !== user.uid || deletingImageId) return;
+    if (!vehicle || !user || !canManageVehicle || deletingImageId) return;
 
     setDeletingImageId(imageId);
+    const previousImages = [...vehicle.images] as VehicleImageItem[];
+    const previousCoverImageUrl = vehicle.coverImageUrl || "";
+    const previousCoverThumbUrl = vehicle.coverThumbUrl || "";
     try {
       await removeVehicleImage(vehicle.id, vehicle.images, imageId);
+      pushUndoAction({
+        label: "Poza a fost stearsa.",
+        run: () => restoreVehicleImages(vehicle.id, previousImages, previousCoverImageUrl, previousCoverThumbUrl),
+      });
     } catch (err) {
       console.error("[VehicleDetailsPage][deleteImage]", err);
     } finally {
@@ -243,11 +305,16 @@ export default function VehicleDetailsPage() {
 
 
   async function handleDeleteDocument(documentId: string) {
-    if (!vehicle || !user || vehicle.ownerUserId !== user.uid || deletingDocumentId) return;
+    if (!vehicle || !user || !canManageVehicle || deletingDocumentId) return;
 
     setDeletingDocumentId(documentId);
+    const previousDocuments = [...vehicle.documents] as VehicleDocumentItem[];
     try {
       await removeVehicleDocument(vehicle.id, vehicle.documents, documentId);
+      pushUndoAction({
+        label: "Documentul a fost sters.",
+        run: () => restoreVehicleDocuments(vehicle.id, previousDocuments),
+      });
     } catch (err) {
       console.error("[VehicleDetailsPage][deleteDocument]", err);
     } finally {
@@ -255,10 +322,56 @@ export default function VehicleDetailsPage() {
     }
   }
 
+  async function handleDeleteVehicle() {
+    if (!vehicle || !canManageVehicle || deletingVehicle) return;
+    const ok = window.confirm(`Stergi masina "${vehicle.plateNumber || vehicle.brand || vehicle.id}"?`);
+    if (!ok) return;
+
+    setDeletingVehicle(true);
+    try {
+      await deleteVehicle(vehicle.id);
+      navigate("/vehicles");
+    } catch (err) {
+      console.error("[VehicleDetailsPage][deleteVehicle]", err);
+      setDeletingVehicle(false);
+    }
+  }
+
+  function pushUndoAction(action: Omit<VehicleUndoAction, "id">) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setUndoStack((current) => [...current.slice(-9), { id, ...action }]);
+  }
+
+  async function handleUndoLastAction() {
+    const action = undoStack[undoStack.length - 1];
+    if (!action || undoBusy) return;
+
+    setUndoBusy(true);
+    try {
+      await action.run();
+      setUndoStack((current) => current.filter((item) => item.id !== action.id));
+    } catch (err) {
+      console.error("[VehicleDetailsPage][undo]", err);
+    } finally {
+      setUndoBusy(false);
+    }
+  }
+
   const isOwner = useMemo(() => {
     if (!vehicle || !user) return false;
     return vehicle.ownerUserId === user.uid;
   }, [vehicle, user]);
+  const canManageVehicle = isOwner || role === "admin";
+
+  const canShowSimulator = useMemo(() => canUseGpsSimulator(user?.email), [user?.email]);
+  const shouldOpenTrackerSection = location.hash === "#vehicle-tracker-live-section";
+
+  useEffect(() => {
+    if (!shouldOpenTrackerSection) return;
+    window.setTimeout(() => {
+      document.getElementById("vehicle-tracker-live-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 180);
+  }, [shouldOpenTrackerSection, vehicle?.id]);
 
   const needsRepair = useMemo(() => {
     if (!vehicle) return false;
@@ -271,17 +384,110 @@ export default function VehicleDetailsPage() {
       { label: "ITP", date: vehicle.nextItpDate },
       { label: "RCA", date: vehicle.nextRcaDate },
       { label: "CASCO", date: vehicle.nextCascoDate },
+      { label: "Rovinieta", date: vehicle.nextRovinietaDate },
     ].filter((a) => Boolean(a.date));
   }, [vehicle]);
 
   const displayedCurrentKm = useMemo(() => {
     if (!vehicle) return 0;
-    const candidates = [vehicle.currentKm, vehicle.gpsSnapshot?.odometerKm, estimatedCurrentKm].filter(
-      (value): value is number => typeof value === "number" && Number.isFinite(value)
+    const initialRecordedKm = vehicle.initialRecordedKm || 0;
+    if (typeof estimatedCurrentKm === "number" && Number.isFinite(estimatedCurrentKm)) {
+      return estimatedCurrentKm;
+    }
+    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+      vehicle.gpsSnapshot?.odometerKm,
+      initialRecordedKm
     );
-    if (!candidates.length) return 0;
-    return Math.max(...candidates);
+    if (trustedGpsOdometerKm > 0) {
+      return Math.max(
+        trustedGpsOdometerKm,
+        typeof vehicle.currentKm === "number" && Number.isFinite(vehicle.currentKm)
+          ? vehicle.currentKm
+          : 0
+      );
+    }
+    if (
+      typeof vehicle.currentKm === "number" &&
+      Number.isFinite(vehicle.currentKm) &&
+      vehicle.currentKm >= initialRecordedKm
+    ) {
+      return vehicle.currentKm;
+    }
+    return initialRecordedKm;
   }, [estimatedCurrentKm, vehicle]);
+
+  useEffect(() => {
+    if (!vehicle) return;
+    const hasActiveRoute =
+      Boolean(vehicle.gpsSim) &&
+      vehicle.gpsSim?.active !== false &&
+      (vehicle.gpsSim?.points?.length ?? 0) > 0;
+
+    if (hasActiveRoute) return;
+
+    const initialRecordedKm = vehicle.initialRecordedKm || 0;
+    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+      vehicle.gpsSnapshot?.odometerKm,
+      initialRecordedKm
+    );
+    const storedKm =
+      typeof vehicle.currentKm === "number" &&
+      Number.isFinite(vehicle.currentKm) &&
+      vehicle.currentKm >= initialRecordedKm
+        ? vehicle.currentKm
+        : initialRecordedKm;
+    const liveKm = Math.max(trustedGpsOdometerKm, storedKm);
+    estimatedKmUpdateRef.current = { km: liveKm, updatedAt: Date.now() };
+    setEstimatedCurrentKm(null);
+  }, [
+    vehicle?.currentKm,
+    vehicle?.gpsSim,
+    vehicle?.gpsSnapshot?.gpsTimestamp,
+    vehicle?.gpsSnapshot?.odometerKm,
+    vehicle?.initialRecordedKm,
+  ]);
+
+  const handleKmEstimateChange = useCallback((km: number) => {
+    if (!Number.isFinite(km)) return;
+
+    const now = Date.now();
+    const previous = estimatedKmUpdateRef.current;
+    const changedEnough = Math.abs(km - previous.km) >= 0.05;
+    const waitedEnough = now - previous.updatedAt >= KM_ESTIMATE_REFRESH_MS;
+
+    if (!changedEnough && !waitedEnough) return;
+
+    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+      vehicle?.gpsSnapshot?.odometerKm,
+      vehicle?.initialRecordedKm || 0
+    );
+    const nextKm = Math.max(km, trustedGpsOdometerKm);
+
+    estimatedKmUpdateRef.current = { km: nextKm, updatedAt: now };
+    setEstimatedCurrentKm((current) => {
+      if (typeof current === "number" && Math.abs(current - nextKm) < 0.01) return current;
+      return nextKm;
+    });
+  }, [vehicle?.gpsSnapshot?.odometerKm, vehicle?.initialRecordedKm]);
+
+  async function handleAddComment() {
+    if (!vehicle || !user?.uid || commentBusy) return;
+    const cleanComment = commentText.trim();
+    if (!cleanComment) return;
+
+    setCommentBusy(true);
+    try {
+      await addVehicleComment(vehicle.id, cleanComment, {
+        actorUserId: user.uid,
+        actorUserName: user.displayName || user.email || "Utilizator",
+        actorUserThemeKey: user.themeKey ?? null,
+      });
+      setCommentText("");
+      await loadMeta();
+    } finally {
+      setCommentBusy(false);
+    }
+  }
 
   const hasPendingDriverRequest = useMemo(() => {
     return Boolean(vehicle?.pendingDriverUserId);
@@ -327,6 +533,7 @@ export default function VehicleDetailsPage() {
                 fallbackText={vehicle.brand || vehicle.plateNumber}
                 sizes="140px"
                 loading="eager"
+                fetchPriority="high"
               />
             </div>
 
@@ -339,7 +546,7 @@ export default function VehicleDetailsPage() {
                 <strong>Marca / model:</strong> {vehicle.brand} {vehicle.model}
                 {vehicle.year ? (
                   <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
-                    · {vehicle.year}
+                    ? {vehicle.year}
                   </span>
                 ) : null}
               </div>
@@ -365,11 +572,44 @@ export default function VehicleDetailsPage() {
               </div>
 
               <div className="vehicle-details-actions">
-                {isOwner && (
-                  <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
-                    <Pencil size={14} /> Editeaza
-                  </Link>
+                <Link to={`/vehicles/${vehicle.id}/live`} className="primary-btn">
+                  <Activity size={14} /> Detalii live
+                </Link>
+                {canManageVehicle && (
+                  <>
+                    <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
+                      <Pencil size={14} /> Editeaza
+                    </Link>
+                    <button
+                      type="button"
+                      className="danger-btn"
+                      onClick={() => void handleDeleteVehicle()}
+                      disabled={deletingVehicle}
+                    >
+                      {deletingVehicle ? "Se sterge..." : "Sterge masina"}
+                    </button>
+                  </>
                 )}
+                {canShowSimulator && (
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => setShowSimulator((value) => !value)}
+                  >
+                    <Navigation size={14} />
+                    {showSimulator ? "Inchide panou" : "Trimite notificare"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  disabled={!undoStack.length || undoBusy}
+                  title={undoStack.length ? "Anuleaza ultima actiune" : "Nu ai nicio actiune de anulat"}
+                  onClick={() => void handleUndoLastAction()}
+                >
+                  <RotateCcw size={14} />
+                  Undo
+                </button>
                 <Link to="/vehicles" className="secondary-btn">
                   <ArrowLeft size={14} /> Inapoi
                 </Link>
@@ -378,6 +618,21 @@ export default function VehicleDetailsPage() {
           </div>
         </div>
       </div>
+
+      {undoStack.length > 0 && (
+        <div className="vehicle-undo-bar">
+          <span>{undoStack[undoStack.length - 1]?.label}</span>
+          <button
+            type="button"
+            className="secondary-btn"
+            disabled={undoBusy}
+            onClick={() => void handleUndoLastAction()}
+          >
+            <RotateCcw size={14} />
+            Undo
+          </button>
+        </div>
+      )}
 
       {needsRepair && user && (
         <div className="panel">
@@ -423,13 +678,19 @@ export default function VehicleDetailsPage() {
 
       <VehicleSectionDropdown title="Date generale" defaultOpen>
         <div className="tool-detail-line">
-          <strong>Responsabil:</strong> {vehicle.ownerUserName || "—"}
+          <strong>Responsabil:</strong>{" "}
+          <UserProfileLink userId={vehicle.ownerUserId} name={vehicle.ownerUserName} themeKey={vehicle.ownerThemeKey} />
         </div>
         <div className="tool-detail-line">
-          <strong>Sofer curent:</strong> {vehicle.currentDriverUserName || "—"}
+          <strong>Sofer curent:</strong>{" "}
+          <UserProfileLink
+            userId={vehicle.currentDriverUserId}
+            name={vehicle.currentDriverUserName}
+            themeKey={vehicle.currentDriverThemeKey}
+          />
         </div>
         <div className="tool-detail-line">
-          <strong>An fabricatie:</strong> {vehicle.year || "—"}
+          <strong>An fabricatie:</strong> {vehicle.year || "?"}
         </div>
         <div className="tool-detail-line">
           <strong>VIN:</strong>{" "}
@@ -440,11 +701,11 @@ export default function VehicleDetailsPage() {
               letterSpacing: "0.5px",
             }}
           >
-            {vehicle.vin || "—"}
+            {vehicle.vin || "?"}
           </span>
         </div>
         <div className="tool-detail-line">
-          <strong>Combustibil:</strong> {vehicle.fuelType || "—"}
+          <strong>Combustibil:</strong> {vehicle.fuelType || "?"}
         </div>
         <div className="tool-detail-line">
           <strong>Km curenti:</strong>{" "}
@@ -463,21 +724,31 @@ export default function VehicleDetailsPage() {
       <VehicleSectionDropdown title="Mentenanta">
         <div className="tool-detail-line">
           <strong>Urmator service la:</strong>{" "}
-          {vehicle.nextServiceKm ? `${vehicle.nextServiceKm.toLocaleString("ro-RO")} km` : "—"}
+          {vehicle.nextServiceKm ? `${vehicle.nextServiceKm.toLocaleString("ro-RO")} km` : "?"}
         </div>
         <div className="tool-detail-line">
           <strong>ITP pana la:</strong>{" "}
-          <span style={{ color: getDateColor(vehicle.nextItpDate) }}>{vehicle.nextItpDate || "—"}</span>
+          <span style={{ color: getDateColor(vehicle.nextItpDate) }}>{vehicle.nextItpDate || "?"}</span>
         </div>
         <div className="tool-detail-line">
           <strong>RCA pana la:</strong>{" "}
-          <span style={{ color: getDateColor(vehicle.nextRcaDate) }}>{vehicle.nextRcaDate || "—"}</span>
+          <span style={{ color: getDateColor(vehicle.nextRcaDate) }}>{vehicle.nextRcaDate || "?"}</span>
         </div>
         <div className="tool-detail-line">
           <strong>CASCO pana la:</strong>{" "}
           <span style={{ color: getDateColor(vehicle.nextCascoDate) }}>
-            {vehicle.nextCascoDate || "—"}
+            {vehicle.nextCascoDate || "?"}
           </span>
+        </div>
+        <div className="tool-detail-line">
+          <strong>Rovinieta pana la:</strong>{" "}
+          <span style={{ color: getDateColor(vehicle.nextRovinietaDate) }}>
+            {vehicle.nextRovinietaDate || "?"}
+          </span>
+        </div>
+        <div className="tool-detail-line">
+          <strong>Revizie ulei la:</strong>{" "}
+          {vehicle.nextOilServiceKm ? `${vehicle.nextOilServiceKm.toLocaleString("ro-RO")} km` : "?"}
         </div>
 
         {vehicle.maintenanceNotes && (
@@ -504,15 +775,22 @@ export default function VehicleDetailsPage() {
       </VehicleSectionDropdown>
 
       <VehicleSectionDropdown title="Schimba soferul curent">
-        {isOwner && <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />}
+        {canManageVehicle && <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />}
 
         {hasPendingDriverRequest && (
-          <div className="panel" style={{ marginTop: isOwner ? 10 : 0 }}>
-            <h3 className="panel-title">Solicitare schimbare șofer</h3>
+          <div className="panel" style={{ marginTop: canManageVehicle ? 10 : 0 }}>
+            <h3 className="panel-title">Solicitare schimbare ?ofer</h3>
             <p className="tools-subtitle" style={{ marginBottom: 12 }}>
-              Solicitare pentru: <strong>{vehicle.pendingDriverUserName || "utilizator"}</strong>.
-              {vehicle.pendingDriverRequestedAt
-                ? ` Trimisă la ${formatDate(vehicle.pendingDriverRequestedAt)}.`
+              Solicitare pentru:{" "}
+              <UserProfileLink
+                userId={vehicle.pendingDriverUserId}
+                name={vehicle.pendingDriverUserName}
+                themeKey={vehicle.pendingDriverThemeKey}
+                fallback="utilizator"
+                className="user-profile-link--plain"
+              />.
+              ? {vehicle.pendingDriverRequestedAt
+                 ? ` Trimisă la ${formatDate(vehicle.pendingDriverRequestedAt)}.`
                 : ""}
             </p>
             {isPendingForCurrentUser ? (
@@ -528,7 +806,8 @@ export default function VehicleDetailsPage() {
         )}
       </VehicleSectionDropdown>
 
-      <VehicleSectionDropdown title="Tracker live">
+      <div id="vehicle-tracker-live-section">
+      <VehicleSectionDropdown title="Tracker live" defaultOpen={shouldOpenTrackerSection}>
         <SectionErrorBoundary sectionName="harta GPS">
           <Suspense
             fallback={
@@ -540,12 +819,25 @@ export default function VehicleDetailsPage() {
           >
             <VehicleLiveRouteCard
               vehicle={vehicle}
-              showControlCard={false}
-              onKmEstimateChange={setEstimatedCurrentKm}
+              onKmEstimateChange={handleKmEstimateChange}
+              simulationPositions={simulationPositions}
+              simulationPlannedPositions={simulationPlannedPositions}
+              simulationActive={simulationActive}
             />
           </Suspense>
         </SectionErrorBoundary>
       </VehicleSectionDropdown>
+      </div>
+
+      {canShowSimulator && showSimulator ? (
+        <GpsSimulatorPanel
+          vehicle={vehicle}
+          defaultExpanded
+          onSimulationPositionsChange={setSimulationPositions}
+          onSimulationPlannedPositionsChange={setSimulationPlannedPositions}
+          onSimulationActiveChange={setSimulationActive}
+        />
+      ) : null}
 
       <VehicleSectionDropdown title="Galerie foto">
         <div>
@@ -573,7 +865,7 @@ export default function VehicleDetailsPage() {
             </div>
             <div className="empty-state-title">Nicio poza incarcata</div>
             <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-              {isOwner ? "Editeaza vehiculul pentru a adauga poze." : "Nicio poza disponibila."}
+              {canManageVehicle ? "Editeaza vehiculul pentru a adauga poze." : "Nicio poza disponibila."}
             </div>
           </div>
         ) : (
@@ -588,7 +880,7 @@ export default function VehicleDetailsPage() {
                   decoding="async"
                   fallbackText={vehicle.plateNumber}
                 />
-                {isOwner && (
+                {canManageVehicle && (
                   <div className="tool-gallery-actions">
                     <button
                       className="secondary-btn"
@@ -637,14 +929,14 @@ export default function VehicleDetailsPage() {
 
         <VehicleDocumentsPanel
           documents={vehicle.documents}
-          isOwner={isOwner}
+          isOwner={canManageVehicle}
           deletingDocumentId={deletingDocumentId}
           onDelete={handleDeleteDocument}
         />
         </div>
       </VehicleSectionDropdown>
 
-      <VehicleSectionDropdown title="Istoric evenimente">
+      <VehicleSectionDropdown title="Istoric evenimente si comentarii">
         <div>
         <div
           style={{
@@ -656,11 +948,34 @@ export default function VehicleDetailsPage() {
         >
           <h3 className="panel-title" style={{ margin: 0 }}>
             <History size={15} style={{ verticalAlign: "middle", marginRight: 6 }} />
-            Istoric evenimente
+            Istoric evenimente si comentarii
           </h3>
           <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
             {events.length} {events.length === 1 ? "eveniment" : "evenimente"}
           </span>
+        </div>
+
+        <div className="asset-comment-box">
+          <label className="tool-form-label">Adauga comentariu / observatie</label>
+          <p className="tools-subtitle" style={{ margin: 0 }}>
+            Comentariile despre masina se scriu aici: defecte, predari, reparatii, documente sau observatii zilnice.
+          </p>
+          <textarea
+            className="tool-input tool-textarea"
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            placeholder="Ex: schimbat ulei, lovitura bara fata, predat curat, verificat documente..."
+          />
+          <div className="tool-form-actions">
+            <button
+              className="primary-btn"
+              type="button"
+              disabled={commentBusy || !commentText.trim()}
+              onClick={() => void handleAddComment()}
+            >
+              {commentBusy ? "Se adauga..." : "Adauga comentariu"}
+            </button>
+          </div>
         </div>
 
         {events.length === 0 ? (
@@ -677,7 +992,12 @@ export default function VehicleDetailsPage() {
                 <div className="simple-list-text">
                   <div className="simple-list-label">{event.message}</div>
                   <div className="simple-list-subtitle">
-                    {event.actorUserName || "Sistem"} · {formatDate(event.createdAt)}
+                    <UserProfileLink
+                      userId={event.actorUserId}
+                      name={event.actorUserName || "Sistem"}
+                      themeKey={event.actorUserThemeKey}
+                    />
+                    {" "}· {formatDate(event.createdAt)}
                   </div>
                 </div>
               </div>

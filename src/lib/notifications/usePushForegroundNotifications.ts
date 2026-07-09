@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { onMessage } from "firebase/messaging";
 import { getMessagingClient } from "../firebase/messaging";
+import { showBrowserNotification } from "./showNotification";
 
 type PushMessagePayload = {
   data?: {
@@ -9,27 +10,13 @@ type PushMessagePayload = {
     message?: string;
     path?: string;
     notificationId?: string;
+    soundEnabled?: string;
   };
   notification?: {
     title?: string;
     body?: string;
   };
 };
-
-async function getNotificationRegistration(): Promise<ServiceWorkerRegistration | null> {
-  if (typeof window === "undefined") return null;
-  if (!("serviceWorker" in navigator)) return null;
-
-  const existing = await navigator.serviceWorker.getRegistration("/");
-  if (existing) return existing;
-
-  try {
-    return await navigator.serviceWorker.register("/notification-sw.js");
-  } catch (error) {
-    console.error("[Push][foreground] Nu s-a putut inregistra service worker-ul:", error);
-    return null;
-  }
-}
 
 function shouldSkipDuplicate(notificationId?: string, fallbackKey?: string): boolean {
   if (typeof window === "undefined") return false;
@@ -39,17 +26,17 @@ function shouldSkipDuplicate(notificationId?: string, fallbackKey?: string): boo
 
   const storageKey = `wc_push_seen_${dedupeKey}`;
   const now = Date.now();
-  const ttlMs = 10_000;
+  const ttlMs = 60_000;
 
   try {
-    const raw = sessionStorage.getItem(storageKey);
+    const raw = localStorage.getItem(storageKey);
     if (raw) {
       const ts = Number(raw);
       if (Number.isFinite(ts) && now - ts < ttlMs) {
         return true;
       }
     }
-    sessionStorage.setItem(storageKey, String(now));
+    localStorage.setItem(storageKey, String(now));
   } catch {
     // no-op
   }
@@ -70,17 +57,11 @@ async function showForegroundNotification(payload: PushMessagePayload): Promise<
     return;
   }
 
-  const registration = await getNotificationRegistration();
-  if (registration) {
-    await registration.showNotification(title, {
-      body,
-      data: { path },
-      tag: notificationId || undefined,
-    });
-    return;
-  }
-
-  new Notification(title, { body, tag: notificationId || undefined });
+  await showBrowserNotification(title, body, path, {
+    sound: payload.data?.soundEnabled !== "false",
+    tag: `workcontrol-${notificationId || `${title}|${body}|${path}`}`,
+    notificationId,
+  });
 }
 
 export function usePushForegroundNotifications(enabled: boolean): void {

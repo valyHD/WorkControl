@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 import {
   initializeFirestore,
   memoryLocalCache,
@@ -27,5 +28,6 @@ export const db = initializeFirestore(app, {
 });
 
 export const storage = getStorage(app);
+export const functions = getFunctions(app, "europe-west1");
 
 export default app;

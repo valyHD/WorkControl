@@ -1,122 +1,83 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  Briefcase,
+  CalendarClock,
+  CarFront,
+  CheckCircle2,
+  Clock3,
+  FolderOpen,
+  RefreshCw,
+  TimerReset,
+  Users,
+  Wrench,
+} from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getDashboardData } from "../services/dashboardService";
 import type { AppUserItem } from "../../../types/user";
 import type { ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem, TimesheetItem } from "../../../types/timesheet";
-import ToolStatusBadge from "../../tools/components/ToolStatusBadge";
-import VehicleStatusBadge from "../../vehicles/components/VehicleStatusBadge";
 import { formatMinutes } from "../../timesheets/services/timesheetsService";
-import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { getMyVehicleForUser } from "../../vehicles/services/vehiclesService";
+import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
+import UserProfileLink from "../../../components/UserProfileLink";
+import KpiCard from "../../../components/KpiCard";
+import StatusBadge from "../../../components/StatusBadge";
+import EmptyState from "../../../components/EmptyState";
+import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import {
-  Users, Wrench, CarFront, Clock3, Briefcase, Bell,
-  AlertTriangle, CheckCircle2, ChevronRight, Activity,
-  FolderOpen, BellDot, Settings2, TimerReset, RefreshCw, CalendarClock,
-} from "lucide-react";
+  getEffectiveWorkedMinutes,
+  getLocalDateKey,
+  getProjectLabel,
+  getTimesheetStatusLabel,
+  getTimesheetStatusTone,
+  getUsersWithoutTimesheetToday,
+} from "../../timesheets/utils/timesheetAnalytics";
+import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 
 type NotificationLite = {
-  id: string; title: string; message: string; read: boolean; createdAt: number;
-  module?: string; entityId?: string;
-  targetUserThemeKey?: string | null;
-  actorUserId?: string; actorUserName?: string; actorUserThemeKey?: string | null;
+  id: string;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: number;
+  module?: string;
+  entityId?: string;
+  eventType?: string;
+  notificationPath?: string;
+  actorUserId?: string;
+  actorUserName?: string;
+  actorUserThemeKey?: string | null;
 };
 
-/* ── KPI Card ── */
-function KpiCard({ label, value, trend, trendType, icon: Icon, iconClass }: {
-  label: string; value: React.ReactNode; trend: string;
-  trendType: "positive" | "warning" | "danger" | "muted";
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; iconClass: string;
-}) {
-  return (
-    <div className="kpi-card">
-      <div className="kpi-head">
-        <div className="kpi-label">{label}</div>
-        <div className={`kpi-icon-wrap ${iconClass}`}><Icon size={18} strokeWidth={2.1} /></div>
-      </div>
-      <div className="kpi-value">{value}</div>
-      <div className={`kpi-trend kpi-trend-${trendType}`}>{trend}</div>
-    </div>
-  );
-}
+type TodayRow = {
+  id: string;
+  user: AppUserItem;
+  timesheet: TimesheetItem | null;
+};
 
-/* ── Section title ── */
-function SectionTitle({ icon: Icon, children }: {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>; children: React.ReactNode;
-}) {
-  return (
-    <h2 className="panel-title" style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-      <span style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center",
-        width: 28, height: 28, borderRadius: "var(--radius-xs)",
-        background: "var(--primary-soft)", color: "var(--primary)", flexShrink: 0,
-      }}>
-        <Icon size={15} strokeWidth={2.3} />
-      </span>
-      {children}
-    </h2>
-  );
-}
+type ActivityItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  at: number;
+  tone: "green" | "orange" | "red" | "blue" | "muted";
+  to?: string;
+};
 
-/* ── Empty state ── */
-function EmptyState({ icon: Icon, title, subtitle, success = false }: {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
-  title: string; subtitle?: string; success?: boolean;
-}) {
-  return (
-    <div className="empty-state">
-      <div className="empty-state-icon"
-        style={success ? { background: "var(--success-soft)", color: "var(--success)" } : undefined}>
-        <Icon size={20} strokeWidth={1.8} />
-      </div>
-      <div className="empty-state-title">{title}</div>
-      {subtitle && <div style={{ fontSize: 13, color: "var(--text-muted)" }}>{subtitle}</div>}
-    </div>
-  );
-}
-
-/* ── Panel header helper ── */
-function PanelHeader({ icon, children, right }: {
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>;
-  children: React.ReactNode; right?: React.ReactNode;
-}) {
-  return (
-    <div style={{
-      padding: "16px 20px", borderBottom: "1.5px solid var(--line)",
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-    }}>
-      <SectionTitle icon={icon}>{children}</SectionTitle>
-      {right}
-    </div>
-  );
-}
-
-/* ── Skeleton ── */
 function DashboardSkeleton() {
   return (
-    <section className="page-section">
-      <div className="kpi-grid dashboard-kpi-grid">
-        {[...Array(6)].map((_, i) => (
-          <div key={i} className="kpi-card" style={{ minHeight: 120 }}>
+    <section className="page-section dashboard-modern-page">
+      <div className="wc-kpi-grid wc-kpi-grid--six">
+        {[...Array(6)].map((_, index) => (
+          <div key={index} className="wc-kpi-card">
             <div className="skeleton" style={{ height: 12, width: "60%", marginBottom: 16 }} />
-            <div className="skeleton" style={{ height: 36, width: "40%", marginBottom: 12 }} />
+            <div className="skeleton" style={{ height: 34, width: "42%", marginBottom: 12 }} />
             <div className="skeleton" style={{ height: 10, width: "80%" }} />
-          </div>
-        ))}
-      </div>
-      <div className="content-grid">
-        {[1, 2].map((i) => (
-          <div key={i} className="panel" style={{ minHeight: 280 }}>
-            <div style={{ padding: "16px 20px", borderBottom: "1.5px solid var(--line)" }}>
-              <div className="skeleton" style={{ height: 16, width: "40%" }} />
-            </div>
-            <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-              {[...Array(4)].map((_, j) => (
-                <div key={j} className="skeleton" style={{ height: 48, borderRadius: "var(--radius-md)" }} />
-              ))}
-            </div>
           </div>
         ))}
       </div>
@@ -124,7 +85,25 @@ function DashboardSkeleton() {
   );
 }
 
-/* ── Main ── */
+function formatDateTime(value?: number | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("ro-RO");
+}
+
+function formatTime(value?: number | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
+}
+
+function isTodayTs(value?: number | null, todayKey = getLocalDateKey()) {
+  if (!value) return false;
+  return getLocalDateKey(value) === todayKey;
+}
+
+function getUserName(userItem: AppUserItem) {
+  return userItem.fullName || userItem.email || "Utilizator";
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -133,28 +112,25 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [navigatingVehicle, setNavigatingVehicle] = useState(false);
-  const [, setUsers] = useState<AppUserItem[]>([]);
+  const [users, setUsers] = useState<AppUserItem[]>([]);
   const [tools, setTools] = useState<ToolItem[]>([]);
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [timesheets, setTimesheets] = useState<TimesheetItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationLite[]>([]);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
-  const [stats, setStats] = useState({
-    totalUsers: 0, activeUsers: 0, totalTools: 0, defectiveTools: 0,
-    lostTools: 0, toolsInWarehouse: 0, totalVehicles: 0,
-    unavailableVehicles: 0, damagedVehicles: 0, activeTimesheets: 0,
-    totalProjects: 0, activeProjects: 0, unreadNotifications: 0,
-  });
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
+
     try {
       const data = await getDashboardData(user?.uid);
       if (!mountedRef.current) return;
@@ -164,54 +140,30 @@ export default function DashboardPage() {
       setTimesheets(data.timesheets ?? []);
       setProjects(data.projects ?? []);
       setNotifications(data.notifications ?? []);
-      setStats(data.stats ?? {
-        totalUsers: 0, activeUsers: 0, totalTools: 0, defectiveTools: 0,
-        lostTools: 0, toolsInWarehouse: 0, totalVehicles: 0,
-        unavailableVehicles: 0, damagedVehicles: 0, activeTimesheets: 0,
-        totalProjects: 0, activeProjects: 0, unreadNotifications: 0,
-      });
       setLastRefreshed(new Date());
-    } catch (err) {
-      console.error("[DashboardPage][load]", err);
+    } catch (error) {
+      console.error("[DashboardPage][load]", error);
     } finally {
-      if (mountedRef.current) { setLoading(false); setRefreshing(false); }
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [user?.uid]);
 
   useEffect(() => {
     void load();
-    const interval = setInterval(() => void load(true), 120_000);
-    return () => clearInterval(interval);
+    const interval = window.setInterval(() => void load(true), 120_000);
+    return () => window.clearInterval(interval);
   }, [load]);
 
-  // Memoized derived data
-  const problemTools = useMemo(
-    () => tools.filter((t) => t.status === "defecta" || t.status === "pierduta"),
-    [tools]
-  );
-  const problemVehicles = useMemo(
-    () => vehicles.filter((v) => v.status === "indisponibila" || v.status === "avariata"),
-    [vehicles]
-  );
-  const activeTimesheets = useMemo(
-    () => timesheets.filter((i) => i.status === "activ").slice(0, 8),
-    [timesheets]
-  );
-  const activeProjects = useMemo(
-    () => projects.filter((p) => p.status === "activ").slice(0, 8),
-    [projects]
-  );
-  const recentNotifications = useMemo(() => notifications.slice(0, 8), [notifications]);
-  const totalWorkedToday = useMemo(() => {
-    const now = new Date();
-    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    return timesheets.filter((i) => i.workDate === todayKey).reduce((s, i) => s + (i.workedMinutes || 0), 0);
-  }, [timesheets]);
-
-  // openMyVehicle — must be defined before any conditional return
   const openMyVehicle = useCallback(async () => {
     if (navigatingVehicle) return;
-    if (!user?.uid) { navigate("/vehicles"); return; }
+    if (!user?.uid) {
+      navigate("/vehicles");
+      return;
+    }
+
     setNavigatingVehicle(true);
     try {
       const myVehicle = await getMyVehicleForUser(user.uid);
@@ -221,290 +173,460 @@ export default function DashboardPage() {
     } finally {
       setNavigatingVehicle(false);
     }
-  }, [user?.uid, navigate, navigatingVehicle]);
+  }, [navigate, navigatingVehicle, user?.uid]);
+
+  const todayKey = getLocalDateKey();
+  const activeUsers = useMemo(() => users.filter((item) => item.active !== false), [users]);
+  const todayTimesheets = useMemo(
+    () => timesheets.filter((item) => item.workDate === todayKey),
+    [timesheets, todayKey]
+  );
+  const activeTimesheetsToday = useMemo(
+    () => todayTimesheets.filter((item) => item.status === "activ"),
+    [todayTimesheets]
+  );
+  const usersWithoutToday = useMemo(
+    () => getUsersWithoutTimesheetToday(activeUsers, todayTimesheets, todayKey),
+    [activeUsers, todayKey, todayTimesheets]
+  );
+  const todayMinutes = useMemo(
+    () => todayTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0),
+    [todayTimesheets]
+  );
+  const activeProjects = useMemo(() => projects.filter((project) => project.status === "activ"), [projects]);
+  const activeVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.status === "activa"), [vehicles]);
+  const vehiclesWithoutDriver = useMemo(
+    () => vehicles.filter((vehicle) => vehicle.status === "activa" && !vehicle.currentDriverUserId),
+    [vehicles]
+  );
+  const problemTools = useMemo(
+    () => tools.filter((tool) => tool.status === "defecta" || tool.status === "pierduta"),
+    [tools]
+  );
+  const problemVehicles = useMemo(
+    () => vehicles.filter((vehicle) => vehicle.status === "indisponibila" || vehicle.status === "avariata"),
+    [vehicles]
+  );
+  const importantAlertsCount =
+    usersWithoutToday.length +
+    todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length +
+    todayTimesheets.filter((item) => !item.projectId && !item.projectName).length +
+    vehiclesWithoutDriver.length +
+    problemVehicles.length +
+    problemTools.length;
+
+  const rows = useMemo<TodayRow[]>(() => {
+    const latestByUser = new Map<string, TimesheetItem>();
+    for (const item of todayTimesheets) {
+      const current = latestByUser.get(item.userId);
+      if (!current || (item.startAt || 0) > (current.startAt || 0)) {
+        latestByUser.set(item.userId, item);
+      }
+    }
+
+    return activeUsers.map((userItem) => ({
+      id: userItem.uid || userItem.id,
+      user: userItem,
+      timesheet: latestByUser.get(userItem.uid || userItem.id) ?? null,
+    }));
+  }, [activeUsers, todayTimesheets]);
+
+  const activityItems = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = [];
+
+    todayTimesheets.forEach((item) => {
+      items.push({
+        id: `${item.id}-start`,
+        title: `${item.userName || "Utilizator"} a pornit pontaj`,
+        subtitle: `${getProjectLabel(item)} - ${formatTime(item.startAt)}`,
+        at: item.startAt || 0,
+        tone: "blue",
+        to: `/timesheets/${item.id}`,
+      });
+      if (item.stopAt) {
+        items.push({
+          id: `${item.id}-stop`,
+          title: `${item.userName || "Utilizator"} a oprit pontaj`,
+          subtitle: `${formatMinutes(item.workedMinutes || 0)} - ${formatTime(item.stopAt)}`,
+          at: item.stopAt,
+          tone: "green",
+          to: `/timesheets/${item.id}`,
+        });
+      }
+    });
+
+    vehicles
+      .filter((vehicle) => isTodayTs(vehicle.updatedAt, todayKey) && vehicle.currentDriverUserId)
+      .slice(0, 8)
+      .forEach((vehicle) => {
+        items.push({
+          id: `vehicle-${vehicle.id}`,
+          title: `${vehicle.currentDriverUserName || "Sofer"} are masina ${vehicle.plateNumber || "-"}`,
+          subtitle: `${vehicle.brand || ""} ${vehicle.model || ""}`.trim() || "Flota",
+          at: vehicle.updatedAt || 0,
+          tone: "orange",
+          to: `/vehicles/${vehicle.id}`,
+        });
+      });
+
+    notifications.slice(0, 8).forEach((item) => {
+      items.push({
+        id: `notification-${item.id}`,
+        title: item.title || "Alerta recenta",
+        subtitle: item.message || formatDateTime(item.createdAt),
+        at: item.createdAt || 0,
+        tone: item.read ? "muted" : "red",
+        to: resolveNotificationPath({
+          module: item.module,
+          eventType: item.eventType,
+          entityId: item.entityId,
+          notificationPath: item.notificationPath,
+        }),
+      });
+    });
+
+    return items.sort((a, b) => b.at - a.at).slice(0, 10);
+  }, [notifications, todayKey, todayTimesheets, vehicles]);
+
+  const columns = useMemo<DataTableColumn<TodayRow>[]>(
+    () => [
+      {
+        key: "employee",
+        header: "Angajat",
+        render: (row) => {
+          const themeClass = getUserThemeClass(row.user.themeKey ?? row.timesheet?.userThemeKey ?? null);
+          return (
+            <div className={`wc-person-cell user-history-row ${themeClass}`}>
+              <span className="user-accent-avatar">{getUserInitials(getUserName(row.user))}</span>
+              <div>
+                <UserProfileLink
+                  userId={row.user.uid || row.user.id}
+                  name={getUserName(row.user)}
+                  themeKey={row.user.themeKey ?? row.timesheet?.userThemeKey}
+                  className="user-accent-name"
+                />
+                <small>{row.user.department || row.user.roleTitle || row.user.email || "-"}</small>
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        key: "project",
+        header: "Proiect",
+        render: (row) => (row.timesheet ? getProjectLabel(row.timesheet) : "-"),
+      },
+      {
+        key: "start",
+        header: "Ora start",
+        render: (row) => formatTime(row.timesheet?.startAt),
+      },
+      {
+        key: "duration",
+        header: "Durata",
+        render: (row) => (row.timesheet ? formatMinutes(getEffectiveWorkedMinutes(row.timesheet)) : "-"),
+      },
+      {
+        key: "status",
+        header: "Status",
+        render: (row) =>
+          row.timesheet ? (
+            <StatusBadge tone={getTimesheetStatusTone(row.timesheet.status)}>
+              {getTimesheetStatusLabel(row.timesheet.status)}
+            </StatusBadge>
+          ) : (
+            <StatusBadge tone="red">Nepontat</StatusBadge>
+          ),
+      },
+      {
+        key: "actions",
+        header: "Actiuni",
+        render: (row) =>
+          row.timesheet ? (
+            <Link className="secondary-btn secondary-btn--compact" to={`/timesheets/${row.timesheet.id}`}>
+              Detalii
+            </Link>
+          ) : (
+            <Link className="secondary-btn secondary-btn--compact" to={`/timesheets?assistantUserId=${row.id}`}>
+              Vezi istoric
+            </Link>
+          ),
+      },
+    ],
+    []
+  );
 
   if (loading) return <DashboardSkeleton />;
 
-  const refreshedStr = lastRefreshed.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
-
   return (
-    <section className="page-section">
-
-      {/* ── TODAY STRIP ── */}
+    <section className="page-section dashboard-modern-page">
       <div className="today-strip">
         <div className="today-strip-dot" />
         <CalendarClock size={15} strokeWidth={2.1} />
         <span>
-          {new Date().toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          {new Date().toLocaleDateString("ro-RO", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}
         </span>
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: "var(--text-muted)", fontSize: 11 }}>
-          {refreshing && <RefreshCw size={11} className="spin-icon" />}
-          actualizat {refreshedStr}
+        <span className="dashboard-refresh-note">
+          {refreshing ? <RefreshCw size={11} className="spin-icon" /> : null}
+          actualizat {lastRefreshed.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}
         </span>
       </div>
 
-      {/* ── SHORTCUT PANEL ── */}
-      <div className="panel" style={{ marginBottom: 16 }}>
-        <SectionTitle icon={Activity}>Shortcut-uri rapide</SectionTitle>
-        <div className="tool-form-actions" style={{ marginTop: 12 }}>
-          <button
-            type="button" className="primary-btn"
-            disabled={navigatingVehicle}
-            onClick={() => void openMyVehicle()}
-          >
-            {navigatingVehicle ? "Se deschide..." : "Mașina mea"}
-          </button>
-          <Link to="/my-timesheets" className="secondary-btn">Pontajul meu</Link>
+      <div className="dashboard-action-strip">
+        <button type="button" className="primary-btn" disabled={navigatingVehicle} onClick={() => void openMyVehicle()}>
+          {navigatingVehicle ? "Se deschide..." : "Masina mea"}
+        </button>
+        <Link to="/my-timesheets" className="secondary-btn">
+          <TimerReset size={16} /> Pontajul meu
+        </Link>
+        <Link to="/timesheets" className="secondary-btn">
+          <Clock3 size={16} /> Pontaje
+        </Link>
+        <Link to="/projects" className="secondary-btn">
+          <FolderOpen size={16} /> Proiecte
+        </Link>
+      </div>
+
+      <div className="wc-kpi-grid wc-kpi-grid--six">
+        <KpiCard
+          label="Pontaje active azi"
+          value={activeTimesheetsToday.length}
+          helper={`${todayTimesheets.length} pontaje azi`}
+          tone="blue"
+          icon={Clock3}
+          to="/timesheets?assistant=active"
+        />
+        <KpiCard
+          label="Angajati nepontati azi"
+          value={usersWithoutToday.length}
+          helper={`${activeUsers.length} angajati activi`}
+          tone={usersWithoutToday.length ? "red" : "green"}
+          icon={Users}
+          to="/timesheets?assistant=missing"
+        />
+        <KpiCard
+          label="Ore lucrate azi"
+          value={formatMinutes(todayMinutes)}
+          helper="include pontajele active"
+          tone="green"
+          icon={TimerReset}
+          to="/timesheets?period=today"
+        />
+        <KpiCard
+          label="Proiecte active"
+          value={activeProjects.length}
+          helper={`${projects.length} total`}
+          tone="blue"
+          icon={Briefcase}
+          to="/projects"
+        />
+        <KpiCard
+          label="Masini active"
+          value={activeVehicles.length}
+          helper={`${vehiclesWithoutDriver.length} fara sofer`}
+          tone={vehiclesWithoutDriver.length ? "orange" : "green"}
+          icon={CarFront}
+          to="/vehicles"
+        />
+        <KpiCard
+          label="Alerte importante"
+          value={importantAlertsCount}
+          helper={importantAlertsCount ? "necesita verificare" : "totul arata ok"}
+          tone={importantAlertsCount ? "orange" : "green"}
+          icon={AlertTriangle}
+          to="/notifications"
+        />
+      </div>
+
+      <div className="content-grid dashboard-main-grid">
+        <div className="panel" data-assistant-section="dashboard-today-timesheets">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Pontaje azi</h2>
+              <p className="panel-subtitle">Cine este pontat, cine nu, si pe ce proiect lucreaza.</p>
+            </div>
+            <StatusBadge tone="blue">{rows.length} angajati</StatusBadge>
+          </div>
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(row) => row.id}
+            rowClassName={(row) => (row.timesheet?.status === "activ" ? "is-active" : row.timesheet ? "" : "is-danger")}
+            empty={<EmptyState icon={Clock3} title="Nu exista utilizatori activi" />}
+          />
         </div>
-      </div>
 
-      {/* ── KPI GRID ── */}
-      <div className="kpi-grid dashboard-kpi-grid">
-        <KpiCard label="Utilizatori activi" value={stats.activeUsers}
-          trend={`din ${stats.totalUsers} total`} trendType="positive"
-          icon={Users} iconClass="kpi-icon-blue" />
-        <KpiCard label="Scule totale" value={stats.totalTools}
-          trend={`depozit: ${stats.toolsInWarehouse}`} trendType="warning"
-          icon={Wrench} iconClass="kpi-icon-orange" />
-        <KpiCard label="Mașini totale" value={stats.totalVehicles}
-          trend={`indisponibile: ${stats.unavailableVehicles}`} trendType="warning"
-          icon={CarFront} iconClass="kpi-icon-orange" />
-        <KpiCard label="Pontaje active" value={stats.activeTimesheets}
-          trend={`azi: ${formatMinutes(totalWorkedToday)}`} trendType="positive"
-          icon={Clock3} iconClass="kpi-icon-green" />
-        <KpiCard label="Proiecte active" value={stats.activeProjects}
-          trend={`din ${stats.totalProjects} total`} trendType="positive"
-          icon={Briefcase} iconClass="kpi-icon-purple" />
-        <KpiCard label="Notificări necitite" value={stats.unreadNotifications}
-          trend="inbox personal"
-          trendType={stats.unreadNotifications > 0 ? "danger" : "muted"}
-          icon={Bell} iconClass={stats.unreadNotifications > 0 ? "kpi-icon-red" : "kpi-icon-sky"} />
-      </div>
-
-      {/* ── ROW 1: Quick actions + Notifications ── */}
-      <div className="content-grid">
-        <div className="panel">
-          <PanelHeader icon={Activity}>Acțiuni rapide</PanelHeader>
-          <div className="quick-actions-grid">
-            <Link to="/tools/new" className="quick-action-card">
-              <div className="quick-action-icon"><Wrench size={18} strokeWidth={2.1} /></div>
-              <div className="quick-action-title">Adaugă sculă</div>
-              <div className="quick-action-subtitle">Inventar nou în sistem</div>
+        <div className="panel" data-assistant-section="dashboard-alerts">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Atentie</h2>
+              <p className="panel-subtitle">Probleme care merita verificate rapid.</p>
+            </div>
+            <StatusBadge tone={importantAlertsCount ? "orange" : "green"}>{importantAlertsCount}</StatusBadge>
+          </div>
+          <div className="dashboard-alert-grid">
+            <Link to="/timesheets?assistant=missing" className="dashboard-alert-card dashboard-alert-card--red">
+              <strong>{usersWithoutToday.length}</strong>
+              <span>angajati fara pontaj azi</span>
             </Link>
-            <Link to="/vehicles/new" className="quick-action-card">
-              <div className="quick-action-icon"><CarFront size={18} strokeWidth={2.1} /></div>
-              <div className="quick-action-title">Adaugă mașină</div>
-              <div className="quick-action-subtitle">Element nou în flotă</div>
+            <Link to="/timesheets?assistant=long" className="dashboard-alert-card dashboard-alert-card--orange">
+              <strong>{todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length}</strong>
+              <span>pontaje peste 8 ore</span>
             </Link>
-            <Link to="/my-timesheets" className="quick-action-card">
-              <div className="quick-action-icon"><TimerReset size={18} strokeWidth={2.1} /></div>
-              <div className="quick-action-title">Pontajul meu</div>
-              <div className="quick-action-subtitle">Start / stop / istoric</div>
+            <Link to="/timesheets?assistant=no-project" className="dashboard-alert-card dashboard-alert-card--orange">
+              <strong>{todayTimesheets.filter((item) => !item.projectId && !item.projectName).length}</strong>
+              <span>pontaje fara proiect</span>
             </Link>
-            <Link to="/projects" className="quick-action-card">
-              <div className="quick-action-icon"><FolderOpen size={18} strokeWidth={2.1} /></div>
-              <div className="quick-action-title">Proiecte</div>
-              <div className="quick-action-subtitle">Active, în lucru, finalizate</div>
+            <Link to="/vehicles" className="dashboard-alert-card dashboard-alert-card--blue">
+              <strong>{vehiclesWithoutDriver.length}</strong>
+              <span>masini fara sofer</span>
             </Link>
-            <Link to="/notifications" className="quick-action-card">
-              <div className="quick-action-icon"
-                style={stats.unreadNotifications > 0 ? { background: "var(--danger-soft)", color: "var(--danger)" } : undefined}>
-                <BellDot size={18} strokeWidth={2.1} />
-              </div>
-              <div className="quick-action-title">
-                Notificări
-                {stats.unreadNotifications > 0 && (
-                  <span className="nav-badge" style={{ marginLeft: 8, verticalAlign: "middle" }}>
-                    {stats.unreadNotifications}
-                  </span>
-                )}
-              </div>
-              <div className="quick-action-subtitle">Inbox-ul tău</div>
+            <Link to="/tools" className="dashboard-alert-card dashboard-alert-card--red">
+              <strong>{problemTools.length}</strong>
+              <span>scule cu probleme</span>
             </Link>
-            <Link to="/notification-rules" className="quick-action-card">
-              <div className="quick-action-icon"><Settings2 size={18} strokeWidth={2.1} /></div>
-              <div className="quick-action-title">Reguli notificări</div>
-              <div className="quick-action-subtitle">Automatizări și destinații</div>
+            <Link to="/vehicles" className="dashboard-alert-card dashboard-alert-card--red">
+              <strong>{problemVehicles.length}</strong>
+              <span>masini indisponibile</span>
             </Link>
           </div>
         </div>
-
-        <div className="panel">
-          <PanelHeader icon={Bell} right={
-            <Link to="/notifications" style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)", display: "flex", alignItems: "center", gap: 3 }}>
-              Vezi toate <ChevronRight size={13} />
-            </Link>
-          }>Notificări recente</PanelHeader>
-
-          {recentNotifications.length === 0 ? (
-            <EmptyState icon={Bell} title="Nicio notificare" subtitle="Totul e liniștit" success />
-          ) : (
-            <div className="simple-list">
-              {recentNotifications.map((item) => {
-                const themeClass = getUserThemeClass(item.actorUserThemeKey || item.targetUserThemeKey || null);
-                return (
-                  <Link to="/notifications" key={item.id} className={`simple-list-item user-history-row ${themeClass}`}>
-                    <div className="simple-list-text">
-                      <div className="user-inline-meta">
-                        <span className="user-accent-avatar">{getUserInitials(item.actorUserName || item.title || "S")}</span>
-                        <span className="simple-list-label user-accent-name">{item.actorUserName || item.title}</span>
-                      </div>
-                      <div className="simple-list-subtitle">{item.title}</div>
-                      <div className="simple-list-subtitle" style={{ fontSize: 12 }}>
-                        {new Date(item.createdAt).toLocaleString("ro-RO")}
-                      </div>
-                    </div>
-                    <span className={item.read ? "badge badge-muted" : "badge badge-orange"}>
-                      {item.read ? "citită" : "nouă"}
-                    </span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* ── ROW 2: Problem tools + vehicles ── */}
       <div className="content-grid">
         <div className="panel">
-          <PanelHeader icon={AlertTriangle} right={
-            problemTools.length > 0
-              ? <span className="badge badge-red">{problemTools.length}</span>
-              : null
-          }>Scule cu probleme</PanelHeader>
-
-          {problemTools.length === 0 ? (
-            <EmptyState icon={CheckCircle2} title="Nicio sculă cu probleme" subtitle="Toate sculele sunt în regulă" success />
-          ) : (
-            <div className="simple-list">
-              {problemTools.slice(0, 8).map((tool) => {
-                const themeClass = getUserThemeClass(tool.currentHolderThemeKey || tool.ownerThemeKey || null);
-                return (
-                  <div key={tool.id} className={`simple-list-item user-history-row ${themeClass}`}>
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Activitate azi</h2>
+              <p className="panel-subtitle">Ultimele porniri, opriri, preluari si alerte.</p>
+            </div>
+            <Activity size={20} />
+          </div>
+          {activityItems.length ? (
+            <div className="simple-list dashboard-activity-list">
+              {activityItems.map((item) => {
+                const content = (
+                  <>
+                    <span className={`dashboard-activity-dot dashboard-activity-dot--${item.tone}`} />
                     <div className="simple-list-text">
-                      <div className="user-inline-meta">
-                        <span className="user-accent-avatar">
-                          {getUserInitials(tool.currentHolderUserName || tool.ownerUserName || "D")}
-                        </span>
-                        <span className="simple-list-label user-accent-name">{tool.name}</span>
-                      </div>
+                      <div className="simple-list-label">{item.title}</div>
                       <div className="simple-list-subtitle">
-                        Responsabil: {tool.ownerUserName || "—"} · La cine: {tool.currentHolderUserName || "Depozit"}
+                        {item.subtitle} - {formatDateTime(item.at)}
                       </div>
                     </div>
-                    <div className="dashboard-inline-actions">
-                      <ToolStatusBadge status={tool.status} />
-                      <Link to={`/tools/${tool.id}`} className="secondary-btn" style={{ gap: 5, paddingLeft: 12, paddingRight: 12 }}>
-                        Vezi <ChevronRight size={13} strokeWidth={2.4} />
-                      </Link>
-                    </div>
+                    <StatusBadge tone={item.tone}>{formatTime(item.at)}</StatusBadge>
+                  </>
+                );
+                return item.to ? (
+                  <Link key={item.id} to={item.to} className="simple-list-item">
+                    {content}
+                  </Link>
+                ) : (
+                  <div key={item.id} className="simple-list-item">
+                    {content}
                   </div>
                 );
               })}
             </div>
+          ) : (
+            <EmptyState icon={CheckCircle2} title="Nicio activitate azi" subtitle="Cand apar pontaje sau alerte, le vezi aici." />
           )}
         </div>
 
         <div className="panel">
-          <PanelHeader icon={CarFront} right={
-            problemVehicles.length > 0
-              ? <span className="badge badge-red">{problemVehicles.length}</span>
-              : null
-          }>Mașini cu probleme</PanelHeader>
-
-          {problemVehicles.length === 0 ? (
-            <EmptyState icon={CheckCircle2} title="Nicio mașină cu probleme" subtitle="Toată flota e disponibilă" success />
-          ) : (
-            <div className="simple-list">
-              {problemVehicles.slice(0, 8).map((v) => {
-                const themeClass = getUserThemeClass(v.currentDriverThemeKey || v.ownerThemeKey || null);
-                return (
-                  <div key={v.id} className={`simple-list-item user-history-row ${themeClass}`}>
-                    <div className="simple-list-text">
-                      <div className="user-inline-meta">
-                        <span className="user-accent-avatar">
-                          {getUserInitials(v.currentDriverUserName || v.ownerUserName || "A")}
-                        </span>
-                        <span className="simple-list-label user-accent-name">
-                          {v.plateNumber} · {v.brand} {v.model}
-                        </span>
-                      </div>
-                      <div className="simple-list-subtitle">
-                        Responsabil: {v.ownerUserName || "—"} · Șofer: {v.currentDriverUserName || "—"}
-                      </div>
-                    </div>
-                    <div className="dashboard-inline-actions">
-                      <VehicleStatusBadge status={v.status} />
-                      <Link to={`/vehicles/${v.id}`} className="secondary-btn" style={{ gap: 5, paddingLeft: 12, paddingRight: 12 }}>
-                        Vezi <ChevronRight size={13} strokeWidth={2.4} />
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Notificari recente</h2>
+              <p className="panel-subtitle">Inbox-ul tau operational.</p>
             </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── ROW 3: Live timesheets + Active projects ── */}
-      <div className="content-grid">
-        <div className="panel">
-          <PanelHeader icon={Clock3} right={
-            activeTimesheets.length > 0
-              ? <span className="badge badge-green">{activeTimesheets.length} activ{activeTimesheets.length !== 1 ? "e" : ""}</span>
-              : null
-          }>Pontaje active live</PanelHeader>
-
-          {activeTimesheets.length === 0 ? (
-            <EmptyState icon={Clock3} title="Niciun pontaj activ" subtitle="Nu există sesiuni în desfășurare" />
-          ) : (
+            <Bell size={20} />
+          </div>
+          {notifications.length ? (
             <div className="simple-list">
-              {activeTimesheets.map((item) => {
-                const themeClass = getUserThemeClass(item.userThemeKey || null);
+              {notifications.slice(0, 6).map((item) => {
+                const themeClass = getUserThemeClass(item.actorUserThemeKey ?? null);
                 return (
-                  <Link to={`/timesheets/${item.id}`} key={item.id} className={`simple-list-item user-history-row ${themeClass}`}>
-                    <div className="simple-list-text">
-                      <div className="user-inline-meta">
-                        <span className="user-accent-avatar">{getUserInitials(item.userName || "U")}</span>
-                        <span className="simple-list-label user-accent-name">
-                          {item.userName} · {item.projectCode} – {item.projectName}
-                        </span>
-                      </div>
-                      <div className="simple-list-subtitle">
-                        Start: {new Date(item.startAt).toLocaleString("ro-RO")} · {item.startLocation?.label || "—"}
-                      </div>
+                  <Link
+                    key={item.id}
+                    to={resolveNotificationPath({
+                      module: item.module,
+                      eventType: item.eventType,
+                      entityId: item.entityId,
+                      notificationPath: item.notificationPath,
+                    })}
+                    className={`simple-list-item user-history-row ${themeClass}`}
+                  >
+                    <div className="user-inline-meta">
+                      <span className="user-accent-avatar">{getUserInitials(item.actorUserName || item.title || "N")}</span>
                     </div>
-                    <span className="badge badge-orange">activ</span>
+                    <div className="simple-list-text">
+                      <div className="simple-list-label">{item.title || "Notificare"}</div>
+                      <div className="simple-list-subtitle">{item.message || formatDateTime(item.createdAt)}</div>
+                    </div>
+                    <StatusBadge tone={item.read ? "muted" : "red"}>{item.read ? "citita" : "noua"}</StatusBadge>
                   </Link>
                 );
               })}
             </div>
+          ) : (
+            <EmptyState icon={Bell} title="Nicio notificare" subtitle="Totul este linistit momentan." />
           )}
         </div>
+      </div>
 
+      <div className="content-grid">
         <div className="panel">
-          <PanelHeader icon={Briefcase} right={
-            <Link to="/projects" style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)", display: "flex", alignItems: "center", gap: 3 }}>
-              Toate <ChevronRight size={13} />
-            </Link>
-          }>Proiecte active</PanelHeader>
-
-          {activeProjects.length === 0 ? (
-            <EmptyState icon={Briefcase} title="Niciun proiect activ" subtitle="Adaugă un proiect pentru a începe" />
-          ) : (
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Proiecte active</h2>
+              <p className="panel-subtitle">Proiectele pe care se poate porni pontaj.</p>
+            </div>
+            <Wrench size={20} />
+          </div>
+          {activeProjects.length ? (
             <div className="simple-list">
-              {activeProjects.map((project) => (
+              {activeProjects.slice(0, 8).map((project) => (
                 <Link to="/projects" key={project.id} className="simple-list-item">
                   <div className="simple-list-text">
-                    <div className="simple-list-label">{project.code} – {project.name}</div>
+                    <div className="simple-list-label">{project.name || "Fara nume"}</div>
                     <div className="simple-list-subtitle">Status: {project.status}</div>
                   </div>
-                  <span className="badge badge-green">activ</span>
+                  <StatusBadge tone="green">activ</StatusBadge>
                 </Link>
               ))}
             </div>
+          ) : (
+            <EmptyState icon={Briefcase} title="Niciun proiect activ" />
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Angajati nepontati azi</h2>
+              <p className="panel-subtitle">Lista scurta pentru manager.</p>
+            </div>
+            <Users size={20} />
+          </div>
+          {usersWithoutToday.length ? (
+            <div className="simple-list">
+              {usersWithoutToday.slice(0, 8).map((item) => (
+                <Link key={item.id} to={`/timesheets?assistantUserId=${item.uid || item.id}`} className="simple-list-item">
+                  <div className="simple-list-text">
+                    <div className="simple-list-label">{getUserName(item)}</div>
+                    <div className="simple-list-subtitle">{item.department || item.roleTitle || item.email || "-"}</div>
+                  </div>
+                  <StatusBadge tone="red">nepontat</StatusBadge>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon={CheckCircle2} title="Toata echipa are pontaj azi" />
           )}
         </div>
       </div>

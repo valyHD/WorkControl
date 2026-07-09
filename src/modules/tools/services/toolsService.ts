@@ -27,10 +27,25 @@ import type {
   ToolItem,
 } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 
 const toolsCollection = collection(db, "tools");
 const usersCollection = collection(db, "users");
 const toolEventsCollection = collection(db, "toolEvents");
+
+const toolAuditFields: AuditFieldDescriptor<ToolFormValues>[] = [
+  { key: "name", label: "Nume scula" },
+  { key: "internalCode", label: "Cod intern" },
+  { key: "qrCodeValue", label: "Cod QR" },
+  { key: "status", label: "Status" },
+  { key: "ownerUserName", label: "Responsabil" },
+  { key: "currentHolderUserName", label: "Detinator" },
+  { key: "locationType", label: "Tip locatie" },
+  { key: "locationLabel", label: "Locatie" },
+  { key: "description", label: "Descriere" },
+  { key: "warrantyText", label: "Garantie" },
+  { key: "warrantyUntil", label: "Garantie pana la" },
+];
 
 async function resizeImage(
   file: File,
@@ -136,11 +151,19 @@ export async function getUsersList(): Promise<AppUser[]> {
   return snap.docs.map((docItem) => ({
     id: docItem.id,
     uid: docItem.data().uid ?? "",
-    themeKey: docItem.data().themeKey ?? null,
-    fullName: docItem.data().fullName ?? "Utilizator fara nume",
+      themeKey: docItem.data().themeKey ?? null,
+      avatarUrl: docItem.data().avatarUrl ?? "",
+      avatarThumbUrl: docItem.data().avatarThumbUrl ?? docItem.data().avatarUrl ?? "",
+      fullName: docItem.data().fullName ?? "Utilizator fara nume",
     email: docItem.data().email ?? "",
     active: docItem.data().active ?? true,
     role: docItem.data().role ?? "",
+    roleTitle: docItem.data().roleTitle ?? "",
+    department: docItem.data().department ?? "",
+    companyIds: Array.isArray(docItem.data().companyIds) ? docItem.data().companyIds : [],
+    companyNames: Array.isArray(docItem.data().companyNames) ? docItem.data().companyNames : [],
+    primaryCompanyId: docItem.data().primaryCompanyId ?? "",
+    primaryCompanyName: docItem.data().primaryCompanyName ?? "",
   }));
 }
 
@@ -215,6 +238,7 @@ export async function isInternalCodeUsed(
 
 export async function createTool(values: ToolFormValues): Promise<string> {
   const now = Date.now();
+  const fieldsText = buildAuditSnapshot(values, toolAuditFields);
 
   const docRef = await addDoc(toolsCollection, {
     ...values,
@@ -237,6 +261,10 @@ export async function createTool(values: ToolFormValues): Promise<string> {
     actorUserId: values.ownerUserId || "",
     actorUserName: values.ownerUserName || "Responsabil",
     actorUserThemeKey: values.ownerThemeKey ?? null,
+    metadata: {
+      fieldsText,
+      fieldsCount: fieldsText.length,
+    },
   });
 
   return docRef.id;
@@ -248,6 +276,11 @@ export async function updateTool(toolId: string, values: ToolFormValues): Promis
 
   const previousStatus = existingData?.status ?? "";
   const previousOwnerUserId = existingData?.ownerUserId ?? "";
+  const changesText = buildAuditChanges(
+    existingData as Partial<ToolFormValues> | null,
+    values,
+    toolAuditFields
+  );
 
   await updateDoc(doc(db, "tools", toolId), {
     ...values,
@@ -268,6 +301,10 @@ export async function updateTool(toolId: string, values: ToolFormValues): Promis
     actorUserId: values.ownerUserId || "",
     actorUserName: values.ownerUserName || "Responsabil",
     actorUserThemeKey: values.ownerThemeKey ?? null,
+    metadata: {
+      changesText,
+      changesCount: changesText.length,
+    },
   });
 
   if (previousStatus !== values.status) {
@@ -288,6 +325,10 @@ await dispatchNotificationEvent({
   actorUserId: values.ownerUserId || "",
   actorUserName: values.ownerUserName || "Responsabil",
   actorUserThemeKey: values.ownerThemeKey ?? null,
+  metadata: {
+    changesText: [`Status: ${previousStatus || "-"} -> ${values.status}`],
+    changesCount: 1,
+  },
 });
   }
 }
@@ -332,6 +373,43 @@ export async function getToolEvents(toolId: string): Promise<ToolEventItem[]> {
   return events.sort((a, b) => b.createdAt - a.createdAt);
 }
 
+export async function addToolComment(
+  toolId: string,
+  comment: string,
+  actor: {
+    actorUserId?: string;
+    actorUserName?: string;
+    actorUserThemeKey?: string | null;
+  }
+): Promise<void> {
+  const cleanComment = comment.trim();
+  if (!toolId || !cleanComment) return;
+
+  const toolSnap = await getDoc(doc(db, "tools", toolId));
+  const toolData = toolSnap.exists() ? toolSnap.data() : null;
+  const toolName = toolData?.name ?? toolId;
+
+  await addToolEvent(toolId, "comment", `Comentariu: ${cleanComment}`, actor);
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_updated",
+    entityId: toolId,
+    title: "Comentariu scula",
+    message: `${actor.actorUserName || "Utilizator"} a adaugat un comentariu la scula ${toolName}: ${cleanComment}`,
+    notificationPath: `/tools/${toolId}`,
+    directUserId: toolData?.currentHolderUserId ?? "",
+    ownerUserId: toolData?.ownerUserId ?? "",
+    actorUserId: actor.actorUserId ?? "",
+    actorUserName: actor.actorUserName ?? "Utilizator",
+    actorUserThemeKey: actor.actorUserThemeKey ?? null,
+    metadata: {
+      fieldsText: [`Comentariu: ${cleanComment}`],
+      fieldsCount: 1,
+    },
+  });
+}
+
 export async function uploadToolImages(toolId: string, files: File[]): Promise<ToolImageItem[]> {
   const uploadedItems: ToolImageItem[] = [];
 
@@ -355,8 +433,14 @@ export async function uploadToolImages(toolId: string, files: File[]): Promise<T
       quality: 0.72,
     });
 
-    await uploadBytes(fullRef, fullBlob, { contentType: "image/jpeg" });
-    await uploadBytes(thumbRef, thumbBlob, { contentType: "image/jpeg" });
+    await uploadBytes(fullRef, fullBlob, {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=31536000,immutable",
+    });
+    await uploadBytes(thumbRef, thumbBlob, {
+      contentType: "image/jpeg",
+      cacheControl: "public,max-age=31536000,immutable",
+    });
 
     const fullUrl = await getDownloadURL(fullRef);
     const thumbUrl = await getDownloadURL(thumbRef);
@@ -395,6 +479,18 @@ export async function saveToolImages(
   });
 
   await addToolEvent(toolId, "images_updated", "Imaginile sculei au fost actualizate.");
+
+  const toolSnap = await getDoc(doc(db, "tools", toolId));
+  const toolData = toolSnap.exists() ? toolSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_images_updated",
+    entityId: toolId,
+    title: "Poze scula actualizate",
+    message: `Au fost adaugate ${newImages.length} poze pentru scula ${toolData?.name ?? toolId}.`,
+    directUserId: toolData?.currentHolderUserId ?? "",
+    ownerUserId: toolData?.ownerUserId ?? "",
+  });
 }
 
 export async function setToolCoverImage(toolId: string, imageUrl: string): Promise<void> {
@@ -413,6 +509,16 @@ export async function setToolCoverImage(toolId: string, imageUrl: string): Promi
   });
 
   await addToolEvent(toolId, "images_updated", "Poza principala a fost schimbata.");
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_cover_changed",
+    entityId: toolId,
+    title: "Poza principala scula schimbata",
+    message: `Poza principala pentru ${data.name ?? toolId} a fost schimbata.`,
+    directUserId: data.currentHolderUserId ?? "",
+    ownerUserId: data.ownerUserId ?? "",
+  });
 }
 
 export async function removeToolImage(
@@ -446,6 +552,18 @@ export async function removeToolImage(
   });
 
   await addToolEvent(toolId, "images_updated", "O imagine a fost stearsa.");
+
+  const toolSnap = await getDoc(doc(db, "tools", toolId));
+  const toolData = toolSnap.exists() ? toolSnap.data() : null;
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_image_deleted",
+    entityId: toolId,
+    title: "Poza scula stearsa",
+    message: `O poza a sculei ${toolData?.name ?? toolId} a fost stearsa.`,
+    directUserId: toolData?.currentHolderUserId ?? "",
+    ownerUserId: toolData?.ownerUserId ?? "",
+  });
   return updatedImages;
 }
 
@@ -649,6 +767,19 @@ updatedAtServer: serverTimestamp(),
     "holder_changed",
     `Scula a fost preluata in responsabilitate si setata la utilizatorul ${userName}.`
   );
+
+  await dispatchNotificationEvent({
+    module: "tools",
+    eventType: "tool_claimed",
+    entityId: toolId,
+    title: "Scula preluata",
+    message: `Scula a fost preluata de ${userName}.`,
+    directUserId: userId,
+    ownerUserId: userId,
+    actorUserId: userId,
+    actorUserName: userName,
+    actorUserThemeKey: userThemeKey,
+  });
 }
 
 export async function getToolsHeldByUserFromOthers(userId: string): Promise<ToolItem[]> {

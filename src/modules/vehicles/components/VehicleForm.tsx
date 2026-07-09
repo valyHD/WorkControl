@@ -30,6 +30,13 @@ const statusOptions: VehicleStatus[] = [
   "avariata",
 ];
 
+type VehicleNumberField =
+  | "initialRecordedKm"
+  | "currentKm"
+  | "serviceIntervalKm"
+  | "nextServiceKm"
+  | "nextOilServiceKm";
+
 export default function VehicleForm({
   initialValues,
   users,
@@ -39,11 +46,13 @@ export default function VehicleForm({
   const [values, setValues] = useState<VehicleFormValues>(initialValues);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedDocuments, setSelectedDocuments] = useState<VehiclePendingDocument[]>([]);
+  const [numberDrafts, setNumberDrafts] = useState<Partial<Record<VehicleNumberField, string>>>({});
 
   useEffect(() => {
     setValues(initialValues);
     setSelectedFiles([]);
     setSelectedDocuments([]);
+    setNumberDrafts({});
   }, [initialValues]);
 
   function updateField<K extends keyof VehicleFormValues>(
@@ -84,6 +93,32 @@ export default function VehicleForm({
     }));
   }
 
+  function getNumberFieldValue(field: VehicleNumberField) {
+    return numberDrafts[field] ?? String(values[field] ?? "");
+  }
+
+  function handleNumberFieldChange(field: VehicleNumberField, rawValue: string) {
+    setNumberDrafts((prev) => ({ ...prev, [field]: rawValue }));
+
+    if (rawValue.trim() === "") {
+      updateField(field, 0);
+      return;
+    }
+
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed)) {
+      updateField(field, parsed);
+    }
+  }
+
+  function commitNumberField(field: VehicleNumberField) {
+    setNumberDrafts((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSubmit(values, selectedFiles, selectedDocuments);
@@ -103,7 +138,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Numar inmatriculare *</label>
           <input
+            id="vehicle-plateNumber"
             className="tool-input"
+            data-assistant-field="plateNumber"
             value={values.plateNumber}
             onChange={(e) => updateField("plateNumber", e.target.value.toUpperCase())}
             placeholder="Ex: B123ABC"
@@ -113,7 +150,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Marca *</label>
           <input
+            id="vehicle-brand"
             className="tool-input"
+            data-assistant-field="brand"
             value={values.brand}
             onChange={(e) => updateField("brand", e.target.value)}
             placeholder="Ex: Ford"
@@ -123,7 +162,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Model *</label>
           <input
+            id="vehicle-model"
             className="tool-input"
+            data-assistant-field="model"
             value={values.model}
             onChange={(e) => updateField("model", e.target.value)}
             placeholder="Ex: Transit"
@@ -133,7 +174,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">An</label>
           <input
+            id="vehicle-year"
             className="tool-input"
+            data-assistant-field="year"
             value={values.year}
             onChange={(e) => updateField("year", e.target.value)}
             placeholder="Ex: 2020"
@@ -143,7 +186,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Serie sasiu (VIN)</label>
           <input
+            id="vehicle-vin"
             className="tool-input"
+            data-assistant-field="vin"
             value={values.vin}
             onChange={(e) => updateField("vin", e.target.value)}
             placeholder="Ex: WF0..."
@@ -153,7 +198,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Combustibil</label>
           <input
+            id="vehicle-fuelType"
             className="tool-input"
+            data-assistant-field="fuelType"
             value={values.fuelType}
             onChange={(e) => updateField("fuelType", e.target.value)}
             placeholder="Ex: diesel"
@@ -163,7 +210,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Status</label>
           <select
+            id="vehicle-status"
             className="tool-input"
+            data-assistant-field="status"
             value={values.status}
             onChange={(e) => updateField("status", e.target.value as VehicleStatus)}
           >
@@ -178,27 +227,35 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Km reali la înregistrare</label>
           <input
+            id="vehicle-initialRecordedKm"
             className="tool-input"
+            data-assistant-field="initialRecordedKm"
             type="number"
-            value={values.initialRecordedKm}
-            onChange={(e) => updateField("initialRecordedKm", Number(e.target.value || 0))}
+            value={getNumberFieldValue("initialRecordedKm")}
+            onChange={(e) => handleNumberFieldChange("initialRecordedKm", e.target.value)}
+            onBlur={() => commitNumberField("initialRecordedKm")}
           />
         </div>
 
         <div className="tool-form-block">
           <label className="tool-form-label">Km curenți</label>
           <input
+            id="vehicle-currentKm"
             className="tool-input"
+            data-assistant-field="currentKm"
             type="number"
-            value={values.currentKm}
-            onChange={(e) => updateField("currentKm", Number(e.target.value || 0))}
+            value={getNumberFieldValue("currentKm")}
+            onChange={(e) => handleNumberFieldChange("currentKm", e.target.value)}
+            onBlur={() => commitNumberField("currentKm")}
           />
         </div>
 
         <div className="tool-form-block">
           <label className="tool-form-label">Responsabil principal</label>
           <select
+            id="vehicle-ownerUserId"
             className="tool-input"
+            data-assistant-field="ownerUserId"
             value={values.ownerUserId}
             onChange={handleOwnerChange}
           >
@@ -216,7 +273,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Sofer curent</label>
           <select
+            id="vehicle-currentDriverUserId"
             className="tool-input"
+            data-assistant-field="currentDriverUserId"
             value={values.currentDriverUserId}
             onChange={handleDriverChange}
           >
@@ -234,7 +293,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">Tip prag service</label>
           <select
+            id="vehicle-serviceStrategy"
             className="tool-input"
+            data-assistant-field="serviceStrategy"
             value={values.serviceStrategy}
             onChange={(e) => updateField("serviceStrategy", e.target.value as VehicleFormValues["serviceStrategy"])}
           >
@@ -247,20 +308,26 @@ export default function VehicleForm({
           <div className="tool-form-block">
             <label className="tool-form-label">Revizie la fiecare (km)</label>
             <input
+              id="vehicle-serviceIntervalKm"
               className="tool-input"
+              data-assistant-field="serviceIntervalKm"
               type="number"
-              value={values.serviceIntervalKm}
-              onChange={(e) => updateField("serviceIntervalKm", Number(e.target.value || 0))}
+              value={getNumberFieldValue("serviceIntervalKm")}
+              onChange={(e) => handleNumberFieldChange("serviceIntervalKm", e.target.value)}
+              onBlur={() => commitNumberField("serviceIntervalKm")}
             />
           </div>
         ) : (
           <div className="tool-form-block">
             <label className="tool-form-label">Prag service (km total)</label>
             <input
+              id="vehicle-nextServiceKm"
               className="tool-input"
+              data-assistant-field="nextServiceKm"
               type="number"
-              value={values.nextServiceKm}
-              onChange={(e) => updateField("nextServiceKm", Number(e.target.value || 0))}
+              value={getNumberFieldValue("nextServiceKm")}
+              onChange={(e) => handleNumberFieldChange("nextServiceKm", e.target.value)}
+              onBlur={() => commitNumberField("nextServiceKm")}
             />
           </div>
         )}
@@ -282,7 +349,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">ITP pana la</label>
           <input
+            id="vehicle-nextItpDate"
             className="tool-input"
+            data-assistant-field="nextItpDate"
             type="date"
             value={values.nextItpDate}
             onChange={(e) => updateField("nextItpDate", e.target.value)}
@@ -292,7 +361,9 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">RCA pana la</label>
           <input
+            id="vehicle-nextRcaDate"
             className="tool-input"
+            data-assistant-field="nextRcaDate"
             type="date"
             value={values.nextRcaDate}
             onChange={(e) => updateField("nextRcaDate", e.target.value)}
@@ -302,17 +373,46 @@ export default function VehicleForm({
         <div className="tool-form-block">
           <label className="tool-form-label">CASCO până la</label>
           <input
+            id="vehicle-nextCascoDate"
             className="tool-input"
+            data-assistant-field="nextCascoDate"
             type="date"
             value={values.nextCascoDate}
             onChange={(e) => updateField("nextCascoDate", e.target.value)}
           />
         </div>
 
+        <div className="tool-form-block">
+          <label className="tool-form-label">Rovinieta pana la</label>
+          <input
+            id="vehicle-nextRovinietaDate"
+            className="tool-input"
+            data-assistant-field="nextRovinietaDate"
+            type="date"
+            value={values.nextRovinietaDate}
+            onChange={(e) => updateField("nextRovinietaDate", e.target.value)}
+          />
+        </div>
+
+        <div className="tool-form-block">
+          <label className="tool-form-label">Revizie ulei la km</label>
+          <input
+            id="vehicle-nextOilServiceKm"
+            className="tool-input"
+            data-assistant-field="nextOilServiceKm"
+            type="number"
+            value={getNumberFieldValue("nextOilServiceKm")}
+            onChange={(e) => handleNumberFieldChange("nextOilServiceKm", e.target.value)}
+            onBlur={() => commitNumberField("nextOilServiceKm")}
+          />
+        </div>
+
         <div className="tool-form-block tool-form-block-full">
           <label className="tool-form-label">Note mentenanta</label>
           <textarea
+            id="vehicle-maintenanceNotes"
             className="tool-input tool-textarea"
+            data-assistant-field="maintenanceNotes"
             value={values.maintenanceNotes}
             onChange={(e) => updateField("maintenanceNotes", e.target.value)}
             placeholder="Detalii revizie, distributie, observatii"
@@ -360,7 +460,7 @@ export default function VehicleForm({
       </div>
 
       <div className="tool-form-actions">
-        <button className="primary-btn" type="submit" disabled={!canSubmit || submitting}>
+        <button id="vehicle-save" className="primary-btn" data-assistant-action="save-vehicle" type="submit" title="Salveaza masina" disabled={!canSubmit || submitting}>
           {submitting ? "Se salveaza..." : "Salveaza masina"}
         </button>
       </div>

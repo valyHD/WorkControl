@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "gps-server": "node server.cjs"
+    "gps-server": "node server.cjs",
+    "storage:cors": "gcloud storage buckets update gs://workcontrol-53b1d.firebasestorage.app --cors-file=storage.cors.json"
   },
   "dependencies": {
     "firebase": "^12.11.0",

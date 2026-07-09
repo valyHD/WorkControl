@@ -11,8 +11,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    function canControlVehicleGpsVisibility() {
+      return isSignedIn() && request.auth.token.email == "ionut.matura23@gmail.com";
+    }
+
     match /users/{userId} {
       allow read, write: if isSignedIn();
+
+      match /pageChangeReads/{readId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
     }
 
     match /tools/{toolId} {
@@ -38,6 +46,10 @@ service cloud.firestore {
         }
       }
 
+      match /diagnosticDays/{dayKey} {
+        allow read, write: if isSignedIn();
+      }
+
       match /events/{eventId} {
         allow read, write: if isSignedIn();
       }
@@ -49,6 +61,11 @@ service cloud.firestore {
 
     match /vehicleEvents/{eventId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /vehiclePositionArchives/{archiveId} {
+      allow read: if isSignedIn();
+      allow write: if isAdminUser();
     }
 
     match /vehicleMaintenanceAlerts/{alertId} {
@@ -71,8 +88,22 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /expenseDocuments/{expenseId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /expenseScanJobs/{jobId} {
+      allow read, write: if isSignedIn();
+    }
+
     match /notifications/{notificationId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /auditLogs/{auditId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdminUser();
     }
 
     match /notificationRules/{ruleId} {
@@ -87,7 +118,9 @@ service cloud.firestore {
     }
 
     match /systemSettings/{settingId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() &&
+        (settingId != "vehicleGpsVisibility" || canControlVehicleGpsVisibility());
     }
 
     match /backupJobs/{jobId} {
@@ -107,6 +140,10 @@ service cloud.firestore {
     }
 
     match /maintenanceReports/{reportId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /maintenancePartOrders/{orderId} {
       allow read, write: if isSignedIn();
     }
 

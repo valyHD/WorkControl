@@ -2,17 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
+  deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
+import { CheckCheck } from "lucide-react";
 import { db } from "../../../lib/firebase/firebase";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
+import UserProfileLink from "../../../components/UserProfileLink";
+import { createAuditLog } from "../../audit/services/auditLogService";
 import {
   activatePushNotifications,
   hasPushVapidKey,
@@ -31,6 +37,7 @@ type NotificationItem = {
   module?: string;
   eventType?: string;
   entityId?: string;
+  notificationPath?: string;
   targetUserThemeKey?: string | null;
   actorUserId?: string;
   actorUserName?: string;
@@ -60,6 +67,10 @@ function getActivationMessage(result: PushActivationResult | null): string {
     return "Service Worker-ul de notificari nu este disponibil pe acest dispozitiv.";
   }
 
+  if (result.reason === "ios_requires_install") {
+    return "Pe iPhone, instaleaza WorkControl pe ecranul principal si deschide aplicatia din icon inainte sa activezi notificarile.";
+  }
+
   return "Dispozitivul nu suporta notificari push in fundal.";
 }
 
@@ -72,6 +83,9 @@ export default function NotificationsPage() {
   );
   const [activatingPush, setActivatingPush] = useState(false);
   const [pushResult, setPushResult] = useState<PushActivationResult | null>(null);
+  const [deletingId, setDeletingId] = useState("");
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [bulkReadError, setBulkReadError] = useState("");
 
   const pushConfigReady = hasPushVapidKey();
 
@@ -101,6 +115,7 @@ export default function NotificationsPage() {
           module: data.module ?? "",
           eventType: data.eventType ?? "",
           entityId: data.entityId ?? "",
+          notificationPath: data.notificationPath ?? "",
           targetUserThemeKey: data.targetUserThemeKey ?? null,
         });
       });
@@ -142,6 +157,112 @@ export default function NotificationsPage() {
     await updateDoc(doc(db, "notifications", id), {
       read: true,
     });
+    const notification = notifications.find((item) => item.id === id);
+    if (notification && user?.uid) {
+      void createAuditLog({
+        category: "notifications",
+        action: "notification_read",
+        title: "Notificare citita",
+        message: `${user.displayName || user.email || "Utilizator"} a citit notificarea: ${notification.title}.`,
+        actorUserId: user.uid,
+        actorUserName: user.displayName || user.email || "Utilizator",
+        actorUserThemeKey: user.themeKey ?? null,
+        targetUserId: notification.userId,
+        targetUserName: user.displayName || user.email || notification.userId,
+        entityId: id,
+        entityLabel: notification.title,
+        path: "/notifications",
+        pageTitle: "Notificari",
+      }).catch((error) => console.warn("[audit][notification_read]", error));
+    }
+  }
+
+  async function handleMarkAllRead() {
+    if (!user?.uid || markingAllRead) return;
+
+    setMarkingAllRead(true);
+    setBulkReadError("");
+    try {
+      const unreadSnap = await getDocs(
+        query(
+          collection(db, "notifications"),
+          where("userId", "==", user.uid),
+          where("read", "==", false)
+        )
+      );
+
+      const unreadDocs = unreadSnap.docs;
+      if (unreadDocs.length === 0) return;
+
+      for (let index = 0; index < unreadDocs.length; index += 450) {
+        const batch = writeBatch(db);
+        unreadDocs.slice(index, index + 450).forEach((notificationDoc) => {
+          batch.update(notificationDoc.ref, { read: true });
+        });
+        await batch.commit();
+      }
+
+      const unreadIds = new Set(unreadDocs.map((notificationDoc) => notificationDoc.id));
+      setNotifications((current) =>
+        current.map((notification) =>
+          unreadIds.has(notification.id) ? { ...notification, read: true } : notification
+        )
+      );
+
+      void createAuditLog({
+        category: "notifications",
+        action: "notification_read",
+        title: "Notificari marcate ca citite",
+        message: `${user.displayName || user.email || "Utilizator"} a marcat ${unreadDocs.length} notificari ca citite.`,
+        actorUserId: user.uid,
+        actorUserName: user.displayName || user.email || "Utilizator",
+        actorUserThemeKey: user.themeKey ?? null,
+        targetUserId: user.uid,
+        targetUserName: user.displayName || user.email || user.uid,
+        entityId: user.uid,
+        entityLabel: "Notificari",
+        path: "/notifications",
+        pageTitle: "Notificari",
+        metadata: {
+          count: unreadDocs.length,
+        },
+      }).catch((error) => console.warn("[audit][notifications_mark_all_read]", error));
+    } catch (error) {
+      console.error("[NotificationsPage][handleMarkAllRead]", error);
+      setBulkReadError("Nu am putut marca toate notificarile ca citite.");
+    } finally {
+      setMarkingAllRead(false);
+    }
+  }
+
+  async function handleDeleteNotification(id: string) {
+    const confirmed = window.confirm("Stergi notificarea?");
+    if (!confirmed || deletingId) return;
+
+    setDeletingId(id);
+    try {
+      const notification = notifications.find((item) => item.id === id);
+      await deleteDoc(doc(db, "notifications", id));
+      if (notification && user?.uid) {
+        void createAuditLog({
+          category: "notifications",
+          action: "notification_deleted",
+          title: "Notificare stearsa",
+          message: `${user.displayName || user.email || "Utilizator"} a sters notificarea: ${notification.title}.`,
+          actorUserId: user.uid,
+          actorUserName: user.displayName || user.email || "Utilizator",
+          actorUserThemeKey: user.themeKey ?? null,
+          targetUserId: notification.userId,
+          targetUserName: user.displayName || user.email || notification.userId,
+          entityId: id,
+          entityLabel: notification.title,
+          path: "/notifications",
+          pageTitle: "Notificari",
+        }).catch((error) => console.warn("[audit][notification_deleted]", error));
+      }
+    } finally {
+      setDeletingId("");
+    }
   }
 
   async function handleOpenNotification(notification: NotificationItem) {
@@ -151,6 +272,7 @@ export default function NotificationsPage() {
         module: notification.module,
         eventType: notification.eventType,
         entityId: notification.entityId,
+        notificationPath: notification.notificationPath,
       })
     );
   }
@@ -171,6 +293,10 @@ export default function NotificationsPage() {
   }
 
   const pushMessage = useMemo(() => getActivationMessage(pushResult), [pushResult]);
+  const unreadCount = useMemo(
+    () => notifications.reduce((count, notification) => count + (notification.read ? 0 : 1), 0),
+    [notifications]
+  );
 
   if (!user) {
     return (
@@ -194,6 +320,16 @@ export default function NotificationsPage() {
 
           <div className="tools-header-actions notifications-activate-box">
             <button
+              className="secondary-btn notifications-mark-all-btn"
+              type="button"
+              onClick={() => void handleMarkAllRead()}
+              disabled={markingAllRead || unreadCount === 0}
+              title="Marcheaza toate notificarile necitite ca citite"
+            >
+              <CheckCheck size={15} />
+              {markingAllRead ? "Se marcheaza..." : `Citit tot${unreadCount > 0 ? ` (${unreadCount})` : ""}`}
+            </button>
+            <button
               className="primary-btn"
               type="button"
               onClick={() => void handleActivatePush()}
@@ -211,6 +347,9 @@ export default function NotificationsPage() {
               <span className={pushResult?.ok ? "badge badge-green" : "badge badge-orange"}>
                 {pushMessage}
               </span>
+            )}
+            {bulkReadError && (
+              <span className="badge badge-orange">{bulkReadError}</span>
             )}
           </div>
         </div>
@@ -242,9 +381,12 @@ export default function NotificationsPage() {
                       <span className="user-accent-avatar">
                         {getUserInitials(notification.actorUserName || notification.title || "S")}
                       </span>
-                      <span className="simple-list-label user-accent-name">
-                        {notification.actorUserName || notification.title}
-                      </span>
+                      <UserProfileLink
+                        userId={notification.actorUserId}
+                        name={notification.actorUserName || notification.title}
+                        themeKey={notification.actorUserThemeKey}
+                        className="simple-list-label user-accent-name"
+                      />
                     </div>
 
                     <div className="simple-list-subtitle">{notification.title}</div>
@@ -254,13 +396,26 @@ export default function NotificationsPage() {
                     </div>
                   </div>
 
-                  <span
-                    className={
-                      notification.read ? "badge badge-green" : "badge badge-orange"
-                    }
-                  >
-                    {notification.read ? "citita" : "noua"}
-                  </span>
+                  <div className="dashboard-inline-actions">
+                    <span
+                      className={
+                        notification.read ? "badge badge-green" : "badge badge-orange"
+                      }
+                    >
+                      {notification.read ? "citita" : "noua"}
+                    </span>
+                    <button
+                      className="danger-btn"
+                      type="button"
+                      disabled={deletingId === notification.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDeleteNotification(notification.id);
+                      }}
+                    >
+                      {deletingId === notification.id ? "Se sterge..." : "Sterge"}
+                    </button>
+                  </div>
                 </div>
               );
             })}

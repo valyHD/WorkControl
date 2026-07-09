@@ -3,8 +3,10 @@ import { Link } from "react-router-dom";
 import type { ToolItem } from "../../../types/tool";
 import { getToolsList } from "../services/toolsService";
 import ToolStatusBadge from "../components/ToolStatusBadge";
-import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
-import SafeImage from "../../../components/SafeImage";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
+import SafeImage, { preloadImageUrls } from "../../../components/SafeImage";
+import UserProfileLink from "../../../components/UserProfileLink";
+import { Camera, MessageSquare, QrCode, UserCheck } from "lucide-react";
 
 export default function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
@@ -31,6 +33,10 @@ export default function ToolsPage() {
   useEffect(() => {
     void loadTools();
   }, []);
+
+  useEffect(() => {
+    preloadImageUrls(tools.map((tool) => tool.coverThumbUrl || tool.coverImageUrl), 48);
+  }, [tools]);
 
   const filteredTools = useMemo(() => {
     return tools.filter((tool) => {
@@ -68,6 +74,29 @@ export default function ToolsPage() {
             <Link to="/tools/new" className="primary-btn">
               Adauga scula
             </Link>
+          </div>
+        </div>
+
+        <div className="asset-help-grid" aria-label="Instructiuni scule">
+          <div className="asset-help-card asset-help-card-blue">
+            <span className="asset-help-icon"><QrCode size={18} /></span>
+            <strong>Scaneaza sau cauta</strong>
+            <p>Foloseste QR-ul sau cautarea dupa nume, cod intern, responsabil ori detinator.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-amber">
+            <span className="asset-help-icon"><UserCheck size={18} /></span>
+            <strong>Dai scula cu aprobare</strong>
+            <p>Cand alegi alt detinator, acesta trebuie sa accepte solicitarea in pagina sculei.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-green">
+            <span className="asset-help-icon"><Camera size={18} /></span>
+            <strong>Tine pozele la zi</strong>
+            <p>Intra pe scula, editeaza si adauga poze clare cu starea ei, accesorii sau defecte.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-violet">
+            <span className="asset-help-icon"><MessageSquare size={18} /></span>
+            <strong>Scrie comentarii</strong>
+            <p>Pe pagina sculei poti lasa observatii, probleme, predari sau note de intretinere.</p>
           </div>
         </div>
 
@@ -109,10 +138,11 @@ export default function ToolsPage() {
           </div>
         ) : (
           <div className="tools-grid">
-            {filteredTools.map((tool) => {
+            {filteredTools.map((tool, index) => {
 const userThemeClass = getUserThemeClass(
   tool.currentHolderThemeKey || tool.ownerThemeKey || null
 );
+const prioritizeImage = index < 18;
 
               return (
                 <Link to={`/tools/${tool.id}`} key={tool.id} className="tool-card-link">
@@ -124,6 +154,8 @@ const userThemeClass = getUserThemeClass(
                           alt={tool.name}
                           className="tool-card-avatar-image"
                           fallbackText={tool.name}
+                          loading={prioritizeImage ? "eager" : "lazy"}
+                          fetchPriority={prioritizeImage ? "high" : "low"}
                           sizes="72px"
                         />
                       </div>
@@ -136,23 +168,36 @@ const userThemeClass = getUserThemeClass(
                     <div className="tool-card-code">QR: {tool.qrCodeValue || "-"}</div>
 
                     <div className="tool-card-meta">
-                      <strong>Responsabil:</strong> {tool.ownerUserName || "-"}
+                      <strong>Responsabil:</strong>{" "}
+                      <UserProfileLink
+                        userId={tool.ownerUserId}
+                        name={tool.ownerUserName}
+                        themeKey={tool.ownerThemeKey}
+                        className="user-profile-link--plain"
+                      />
                     </div>
 
                     <div className="tool-card-meta">
-                      <strong>La cine se afla:</strong> {tool.currentHolderUserName || "Depozit"}
+                      <strong>La cine se afla:</strong>{" "}
+                      <UserProfileLink
+                        userId={tool.currentHolderUserId}
+                        name={tool.currentHolderUserName}
+                        themeKey={tool.currentHolderThemeKey}
+                        fallback="Depozit"
+                        className="user-profile-link--plain"
+                      />
                     </div>
 
                     <div className="tool-card-actions">
-                      <span className="user-accent-chip">
-                        <span
-                          className="user-accent-avatar"
-                          style={{ width: 24, height: 24, fontSize: 10 }}
-                        >
-                          {getUserInitials(tool.currentHolderUserName || tool.ownerUserName || "D")}
-                        </span>
-                        {tool.currentHolderUserName || tool.ownerUserName || "Depozit"}
-                      </span>
+                      <UserProfileLink
+                        userId={tool.currentHolderUserId || tool.ownerUserId}
+                        name={tool.currentHolderUserName || tool.ownerUserName}
+                        themeKey={tool.currentHolderThemeKey || tool.ownerThemeKey}
+                        fallback="Depozit"
+                        showAvatar
+                        avatarClassName="user-profile-small-avatar"
+                        className="user-profile-link--chip"
+                      />
                     </div>
                   </div>
                 </Link>

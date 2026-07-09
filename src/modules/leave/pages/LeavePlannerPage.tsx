@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { BadgeCheck, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Send } from "lucide-react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import { db } from "../../../lib/firebase/firebase";
 import type { TimesheetItem } from "../../../types/timesheet";
@@ -12,6 +14,12 @@ import {
   getWorkedMinutesByDay,
   saveLeaveRequest,
 } from "../services/leaveRequestsService";
+import UserProfileLink from "../../../components/UserProfileLink";
+import ActionBar from "../../../components/ActionBar";
+import PageQuickActions from "../../../components/PageQuickActions";
+import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
 
 const weekDays = ["L", "Ma", "Mi", "J", "V", "S", "D"];
 
@@ -95,11 +103,11 @@ function getRomanianPublicHolidayLookup(year: number): HolidayLookup {
   return { holidayDates: new Set(Object.keys(holidayReasonByDate)), holidayReasonByDate };
 }
 
-function defaultForm(userName: string, userEmail: string): LeaveRequestFormValues {
+function defaultForm(userName: string, userEmail: string, companyName = ""): LeaveRequestFormValues {
   return {
     userName,
     userEmail,
-    companyName: "",
+    companyName,
     roleTitle: "",
     department: "",
     requestType: "concediu_odihna",
@@ -171,8 +179,105 @@ function requestTypeLabel(type: LeaveRequestItem["requestType"]): string {
   return "Zi libera eveniment";
 }
 
+function getLeaveRequestFileName(request: LeaveRequestItem) {
+  const name = request.userName || request.userEmail || request.userId || "utilizator";
+  return `cerere-concediu-${name}-${request.periodStart}-${request.periodEnd}.pdf`;
+}
+
+const ASSISTANT_LEAVE_MONTHS: Record<string, number> = {
+  ianuarie: 1,
+  ian: 1,
+  februarie: 2,
+  feb: 2,
+  martie: 3,
+  mar: 3,
+  aprilie: 4,
+  apr: 4,
+  mai: 5,
+  iunie: 6,
+  iun: 6,
+  iulie: 7,
+  iul: 7,
+  august: 8,
+  aug: 8,
+  septembrie: 9,
+  sept: 9,
+  sep: 9,
+  octombrie: 10,
+  oct: 10,
+  noiembrie: 11,
+  noi: 11,
+  decembrie: 12,
+  dec: 12,
+};
+
+function normalizeAssistantLeaveText(value: unknown) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function assistantLeaveField(fields: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = String(fields[key] ?? "").trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function assistantLeaveDate(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const normalized = normalizeAssistantLeaveText(raw);
+  const named = normalized.match(/\b(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?\b/);
+  if (named) {
+    const month = ASSISTANT_LEAVE_MONTHS[named[2]];
+    const year = named[3] ? Number(named[3].length === 2 ? `20${named[3]}` : named[3]) : new Date().getFullYear();
+    if (month) return toIsoDate(new Date(year, month - 1, Number(named[1])));
+  }
+  const numeric = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b/);
+  if (numeric) {
+    const year = numeric[3] ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3]) : new Date().getFullYear();
+    return toIsoDate(new Date(year, Number(numeric[2]) - 1, Number(numeric[1])));
+  }
+  return "";
+}
+
+function inferAssistantLeaveRange(text: string) {
+  const normalized = normalizeAssistantLeaveText(text);
+  const currentYear = new Date().getFullYear();
+  const lastWeek = normalized.match(/ultima\s+saptamana\s+(?:din|de|in)?\s*([a-z]+)/);
+  if (lastWeek) {
+    const month = ASSISTANT_LEAVE_MONTHS[lastWeek[1]];
+    if (month) {
+      const end = new Date(currentYear, month, 0);
+      while (end.getDay() !== 0) end.setDate(end.getDate() - 1);
+      const start = new Date(end);
+      start.setDate(end.getDate() - 6);
+      return { startDate: toIsoDate(start), endDate: toIsoDate(end) };
+    }
+  }
+
+  const range = normalized.match(
+    /(?:intre|din)?\s*(\d{1,2})(?:\s+[a-z]+)?\s+(?:si|pana\s+pe|pana\s+la|pana|-)\s+(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?/
+  );
+  if (!range) return null;
+  const month = ASSISTANT_LEAVE_MONTHS[range[3]];
+  if (!month) return null;
+  const year = range[4] ? Number(range[4].length === 2 ? `20${range[4]}` : range[4]) : currentYear;
+  return {
+    startDate: toIsoDate(new Date(year, month - 1, Number(range[1]))),
+    endDate: toIsoDate(new Date(year, month - 1, Number(range[2]))),
+  };
+}
+
 export default function LeavePlannerPage() {
   const { user, role } = useAuth();
+  const location = useLocation();
   const isAdmin = role === "admin";
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
   const [users, setUsers] = useState<AppUserItem[]>([]);
@@ -190,18 +295,133 @@ export default function LeavePlannerPage() {
   const [showYearCalendar, setShowYearCalendar] = useState(false);
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState<string>("");
+  const [submittedLeaveRequestId, setSubmittedLeaveRequestId] = useState("");
   const [drawingSignature, setDrawingSignature] = useState(false);
   const [formValues, setFormValues] = useState<LeaveRequestFormValues>(
-    defaultForm(user?.displayName || user?.email || "", user?.email || "")
+    {
+      ...defaultForm(user?.displayName || user?.email || "", user?.email || "", user?.primaryCompanyName || ""),
+      roleTitle: user?.roleTitle || "",
+      department: user?.department || "",
+    }
   );
   const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const signatureStrokeRef = useRef<SignaturePoint[]>([]);
   const signatureStrokesRef = useRef<SignaturePoint[][]>([]);
+  const previousProfileCompanyNameRef = useRef(user?.primaryCompanyName || "");
+  const previousProfileRoleTitleRef = useRef(user?.roleTitle || "");
+  const previousProfileDepartmentRef = useRef(user?.department || "");
+  const assistantLeaveKeyRef = useRef("");
 
   useEffect(() => {
-    setFormValues(defaultForm(user?.displayName || user?.email || "", user?.email || ""));
+    const profileCompanyName = user?.primaryCompanyName || "";
+    const previousProfileCompanyName = previousProfileCompanyNameRef.current;
+    const profileRoleTitle = user?.roleTitle || "";
+    const previousProfileRoleTitle = previousProfileRoleTitleRef.current;
+    const profileDepartment = user?.department || "";
+    const previousProfileDepartment = previousProfileDepartmentRef.current;
+    setFormValues((prev) => {
+      const shouldUseProfileCompany =
+        !prev.companyName || prev.companyName === previousProfileCompanyName;
+      const shouldUseProfileRoleTitle =
+        !prev.roleTitle || prev.roleTitle === previousProfileRoleTitle;
+      const shouldUseProfileDepartment =
+        !prev.department || prev.department === previousProfileDepartment;
+
+      return {
+        ...defaultForm(user?.displayName || user?.email || "", user?.email || "", shouldUseProfileCompany ? profileCompanyName : prev.companyName),
+        roleTitle: shouldUseProfileRoleTitle ? profileRoleTitle : prev.roleTitle,
+        department: shouldUseProfileDepartment ? profileDepartment : prev.department,
+        requestType: prev.requestType,
+        periodStart: prev.periodStart,
+        periodEnd: prev.periodEnd,
+        reason: prev.reason,
+        signatureData: prev.signatureData,
+      };
+    });
+    previousProfileCompanyNameRef.current = profileCompanyName;
+    previousProfileRoleTitleRef.current = profileRoleTitle;
+    previousProfileDepartmentRef.current = profileDepartment;
     signatureStrokesRef.current = [];
-  }, [user?.displayName, user?.email]);
+  }, [user?.department, user?.displayName, user?.email, user?.primaryCompanyName, user?.roleTitle]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("assistant") !== "leave") return;
+    if (assistantLeaveKeyRef.current === location.search) return;
+
+    assistantLeaveKeyRef.current = location.search;
+    const start = params.get("start") || "";
+    const end = params.get("end") || start;
+
+    setFormValues((prev) => ({
+      ...prev,
+      companyName: user?.primaryCompanyName || prev.companyName,
+      roleTitle: user?.roleTitle || prev.roleTitle,
+      department: user?.department || prev.department,
+      requestType: "concediu_odihna",
+      periodStart: start || prev.periodStart,
+      periodEnd: end || prev.periodEnd,
+    }));
+
+    window.setTimeout(() => {
+      document.getElementById("leave-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  }, [location.search, user?.department, user?.primaryCompanyName, user?.roleTitle]);
+
+  useEffect(() => {
+    const handleAssistantLeaveFill = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      const inferredRange = inferAssistantLeaveRange(
+        [
+          assistantLeaveField(detail, ["period", "perioada", "text", "range"]),
+          assistantLeaveField(detail, ["spokenText", "command"]),
+        ].filter(Boolean).join(" ")
+      );
+      const startDate =
+        assistantLeaveDate(assistantLeaveField(detail, ["startDate", "periodStart", "dataInceput", "inceput"])) ||
+        inferredRange?.startDate ||
+        "";
+      const endDate =
+        assistantLeaveDate(assistantLeaveField(detail, ["endDate", "periodEnd", "dataSfarsit", "sfarsit"])) ||
+        inferredRange?.endDate ||
+        startDate;
+      const reason = assistantLeaveField(detail, ["reason", "motiv", "observatii"]);
+      const requestType = assistantLeaveField(detail, ["requestType", "tip", "tipSolicitare"]);
+
+      setError("");
+      setSuccess("Asistentul a completat perioada. Verifica semnatura si trimite cererea.");
+      setFormValues((prev) => ({
+        ...prev,
+        companyName: user?.primaryCompanyName || prev.companyName,
+        roleTitle: user?.roleTitle || prev.roleTitle,
+        department: user?.department || prev.department,
+        requestType:
+          requestType === "zi_libera_platita" || requestType === "zi_libera_eveniment" || requestType === "concediu_odihna"
+            ? requestType
+            : prev.requestType,
+        periodStart: startDate || prev.periodStart,
+        periodEnd: endDate || prev.periodEnd,
+        reason: reason || prev.reason,
+      }));
+
+      if (startDate) {
+        const visibleDate = new Date(startDate);
+        if (!Number.isNaN(visibleDate.getTime())) {
+          setVisibleMonth(new Date(visibleDate.getFullYear(), visibleDate.getMonth(), 1));
+        }
+      }
+
+      window.setTimeout(() => {
+        document.getElementById("leave-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        highlightAssistantElement("[data-assistant-action='submit-leave-request']");
+      }, 180);
+    };
+
+    window.addEventListener(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
+    return () => {
+      window.removeEventListener(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
+    };
+  }, [user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     if (!showYearCalendar) return undefined;
@@ -233,7 +453,13 @@ export default function LeavePlannerPage() {
           email: data.email ?? "",
           active: data.active !== false,
           role: data.role ?? "angajat",
+          roleTitle: data.roleTitle ?? "",
+          department: data.department ?? "",
           themeKey: data.themeKey ?? undefined,
+          companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
+          companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
+          primaryCompanyId: data.primaryCompanyId ?? "",
+          primaryCompanyName: data.primaryCompanyName ?? "",
           createdAt: Number(data.createdAt ?? 0),
           updatedAt: Number(data.updatedAt ?? 0),
         } as AppUserItem;
@@ -292,12 +518,35 @@ export default function LeavePlannerPage() {
   const holidayLookup = useMemo(() => getRomanianPublicHolidayLookup(visibleMonth.getFullYear()), [visibleMonth]);
   const pendingLeaveRequests = useMemo(() => adminRequests.filter((request) => request.status === "in_asteptare"), [adminRequests]);
   const approvedRequests = useMemo(() => adminRequests.filter((request) => request.status === "aprobat"), [adminRequests]);
+  const myLeaveRequests = useMemo(
+    () => adminRequests.filter((request) => request.userId === user?.uid),
+    [adminRequests, user?.uid]
+  );
+  const leaveFormNeedsAttention =
+    !formValues.userName.trim() ||
+    !formValues.userEmail.trim() ||
+    !formValues.companyName.trim() ||
+    !formValues.roleTitle.trim() ||
+    !formValues.department.trim() ||
+    !formValues.periodStart ||
+    !formValues.periodEnd ||
+    !formValues.signatureData;
   const yearMonths = useMemo(
     () => Array.from({ length: 12 }, (_, month) => new Date(visibleMonth.getFullYear(), month, 1)),
     [visibleMonth]
   );
   const expandedUser = useMemo(() => users.find((userItem) => userItem.uid === expandedUserId), [expandedUserId, users]);
   const expandedUserName = expandedUser ? buildUserLabel(expandedUser) : "Utilizator";
+  const attentionClass = (condition: boolean) => (condition ? "attention-pulse" : "");
+
+  useEffect(() => {
+    if (!submittedLeaveRequestId) return;
+    if (!myLeaveRequests.some((request) => request.id === submittedLeaveRequestId)) return;
+
+    window.setTimeout(() => {
+      document.getElementById(`leave-request-${submittedLeaveRequestId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 180);
+  }, [myLeaveRequests, submittedLeaveRequestId]);
 
   function formatWorkedMinutesLabel(minutes: number): string {
     const safeMinutes = Math.max(0, Math.floor(minutes));
@@ -415,13 +664,14 @@ export default function LeavePlannerPage() {
       if (!formValues.signatureData) {
         throw new Error("Semnatura este obligatorie.");
       }
-      await saveLeaveRequest(user.uid, formValues);
-      setSuccess("Cererea a fost trimisa. Va aparea in istoric dupa aprobare.");
+      const requestId = await saveLeaveRequest(user.uid, formValues);
+      setSubmittedLeaveRequestId(requestId);
+      setExpandedUserId(user.uid);
+      setSuccess("Cererea a fost trimisa si apare mai jos in Cererile mele.");
       setFormValues((prev) => ({
-        ...defaultForm(user.displayName || user.email || "", user.email || ""),
-        companyName: prev.companyName,
-        roleTitle: prev.roleTitle,
-        department: prev.department,
+        ...defaultForm(user.displayName || user.email || "", user.email || "", user.primaryCompanyName || prev.companyName),
+        roleTitle: user.roleTitle || prev.roleTitle,
+        department: user.department || prev.department,
       }));
       clearSignature();
     } catch (err) {
@@ -443,7 +693,7 @@ export default function LeavePlannerPage() {
         actorUserName: user?.displayName || user?.email || "Administrator",
         actorUserThemeKey: user?.themeKey ?? null,
       });
-      setSuccess("Cererea a fost aprobata. PDF-ul contine acum eticheta albastra «Aprobat». ");
+      setSuccess("Cererea a fost aprobata. PDF-ul contine acum eticheta albastra Aprobat.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nu am putut aproba cererea.");
     } finally {
@@ -483,20 +733,78 @@ export default function LeavePlannerPage() {
 
   return (
     <section className="page-section leave-page">
-      <div className="panel">
-        <div className="tools-header" style={{ paddingBottom: 12 }}>
-          <div>
-            <h2 className="panel-title">Concedii & zile lucrate</h2>
-            <p className="tools-subtitle">Toti utilizatorii apar in lista, iar pe click vezi calendarul compact in dropdown.</p>
-          </div>
-          <a className="primary-btn" href="#leave-form">Programeaza concediu / cere liber</a>
-        </div>
+      <ActionBar
+        title="Concedii & zile lucrate"
+        subtitle="Toti utilizatorii apar in lista, iar pe click vezi calendarul compact in dropdown."
+        actions={[
+          {
+            label: "Programeaza concediu",
+            href: "#leave-form",
+            icon: <FileSignature size={16} />,
+            variant: "primary",
+            assistantAction: "submit-leave-request",
+            tooltip: "Completeaza cererea si trimite-o catre manager",
+          },
+        ]}
+      />
+
+      <PageQuickActions
+        actions={[
+          {
+            label: "Programeaza concediu",
+            href: "#leave-form",
+            icon: <FileSignature size={16} />,
+            assistantAction: "submit-leave-request",
+            tooltip: "Completeaza formularul de concediu",
+            variant: "primary",
+          },
+          {
+            label: "Vezi calendar",
+            href: "#leave-calendar",
+            icon: <CalendarDays size={16} />,
+            assistantSection: "leave-calendar",
+            tooltip: "Vezi calendarul utilizatorilor",
+          },
+          {
+            label: "Cererile mele",
+            href: "#my-leave-requests",
+            icon: <BadgeCheck size={16} />,
+            assistantSection: "my-leave-requests",
+            tooltip: "Coboara la cererile tale",
+          },
+        ]}
+      />
+
+      <div id="leave-calendar" className="panel" data-assistant-section="leave-calendar">
 
         <div className="leave-legend">
           <span><i className="leave-dot leave-dot-worked" /> Zi lucrata (pontaj)</span>
           <span><i className="leave-dot leave-dot-leave" /> Concediu / invoire</span>
           <span><i className="leave-dot leave-dot-mixed" /> Pontaj + concediu in aceeasi zi</span>
           <span><i className="leave-dot leave-dot-holiday" /> Sarbatoare legala Romania</span>
+        </div>
+
+        <div className="leave-help-grid" aria-label="Cum folosesti pagina de concedii">
+          <div className="leave-help-card leave-help-card-blue">
+            <span className="leave-help-icon"><CalendarDays size={18} /></span>
+            <strong>1. Verifica luna</strong>
+            <p>Apasa pe numele unui user si vezi in calendar zile lucrate, concedii aprobate si sarbatori legale.</p>
+          </div>
+          <div className="leave-help-card leave-help-card-amber">
+            <span className="leave-help-icon"><FileSignature size={18} /></span>
+            <strong>2. Completeaza cererea</strong>
+            <p>Alege tipul solicitarii, perioada de inceput/sfarsit si scrie motivul daca este nevoie.</p>
+          </div>
+          <div className="leave-help-card leave-help-card-green">
+            <span className="leave-help-icon"><Send size={18} /></span>
+            <strong>3. Semneaza si trimite</strong>
+            <p>Semnatura este obligatorie. Dupa trimitere, cererea ajunge la admin pentru aprobare.</p>
+          </div>
+          <div className="leave-help-card leave-help-card-violet">
+            <span className="leave-help-icon"><BadgeCheck size={18} /></span>
+            <strong>4. Urmareste statusul</strong>
+            <p>Dupa aprobare, zilele apar colorate in calendar si PDF-ul ramane in istoricul cererilor.</p>
+          </div>
         </div>
 
         <div className="leave-user-list">
@@ -509,7 +817,9 @@ export default function LeavePlannerPage() {
               <div key={uid} className="leave-user-item">
                 <button
                   type="button"
-                  className="leave-user-trigger"
+                  data-assistant-action="view-leave-calendar"
+                  className={`leave-user-trigger ${attentionClass(uid === user.uid)}`}
+                  title="Deschide calendarul acestui utilizator"
                   onClick={() => setExpandedUserId(isExpanded ? "" : uid)}
                 >
                   <span>{buildUserLabel(userItem)}</span>
@@ -521,8 +831,8 @@ export default function LeavePlannerPage() {
                     <div className="leave-inline-calendar-header">
                       <strong className="leave-month-title">{monthTitle}</strong>
                       <div className="leave-inline-calendar-actions">
-                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))} aria-label="Luna anterioara">◀</button>
-                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))} aria-label="Luna urmatoare">▶</button>
+                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1))} aria-label="Luna anterioara"><ChevronLeft size={16} /></button>
+                        <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1))} aria-label="Luna urmatoare"><ChevronRight size={16} /></button>
                         <button className="secondary-btn" type="button" onClick={() => setShowYearCalendar(true)}>Fullscreen</button>
                       </div>
                     </div>
@@ -539,73 +849,84 @@ export default function LeavePlannerPage() {
         </div>
       </div>
 
-      <div id="leave-form" className="panel">
+      <div id="leave-form" className="panel" data-assistant-section="leave-form">
         <h3 className="panel-title">Formular cerere concediu / zi libera</h3>
+        <div className="leave-form-guide">
+          <div>
+            <strong>Ce trebuie completat?</strong>
+            <span>Nume, companie, functie, departament, tip solicitare, perioada si semnatura.</span>
+          </div>
+          <div>
+            <strong>Ce se intampla dupa trimitere?</strong>
+            <span>Se genereaza cererea PDF si ramane in asteptare pana cand adminul o aproba.</span>
+          </div>
+        </div>
 
         <form className="tool-form" onSubmit={handleSubmit}>
           <div className="tool-form-grid">
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.userName.trim())}`}>
               <span className="tool-form-label">Nume salariat</span>
-              <input className="tool-input" value={formValues.userName} onChange={(event) => setFormValues((prev) => ({ ...prev, userName: event.target.value }))} required />
+              <input className="tool-input" data-assistant-field="leave-user-name" value={formValues.userName} onChange={(event) => setFormValues((prev) => ({ ...prev, userName: event.target.value }))} required />
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.userEmail.trim())}`}>
               <span className="tool-form-label">Email</span>
-              <input className="tool-input" type="email" value={formValues.userEmail} onChange={(event) => setFormValues((prev) => ({ ...prev, userEmail: event.target.value }))} required />
+              <input className="tool-input" data-assistant-field="leave-user-email" type="email" value={formValues.userEmail} onChange={(event) => setFormValues((prev) => ({ ...prev, userEmail: event.target.value }))} required />
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.companyName.trim())}`}>
               <span className="tool-form-label">Companie</span>
-              <input className="tool-input" value={formValues.companyName} onChange={(event) => setFormValues((prev) => ({ ...prev, companyName: event.target.value }))} placeholder="Ex: SC Exemplu Construct SRL" required />
+              <input className="tool-input" data-assistant-field="leave-company" value={formValues.companyName} onChange={(event) => setFormValues((prev) => ({ ...prev, companyName: event.target.value }))} placeholder="Ex: SC Exemplu Construct SRL" required />
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.roleTitle.trim())}`}>
               <span className="tool-form-label">Functie</span>
-              <input className="tool-input" value={formValues.roleTitle} onChange={(event) => setFormValues((prev) => ({ ...prev, roleTitle: event.target.value }))} placeholder="Ex: Tehnician" required />
+              <input className="tool-input" data-assistant-field="leave-role-title" value={formValues.roleTitle} onChange={(event) => setFormValues((prev) => ({ ...prev, roleTitle: event.target.value }))} placeholder="Ex: Tehnician" required />
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.department.trim())}`}>
               <span className="tool-form-label">Departament</span>
-              <input className="tool-input" value={formValues.department} onChange={(event) => setFormValues((prev) => ({ ...prev, department: event.target.value }))} placeholder="Ex: Operational" required />
+              <input className="tool-input" data-assistant-field="leave-department" value={formValues.department} onChange={(event) => setFormValues((prev) => ({ ...prev, department: event.target.value }))} placeholder="Ex: Operational" required />
             </label>
 
             <label className="tool-form-block">
               <span className="tool-form-label">Tip solicitare</span>
-              <select className="tool-input" value={formValues.requestType} onChange={(event) => setFormValues((prev) => ({ ...prev, requestType: event.target.value as LeaveRequestFormValues["requestType"] }))}>
+              <select className="tool-input" data-assistant-field="leave-request-type" value={formValues.requestType} onChange={(event) => setFormValues((prev) => ({ ...prev, requestType: event.target.value as LeaveRequestFormValues["requestType"] }))}>
                 <option value="concediu_odihna">Concediu de odihna</option>
                 <option value="zi_libera_platita">Zi libera platita</option>
                 <option value="zi_libera_eveniment">Zi libera eveniment deosebit</option>
               </select>
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.periodStart)}`}>
               <span className="tool-form-label">Data inceput</span>
-              <input className="tool-input" type="date" value={formValues.periodStart} onChange={(event) => setFormValues((prev) => ({ ...prev, periodStart: event.target.value }))} required />
+              <input className="tool-input" data-assistant-field="leave-start-date" type="date" value={formValues.periodStart} onChange={(event) => setFormValues((prev) => ({ ...prev, periodStart: event.target.value }))} required />
             </label>
 
-            <label className="tool-form-block">
+            <label className={`tool-form-block ${attentionClass(!formValues.periodEnd)}`}>
               <span className="tool-form-label">Data sfarsit</span>
-              <input className="tool-input" type="date" value={formValues.periodEnd} onChange={(event) => setFormValues((prev) => ({ ...prev, periodEnd: event.target.value }))} required />
+              <input className="tool-input" data-assistant-field="leave-end-date" type="date" value={formValues.periodEnd} onChange={(event) => setFormValues((prev) => ({ ...prev, periodEnd: event.target.value }))} required />
             </label>
 
             <label className="tool-form-block tool-form-block-full">
               <span className="tool-form-label">Motiv (optional)</span>
-              <textarea className="tool-input tool-textarea" value={formValues.reason} onChange={(event) => setFormValues((prev) => ({ ...prev, reason: event.target.value }))} placeholder="Detaliaza pe scurt motivul solicitarii." />
+              <textarea className="tool-input tool-textarea" data-assistant-field="leave-reason" value={formValues.reason} onChange={(event) => setFormValues((prev) => ({ ...prev, reason: event.target.value }))} placeholder="Detaliaza pe scurt motivul solicitarii." />
             </label>
 
-            <label className="tool-form-block tool-form-block-full">
+            <label className={`tool-form-block tool-form-block-full ${attentionClass(!formValues.signatureData)}`}>
               <span className="tool-form-label">Semnatura</span>
               <canvas
                 ref={signatureCanvasRef}
+                data-assistant-field="leave-signature"
                 width={420}
                 height={120}
-                className="leave-signature-pad"
+                className={`leave-signature-pad ${attentionClass(!formValues.signatureData)}`}
                 onPointerDown={startSignature}
                 onPointerMove={drawSignature}
                 onPointerUp={endSignature}
               />
               <div className="tool-form-actions" style={{ padding: 0 }}>
-                <button className="secondary-btn" type="button" onClick={clearSignature}>Sterge semnatura</button>
+                <button className="secondary-btn" data-assistant-action="clear-leave-signature" type="button" onClick={clearSignature} title="Sterge semnatura si o poti face din nou">Sterge semnatura</button>
               </div>
             </label>
           </div>
@@ -614,9 +935,59 @@ export default function LeavePlannerPage() {
           {success && <div className="status-ok">{success}</div>}
 
           <div className="tool-form-actions">
-            <button className="primary-btn" type="submit" disabled={submitting}>{submitting ? "Se genereaza..." : "Trimite cererea"}</button>
+            <button className={`primary-btn ${attentionClass(leaveFormNeedsAttention)}`} data-assistant-action="submit-leave-request" type="submit" title="Trimite cererea catre manager" disabled={submitting}>{submitting ? "Se genereaza..." : "Trimite cererea"}</button>
           </div>
         </form>
+      </div>
+
+      <div id="my-leave-requests" className="panel" data-assistant-section="my-leave-requests">
+        <h3 className="panel-title">Cererile mele</h3>
+        {myLeaveRequests.length === 0 ? (
+          <p className="tools-subtitle">Nu ai cereri depuse momentan.</p>
+        ) : (
+          <div className="simple-list">
+            {myLeaveRequests.map((request) => (
+              <div
+                id={`leave-request-${request.id}`}
+                key={request.id}
+                className={`simple-list-item leave-history-item leave-history-item-vertical ${attentionClass(request.id === submittedLeaveRequestId)}`}
+              >
+                <div className="simple-list-text">
+                  <div className="simple-list-label">{requestTypeLabel(request.requestType)}</div>
+                  <div className="simple-list-subtitle">
+                    {request.periodStart} - {request.periodEnd} - {request.requestedDays} zile - status: {request.status.replace("_", " ")}
+                  </div>
+                  <div className="simple-list-subtitle">
+                    {request.companyName || "Fara companie"} - {request.roleTitle || "Fara functie"} - {request.department || "Fara departament"}
+                  </div>
+                </div>
+                <div className="leave-admin-actions">
+                  {request.pdfDataUrl ? (
+                    <>
+                      <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                      <button
+                        className="secondary-btn"
+                        type="button"
+                        onClick={() =>
+                          void downloadFileFromUrl({
+                            url: request.pdfDataUrl,
+                            fileName: getLeaveRequestFileName(request),
+                          })
+                        }
+                      >
+                        <Download size={14} />
+                        Download
+                      </button>
+                    </>
+                  ) : null}
+                  <span className={request.status === "aprobat" ? "badge badge-green" : "badge badge-orange"}>
+                    {request.status.replace("_", " ")}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -630,13 +1001,29 @@ export default function LeavePlannerPage() {
             {pendingLeaveRequests.map((request) => (
               <div key={request.id} className="simple-list-item leave-history-item">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">{request.userName} · {requestTypeLabel(request.requestType)}</div>
+                  <div className="simple-list-label">
+                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    {" "}· {requestTypeLabel(request.requestType)}
+                  </div>
                   <div className="simple-list-subtitle">
                     {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile
                   </div>
                 </div>
                 <div className="leave-admin-actions">
                   <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() =>
+                      void downloadFileFromUrl({
+                        url: request.pdfDataUrl,
+                        fileName: getLeaveRequestFileName(request),
+                      })
+                    }
+                  >
+                    <Download size={14} />
+                    Download
+                  </button>
                   <button
                     className="primary-btn"
                     type="button"
@@ -661,7 +1048,10 @@ export default function LeavePlannerPage() {
             {approvedRequests.map((request) => (
               <div key={request.id} className="simple-list-item leave-history-item leave-history-item-vertical">
                 <div className="simple-list-text">
-                  <div className="simple-list-label">{request.userName} · {requestTypeLabel(request.requestType)}</div>
+                  <div className="simple-list-label">
+                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    {" "}· {requestTypeLabel(request.requestType)}
+                  </div>
                   <div className="simple-list-subtitle">
                     {request.periodStart} - {request.periodEnd} · {request.requestedDays} zile · emis la {new Date(request.issuedAt).toLocaleString("ro-RO")}
                   </div>
@@ -669,6 +1059,19 @@ export default function LeavePlannerPage() {
                 </div>
                 <div className="leave-admin-actions">
                   <a className="secondary-btn" href={request.pdfDataUrl} target="_blank" rel="noreferrer">Preview PDF</a>
+                  <button
+                    className="secondary-btn"
+                    type="button"
+                    onClick={() =>
+                      void downloadFileFromUrl({
+                        url: request.pdfDataUrl,
+                        fileName: getLeaveRequestFileName(request),
+                      })
+                    }
+                  >
+                    <Download size={14} />
+                    Download
+                  </button>
                   {(isAdmin || request.userId === user.uid) && (
                     <button className="danger-btn" type="button" onClick={() => handleDeleteRequest(request.id)} disabled={deletingRequestId === request.id}>
                       {deletingRequestId === request.id ? "Se sterge..." : "Sterge PDF (cerere)"}
@@ -687,8 +1090,8 @@ export default function LeavePlannerPage() {
             <div className="leave-calendar-nav">
               <strong className="leave-month-title">Calendar fullscreen · {expandedUserName} · {visibleMonth.getFullYear()}</strong>
               <div className="leave-inline-calendar-actions">
-                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() - 1, visibleMonth.getMonth(), 1))} aria-label="An precedent">◀</button>
-                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() + 1, visibleMonth.getMonth(), 1))} aria-label="An urmator">▶</button>
+                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() - 1, visibleMonth.getMonth(), 1))} aria-label="An precedent"><ChevronLeft size={16} /></button>
+                <button className="secondary-btn leave-icon-btn" type="button" onClick={() => setVisibleMonth(new Date(visibleMonth.getFullYear() + 1, visibleMonth.getMonth(), 1))} aria-label="An urmator"><ChevronRight size={16} /></button>
                 <button className="primary-btn" type="button" onClick={() => setShowYearCalendar(false)}>Exit fullscreen</button>
               </div>
             </div>

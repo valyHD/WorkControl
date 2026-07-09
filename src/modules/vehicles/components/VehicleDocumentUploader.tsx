@@ -8,6 +8,7 @@ export type VehiclePendingDocument = {
   id: string;
   file: File;
   category: VehicleDocumentCategory;
+  expiryDate: string;
 };
 
 type Props = {
@@ -17,8 +18,10 @@ type Props = {
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
   service: "Service + facturi",
+  itp: "ITP",
+  rca: "RCA / Asigurare",
+  casco: "CASCO",
   leasing_rate: "Rate leasing",
-  rca_itp: "RCA / ITP",
   rovinieta: "Roviniete",
   amenda: "Amenzi",
   other: "Alte documente",
@@ -29,6 +32,7 @@ export default function VehicleDocumentUploader({
   onDocumentsChange,
 }: Props) {
   const [category, setCategory] = useState<VehicleDocumentCategory>("service");
+  const [expiryDate, setExpiryDate] = useState("");
 
   function handleFilesSelect(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -38,6 +42,7 @@ export default function VehicleDocumentUploader({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
       file,
       category,
+      expiryDate,
     }));
 
     onDocumentsChange([...selectedDocuments, ...pending]);
@@ -56,8 +61,10 @@ export default function VehicleDocumentUploader({
       },
       {
         service: 0,
+        itp: 0,
+        rca: 0,
+        casco: 0,
         leasing_rate: 0,
-        rca_itp: 0,
         rovinieta: 0,
         amenda: 0,
         other: 0,
@@ -81,6 +88,14 @@ export default function VehicleDocumentUploader({
           ))}
         </select>
 
+        <label className="tool-form-label">Data expirare</label>
+        <input
+          className="tool-input"
+          type="date"
+          value={expiryDate}
+          onChange={(event) => setExpiryDate(event.target.value)}
+        />
+
         <label className="secondary-btn" style={{ alignSelf: "flex-end" }}>
           Alege documente
           <input
@@ -102,6 +117,7 @@ export default function VehicleDocumentUploader({
                   <div className="vehicle-doc-item__name">{item.file.name}</div>
                   <div className="vehicle-doc-item__meta">
                     {categoryLabels[item.category]} · {(item.file.size / 1024).toFixed(1)} KB
+                    {item.expiryDate ? ` · expira ${item.expiryDate}` : ""}
                   </div>
                 </div>
               </div>

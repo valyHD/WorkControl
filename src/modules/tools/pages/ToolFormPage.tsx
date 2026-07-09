@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Hash, PackageSearch, Save, UserCheck } from "lucide-react";
 import type { AppUser, ToolFormValues } from "../../../types/tool";
 import ToolForm from "../components/ToolForm";
 import {
@@ -14,6 +15,8 @@ import {
   uploadToolImages,
 } from "../services/toolsService";
 import { useAuth } from "../../../providers/AuthProvider";
+import ActionBar from "../../../components/ActionBar";
+import PageQuickActions from "../../../components/PageQuickActions";
 
 const emptyValues: ToolFormValues = {
   name: "",
@@ -46,7 +49,8 @@ export default function ToolFormPage() {
   const { toolId } = useParams();
   const isEdit = Boolean(toolId);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const location = useLocation();
+  const { role, user } = useAuth();
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [initialValues, setInitialValues] = useState<ToolFormValues>(emptyValues);
@@ -69,7 +73,7 @@ export default function ToolFormPage() {
           const tool = await getToolById(toolId);
 
           if (tool) {
-            if (user?.uid && tool.ownerUserId && tool.ownerUserId !== user.uid) {
+            if (role !== "admin" && user?.uid && tool.ownerUserId && tool.ownerUserId !== user.uid) {
               setForbidden(true);
               return;
             }
@@ -102,8 +106,11 @@ export default function ToolFormPage() {
             });
           }
         } else {
+          const params = new URLSearchParams(location.search);
           setInitialValues({
             ...emptyValues,
+            name: params.get("name") || "",
+            internalCode: (params.get("code") || "").toUpperCase(),
             ownerUserId: user?.uid ?? "",
             ownerUserName: user?.displayName ?? "",
             ownerThemeKey: user?.themeKey ?? null,
@@ -126,7 +133,7 @@ export default function ToolFormPage() {
     }
 
     void load();
-  }, [toolId, user]);
+  }, [location.search, role, toolId, user]);
 
   async function handleSubmit(values: ToolFormValues, selectedFiles: File[]) {
     setSubmitting(true);
@@ -190,7 +197,7 @@ export default function ToolFormPage() {
 
         locationType: values.currentHolderUserId ? "utilizator" : "depozit",
         locationLabel: values.currentHolderUserId
-          ? selectedHolder?.fullName || values.currentHolderUserName || "Utilizator"
+           ? selectedHolder?.fullName || values.currentHolderUserName || "Utilizator"
           : "Depozit",
 
         status: values.currentHolderUserId
@@ -257,26 +264,61 @@ export default function ToolFormPage() {
     return (
       <div className="placeholder-page">
         <h2>Nu poti edita aceasta scula</h2>
-        <p>Doar responsabilul principal poate modifica aceasta scula.</p>
+        <p>Doar responsabilul principal sau un administrator poate modifica aceasta scula.</p>
       </div>
     );
   }
 
   return (
     <section className="page-section">
-      <div className="panel">
-        <div className="tools-header">
-          <div>
-            <h2 className="panel-title">{title}</h2>
-            <p className="tools-subtitle">
-              Completeaza datele principale, responsabilul, detinatorul si pozele.
-            </p>
-          </div>
+      <ActionBar
+        title={title}
+        subtitle="Completeaza datele principale, responsabilul, detinatorul si pozele."
+        actions={[
+          {
+            label: "Inapoi la lista",
+            href: "/tools",
+            icon: <ArrowLeft size={16} />,
+            tooltip: "Revino la lista de scule",
+          },
+        ]}
+      />
 
-          <Link to="/tools" className="secondary-btn">
-            Inapoi la lista
-          </Link>
-        </div>
+      <PageQuickActions
+        actions={[
+          {
+            label: "Salveaza",
+            href: "#tool-save",
+            icon: <Save size={16} />,
+            assistantAction: "save-tool",
+            tooltip: "Salveaza scula",
+            variant: "primary",
+          },
+          {
+            label: "Nume scula",
+            href: "#tool-name",
+            icon: <PackageSearch size={16} />,
+            assistantField: "name",
+            tooltip: "Mergi la numele sculei",
+          },
+          {
+            label: "Cod intern",
+            href: "#tool-internalCode",
+            icon: <Hash size={16} />,
+            assistantField: "internalCode",
+            tooltip: "Mergi la codul intern",
+          },
+          {
+            label: "Detinator",
+            href: "#tool-currentHolderUserId",
+            icon: <UserCheck size={16} />,
+            assistantField: "currentHolderUserId",
+            tooltip: "Mergi la detinatorul curent",
+          },
+        ]}
+      />
+
+      <div className="panel" data-assistant-section="tool-form">
 
         {error && <div className="tool-message">{error}</div>}
 

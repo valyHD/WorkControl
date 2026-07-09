@@ -4,6 +4,7 @@ import type { AppUser, ToolItem } from "../../../types/tool";
 import ToolStatusBadge from "../../tools/components/ToolStatusBadge";
 import SafeImage from "../../../components/SafeImage";
 import { changeToolHolder } from "../../tools/services/toolsService";
+import UserProfileLink from "../../../components/UserProfileLink";
 
 type Props = {
   tool: ToolItem;
@@ -73,6 +74,8 @@ export default function MyToolCard({
             alt={tool.name}
             className="tool-card-avatar-image"
             fallbackText={tool.name}
+            loading="eager"
+            fetchPriority="high"
             sizes="72px"
           />
         </div>
@@ -87,12 +90,19 @@ export default function MyToolCard({
 
       {showOwner && (
         <div className="tool-card-meta">
-          <strong>Responsabil:</strong> {tool.ownerUserName || "-"}
+          <strong>Responsabil:</strong>{" "}
+          <UserProfileLink userId={tool.ownerUserId} name={tool.ownerUserName} themeKey={tool.ownerThemeKey} />
         </div>
       )}
 
       <div className="tool-card-meta">
-        <strong>La cine se afla:</strong> {tool.currentHolderUserName || "Depozit"}
+        <strong>La cine se afla:</strong>{" "}
+        <UserProfileLink
+          userId={tool.currentHolderUserId}
+          name={tool.currentHolderUserName}
+          themeKey={tool.currentHolderThemeKey}
+          fallback="Depozit"
+        />
       </div>
 
       {canManage ? (

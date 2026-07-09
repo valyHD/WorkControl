@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import SafeImage from "../../../components/SafeImage";
+import SafeImage, { preloadImageUrls } from "../../../components/SafeImage";
 import type { VehicleItem } from "../../../types/vehicle";
 import { subscribeVehiclesList } from "../services/vehiclesService";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
-import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
-import { CarFront, Search } from "lucide-react";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
+import { CarFront, FileText, MapPinned, MessageSquare, Search, UserCheck } from "lucide-react";
+import UserProfileLink from "../../../components/UserProfileLink";
+import { VehicleGpsVisibilityToggle } from "../components/VehicleGpsVisibilityGate";
 
 function VehicleCardSkeleton() {
   return (
@@ -24,11 +26,44 @@ function VehicleCardSkeleton() {
 
 const STATUS_OPTIONS = [
   { value: "toate", label: "Toate statusurile" },
-  { value: "activa", label: "Activă" },
+  { value: "activa", label: "Activ?" },
   { value: "in_service", label: "În service" },
-  { value: "indisponibila", label: "Indisponibilă" },
-  { value: "avariata", label: "Avariată" },
+  { value: "indisponibila", label: "Indisponibil?" },
+  { value: "avariata", label: "Avariat?" },
 ];
+
+function formatDataBytes(value: unknown) {
+  const bytes = typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  const formatter = new Intl.NumberFormat("ro-RO", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${formatter.format(bytes / (1024 * 1024 * 1024))} GB`;
+  }
+
+  if (bytes >= 1024 * 1024) {
+    return `${formatter.format(bytes / (1024 * 1024))} MB`;
+  }
+
+  if (bytes >= 1024) {
+    return `${formatter.format(bytes / 1024)} KB`;
+  }
+
+  return `${formatter.format(bytes)} B`;
+}
+
+function getCurrentGpsDataUsageMonthKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Bucharest",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  return `${year}_${month}`;
+}
 
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
@@ -53,11 +88,15 @@ export default function VehiclesPage() {
     };
   }, []);
 
+  useEffect(() => {
+    preloadImageUrls(vehicles.map((vehicle) => vehicle.coverThumbUrl || vehicle.coverImageUrl), 48);
+  }, [vehicles]);
+
   const filteredVehicles = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     return vehicles.filter((v) => {
-      // Safe string access — Firestore may occasionally return missing fields
+      // Safe string access ? Firestore may occasionally return missing fields
       const plate = (v.plateNumber || "").toLowerCase();
       const brand = (v.brand || "").toLowerCase();
       const model = (v.model || "").toLowerCase();
@@ -94,9 +133,36 @@ export default function VehiclesPage() {
             </p>
           </div>
           <div className="tools-header-actions">
+            <VehicleGpsVisibilityToggle />
+            <Link to="/vehicles/gps-map" className="secondary-btn">
+              <MapPinned size={15} /> Lista harta GPS
+            </Link>
             <Link to="/vehicles/new" className="primary-btn">
               <CarFront size={15} /> Adaugă mașină
             </Link>
+          </div>
+        </div>
+
+        <div className="asset-help-grid" aria-label="Instructiuni masini">
+          <div className="asset-help-card asset-help-card-blue">
+            <span className="asset-help-icon"><CarFront size={18} /></span>
+            <strong>Verifica masina</strong>
+            <p>Cauta dupa numar, marca, model, responsabil sau sofer si intra pe masina pentru detalii.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-amber">
+            <span className="asset-help-icon"><UserCheck size={18} /></span>
+            <strong>Schimbi soferul cu aprobare</strong>
+            <p>Cand alegi alt sofer, acesta trebuie sa accepte solicitarea ca schimbarea sa fie finala.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-green">
+            <span className="asset-help-icon"><FileText size={18} /></span>
+            <strong>Actualizeaza mentenanta</strong>
+            <p>Adauga RCA, ITP, CASCO, rovinieta, service si km ca sa primesti alerte corecte.</p>
+          </div>
+          <div className="asset-help-card asset-help-card-violet">
+            <span className="asset-help-icon"><MessageSquare size={18} /></span>
+            <strong>Note si poze</strong>
+            <p>In pagina masinii, deschide Istoric evenimente si comentarii ca sa adaugi observatii.</p>
           </div>
         </div>
 
@@ -136,7 +202,7 @@ export default function VehiclesPage() {
           <div className="placeholder-page">
             <h2>Eroare</h2>
             <p>{error}</p>
-            <button className="secondary-btn" onClick={() => window.location.reload()}>Reîncarcă</button>
+            <button className="secondary-btn" onClick={() => window.location.reload()}>Re?ncarc?</button>
           </div>
         ) : loading ? (
           <div className="tools-grid">
@@ -150,16 +216,17 @@ export default function VehiclesPage() {
             </div>
             <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
               {search || statusFilter !== "toate"
-                ? "Modifică filtrele de căutare."
-                : "Apasă «Adaugă mașină» pentru a începe."}
+                 ? "Modifică filtrele de căutare."
+                : "Apasă Adaugă mașină pentru a începe."}
             </div>
           </div>
         ) : (
           <div className="tools-grid">
-            {filteredVehicles.map((vehicle) => {
+            {filteredVehicles.map((vehicle, index) => {
               const themeClass = getUserThemeClass(
                 vehicle.currentDriverThemeKey || vehicle.ownerThemeKey || null
               );
+              const prioritizeImage = index < 18;
 
               return (
                 <Link
@@ -175,6 +242,8 @@ export default function VehiclesPage() {
                           alt={vehicle.plateNumber}
                           className="tool-card-avatar-image"
                           fallbackText={vehicle.brand || vehicle.plateNumber}
+                          loading={prioritizeImage ? "eager" : "lazy"}
+                          fetchPriority={prioritizeImage ? "high" : "low"}
                           sizes="72px"
                         />
                       </div>
@@ -183,26 +252,55 @@ export default function VehiclesPage() {
 
                     <div className="tool-card-title user-accent-title">{vehicle.plateNumber}</div>
                     <div className="tool-card-code">
-                      {[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "—"}
+                      {[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "?"}
                     </div>
 
                     <div className="tool-card-meta">
-                      <strong>Responsabil:</strong> {vehicle.ownerUserName || "—"}
+                      <strong>Responsabil:</strong>{" "}
+                      <UserProfileLink
+                        userId={vehicle.ownerUserId}
+                        name={vehicle.ownerUserName}
+                        themeKey={vehicle.ownerThemeKey}
+                        fallback="-"
+                        className="user-profile-link--plain"
+                      />
                     </div>
                     <div className="tool-card-meta">
-                      <strong>Șofer curent:</strong> {vehicle.currentDriverUserName || "—"}
+                      <strong>Sofer curent:</strong>{" "}
+                      <UserProfileLink
+                        userId={vehicle.currentDriverUserId}
+                        name={vehicle.currentDriverUserName}
+                        themeKey={vehicle.currentDriverThemeKey}
+                        fallback="-"
+                        className="user-profile-link--plain"
+                      />
                     </div>
                     <div className="tool-card-meta">
                       <strong>Km:</strong> {(vehicle.currentKm || 0).toLocaleString("ro-RO")}
                     </div>
+                    <div className="tool-card-meta">
+                      <strong>Date GPS luna:</strong>{" "}
+                      {(() => {
+                        const monthKey =
+                          vehicle.gpsDataUsage?.currentMonthKey || getCurrentGpsDataUsageMonthKey();
+                        const monthUsage = vehicle.gpsDataUsage?.months?.[monthKey];
+                        return formatDataBytes(
+                          monthUsage?.totalBytes ||
+                            (monthUsage?.rxBytes || 0) + (monthUsage?.txBytes || 0)
+                        );
+                      })()}
+                    </div>
 
                     <div className="tool-card-actions">
-                      <span className="user-accent-chip">
-                        <span className="user-accent-avatar" style={{ width: 24, height: 24, fontSize: 10 }}>
-                          {getUserInitials(vehicle.currentDriverUserName || vehicle.ownerUserName || "A")}
-                        </span>
-                        {vehicle.currentDriverUserName || vehicle.ownerUserName || "—"}
-                      </span>
+                      <UserProfileLink
+                        userId={vehicle.currentDriverUserId || vehicle.ownerUserId}
+                        name={vehicle.currentDriverUserName || vehicle.ownerUserName}
+                        themeKey={vehicle.currentDriverThemeKey || vehicle.ownerThemeKey}
+                        fallback="-"
+                        showAvatar
+                        avatarClassName="user-profile-small-avatar"
+                        className="user-profile-link--chip"
+                      />
                     </div>
                   </div>
                 </Link>

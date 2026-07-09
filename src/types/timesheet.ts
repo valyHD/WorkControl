@@ -34,6 +34,12 @@ export interface TimesheetItem {
 
   status: TimesheetStatus;
   explanation: string;
+  startExplanation?: string;
+  stopExplanation?: string;
+  startPolicyFlag?: string;
+  stopPolicyFlag?: string;
+  startExpectedTime?: string;
+  stopExpectedMinutes?: number | null;
 
   startAt: number;
   stopAt: number | null;
@@ -54,7 +60,6 @@ export interface TimesheetItem {
 }
 
 export interface ProjectFormValues {
-  code: string;
   name: string;
   status: ProjectStatus;
 }

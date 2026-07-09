@@ -1,6 +1,8 @@
 import {
   addDoc,
   collection,
+  deleteField,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -8,6 +10,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -20,9 +23,16 @@ import type {
   TimesheetStatsSummary,
 } from "../../../types/timesheet";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
+import { simplifyTimesheetAddressLabel } from "../utils/timesheetLocation";
 
 const projectsCollection = collection(db, "projects");
 const timesheetsCollection = collection(db, "timesheets");
+const usersCollection = collection(db, "users");
+const projectAuditFields: AuditFieldDescriptor<ProjectFormValues>[] = [
+  { key: "name", label: "Nume proiect" },
+  { key: "status", label: "Status" },
+];
 
 function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
   return {
@@ -36,6 +46,10 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
 }
 
 function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
+  const rawStatus = (data.status ?? "activ") as TimesheetItem["status"];
+  const normalizedStatus =
+    rawStatus === "neinchis" && data.stopAt ? "corectat" : rawStatus;
+
   return {
     id,
     userId: data.userId ?? "",
@@ -45,8 +59,15 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     projectCode: data.projectCode ?? "",
     projectName: data.projectName ?? "",
 userThemeKey: data.userThemeKey ?? null,
-    status: data.status ?? "activ",
+    status: normalizedStatus,
     explanation: data.explanation ?? "",
+    startExplanation: data.startExplanation ?? "",
+    stopExplanation: data.stopExplanation ?? "",
+    startPolicyFlag: data.startPolicyFlag ?? "",
+    stopPolicyFlag: data.stopPolicyFlag ?? "",
+    startExpectedTime: data.startExpectedTime ?? "",
+    stopExpectedMinutes:
+      typeof data.stopExpectedMinutes === "number" ? data.stopExpectedMinutes : null,
 
     startAt: data.startAt ?? Date.now(),
     stopAt: data.stopAt ?? null,
@@ -97,6 +118,45 @@ function getDateParts(ts: number) {
   };
 }
 
+function getProjectDisplayName(projectName?: string, projectCode?: string): string {
+  const name = String(projectName ?? "").trim();
+  const code = String(projectCode ?? "").trim();
+  return name || code || "Fara proiect";
+}
+
+function getStartExplanationLabel(startPolicyFlag?: string): string {
+  return startPolicyFlag === "late_start" ? "Explicatie start tarziu" : "Explicatie start";
+}
+
+function getStopExplanationLabel(stopPolicyFlag?: string): string {
+  if (stopPolicyFlag === "early_stop") return "Explicatie stop devreme";
+  if (stopPolicyFlag === "late_stop") return "Explicatie stop tarziu";
+  return "Explicatie stop";
+}
+
+function formatExplanationBlock(label: string, explanation: string): string {
+  const cleanExplanation = explanation.trim();
+  return cleanExplanation ? `${label}:\n${cleanExplanation}` : "";
+}
+
+function buildTimesheetExplanationSummary(params: {
+  startExplanation?: string;
+  stopExplanation?: string;
+  startPolicyFlag?: string;
+  stopPolicyFlag?: string;
+}): string {
+  return [
+    formatExplanationBlock(
+      getStartExplanationLabel(params.startPolicyFlag),
+      String(params.startExplanation ?? "")
+    ),
+    formatExplanationBlock(
+      getStopExplanationLabel(params.stopPolicyFlag),
+      String(params.stopExplanation ?? "")
+    ),
+  ].filter(Boolean).join("\n\n");
+}
+
 export async function getProjectsList(): Promise<ProjectItem[]> {
   const snap = await getDocs(query(projectsCollection, orderBy("name", "asc")));
   return snap.docs.map((docItem) => mapProjectDoc(docItem.id, docItem.data()));
@@ -113,13 +173,39 @@ export async function getProjectById(projectId: string): Promise<ProjectItem | n
   return mapProjectDoc(snap.id, snap.data());
 }
 
+export async function getUserTimesheetProjectPreference(userId: string): Promise<string> {
+  if (!userId) return "";
+  const snap = await getDoc(doc(usersCollection, userId));
+  if (!snap.exists()) return "";
+  const data = snap.data();
+  return String(data.timesheetDefaultProjectId ?? data.lastTimesheetProjectId ?? "").trim();
+}
+
+export async function saveUserTimesheetProjectPreference(
+  userId: string,
+  projectId: string
+): Promise<void> {
+  if (!userId) return;
+  await setDoc(
+    doc(usersCollection, userId),
+    {
+      timesheetDefaultProjectId: projectId.trim(),
+      lastTimesheetProjectId: projectId.trim(),
+      updatedAt: Date.now(),
+      updatedAtServer: serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
 export async function createProject(values: ProjectFormValues): Promise<string> {
   const now = Date.now();
+  const savedValues = { ...values, name: values.name.trim() };
+  const fieldsText = buildAuditSnapshot(savedValues, projectAuditFields);
 
   const refDoc = await addDoc(projectsCollection, {
-    code: values.code.trim(),
-    name: values.name.trim(),
-    status: values.status,
+    name: savedValues.name,
+    status: savedValues.status,
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -131,7 +217,11 @@ export async function createProject(values: ProjectFormValues): Promise<string> 
     eventType: "project_created",
     entityId: refDoc.id,
     title: "Proiect creat",
-    message: `Proiect nou: ${values.code.trim()} - ${values.name.trim()}.`,
+    message: `Proiect nou: ${values.name.trim()}.`,
+    metadata: {
+      fieldsText,
+      fieldsCount: fieldsText.length,
+    },
   });
 
   return refDoc.id;
@@ -141,10 +231,20 @@ export async function updateProject(
   projectId: string,
   values: ProjectFormValues
 ): Promise<void> {
+  const existingSnap = await getDoc(doc(db, "projects", projectId));
+  const existingData = existingSnap.exists() ? existingSnap.data() : null;
+  const previousStatus = existingData?.status ?? "";
+  const savedValues = { ...values, name: values.name.trim() };
+  const changesText = buildAuditChanges(
+    existingData as Partial<ProjectFormValues> | null,
+    savedValues,
+    projectAuditFields
+  );
+
   await updateDoc(doc(db, "projects", projectId), {
-    code: values.code.trim(),
-    name: values.name.trim(),
-    status: values.status,
+    code: deleteField(),
+    name: savedValues.name,
+    status: savedValues.status,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -154,20 +254,48 @@ export async function updateProject(
     eventType: "project_updated",
     entityId: projectId,
     title: "Proiect actualizat",
-    message: `Proiect actualizat: ${values.code.trim()} - ${values.name.trim()} (${values.status}).`,
+    message: `Proiect actualizat: ${values.name.trim()} (${values.status}).`,
+    metadata: {
+      changesText,
+      changesCount: changesText.length,
+    },
+  });
+
+  if (previousStatus && previousStatus !== values.status) {
+    await dispatchNotificationEvent({
+      module: "projects",
+      eventType: "project_status_changed",
+      entityId: projectId,
+      title: "Status proiect schimbat",
+      message: `Proiectul ${values.name.trim()} are acum statusul ${values.status}.`,
+      notificationPath: "/projects",
+      metadata: {
+        changesText: [`Status: ${previousStatus || "-"} -> ${values.status}`],
+        changesCount: 1,
+      },
+    });
+  }
+}
+
+export async function deleteProject(project: ProjectItem): Promise<void> {
+  await deleteDoc(doc(db, "projects", project.id));
+
+  await dispatchNotificationEvent({
+    module: "projects",
+    eventType: "project_deleted",
+    entityId: project.id,
+    title: "Proiect sters",
+    message: `Proiectul ${project.name || project.code || project.id} a fost sters.`,
+    notificationPath: "/projects",
   });
 }
 
-export async function isProjectCodeUsed(code: string, excludeId?: string): Promise<boolean> {
-  const clean = code.trim();
-  if (!clean) return false;
-
-  const snap = await getDocs(
-    query(projectsCollection, where("code", "==", clean), limit(10))
-  );
-
-  if (snap.empty) return false;
-  return snap.docs.some((docItem) => docItem.id !== excludeId);
+function cleanTimesheetLocation(location: TimesheetLocation): TimesheetLocation {
+  return {
+    lat: location.lat ?? null,
+    lng: location.lng ?? null,
+    label: simplifyTimesheetAddressLabel(location.label),
+  };
 }
 
 export async function getActiveTimesheetForUser(userId: string): Promise<TimesheetItem | null> {
@@ -192,6 +320,9 @@ export async function startTimesheet(params: {
   projectCode: string;
   projectName: string;
   startLocation: TimesheetLocation;
+  startExplanation?: string;
+  startPolicyFlag?: string;
+  startExpectedTime?: string;
 }): Promise<string> {
   const existing = await getActiveTimesheetForUser(params.userId);
   if (existing) {
@@ -200,6 +331,8 @@ export async function startTimesheet(params: {
 
   const now = Date.now();
   const parts = getDateParts(now);
+  const startExplanation = String(params.startExplanation ?? "").trim();
+  const startPolicyFlag = params.startPolicyFlag ?? "";
 
   const refDoc = await addDoc(timesheetsCollection, {
     userId: params.userId,
@@ -208,15 +341,24 @@ export async function startTimesheet(params: {
     projectId: params.projectId,
     projectCode: params.projectCode,
     projectName: params.projectName,
-userThemeKey: params.userThemeKey ?? null,
+    userThemeKey: params.userThemeKey ?? null,
     status: "activ",
-    explanation: "",
+    explanation: buildTimesheetExplanationSummary({
+      startExplanation,
+      startPolicyFlag,
+    }),
+    startExplanation,
+    stopExplanation: "",
+    startPolicyFlag,
+    stopPolicyFlag: "",
+    startExpectedTime: params.startExpectedTime ?? "",
+    stopExpectedMinutes: null,
 
     startAt: now,
     stopAt: null,
     workedMinutes: 0,
 
-    startLocation: params.startLocation,
+    startLocation: cleanTimesheetLocation(params.startLocation),
     stopLocation: null,
 
     startSource: "web",
@@ -237,12 +379,23 @@ userThemeKey: params.userThemeKey ?? null,
     eventType: "timesheet_started",
     entityId: refDoc.id,
     title: "Pontaj pornit",
-    message: `${params.userName} a pornit pontajul pe ${params.projectCode} - ${params.projectName}.`,
+    message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
     directUserId: params.userId,
     ownerUserId: params.userId,
     actorUserId: params.userId,
     actorUserName: params.userName,
     actorUserThemeKey: params.userThemeKey ?? null,
+    metadata: {
+      fieldsText: [
+        `User: ${params.userName}`,
+        `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
+        `Data lucru: ${parts.workDate}`,
+        `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
+        `Explicatie start: ${params.startExplanation || "-"}`,
+        `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
+      ],
+      fieldsCount: 6,
+    },
   });
 
   return refDoc.id;
@@ -252,6 +405,8 @@ export async function stopTimesheet(params: {
   timesheetId: string;
   explanation: string;
   stopLocation: TimesheetLocation;
+  stopPolicyFlag?: string;
+  stopExpectedMinutes?: number;
 }): Promise<void> {
   const refDoc = doc(db, "timesheets", params.timesheetId);
   const snap = await getDoc(refDoc);
@@ -266,19 +421,32 @@ export async function stopTimesheet(params: {
   const workedMinutes = Math.max(1, Math.round((stopAt - startAt) / 60000));
 
   let status: TimesheetItem["status"] = "inchis";
-  if (workedMinutes < 8 * 60) {
+  if (workedMinutes < 8 * 60 || workedMinutes > 9 * 60) {
     status = "corectat";
   }
-  if (workedMinutes > 9 * 60) {
-    status = "neinchis";
-  }
+
+  const stopExplanation = params.explanation.trim();
+  const startExplanation = String(data.startExplanation ?? "").trim();
+  const legacyExplanation = String(data.explanation ?? "").trim();
+  const startPolicyFlag = String(data.startPolicyFlag ?? "");
+  const stopPolicyFlag = params.stopPolicyFlag ?? "";
+  const explanationSummary = buildTimesheetExplanationSummary({
+    startExplanation: startExplanation || (!data.startExplanation ? legacyExplanation : ""),
+    stopExplanation,
+    startPolicyFlag,
+    stopPolicyFlag,
+  });
 
   await updateDoc(refDoc, {
     stopAt,
     workedMinutes,
-    stopLocation: params.stopLocation,
+    stopLocation: cleanTimesheetLocation(params.stopLocation),
     stopSource: "web",
-    explanation: params.explanation.trim(),
+    explanation: explanationSummary,
+    stopExplanation,
+    stopPolicyFlag,
+    stopExpectedMinutes:
+      typeof params.stopExpectedMinutes === "number" ? params.stopExpectedMinutes : null,
     status,
     updatedAt: stopAt,
     updatedAtServer: serverTimestamp(),
@@ -289,12 +457,23 @@ export async function stopTimesheet(params: {
     eventType: "timesheet_stopped",
     entityId: params.timesheetId,
     title: "Pontaj oprit",
-    message: `${data.userName ?? "Utilizator"} a oprit pontajul pentru ${data.projectCode ?? ""} - ${data.projectName ?? ""}.`,
+    message: `${data.userName ?? "Utilizator"} a oprit pontajul pentru ${getProjectDisplayName(data.projectName, data.projectCode)}.`,
     directUserId: data.userId ?? "",
     ownerUserId: data.userId ?? "",
     actorUserId: data.userId ?? "",
     actorUserName: data.userName ?? "Utilizator",
     actorUserThemeKey: data.userThemeKey ?? null,
+    metadata: {
+      fieldsText: [
+        `User: ${data.userName ?? "Utilizator"}`,
+        `Proiect: ${getProjectDisplayName(data.projectName, data.projectCode)}`,
+        `Minute lucrate: ${workedMinutes}`,
+        `Status: ${status}`,
+        `Explicatie stop: ${stopExplanation || "-"}`,
+        `Locatie stop: ${cleanTimesheetLocation(params.stopLocation).label || "-"}`,
+      ],
+      fieldsCount: 6,
+    },
   });
 }
 
@@ -310,10 +489,48 @@ export async function getTimesheetsForUser(userId: string): Promise<TimesheetIte
     .sort((a, b) => b.startAt - a.startAt);
 }
 
+export async function getLatestTimesheetProjectForUser(userId: string): Promise<ProjectItem | null> {
+  if (!userId) return null;
+
+  const activeTimesheet = await getActiveTimesheetForUser(userId);
+  const latestTimesheet =
+    activeTimesheet ||
+    (await getTimesheetsForUser(userId)).find((item) => item.projectId || item.projectName);
+
+  if (!latestTimesheet?.projectId) return null;
+
+  const project = await getProjectById(latestTimesheet.projectId);
+  if (project) return project;
+
+  return {
+    id: latestTimesheet.projectId,
+    code: latestTimesheet.projectCode || "",
+    name: latestTimesheet.projectName || "Proiect din pontaj",
+    status: "activ",
+    createdAt: latestTimesheet.createdAt,
+    updatedAt: latestTimesheet.updatedAt,
+  };
+}
+
 export async function getTimesheetById(timesheetId: string): Promise<TimesheetItem | null> {
   const snap = await getDoc(doc(db, "timesheets", timesheetId));
   if (!snap.exists()) return null;
   return mapTimesheetDoc(snap.id, snap.data());
+}
+
+export async function deleteTimesheet(item: TimesheetItem): Promise<void> {
+  await deleteDoc(doc(db, "timesheets", item.id));
+
+  await dispatchNotificationEvent({
+    module: "timesheets",
+    eventType: "timesheet_deleted",
+    entityId: item.id,
+    title: "Pontaj sters",
+    message: `Pontajul lui ${item.userName || "utilizator"} pentru ${item.projectName || item.projectCode || "proiect"} din ${item.workDate || "-"} a fost sters.`,
+    directUserId: item.userId,
+    ownerUserId: item.userId,
+    notificationPath: "/timesheets",
+  });
 }
 
 export function computeTimesheetStats(

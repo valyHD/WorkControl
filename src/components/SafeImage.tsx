@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 type SafeImageProps = {
   src?: string | null;
@@ -12,6 +12,32 @@ type SafeImageProps = {
   /** Optional wrapper class — useful when you need the skeleton to fill a container */
   wrapperClassName?: string;
 };
+
+const loadedImageUrls = new Set<string>();
+const pendingImageUrls = new Set<string>();
+
+export function preloadImageUrls(urls: Array<string | null | undefined>, limit = 36): void {
+  if (typeof window === "undefined") return;
+
+  urls
+    .filter((url): url is string => Boolean(url))
+    .slice(0, limit)
+    .forEach((url) => {
+      if (loadedImageUrls.has(url) || pendingImageUrls.has(url)) return;
+
+      pendingImageUrls.add(url);
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => {
+        loadedImageUrls.add(url);
+        pendingImageUrls.delete(url);
+      };
+      image.onerror = () => {
+        pendingImageUrls.delete(url);
+      };
+      image.src = url;
+    });
+}
 
 function initialsFromLabel(label: string): string {
   const compact = (label || "").trim();
@@ -31,7 +57,7 @@ function SafeImageComponent({
   sizes,
   wrapperClassName,
 }: SafeImageProps) {
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(() => Boolean(src && loadedImageUrls.has(src)));
   const [failed, setFailed] = useState(false);
 
   const displayFallback = failed || !src;
@@ -39,6 +65,11 @@ function SafeImageComponent({
     () => initialsFromLabel(fallbackText || alt),
     [fallbackText, alt]
   );
+
+  useEffect(() => {
+    setLoaded(Boolean(src && loadedImageUrls.has(src)));
+    setFailed(false);
+  }, [src]);
 
   if (displayFallback) {
     return (
@@ -74,7 +105,10 @@ function SafeImageComponent({
         decoding={decoding}
         fetchPriority={fetchPriority}
         sizes={sizes}
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          if (src) loadedImageUrls.add(src);
+          setLoaded(true);
+        }}
         onError={() => {
           setLoaded(false);
           setFailed(true);

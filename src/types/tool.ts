@@ -8,6 +8,14 @@ export interface AppUser {
   active?: boolean;
   role?: string;
   themeKey?: string | null;
+  avatarUrl?: string;
+  avatarThumbUrl?: string;
+  roleTitle?: string;
+  department?: string;
+  companyIds?: string[];
+  companyNames?: string[];
+  primaryCompanyId?: string;
+  primaryCompanyName?: string;
 }
 
 export interface ToolImageItem {
@@ -66,7 +74,8 @@ export interface ToolEventItem {
     | "assigned_changed"
     | "images_updated"
     | "qr_updated"
-    | "holder_changed";
+    | "holder_changed"
+    | "comment";
   message: string;
   createdAt: number;
   actorUserId?: string;

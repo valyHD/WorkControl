@@ -29,6 +29,12 @@ const FALLBACK_SETTINGS: ControlPanelSettings = {
   updatedAt: Date.now(),
 };
 
+type NumericSettingKey =
+  | "retentionMonths"
+  | "autoBackupIntervalDays"
+  | "notifyBeforeCleanupDays"
+  | "uiFontScale";
+
 function openBackupPreviewPage(payload: {
   summary: ProfessionalBackupView;
   meta: { fileName: string; exportedAt: number | null };
@@ -78,6 +84,7 @@ export default function ControlPanelPage() {
   const [cleanupVehicleEvents, setCleanupVehicleEvents] = useState(true);
   const [cleanupTimesheets, setCleanupTimesheets] = useState(false);
   const [cleanupMode, setCleanupMode] = useState<"retention_only" | "delete_all_selected">("retention_only");
+  const [numericSettingDrafts, setNumericSettingDrafts] = useState<Partial<Record<NumericSettingKey, string>>>({});
 
   const totalRecords = useMemo(
     () => Object.values(counters).reduce((sum, count) => sum + count, 0),
@@ -95,6 +102,7 @@ export default function ControlPanelPage() {
       ]);
 
       setSettings(loadedSettings);
+      setNumericSettingDrafts({});
       setCounters(loadedCounters);
       setLastBackupInfo((backupInfo as Record<string, any> | null) ?? null);
 
@@ -116,6 +124,42 @@ export default function ControlPanelPage() {
       setError("Nu am putut încărca datele din Control Panel.");
     });
   }, []);
+
+  function clampNumber(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function getNumericSettingValue(key: NumericSettingKey) {
+    return numericSettingDrafts[key] ?? String(settings[key] ?? "");
+  }
+
+  function updateNumericSetting(
+    key: NumericSettingKey,
+    rawValue: string,
+    fallback: number,
+    min: number,
+    max: number
+  ) {
+    setNumericSettingDrafts((prev) => ({ ...prev, [key]: rawValue }));
+
+    if (rawValue.trim() === "") {
+      setSettings((prev) => ({ ...prev, [key]: fallback }));
+      return;
+    }
+
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+
+    setSettings((prev) => ({ ...prev, [key]: clampNumber(parsed, min, max) }));
+  }
+
+  function commitNumericSetting(key: NumericSettingKey) {
+    setNumericSettingDrafts((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
 
   useEffect(() => {
     document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
@@ -204,8 +248,7 @@ export default function ControlPanelPage() {
       };
 
       const professionalView =
-        parsed.professionalView ??
-        (parsed.data ? buildProfessionalBackupView(parsed.data) : null);
+        parsed.professionalView ? (parsed.data ? buildProfessionalBackupView(parsed.data) : null) : null;
 
       if (!professionalView) {
         throw new Error("Fișierul încărcat nu conține structura de backup așteptată.");
@@ -483,7 +526,7 @@ export default function ControlPanelPage() {
                     <summary>{group.userName} ({group.entries.length})</summary>
                     {group.entries.map((entry, index) => (
                       <div key={`${group.userName}-${entry.startAt}-${index}`} className="simple-list-item">
-                        <strong>{entry.projectCode} · {entry.projectName}</strong>
+                        <strong>{entry.projectName || entry.projectCode || "Fara proiect"}</strong>
                         <small>
                           {new Date(entry.startAt).toLocaleString("ro-RO")} - {entry.stopAt ? new Date(entry.stopAt).toLocaleString("ro-RO") : "în curs"} · {entry.workedMinutes} min · {entry.status}
                         </small>
@@ -521,8 +564,9 @@ export default function ControlPanelPage() {
               type="number"
               min={1}
               max={24}
-              value={settings.retentionMonths}
-              onChange={(e) => setSettings((prev) => ({ ...prev, retentionMonths: Number(e.target.value) || 1 }))}
+              value={getNumericSettingValue("retentionMonths")}
+              onChange={(e) => updateNumericSetting("retentionMonths", e.target.value, 1, 1, 24)}
+              onBlur={() => commitNumericSetting("retentionMonths")}
             />
           </div>
 
@@ -545,8 +589,9 @@ export default function ControlPanelPage() {
               type="number"
               min={1}
               max={30}
-              value={settings.autoBackupIntervalDays}
-              onChange={(e) => setSettings((prev) => ({ ...prev, autoBackupIntervalDays: Number(e.target.value) || 1 }))}
+              value={getNumericSettingValue("autoBackupIntervalDays")}
+              onChange={(e) => updateNumericSetting("autoBackupIntervalDays", e.target.value, 1, 1, 30)}
+              onBlur={() => commitNumericSetting("autoBackupIntervalDays")}
             />
           </div>
 
@@ -557,8 +602,9 @@ export default function ControlPanelPage() {
               type="number"
               min={1}
               max={30}
-              value={settings.notifyBeforeCleanupDays}
-              onChange={(e) => setSettings((prev) => ({ ...prev, notifyBeforeCleanupDays: Number(e.target.value) || 1 }))}
+              value={getNumericSettingValue("notifyBeforeCleanupDays")}
+              onChange={(e) => updateNumericSetting("notifyBeforeCleanupDays", e.target.value, 1, 1, 30)}
+              onBlur={() => commitNumericSetting("notifyBeforeCleanupDays")}
             />
           </div>
         </div>
@@ -613,8 +659,9 @@ export default function ControlPanelPage() {
               step="0.05"
               min={0.9}
               max={1.25}
-              value={settings.uiFontScale}
-              onChange={(e) => setSettings((prev) => ({ ...prev, uiFontScale: Number(e.target.value) || 1 }))}
+              value={getNumericSettingValue("uiFontScale")}
+              onChange={(e) => updateNumericSetting("uiFontScale", e.target.value, 1, 0.9, 1.25)}
+              onBlur={() => commitNumericSetting("uiFontScale")}
             />
           </div>
           <div className="tool-form-block">

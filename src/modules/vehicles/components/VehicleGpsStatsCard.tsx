@@ -1,53 +1,83 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BatteryCharging,
+  Database,
   Gauge,
-  MapPin,
   Radio,
-  Satellite,
-  ShieldCheck,
-  Smartphone,
   Waypoints,
 } from "lucide-react";
-import type { VehicleItem } from "../../../types/vehicle";
+import type { VehicleItem, VehiclePositionItem } from "../../../types/vehicle";
 
 type Props = {
   vehicle: VehicleItem;
   odometerKmOverride?: number;
+  livePositionOverride?: VehiclePositionItem | null;
+  livePositionOverrideIsVirtual?: boolean;
 };
 
 const ONLINE_MS = 3 * 60 * 1000;
 const RECENT_MS = 10 * 60 * 1000;
+const FRESH_GPS_MOTION_MS = 90 * 1000;
 const MOVING_SPEED_THRESHOLD_KMH = 4;
-const IGNITION_OFF_IDLE_MS = 10 * 60 * 1000;
 
-function formatDate(ts?: number) {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleString("ro-RO");
+function getTrustedTotalOdometerKm(value: unknown, initialRecordedKm: number) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+  if (initialRecordedKm > 0 && value < initialRecordedKm) return 0;
+  return value;
 }
 
-function formatCoords(lat?: number, lng?: number) {
-  if (typeof lat !== "number" || typeof lng !== "number") return "-";
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "-";
-  return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+function getLastSavedRouteEndTs(vehicle: VehicleItem) {
+  let lastEndTs = 0;
+
+  for (const route of vehicle.gpsSimHistory ?? []) {
+    const lastPointTs = route.points?.[route.points.length - 1]?.ts || 0;
+    const durationEndTs =
+      route.startedAt && route.totalDurationMs ? route.startedAt + route.totalDurationMs : 0;
+    lastEndTs = Math.max(lastEndTs, route.stoppedAt || 0, lastPointTs, durationEndTs);
+  }
+
+  return lastEndTs;
 }
 
-function formatRelative(msAgo: number) {
-  const sec = Math.max(0, Math.floor(msAgo / 1000));
+function formatDataBytes(value: unknown) {
+  const bytes = typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  const formatter = new Intl.NumberFormat("ro-RO", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
 
-  if (sec < 60) return `${sec}s in urma`;
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${formatter.format(bytes / (1024 * 1024 * 1024))} GB`;
+  }
 
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min} min in urma`;
+  if (bytes >= 1024 * 1024) {
+    return `${formatter.format(bytes / (1024 * 1024))} MB`;
+  }
 
-  const hours = Math.floor(min / 60);
-  const restMin = min % 60;
+  if (bytes >= 1024) {
+    return `${formatter.format(bytes / 1024)} KB`;
+  }
 
-  if (!restMin) return `${hours}h in urma`;
-  return `${hours}h ${restMin}m in urma`;
+  return `${formatter.format(bytes)} B`;
 }
 
-export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Props) {
+function getCurrentGpsDataUsageMonthKey() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Bucharest",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  return `${year}_${month}`;
+}
+
+export default function VehicleGpsStatsCard({
+  vehicle,
+  odometerKmOverride,
+  livePositionOverride,
+  livePositionOverrideIsVirtual = false,
+}: Props) {
   const [nowTs, setNowTs] = useState(Date.now());
 
   useEffect(() => {
@@ -58,17 +88,21 @@ export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Pro
     return () => window.clearInterval(interval);
   }, []);
 
-  const snapshot = vehicle.gpsSnapshot;
+  const snapshot = livePositionOverride ?? vehicle.gpsSnapshot;
 
-  const trackerPingAt =
-    vehicle.tracker?.lastSeenAt ||
-    vehicle.tracker?.updatedAt ||
-    snapshot?.serverTimestamp ||
-    snapshot?.gpsTimestamp ||
-    0;
+  const trackerPingAt = livePositionOverride && livePositionOverrideIsVirtual
+     ? nowTs
+    : vehicle.tracker?.lastSeenAt ||
+      vehicle.tracker?.updatedAt ||
+      snapshot?.serverTimestamp ||
+      snapshot?.gpsTimestamp ||
+      0;
 
   const ageMs = trackerPingAt
     ? Math.max(0, nowTs - trackerPingAt)
+    : Number.POSITIVE_INFINITY;
+  const gpsFixAgeMs = snapshot?.gpsTimestamp
+     ? Math.max(0, nowTs - snapshot.gpsTimestamp)
     : Number.POSITIVE_INFINITY;
 
   const trackerState = useMemo(() => {
@@ -99,31 +133,79 @@ export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Pro
     };
   }, [ageMs, trackerPingAt]);
 
-  const mapsHref =
-    typeof snapshot?.lat === "number" && typeof snapshot?.lng === "number"
-      ? `https://www.google.com/maps?q=${snapshot.lat},${snapshot.lng}`
-      : "";
+  const isTrackerOnline = ageMs <= RECENT_MS;
+  const lastSavedRouteEndTs = useMemo(() => getLastSavedRouteEndTs(vehicle), [vehicle]);
+  const realSnapshotIsAfterSavedRoute =
+    livePositionOverrideIsVirtual ||
+    !lastSavedRouteEndTs ||
+    (snapshot?.gpsTimestamp || 0) > lastSavedRouteEndTs;
+  const canTrustMotionFromSnapshot =
+    Boolean(livePositionOverride && livePositionOverrideIsVirtual) ||
+    (isTrackerOnline && gpsFixAgeMs <= FRESH_GPS_MOTION_MS && realSnapshotIsAfterSavedRoute);
+  const rawSpeedKmh = Number.isFinite(snapshot?.speedKmh) ? Number(snapshot?.speedKmh) : 0;
+  const effectiveSpeedKmh =
+    canTrustMotionFromSnapshot && snapshot?.ignitionOn !== false
+       ? Math.max(0, Math.round(rawSpeedKmh))
+      : 0;
 
   const ignitionFromGpsOn = useMemo(() => {
     if (!snapshot?.gpsTimestamp) return false;
+    if (!canTrustMotionFromSnapshot) return false;
+    if (typeof snapshot.ignitionOn === "boolean") {
+      return snapshot.ignitionOn;
+    }
 
-    const speed = Number.isFinite(snapshot.speedKmh) ? Number(snapshot.speedKmh) : 0;
-    if (speed > MOVING_SPEED_THRESHOLD_KMH) return true;
+    if (effectiveSpeedKmh > MOVING_SPEED_THRESHOLD_KMH) return true;
 
-    return nowTs - snapshot.gpsTimestamp < IGNITION_OFF_IDLE_MS;
-  }, [nowTs, snapshot?.gpsTimestamp, snapshot?.speedKmh]);
+    return false;
+  }, [
+    canTrustMotionFromSnapshot,
+    effectiveSpeedKmh,
+    snapshot?.gpsTimestamp,
+    snapshot?.ignitionOn,
+  ]);
+
+  const displayedSpeedKmh = useMemo(() => {
+    if (!canTrustMotionFromSnapshot) return 0;
+    if (snapshot?.ignitionOn === false) return 0;
+    return effectiveSpeedKmh;
+  }, [canTrustMotionFromSnapshot, effectiveSpeedKmh, snapshot?.ignitionOn]);
+
+  const displayedTrackerIgnitionOn =
+    livePositionOverrideIsVirtual
+       ? Boolean(snapshot?.ignitionOn)
+      : Boolean(isTrackerOnline && ignitionFromGpsOn);
+  const dataUsageMonthKey =
+    vehicle.gpsDataUsage?.currentMonthKey || getCurrentGpsDataUsageMonthKey();
+  const currentMonthDataUsage = vehicle.gpsDataUsage?.months?.[dataUsageMonthKey];
+  const dataUsageMonthlyBytes =
+    currentMonthDataUsage?.totalBytes ||
+    (currentMonthDataUsage?.rxBytes || 0) + (currentMonthDataUsage?.txBytes || 0);
+  const lastDataPacketBytes =
+    vehicle.gpsDataUsage?.lastTotalBytes ||
+    (vehicle.gpsDataUsage?.lastRxBytes || 0) + (vehicle.gpsDataUsage?.lastTxBytes || 0);
 
   const displayedOdometerKm = useMemo(() => {
+    const initialRecordedKm = vehicle.initialRecordedKm || 0;
     const candidates = [
-      snapshot?.odometerKm,
-      vehicle.currentKm,
+      getTrustedTotalOdometerKm(vehicle.gpsSnapshot?.odometerKm, initialRecordedKm),
+      livePositionOverrideIsVirtual
+        ? 0
+        : getTrustedTotalOdometerKm(snapshot?.odometerKm, initialRecordedKm),
       odometerKmOverride,
-      vehicle.initialRecordedKm,
-    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      getTrustedTotalOdometerKm(vehicle.currentKm, initialRecordedKm),
+      initialRecordedKm,
+    ].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
 
-    if (!candidates.length) return 0;
-    return Math.max(...candidates);
-  }, [odometerKmOverride, snapshot?.odometerKm, vehicle.currentKm, vehicle.initialRecordedKm]);
+    return candidates.length ? Math.max(...candidates) : 0;
+  }, [
+    livePositionOverrideIsVirtual,
+    odometerKmOverride,
+    snapshot?.odometerKm,
+    vehicle.currentKm,
+    vehicle.gpsSnapshot?.odometerKm,
+    vehicle.initialRecordedKm,
+  ]);
 
   return (
     <div className="panel vehicle-info-card">
@@ -140,18 +222,6 @@ export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Pro
         </div>
 
         <div className="vehicle-info-item">
-          <ShieldCheck size={16} />
-          <strong>{trackerPingAt ? formatRelative(ageMs) : "-"}</strong>
-          <span>Ultimul ping</span>
-        </div>
-
-        <div className="vehicle-info-item">
-          <MapPin size={16} />
-          <strong>{formatCoords(snapshot?.lat, snapshot?.lng)}</strong>
-          <span>Ultima locatie</span>
-        </div>
-
-        <div className="vehicle-info-item">
           <Waypoints size={16} />
           <strong>{ignitionFromGpsOn ? "Contact pornit" : "Contact oprit"}</strong>
           <span>Contact</span>
@@ -159,7 +229,7 @@ export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Pro
 
         <div className="vehicle-info-item">
           <Gauge size={16} />
-          <strong>{snapshot?.speedKmh ?? 0} km/h</strong>
+          <strong>{displayedSpeedKmh} km/h</strong>
           <span>Viteza curenta</span>
         </div>
 
@@ -170,52 +240,24 @@ export default function VehicleGpsStatsCard({ vehicle, odometerKmOverride }: Pro
         </div>
 
         <div className="vehicle-info-item">
-          <Satellite size={16} />
-          <strong>{snapshot?.satellites ?? 0}</strong>
-          <span>Sateliti</span>
-        </div>
-
-        <div className="vehicle-info-item">
           <BatteryCharging size={16} />
-          <strong>{snapshot?.altitude ?? 0} m</strong>
-          <span>Altitudine</span>
+          <strong>{displayedTrackerIgnitionOn ? "Pornit" : "Oprit"}</strong>
+          <span>Ignitie tracker</span>
         </div>
 
         <div className="vehicle-info-item">
-          <Smartphone size={16} />
-          <strong>{vehicle.tracker?.imei || snapshot?.imei || "-"}</strong>
-          <span>IMEI</span>
+          <Database size={16} />
+          <strong>{formatDataBytes(dataUsageMonthlyBytes)}</strong>
+          <span>Consum luna GPS</span>
         </div>
 
         <div className="vehicle-info-item">
-          <Smartphone size={16} />
-          <strong>{vehicle.tracker?.protocol || "-"}</strong>
-          <span>Protocol</span>
+          <Database size={16} />
+          <strong>{formatDataBytes(lastDataPacketBytes)}</strong>
+          <span>Ultimul pachet</span>
         </div>
       </div>
 
-      <div className="tool-detail-line">
-        <strong>Ultima actualizare tracker:</strong> {formatDate(trackerPingAt)}
-      </div>
-
-      <div className="tool-detail-line">
-        <strong>Ultimul GPS timestamp:</strong> {formatDate(snapshot?.gpsTimestamp)}
-      </div>
-
-      <div className="tool-form-actions" style={{ marginTop: 14 }}>
-        <a
-          href={mapsHref || undefined}
-          className="secondary-btn"
-          target="_blank"
-          rel="noreferrer"
-          aria-disabled={!mapsHref}
-          onClick={(event) => {
-            if (!mapsHref) event.preventDefault();
-          }}
-        >
-          Deschide in Google Maps
-        </a>
-      </div>
     </div>
   );
 }

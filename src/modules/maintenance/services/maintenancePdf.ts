@@ -25,6 +25,7 @@ export type MaintenanceReport = {
   createdAt?: number | string;
   locationText?: string;
   technicianName?: string;
+  technicianComments?: string;
   dateText?: string;
   timeText?: string;
   address?: string;
@@ -74,12 +75,14 @@ function getLiftLabel(lift: LiftUnit): string {
   const candidate =
     (lift as { liftNumber?: string }).liftNumber ||
     (lift as { number?: string }).number ||
+    (lift as { serialNumber?: string }).serialNumber ||
+    (lift as { label?: string }).label ||
     (lift as { code?: string }).code ||
     (lift as { name?: string }).name ||
     (lift as { id?: string }).id ||
     "-";
 
-  return String(candidate).trim() || "-";
+  return String(candidate).trim().replace(/^lift[_\s-]+/i, "") || "-";
 }
 
 function getClientName(client: MaintenanceClient): string {
@@ -192,6 +195,8 @@ async function loadImageAsJpegHex(input: { url?: string; path?: string }): Promi
       return null;
     }
 
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bitmap, 0, 0);
     const jpegBlob = await new Promise<Blob | null>((resolve) => {
       canvas.toBlob((result) => resolve(result), "image/jpeg", 0.86);
@@ -241,7 +246,9 @@ function buildPdfDocument(input: {
   const lineHeight = 14;
   const { lines, title, logo, stamp } = input;
 
-  const bodyCommands: string[] = ["BT", "/F1 10 Tf", `${margin} 760 Td`, `${lineHeight} TL`];
+  const titleY = 735;
+  const bodyStartY = 680;
+  const bodyCommands: string[] = ["BT", "/F1 10 Tf", `${margin} ${bodyStartY} Td`, `${lineHeight} TL`];
   lines.forEach((line, index) => {
     if (index > 0) bodyCommands.push("T*");
     bodyCommands.push(`(${escapePdfText(line)}) Tj`);
@@ -250,7 +257,7 @@ function buildPdfDocument(input: {
 
   const titleWidthEstimate = title.length * 7;
   const titleX = Math.max(margin, Math.floor((pageWidth - titleWidthEstimate) / 2));
-  bodyCommands.push(`BT /F1 18 Tf ${titleX} 800 Td (${escapePdfText(title)}) Tj ET`);
+  bodyCommands.push(`BT /F1 18 Tf ${titleX} ${titleY} Td (${escapePdfText(title)}) Tj ET`);
 
   if (logo) {
     const logoSize = scaleInside(logo.width, logo.height, 120, 60);
@@ -333,6 +340,7 @@ export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
   const address = report.address || report.locationText || "-";
   const technicianName = report.technicianName || "-";
   const reportText = report.continutRaport || report.notes || report.observations || "-";
+  const technicianComments = report.technicianComments?.trim() || "";
 
   const lines = [
     `Client: ${getClientName(client)}`,
@@ -344,9 +352,9 @@ export async function buildMaintenancePdfBlob(input: PdfInput): Promise<Blob> {
     "",
     normalizedType === "interventie" ? "Constatare interventie:" : "Continut revizie:",
     ...splitTextSafe(reportText, 95),
-    "",
-    "Semnatura beneficiar: _____________________",
-    "Semnatura tehnician: _____________________",
+    ...(technicianComments
+      ? ["", "Comentarii tehnician:", ...splitTextSafe(technicianComments, 95)]
+      : []),
   ];
 
   const [logoResult, stampResult] = await Promise.allSettled([

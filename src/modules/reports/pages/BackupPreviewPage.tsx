@@ -183,8 +183,8 @@ export default function BackupPreviewPage() {
             <div className="backup-user-overview__section">
               <h4>Pontaje</h4>
               {user.timesheets.slice(0, 5).map((entry, index) => (
-                <div key={`${entry.projectCode}-${entry.startAt}-${index}`} className="backup-data-line">
-                  <strong>{entry.projectCode}</strong> · {entry.projectName} · {entry.workedMinutes} min · {entry.status}
+                <div key={`${entry.projectName || entry.projectCode}-${entry.startAt}-${index}`} className="backup-data-line">
+                  <strong>{entry.projectName || entry.projectCode || "Fara proiect"}</strong> · {entry.workedMinutes} min · {entry.status}
                 </div>
               ))}
               {user.timesheets.length === 0 && <p className="backup-empty-line">Fără pontaje.</p>}

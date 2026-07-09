@@ -7,8 +7,6 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase/firebase";
-import { showBrowserNotification } from "./showNotification";
-import { resolveNotificationPath } from "./notificationNavigation";
 
 export function useNotificationsListener(userId: string | undefined) {
   const initializedRef = useRef(false);
@@ -33,16 +31,9 @@ export function useNotificationsListener(userId: string | undefined) {
 
         snap.docChanges().forEach((change) => {
           if (change.type === "added") {
-            const data = change.doc.data();
-            void showBrowserNotification(
-              data.title ?? "Notificare",
-              data.message ?? "",
-              resolveNotificationPath({
-                module: data.module,
-                eventType: data.eventType,
-                entityId: data.entityId,
-              })
-            );
+            // Push notifications are dispatched by the backend. Showing another
+            // local notification here produces duplicates when the app is open.
+            return;
           }
         });
       },

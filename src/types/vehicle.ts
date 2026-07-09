@@ -20,8 +20,10 @@ export interface VehicleImageItem {
 
 export const VEHICLE_DOCUMENT_CATEGORIES = [
   "service",
+  "itp",
+  "rca",
+  "casco",
   "leasing_rate",
-  "rca_itp",
   "rovinieta",
   "amenda",
   "other",
@@ -38,22 +40,37 @@ export interface VehicleDocumentItem {
   sizeBytes: number;
   extension: string;
   category: VehicleDocumentCategory;
+  expiryDate?: string;
+  aiAnalysis?: {
+    documentType?: VehicleDocumentCategory | "unknown";
+    expiryDate?: string;
+    issueDate?: string;
+    policyNumber?: string;
+    providerName?: string;
+    vehiclePlateNumber?: string;
+    confidence?: number;
+    notes?: string;
+    analyzedAt?: number;
+  };
   createdAt: number;
 }
 
 export interface VehicleGpsSnapshot {
   lat: number;
   lng: number;
-  speedKmh: number;
+  speedKmh?: number;
   altitude?: number;
   angle?: number;
   satellites?: number;
   gpsTimestamp: number;
   serverTimestamp: number;
+  expiresAt?: number;
   ignitionOn?: boolean;
   odometerKm?: number;
+  tripOdometerKm?: number;
   imei?: string;
   online?: boolean;
+  rawIo?: Record<string, unknown>;
 }
 
 export interface VehicleTrackerMeta {
@@ -61,6 +78,150 @@ export interface VehicleTrackerMeta {
   lastSeenAt?: number;
   updatedAt?: number;
   protocol?: string;
+}
+
+export interface VehicleGpsDataUsagePeriod {
+  rxBytes?: number;
+  txBytes?: number;
+  totalBytes?: number;
+  recordsCount?: number;
+  frameCount?: number;
+  lastRxBytes?: number;
+  lastTxBytes?: number;
+  lastTotalBytes?: number;
+  updatedAt?: number;
+}
+
+export interface VehicleGpsDataUsage extends VehicleGpsDataUsagePeriod {
+  currentMonthKey?: string;
+  months?: Record<string, VehicleGpsDataUsagePeriod>;
+}
+
+export type VehicleLiveIoGroup =
+  | "gps"
+  | "obd"
+  | "power"
+  | "connectivity"
+  | "input_output"
+  | "bluetooth"
+  | "system"
+  | "unknown";
+
+export interface VehicleLiveIoItem {
+  id: number;
+  key: string;
+  label: string;
+  group: VehicleLiveIoGroup;
+  value: string | number | boolean | null;
+  rawValue: unknown;
+  displayValue: string;
+  unit?: string;
+  description?: string;
+}
+
+export interface VehicleLiveDiagnosticsGps {
+  lat: number;
+  lng: number;
+  speedKmh?: number;
+  altitude?: number;
+  angle?: number;
+  satellites?: number;
+}
+
+export interface VehicleLiveDiagnostics {
+  source?: string;
+  imei?: string;
+  protocol?: string;
+  online?: boolean;
+  recordTimestamp?: number;
+  serverTimestamp?: number;
+  expiresAt?: number;
+  eventIoId?: number;
+  totalIo?: number;
+  priority?: number;
+  bluetoothObdConnected?: boolean | null;
+  obdConnected?: boolean | null;
+  gps?: VehicleLiveDiagnosticsGps;
+  obd?: Record<string, unknown>;
+  decodedIo?: VehicleLiveIoItem[];
+  rawIo?: Record<string, unknown>;
+}
+
+export type VehicleDailyDiagnosticSeverity = "info" | "warning" | "critical";
+
+export interface VehicleDailyDiagnosticEvent {
+  id: string;
+  key?: string;
+  type: string;
+  label: string;
+  timestamp: number;
+  severity: VehicleDailyDiagnosticSeverity;
+  value?: number | string | boolean | null;
+  unit?: string;
+  details?: string;
+}
+
+export interface VehicleDailyDiagnosticSample {
+  timestamp: number;
+  speedKmh?: number | null;
+  engineRpm?: number | null;
+  totalOdometerKm?: number | null;
+  tripOdometerKm?: number | null;
+  coolantTemperatureC?: number | null;
+  engineOilTemperatureC?: number | null;
+  externalVoltageV?: number | null;
+  batteryVoltageV?: number | null;
+  fuelLevelPct?: number | null;
+  fuelRateLh?: number | null;
+  engineLoadPct?: number | null;
+  throttlePositionPct?: number | null;
+}
+
+export interface VehicleDailyDiagnosticsSummary {
+  id: string;
+  vehicleId: string;
+  dayKey: string;
+  imei?: string;
+  firstRecordAt?: number;
+  lastRecordAt?: number;
+  updatedAt?: number;
+  packetsCount: number;
+  summaryText?: string;
+  stats: Record<string, unknown>;
+  latestObd?: Record<string, unknown>;
+  availableSensorKeys?: string[];
+  events: VehicleDailyDiagnosticEvent[];
+  samples: VehicleDailyDiagnosticSample[];
+}
+
+export interface VehicleGpsSimulationPoint {
+  lat: number;
+  lng: number;
+  speedKmh: number;
+  angle: number;
+  odometerKm: number;
+  ts: number;
+  ignitionOn: boolean;
+}
+
+export interface VehicleGpsSimulationItem {
+  id?: string;
+  active?: boolean;
+  status?: "running" | "paused" | "done";
+  destinationQuery?: string;
+  destinationDisplay?: string;
+  startLat?: number;
+  startLng?: number;
+  endLat?: number;
+  endLng?: number;
+  points: VehicleGpsSimulationPoint[];
+  startedAt: number;
+  resumedAt?: number;
+  pausedAt?: number | null;
+  elapsedBeforePauseMs?: number;
+  totalDurationMs?: number;
+  totalDistanceKm: number;
+  stoppedAt?: number;
 }
 
 export interface VehiclePositionItem {
@@ -179,6 +340,8 @@ export interface VehicleItem {
   nextItpDate: string;
   nextRcaDate: string;
   nextCascoDate: string;
+  nextRovinietaDate: string;
+  nextOilServiceKm: number;
 
   coverImageUrl: string;
   coverThumbUrl: string;
@@ -186,10 +349,15 @@ export interface VehicleItem {
   documents: VehicleDocumentItem[];
 
   gpsSnapshot?: VehicleGpsSnapshot | null;
+  liveDiagnostics?: VehicleLiveDiagnostics | null;
+  gpsDataUsage?: VehicleGpsDataUsage | null;
   tracker?: VehicleTrackerMeta | null;
+  /** Ruta GPS activa - array de puncte stocat pe vehicul, real-time prin onSnapshot */
+  gpsSim?: VehicleGpsSimulationItem | null;
+  gpsSimHistory?: VehicleGpsSimulationItem[];
 
   createdAt: number;
-  updatedAt: number;
+  updatedAt?: number;
 }
 
 export interface VehicleFormValues {
@@ -223,6 +391,8 @@ export interface VehicleFormValues {
   nextItpDate: string;
   nextRcaDate: string;
   nextCascoDate: string;
+  nextRovinietaDate: string;
+  nextOilServiceKm: number;
 
   coverImageUrl: string;
   coverThumbUrl: string;
@@ -235,7 +405,8 @@ export type VehicleEventType =
   | "updated"
   | "driver_changed"
   | "images_updated"
-  | "claimed";
+  | "claimed"
+  | "comment";
 
 export interface VehicleEventItem {
   id: string;

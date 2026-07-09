@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { ProjectStatus } from "../../../types/timesheet";
 
 type ProjectFormValues = {
-  code: string;
   name: string;
   status: ProjectStatus;
 };
@@ -28,16 +27,6 @@ export default function ProjectForm({ initialValues, submitting, onSubmit }: Pro
   return (
     <form className="tool-form" onSubmit={handleSubmit}>
       <div className="tool-form-grid">
-        <div className="tool-form-block">
-          <label className="tool-form-label">Cod proiect</label>
-          <input
-            className="tool-input"
-            value={values.code}
-            onChange={(e) => setValues((prev) => ({ ...prev, code: e.target.value }))}
-            placeholder="Ex: PRJ-001"
-          />
-        </div>
-
         <div className="tool-form-block">
           <label className="tool-form-label">Nume proiect</label>
           <input

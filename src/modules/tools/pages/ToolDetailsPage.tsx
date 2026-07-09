@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import type { ToolEventItem, ToolItem, AppUser } from "../../../types/tool";
 import ToolStatusBadge from "../components/ToolStatusBadge";
 import ToolChangeHolderCard from "../components/ToolChangeHolderCard";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import UserProfileLink from "../../../components/UserProfileLink";
 import {
   acceptToolHolderChange,
+  addToolComment,
   claimToolForCurrentUser,
+  deleteTool,
   getToolById,
   getToolEvents,
   getUsersList,
@@ -23,12 +26,16 @@ function formatDate(ts: number) {
 
 export default function ToolDetailsPage() {
   const { toolId = "" } = useParams();
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { role, user } = useAuth();
 
   const [tool, setTool] = useState<ToolItem | null>(null);
   const [events, setEvents] = useState<ToolEventItem[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [commentText, setCommentText] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [deletingTool, setDeletingTool] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -61,13 +68,13 @@ export default function ToolDetailsPage() {
   }, [toolId]);
 
   async function handleSetCover(url: string) {
-    if (!tool || !user || tool.ownerUserId !== user.uid) return;
+    if (!tool || !user || !canManageTool) return;
     await setToolCoverImage(tool.id, url);
     await load();
   }
 
   async function handleDeleteImage(imageId: string) {
-    if (!tool || !user || tool.ownerUserId !== user.uid) return;
+    if (!tool || !user || !canManageTool) return;
     await removeToolImage(tool.id, tool.images, imageId);
     await load();
   }
@@ -91,6 +98,40 @@ await claimToolForCurrentUser(
     await load();
   }
 
+  async function handleAddComment() {
+    if (!tool || !user?.uid || commentBusy) return;
+    const cleanComment = commentText.trim();
+    if (!cleanComment) return;
+
+    setCommentBusy(true);
+    try {
+      await addToolComment(tool.id, cleanComment, {
+        actorUserId: user.uid,
+        actorUserName: user.displayName || user.email || "Utilizator",
+        actorUserThemeKey: user.themeKey ?? null,
+      });
+      setCommentText("");
+      await load();
+    } finally {
+      setCommentBusy(false);
+    }
+  }
+
+  async function handleDeleteTool() {
+    if (!tool || !canManageTool || deletingTool) return;
+    const ok = window.confirm(`Stergi scula "${tool.name || tool.internalCode || tool.id}"?`);
+    if (!ok) return;
+
+    setDeletingTool(true);
+    try {
+      await deleteTool(tool.id);
+      navigate("/tools");
+    } catch (error) {
+      console.error("[ToolDetailsPage][deleteTool]", error);
+      setDeletingTool(false);
+    }
+  }
+
   const qrDisplayValue = useMemo(() => {
     if (!tool) return "";
     return tool.qrCodeValue || `${window.location.origin}/tools/${tool.id}`;
@@ -100,6 +141,7 @@ await claimToolForCurrentUser(
     if (!tool || !user) return false;
     return tool.ownerUserId === user.uid;
   }, [tool, user]);
+  const canManageTool = isOwner || role === "admin";
   const isCurrentHolder = useMemo(() => {
     if (!tool || !user) return false;
     return tool.currentHolderUserId === user.uid;
@@ -177,10 +219,15 @@ await claimToolForCurrentUser(
           </div>
 
           <div className="tools-header-actions">
-            {isOwner && (
-              <Link to={`/tools/${tool.id}/edit`} className="primary-btn">
-                Editeaza
-              </Link>
+            {canManageTool && (
+              <>
+                <Link to={`/tools/${tool.id}/edit`} className="primary-btn">
+                  Editeaza
+                </Link>
+                <button className="danger-btn" type="button" onClick={() => void handleDeleteTool()} disabled={deletingTool}>
+                  {deletingTool ? "Se sterge..." : "Sterge scula"}
+                </button>
+              </>
             )}
             <Link to="/tools" className="secondary-btn">
               Inapoi
@@ -193,10 +240,17 @@ await claimToolForCurrentUser(
             <h3 className="panel-title">Date generale</h3>
 
             <div className="tool-detail-line">
-              <strong>Responsabil principal:</strong> {tool.ownerUserName || "-"}
+              <strong>Responsabil principal:</strong>{" "}
+              <UserProfileLink userId={tool.ownerUserId} name={tool.ownerUserName} themeKey={tool.ownerThemeKey} />
             </div>
             <div className="tool-detail-line">
-              <strong>La cine se afla:</strong> {tool.currentHolderUserName || "Depozit"}
+              <strong>La cine se afla:</strong>{" "}
+              <UserProfileLink
+                userId={tool.currentHolderUserId}
+                name={tool.currentHolderUserName}
+                themeKey={tool.currentHolderThemeKey}
+                fallback="Depozit"
+              />
             </div>
             <div className="tool-detail-line">
               <strong>Garantie:</strong> {tool.warrantyText || "-"}
@@ -245,7 +299,7 @@ await claimToolForCurrentUser(
         </div>
       )}
 
-      {(isOwner || isCurrentHolder) && (
+      {(canManageTool || isCurrentHolder) && (
         <ToolChangeHolderCard
           tool={tool}
           users={users}
@@ -262,8 +316,15 @@ await claimToolForCurrentUser(
         <div className="panel">
           <h3 className="panel-title">Solicitare schimbare detinator</h3>
           <p className="tools-subtitle" style={{ marginBottom: 12 }}>
-            Solicitare pentru: <strong>{tool.pendingHolderUserName || "utilizator"}</strong>.
-            {tool.pendingHolderRequestedAt
+            Solicitare pentru:{" "}
+            <UserProfileLink
+              userId={tool.pendingHolderUserId}
+              name={tool.pendingHolderUserName}
+              themeKey={tool.pendingHolderThemeKey}
+              fallback="utilizator"
+              className="user-profile-link--plain"
+            />.
+            ? {tool.pendingHolderRequestedAt
               ? ` Trimisa la ${formatDate(tool.pendingHolderRequestedAt)}.`
               : ""}
           </p>
@@ -297,7 +358,7 @@ await claimToolForCurrentUser(
                   decoding="async"
                   fallbackText={tool.name}
                 />
-                {isOwner && (
+                {canManageTool && (
                   <div className="tool-gallery-actions">
                     <button
                       className="secondary-btn"
@@ -324,6 +385,26 @@ await claimToolForCurrentUser(
       <div className="panel">
         <h3 className="panel-title">Istoric</h3>
 
+        <div className="asset-comment-box">
+          <label className="tool-form-label">Adauga comentariu / observatie</label>
+          <textarea
+            className="tool-input tool-textarea"
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            placeholder="Ex: predat cu acumulator lipsa, necesita verificare, curatat si functional..."
+          />
+          <div className="tool-form-actions">
+            <button
+              className="primary-btn"
+              type="button"
+              disabled={commentBusy || !commentText.trim()}
+              onClick={() => void handleAddComment()}
+            >
+              {commentBusy ? "Se adauga..." : "Adauga comentariu"}
+            </button>
+          </div>
+        </div>
+
         {events.length === 0 ? (
           <p className="tools-subtitle">Nu exista actiuni inregistrate.</p>
         ) : (
@@ -338,9 +419,12 @@ await claimToolForCurrentUser(
           <span className="user-accent-avatar">
             {getUserInitials(event.actorUserName || "S")}
           </span>
-          <span className="simple-list-label user-accent-name">
-            {event.actorUserName || "Sistem"}
-          </span>
+          <UserProfileLink
+            userId={event.actorUserId}
+            name={event.actorUserName || "Sistem"}
+            themeKey={event.actorUserThemeKey}
+            className="simple-list-label user-accent-name"
+          />
         </div>
 
         <div className="simple-list-subtitle">{event.message}</div>

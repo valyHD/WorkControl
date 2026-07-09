@@ -31,19 +31,714 @@ const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LAST_CLEANUP_FILE = "/tmp/workcontrol-last-cleanup.txt";
 const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
 const UNBOUND_LOG_THROTTLE_MS = 15 * 60 * 1000;
-const SNAPSHOT_WRITE_MIN_INTERVAL_MS = 15_000;
-const MIN_POINT_INTERVAL_MS_MOVING = 15_000;
+const SNAPSHOT_WRITE_MIN_INTERVAL_MS = Number(process.env.LIVE_SNAPSHOT_WRITE_INTERVAL_MS || 1_000);
+const LIVE_DIAGNOSTICS_TTL_MS = Number(process.env.LIVE_DIAGNOSTICS_TTL_MS || 30_000);
+const MIN_POINT_INTERVAL_MS_MOVING = Number(process.env.ROUTE_POINT_INTERVAL_MS_MOVING || 3_000);
 const MIN_POINT_INTERVAL_MS_IDLE = 180_000;
-const MIN_POINT_DISTANCE_METERS = 35;
+const MIN_POINT_DISTANCE_METERS = Number(process.env.ROUTE_POINT_DISTANCE_METERS || 8);
+const IDLE_JITTER_DISTANCE_METERS = 80;
+const IDLE_JITTER_MAX_INTERVAL_MS = 10 * 60 * 1000;
 const MOVING_SPEED_THRESHOLD_KMH = 5;
 const MAX_DISTANCE_STEP_METERS = 2000;
+const MAX_ODOMETER_INCREMENT_KM = 500;
 const trackerBindingCache = new Map();
 const lastSavedPointByImei = new Map();
+const lastOdometerKmByImei = new Map();
 const lastSnapshotWriteByVehicle = new Map();
 const lastUnboundLogByImei = new Map();
 const NOTIFICATION_LISTENER_START_TS = Date.now();
 const NOTIFICATION_STARTUP_GRACE_MS = 90_000;
 const NOTIFICATION_PUSH_BATCH_LIMIT = 120;
+const DIAGNOSTIC_DAY_EVENT_LIMIT = 250;
+const DIAGNOSTIC_DAY_SAMPLE_LIMIT = 1440;
+const OBD_OVERSPEED_KMH = Number(process.env.OBD_OVERSPEED_KMH || 130);
+const OBD_HIGH_RPM = Number(process.env.OBD_HIGH_RPM || 4000);
+const OBD_CRITICAL_RPM = Number(process.env.OBD_CRITICAL_RPM || 5000);
+const OBD_COOLANT_WARNING_C = Number(process.env.OBD_COOLANT_WARNING_C || 105);
+const OBD_COOLANT_CRITICAL_C = Number(process.env.OBD_COOLANT_CRITICAL_C || 115);
+const OBD_OIL_WARNING_C = Number(process.env.OBD_OIL_WARNING_C || 120);
+const OBD_LOW_VOLTAGE_V = Number(process.env.OBD_LOW_VOLTAGE_V || 11.5);
+const OBD_LOW_FUEL_PCT = Number(process.env.OBD_LOW_FUEL_PCT || 10);
+
+function toByteCount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  return Math.round(numeric);
+}
+
+function getGpsDataUsageMonthKey(ts = Date.now()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Bucharest",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date(ts));
+  const year = parts.find((part) => part.type === "year")?.value || "0000";
+  const month = parts.find((part) => part.type === "month")?.value || "00";
+  return `${year}_${month}`;
+}
+
+function normalizeGpsDataUsageDelta(delta) {
+  if (!delta || typeof delta !== "object") return null;
+
+  const rxBytes = toByteCount(delta.rxBytes);
+  const txBytes = toByteCount(delta.txBytes);
+  const recordsCount = toByteCount(delta.recordsCount);
+  const frameCount = toByteCount(delta.frameCount);
+  const totalBytes = rxBytes + txBytes;
+
+  if (totalBytes <= 0 && recordsCount <= 0 && frameCount <= 0) return null;
+
+  return {
+    rxBytes,
+    txBytes,
+    totalBytes,
+    recordsCount,
+    frameCount,
+  };
+}
+
+function buildGpsDataUsageUpdateFields(delta, now) {
+  const usage = normalizeGpsDataUsageDelta(delta);
+  if (!usage) return {};
+
+  const monthKey = getGpsDataUsageMonthKey(now);
+  const monthPrefix = `gpsDataUsage.months.${monthKey}`;
+  const fields = {
+    "gpsDataUsage.currentMonthKey": monthKey,
+    "gpsDataUsage.lastRxBytes": usage.rxBytes,
+    "gpsDataUsage.lastTxBytes": usage.txBytes,
+    "gpsDataUsage.lastTotalBytes": usage.totalBytes,
+    "gpsDataUsage.updatedAt": now,
+    "gpsDataUsage.updatedAtServer": admin.firestore.FieldValue.serverTimestamp(),
+    [`${monthPrefix}.lastRxBytes`]: usage.rxBytes,
+    [`${monthPrefix}.lastTxBytes`]: usage.txBytes,
+    [`${monthPrefix}.lastTotalBytes`]: usage.totalBytes,
+    [`${monthPrefix}.updatedAt`]: now,
+    [`${monthPrefix}.updatedAtServer`]: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (usage.rxBytes > 0) {
+    fields["gpsDataUsage.rxBytes"] = admin.firestore.FieldValue.increment(usage.rxBytes);
+    fields[`${monthPrefix}.rxBytes`] = admin.firestore.FieldValue.increment(usage.rxBytes);
+  }
+  if (usage.txBytes > 0) {
+    fields["gpsDataUsage.txBytes"] = admin.firestore.FieldValue.increment(usage.txBytes);
+    fields[`${monthPrefix}.txBytes`] = admin.firestore.FieldValue.increment(usage.txBytes);
+  }
+  if (usage.totalBytes > 0) {
+    fields["gpsDataUsage.totalBytes"] = admin.firestore.FieldValue.increment(usage.totalBytes);
+    fields[`${monthPrefix}.totalBytes`] = admin.firestore.FieldValue.increment(usage.totalBytes);
+  }
+  if (usage.recordsCount > 0) {
+    fields["gpsDataUsage.recordsCount"] = admin.firestore.FieldValue.increment(usage.recordsCount);
+    fields[`${monthPrefix}.recordsCount`] = admin.firestore.FieldValue.increment(usage.recordsCount);
+  }
+  if (usage.frameCount > 0) {
+    fields["gpsDataUsage.frameCount"] = admin.firestore.FieldValue.increment(usage.frameCount);
+    fields[`${monthPrefix}.frameCount`] = admin.firestore.FieldValue.increment(usage.frameCount);
+  }
+
+  return fields;
+}
+
+function buildGpsDataUsageInitialValue(delta, now) {
+  const usage = normalizeGpsDataUsageDelta(delta);
+  if (!usage) return null;
+
+  const monthKey = getGpsDataUsageMonthKey(now);
+  const monthUsage = {
+    rxBytes: usage.rxBytes,
+    txBytes: usage.txBytes,
+    totalBytes: usage.totalBytes,
+    recordsCount: usage.recordsCount,
+    frameCount: usage.frameCount,
+    lastRxBytes: usage.rxBytes,
+    lastTxBytes: usage.txBytes,
+    lastTotalBytes: usage.totalBytes,
+    updatedAt: now,
+    updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  return {
+    rxBytes: usage.rxBytes,
+    txBytes: usage.txBytes,
+    totalBytes: usage.totalBytes,
+    recordsCount: usage.recordsCount,
+    frameCount: usage.frameCount,
+    lastRxBytes: usage.rxBytes,
+    lastTxBytes: usage.txBytes,
+    lastTotalBytes: usage.totalBytes,
+    updatedAt: now,
+    updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+    currentMonthKey: monthKey,
+    months: {
+      [monthKey]: monthUsage,
+    },
+  };
+}
+
+function addSessionTxBytes(session, bytes) {
+  if (!session) return;
+  session.pendingTxBytes = toByteCount(session.pendingTxBytes) + toByteCount(bytes);
+}
+
+function takeSessionDataUsageDelta(session, recordsCount) {
+  const delta = {
+    rxBytes: toByteCount(session?.pendingRxBytes),
+    txBytes: toByteCount(session?.pendingTxBytes),
+    recordsCount: toByteCount(recordsCount),
+    frameCount: 1,
+  };
+
+  if (session) {
+    session.pendingRxBytes = 0;
+    session.pendingTxBytes = 0;
+  }
+
+  return delta;
+}
+
+const FMC130_IO_DEFINITIONS = {
+  1: { key: "digitalInput1", label: "Intrare digitala 1", group: "input_output", description: "Digital Input 1" },
+  9: { key: "analogInput1V", label: "Intrare analogica 1", group: "input_output", unit: "V", multiplier: 0.001, decimals: 3, description: "Analog Input 1" },
+  12: { key: "fuelUsedGpsL", label: "Combustibil folosit GPS", group: "gps", unit: "L", multiplier: 0.001, decimals: 3, description: "Fuel Used GPS" },
+  15: { key: "ecoScore", label: "Eco score", group: "gps", description: "Eco Score" },
+  16: { key: "totalOdometerKm", label: "Odometru total AVL 16", group: "obd", unit: "km", multiplier: 0.001, decimals: 1, description: "Total Odometer; seteaza sursa pe OBD in FMC130" },
+  13: { key: "fuelRateGpsL100Km", label: "Consum GPS", group: "gps", unit: "l/100km", multiplier: 0.01, decimals: 2, description: "Fuel Rate GPS" },
+  21: { key: "gsmSignal", label: "Semnal GSM", group: "connectivity", unit: "/5", description: "GSM Signal" },
+  24: { key: "gnssSpeedKmh", label: "Viteza GNSS", group: "gps", unit: "km/h", description: "GNSS Speed" },
+  30: { key: "dtcCount", label: "Numar coduri defecte", group: "obd", description: "Number of DTC" },
+  31: { key: "engineLoadPct", label: "Sarcina motor", group: "obd", unit: "%", description: "Engine Load" },
+  32: { key: "coolantTemperatureC", label: "Temperatura lichid racire", group: "obd", unit: "C", signedBits: 8, description: "Coolant Temperature" },
+  33: { key: "shortFuelTrimPct", label: "Short fuel trim", group: "obd", unit: "%", signedBits: 8, description: "Short Fuel Trim" },
+  34: { key: "fuelPressureKpa", label: "Presiune combustibil", group: "obd", unit: "kPa", description: "Fuel pressure" },
+  35: { key: "intakeMapKpa", label: "Presiune admisie MAP", group: "obd", unit: "kPa", description: "Intake MAP" },
+  36: { key: "engineRpm", label: "Turatie motor", group: "obd", unit: "rpm", description: "Engine RPM" },
+  37: { key: "vehicleSpeedKmh", label: "Viteza vehicul OBD", group: "obd", unit: "km/h", description: "Vehicle Speed" },
+  38: { key: "timingAdvanceDeg", label: "Avans aprindere", group: "obd", unit: "deg", signedBits: 8, description: "Timing Advance" },
+  39: { key: "intakeAirTemperatureC", label: "Temperatura aer admisie", group: "obd", unit: "C", signedBits: 8, description: "Intake Air Temperature" },
+  40: { key: "mafGps", label: "Debit aer MAF", group: "obd", unit: "g/sec", multiplier: 0.01, decimals: 2, description: "MAF air flow rate" },
+  41: { key: "throttlePositionPct", label: "Pozitie acceleratie", group: "obd", unit: "%", description: "Throttle Position" },
+  42: { key: "engineRuntimeSec", label: "Timp functionare motor", group: "obd", unit: "s", description: "Runtime since engine start" },
+  43: { key: "distanceMilOnKm", label: "Distanta cu MIL aprins", group: "obd", unit: "km", description: "Distance Traveled MIL On" },
+  44: { key: "relativeFuelRailPressureKpa", label: "Presiune rampa relativa", group: "obd", unit: "kPa", multiplier: 0.1, decimals: 1, description: "Relative Fuel Rail Pressure" },
+  45: { key: "directFuelRailPressureKpa", label: "Presiune rampa directa", group: "obd", unit: "kPa", multiplier: 10, description: "Direct Fuel Rail Pressure" },
+  46: { key: "commandedEgrPct", label: "EGR comandat", group: "obd", unit: "%", description: "Commanded EGR" },
+  47: { key: "egrErrorPct", label: "Eroare EGR", group: "obd", unit: "%", signedBits: 8, description: "EGR Error" },
+  48: { key: "fuelLevelPct", label: "Nivel combustibil", group: "obd", unit: "%", description: "Fuel Level" },
+  49: { key: "distanceSinceCodesClearKm", label: "Distanta de la stergere coduri", group: "obd", unit: "km", description: "Distance Since Codes Clear" },
+  50: { key: "barometricPressureKpa", label: "Presiune barometrica", group: "obd", unit: "kPa", description: "Barometric Pressure" },
+  51: { key: "controlModuleVoltageV", label: "Tensiune modul control", group: "obd", unit: "V", multiplier: 0.001, decimals: 3, description: "Control Module Voltage" },
+  52: { key: "absoluteLoadPct", label: "Sarcina absoluta", group: "obd", unit: "%", description: "Absolute Load Value" },
+  53: { key: "ambientAirTemperatureC", label: "Temperatura exterioara", group: "obd", unit: "C", signedBits: 8, description: "Ambient Air Temperature" },
+  54: { key: "timeRunMilOnMin", label: "Timp cu MIL aprins", group: "obd", unit: "min", description: "Time Run With MIL On" },
+  55: { key: "timeSinceCodesClearedMin", label: "Timp de la stergere coduri", group: "obd", unit: "min", description: "Time Since Codes Cleared" },
+  56: { key: "absoluteFuelRailPressureKpa", label: "Presiune rampa absoluta", group: "obd", unit: "kPa", multiplier: 10, description: "Absolute Fuel Rail Pressure" },
+  57: { key: "hybridBatteryLifePct", label: "Baterie hibrid", group: "obd", unit: "%", description: "Hybrid battery pack life" },
+  58: { key: "engineOilTemperatureC", label: "Temperatura ulei motor", group: "obd", unit: "C", description: "Engine Oil Temperature" },
+  59: { key: "fuelInjectionTimingDeg", label: "Avans injectie", group: "obd", unit: "deg", multiplier: 0.01, decimals: 2, signedBits: 16, description: "Fuel injection timing" },
+  60: { key: "fuelRateLh", label: "Consum instant", group: "obd", unit: "L/h", multiplier: 0.01, decimals: 2, description: "Fuel Rate" },
+  66: { key: "externalVoltageV", label: "Tensiune externa", group: "power", unit: "V", multiplier: 0.001, decimals: 3, description: "External Voltage" },
+  67: { key: "batteryVoltageV", label: "Tensiune baterie interna", group: "power", unit: "V", multiplier: 0.001, decimals: 3, description: "Battery Voltage" },
+  68: { key: "batteryCurrentA", label: "Curent baterie", group: "power", unit: "A", multiplier: 0.001, decimals: 3, description: "Battery Current" },
+  69: { key: "gnssStatus", label: "Status GNSS", group: "gps", description: "GNSS Status" },
+  80: { key: "dataMode", label: "Mod date", group: "system", description: "Data Mode" },
+  199: { key: "tripOdometerKm", label: "Odometer trip", group: "gps", unit: "km", multiplier: 0.001, decimals: 1, description: "Trip Odometer" },
+  181: { key: "gnssPdop", label: "GNSS PDOP", group: "gps", multiplier: 0.1, decimals: 1, description: "GNSS PDOP" },
+  182: { key: "gnssHdop", label: "GNSS HDOP", group: "gps", multiplier: 0.1, decimals: 1, description: "GNSS HDOP" },
+  200: { key: "sleepMode", label: "Sleep mode", group: "system", description: "Sleep Mode" },
+  205: { key: "gsmCellId", label: "GSM Cell ID", group: "connectivity", description: "GSM Cell ID" },
+  206: { key: "gsmAreaCode", label: "GSM Area Code", group: "connectivity", description: "GSM Area Code" },
+  239: { key: "ignitionOn", label: "Contact", group: "input_output", description: "Ignition" },
+  240: { key: "movement", label: "Miscare", group: "gps", description: "Movement" },
+  241: { key: "activeGsmOperator", label: "Operator GSM activ", group: "connectivity", description: "Active GSM Operator" },
+  179: { key: "digitalOutput1", label: "Iesire digitala 1", group: "input_output", description: "Digital Output 1" },
+  251: { key: "idling", label: "Ralanti", group: "obd", description: "Idling" },
+  263: { key: "btStatus", label: "Status Bluetooth", group: "bluetooth", description: "Bluetooth status" },
+  264: { key: "btData", label: "Date Bluetooth SPP", group: "bluetooth", description: "Bluetooth SPP payload" },
+  281: { key: "faultCodes", label: "Coduri defecte", group: "obd", description: "Fault Codes" },
+  385: { key: "beaconData", label: "Beacon Bluetooth", group: "bluetooth", description: "Beacon data" },
+  540: { key: "throttlePositionGroupPct", label: "Pozitie acceleratie grup", group: "obd", unit: "%", description: "Throttle Position Value From PID Group" },
+  541: { key: "commandedEquivalenceRatio", label: "Raport aer-combustibil comandat", group: "obd", multiplier: 0.01, decimals: 2, description: "Fuel-Air Commanded Equivalence Ratio" },
+  542: { key: "intakeMap2Kpa", label: "Presiune admisie MAP 2", group: "obd", unit: "kPa", description: "Intake Manifold Absolute Pressure" },
+  543: { key: "hybridBatteryPackVoltageV", label: "Tensiune sistem hibrid", group: "obd", unit: "V", description: "Hybrid System Voltage" },
+  544: { key: "hybridSystemCurrentA", label: "Curent sistem hibrid", group: "obd", unit: "A", signedBits: 16, description: "Hybrid System Current" },
+  548: { key: "advancedBeaconData", label: "Beacon Bluetooth avansat", group: "bluetooth", description: "Advanced beacon data" },
+  759: { key: "fuelType", label: "Tip combustibil OBD", group: "obd", description: "Fuel Type" },
+};
+
+function normalizeSignedIoValue(value, bits) {
+  if (typeof value !== "number" || !Number.isFinite(value) || !bits) return value;
+
+  const limit = 2 ** bits;
+  const signLimit = 2 ** (bits - 1);
+  return value >= signLimit ? value - limit : value;
+}
+
+function roundIoValue(value, decimals) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value;
+  const factor = 10 ** Math.max(0, decimals || 0);
+  return Math.round(value * factor) / factor;
+}
+
+function formatIoDisplayValue(value, unit) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "boolean") return value ? "Da" : "Nu";
+  return unit ? `${value} ${unit}` : String(value);
+}
+
+function normalizeIoValue(id, rawValue, definition) {
+  if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) return rawValue;
+
+  let value = normalizeSignedIoValue(rawValue, definition?.signedBits);
+  if (typeof value === "number" && Number.isFinite(value) && typeof definition?.multiplier === "number") {
+    value *= definition.multiplier;
+  }
+
+  return roundIoValue(value, definition?.decimals);
+}
+
+function buildDecodedIoItems(io) {
+  return Object.entries(io || {})
+    .map(([idText, rawValue]) => {
+      const id = Number(idText);
+      const definition = FMC130_IO_DEFINITIONS[id] || {
+        key: `avl_${idText}`,
+        label: `AVL ${idText}`,
+        group: "unknown",
+      };
+      const value = normalizeIoValue(id, rawValue, definition);
+
+      return {
+        id: Number.isFinite(id) ? id : 0,
+        key: definition.key,
+        label: definition.label,
+        group: definition.group,
+        value,
+        rawValue,
+        displayValue: formatIoDisplayValue(value, definition.unit),
+        unit: definition.unit || "",
+        description: definition.description || "",
+      };
+    })
+    .sort((a, b) => a.id - b.id);
+}
+
+function buildLiveDiagnosticsSnapshot(imei, record, now) {
+  const decodedIo = buildDecodedIoItems(record.io);
+  const metrics = {};
+
+  for (const item of decodedIo) {
+    if (!item.key || item.key.startsWith("avl_")) continue;
+    metrics[item.key] = item.value;
+  }
+
+  const hasObdData = decodedIo.some((item) => item.group === "obd");
+
+  return {
+    source: "fmc130",
+    imei,
+    protocol: "teltonika_codec_8e_tcp",
+    online: true,
+    recordTimestamp: record.gpsTimestamp,
+    serverTimestamp: now,
+    expiresAt: now + LIVE_DIAGNOSTICS_TTL_MS,
+    eventIoId: record.eventIoId,
+    totalIo: record.totalIo,
+    priority: record.priority,
+    bluetoothObdConnected: hasObdData ? true : null,
+    obdConnected: hasObdData ? true : null,
+    gps: {
+      lat: record.lat,
+      lng: record.lng,
+      speedKmh: record.speedKmh,
+      altitude: record.altitude,
+      angle: record.angle,
+      satellites: record.satellites,
+    },
+    obd: metrics,
+    decodedIo,
+    rawIo: record.io || {},
+  };
+}
+
+function toFiniteMetric(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getMetric(metrics, key) {
+  if (!metrics || typeof metrics !== "object") return null;
+  return toFiniteMetric(metrics[key]);
+}
+
+function getMetricValue(metrics, key) {
+  if (!metrics || typeof metrics !== "object") return null;
+  return metrics[key] ?? null;
+}
+
+function makeDiagnosticEvent(type, timestamp, label, severity, value, unit, details) {
+  const minuteBucket = Math.floor(Number(timestamp || Date.now()) / 60000);
+  const eventValue =
+    value === null || value === undefined || value === ""
+      ? "na"
+      : String(value).replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 32);
+  const key = `${type}:${minuteBucket}:${eventValue}`;
+
+  return {
+    id: key,
+    key,
+    type,
+    label,
+    timestamp,
+    severity,
+    value: value ?? null,
+    unit: unit || "",
+    details: details || "",
+  };
+}
+
+function buildUnusualDiagnosticEvents(diagnostics, record) {
+  const events = [];
+  const metrics = diagnostics?.obd || {};
+  const timestamp = diagnostics?.recordTimestamp || record.gpsTimestamp || Date.now();
+  const speedKmh =
+    getMetric(metrics, "vehicleSpeedKmh") ??
+    getMetric(metrics, "gnssSpeedKmh") ??
+    toFiniteMetric(record.speedKmh);
+  const rpm = getMetric(metrics, "engineRpm");
+  const coolant = getMetric(metrics, "coolantTemperatureC");
+  const oil = getMetric(metrics, "engineOilTemperatureC");
+  const externalVoltage = getMetric(metrics, "externalVoltageV");
+  const fuelLevel = getMetric(metrics, "fuelLevelPct");
+  const engineLoad = getMetric(metrics, "engineLoadPct");
+  const throttle = getMetric(metrics, "throttlePositionPct");
+  const dtcCount = getMetric(metrics, "dtcCount");
+  const faultCodes = getMetricValue(metrics, "faultCodes");
+  const idling = getMetricValue(metrics, "idling");
+
+  if (speedKmh !== null && speedKmh >= OBD_OVERSPEED_KMH) {
+    events.push(
+      makeDiagnosticEvent(
+        "overspeed",
+        timestamp,
+        "Viteza neobisnuit de mare",
+        speedKmh >= OBD_OVERSPEED_KMH + 30 ? "critical" : "warning",
+        speedKmh,
+        "km/h",
+        `Prag setat: ${OBD_OVERSPEED_KMH} km/h`
+      )
+    );
+  }
+
+  if (rpm !== null && rpm >= OBD_HIGH_RPM) {
+    events.push(
+      makeDiagnosticEvent(
+        "high_rpm",
+        timestamp,
+        "Turatie motor ridicata",
+        rpm >= OBD_CRITICAL_RPM ? "critical" : "warning",
+        rpm,
+        "rpm",
+        `Praguri: ${OBD_HIGH_RPM}/${OBD_CRITICAL_RPM} rpm`
+      )
+    );
+  }
+
+  if (coolant !== null && coolant >= OBD_COOLANT_WARNING_C) {
+    events.push(
+      makeDiagnosticEvent(
+        "high_coolant_temp",
+        timestamp,
+        "Temperatura lichid racire ridicata",
+        coolant >= OBD_COOLANT_CRITICAL_C ? "critical" : "warning",
+        coolant,
+        "C",
+        `Praguri: ${OBD_COOLANT_WARNING_C}/${OBD_COOLANT_CRITICAL_C} C`
+      )
+    );
+  }
+
+  if (oil !== null && oil >= OBD_OIL_WARNING_C) {
+    events.push(
+      makeDiagnosticEvent(
+        "high_oil_temp",
+        timestamp,
+        "Temperatura ulei motor ridicata",
+        "warning",
+        oil,
+        "C",
+        `Prag setat: ${OBD_OIL_WARNING_C} C`
+      )
+    );
+  }
+
+  if (externalVoltage !== null && externalVoltage > 0 && externalVoltage < OBD_LOW_VOLTAGE_V) {
+    events.push(
+      makeDiagnosticEvent(
+        "low_voltage",
+        timestamp,
+        "Tensiune alimentare scazuta",
+        "warning",
+        externalVoltage,
+        "V",
+        `Prag setat: ${OBD_LOW_VOLTAGE_V} V`
+      )
+    );
+  }
+
+  if (fuelLevel !== null && fuelLevel >= 0 && fuelLevel <= OBD_LOW_FUEL_PCT) {
+    events.push(
+      makeDiagnosticEvent(
+        "low_fuel",
+        timestamp,
+        "Combustibil aproape terminat",
+        fuelLevel <= 5 ? "critical" : "warning",
+        fuelLevel,
+        "%",
+        `Prag setat: ${OBD_LOW_FUEL_PCT}%`
+      )
+    );
+  }
+
+  if (dtcCount !== null && dtcCount > 0) {
+    events.push(
+      makeDiagnosticEvent(
+        "dtc_detected",
+        timestamp,
+        "Coduri defecte OBD detectate",
+        "warning",
+        dtcCount,
+        "",
+        "FMC130 a transmis DTC count mai mare decat zero"
+      )
+    );
+  }
+
+  if (
+    faultCodes !== null &&
+    faultCodes !== undefined &&
+    String(faultCodes).trim() &&
+    String(faultCodes).trim() !== "0"
+  ) {
+    events.push(
+      makeDiagnosticEvent(
+        "fault_codes",
+        timestamp,
+        "Coduri defecte transmise",
+        "warning",
+        String(faultCodes).trim(),
+        "",
+        "Valoare raw Fault Codes"
+      )
+    );
+  }
+
+  if (engineLoad !== null && engineLoad >= 95) {
+    events.push(
+      makeDiagnosticEvent(
+        "high_engine_load",
+        timestamp,
+        "Sarcina motor foarte mare",
+        "info",
+        engineLoad,
+        "%",
+        "Engine Load peste 95%"
+      )
+    );
+  }
+
+  if (throttle !== null && throttle >= 95) {
+    events.push(
+      makeDiagnosticEvent(
+        "high_throttle",
+        timestamp,
+        "Acceleratie aproape maxima",
+        "info",
+        throttle,
+        "%",
+        "Throttle Position peste 95%"
+      )
+    );
+  }
+
+  if (idling === true || idling === 1 || idling === "1") {
+    events.push(
+      makeDiagnosticEvent(
+        "idling",
+        timestamp,
+        "Ralanti detectat",
+        "info",
+        1,
+        "",
+        "OBD/FMC a transmis idling activ"
+      )
+    );
+  }
+
+  return events;
+}
+
+function mergeDiagnosticEvents(existingEvents, incomingEvents) {
+  const byKey = new Map();
+
+  for (const event of [...(existingEvents || []), ...(incomingEvents || [])]) {
+    if (!event || typeof event !== "object") continue;
+    const key = event.key || event.id;
+    if (!key) continue;
+    byKey.set(key, event);
+  }
+
+  return [...byKey.values()]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(0, DIAGNOSTIC_DAY_EVENT_LIMIT);
+}
+
+function mergeDiagnosticSamples(existingSamples, incomingSamples) {
+  const byKey = new Map();
+
+  for (const sample of [...(existingSamples || []), ...(incomingSamples || [])]) {
+    if (!sample || typeof sample !== "object") continue;
+    const timestamp = Number(sample.timestamp || 0);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
+    const key = String(Math.floor(timestamp / 60_000));
+    byKey.set(key, sample);
+  }
+
+  return [...byKey.values()]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(0, DIAGNOSTIC_DAY_SAMPLE_LIMIT);
+}
+
+function updateMaxStat(stats, key, value) {
+  const numeric = toFiniteMetric(value);
+  if (numeric === null) return;
+  const current = toFiniteMetric(stats[key]);
+  if (current === null || numeric > current) stats[key] = numeric;
+}
+
+function updateMinStat(stats, key, value) {
+  const numeric = toFiniteMetric(value);
+  if (numeric === null) return;
+  const current = toFiniteMetric(stats[key]);
+  if (current === null || numeric < current) stats[key] = numeric;
+}
+
+function buildDailyDiagnosticSummaryText(stats, events) {
+  const eventCount = Array.isArray(events) ? events.length : 0;
+  const criticalCount = Array.isArray(events)
+    ? events.filter((event) => event.severity === "critical").length
+    : 0;
+  const warningCount = Array.isArray(events)
+    ? events.filter((event) => event.severity === "warning").length
+    : 0;
+  const maxSpeed = toFiniteMetric(stats.maxSpeedKmh);
+  const maxRpm = toFiniteMetric(stats.maxEngineRpm);
+  const maxCoolant = toFiniteMetric(stats.maxCoolantTemperatureC);
+
+  if (!eventCount) {
+    return "Nu sunt evenimente neobisnuite inregistrate pentru ziua curenta.";
+  }
+
+  const parts = [`${eventCount} evenimente neobisnuite`];
+  if (criticalCount) parts.push(`${criticalCount} critice`);
+  if (warningCount) parts.push(`${warningCount} avertizari`);
+  if (maxSpeed !== null) parts.push(`viteza maxima ${maxSpeed} km/h`);
+  if (maxRpm !== null) parts.push(`turatie maxima ${maxRpm} rpm`);
+  if (maxCoolant !== null) parts.push(`temperatura maxima ${maxCoolant} C`);
+
+  return parts.join(", ") + ".";
+}
+
+async function updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRecords, now) {
+  if (!dayRecords.length) return;
+
+  const diagnosticsItems = dayRecords.map((record) => buildLiveDiagnosticsSnapshot(imei, record, now));
+  const incomingEvents = diagnosticsItems.flatMap((diagnostics, index) =>
+    buildUnusualDiagnosticEvents(diagnostics, dayRecords[index])
+  );
+  const incomingSamples = diagnosticsItems.map((diagnostics) => ({
+    timestamp: diagnostics.recordTimestamp,
+    speedKmh: diagnostics.obd?.vehicleSpeedKmh ?? diagnostics.gps?.speedKmh ?? null,
+    engineRpm: diagnostics.obd?.engineRpm ?? null,
+    totalOdometerKm: diagnostics.obd?.totalOdometerKm ?? null,
+    tripOdometerKm: diagnostics.obd?.tripOdometerKm ?? null,
+    coolantTemperatureC: diagnostics.obd?.coolantTemperatureC ?? null,
+    engineOilTemperatureC: diagnostics.obd?.engineOilTemperatureC ?? null,
+    externalVoltageV: diagnostics.obd?.externalVoltageV ?? null,
+    batteryVoltageV: diagnostics.obd?.batteryVoltageV ?? null,
+    fuelLevelPct: diagnostics.obd?.fuelLevelPct ?? null,
+    fuelRateLh: diagnostics.obd?.fuelRateLh ?? null,
+    engineLoadPct: diagnostics.obd?.engineLoadPct ?? null,
+    throttlePositionPct: diagnostics.obd?.throttlePositionPct ?? null,
+  }));
+  const firstRecordAt = Math.min(...dayRecords.map((record) => record.gpsTimestamp));
+  const lastRecordAt = Math.max(...dayRecords.map((record) => record.gpsTimestamp));
+  const latestDiagnostics = diagnosticsItems[diagnosticsItems.length - 1];
+  const dayRef = vehicleRef.collection("diagnosticDays").doc(dayKey);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(dayRef);
+    const existing = snap.exists ? snap.data() || {} : {};
+    const stats = { ...(existing.stats || {}) };
+
+    for (const diagnostics of diagnosticsItems) {
+      const metrics = diagnostics.obd || {};
+      updateMaxStat(stats, "maxSpeedKmh", metrics.vehicleSpeedKmh ?? diagnostics.gps?.speedKmh);
+      updateMaxStat(stats, "maxEngineRpm", metrics.engineRpm);
+      updateMaxStat(stats, "maxTotalOdometerKm", metrics.totalOdometerKm);
+      updateMaxStat(stats, "maxTripOdometerKm", metrics.tripOdometerKm);
+      updateMaxStat(stats, "maxCoolantTemperatureC", metrics.coolantTemperatureC);
+      updateMaxStat(stats, "maxEngineOilTemperatureC", metrics.engineOilTemperatureC);
+      updateMaxStat(stats, "maxFuelRateLh", metrics.fuelRateLh);
+      updateMaxStat(stats, "maxEngineLoadPct", metrics.engineLoadPct);
+      updateMaxStat(stats, "maxThrottlePositionPct", metrics.throttlePositionPct);
+      updateMinStat(stats, "minExternalVoltageV", metrics.externalVoltageV);
+      updateMinStat(stats, "minBatteryVoltageV", metrics.batteryVoltageV);
+      updateMinStat(stats, "minFuelLevelPct", metrics.fuelLevelPct);
+      updateMaxStat(stats, "maxDtcCount", metrics.dtcCount);
+    }
+
+    const existingEvents = Array.isArray(existing.events) ? existing.events : [];
+    const mergedEvents = mergeDiagnosticEvents(existingEvents, incomingEvents);
+    const existingSamples = Array.isArray(existing.samples) ? existing.samples : [];
+    const mergedSamples = mergeDiagnosticSamples(existingSamples, incomingSamples);
+    const previousFirstRecordAt = Number(existing.firstRecordAt || 0);
+    const previousLastRecordAt = Number(existing.lastRecordAt || 0);
+    const availableSensorKeys = Array.from(
+      new Set([
+        ...(Array.isArray(existing.availableSensorKeys) ? existing.availableSensorKeys : []),
+        ...Object.keys(latestDiagnostics?.obd || {}),
+      ])
+    ).sort();
+
+    tx.set(
+      dayRef,
+      {
+        vehicleId,
+        imei,
+        dayKey,
+        firstRecordAt:
+          previousFirstRecordAt > 0
+            ? Math.min(previousFirstRecordAt, firstRecordAt)
+            : firstRecordAt,
+        lastRecordAt: Math.max(previousLastRecordAt || 0, lastRecordAt),
+        packetsCount: Number(existing.packetsCount || 0) + dayRecords.length,
+        updatedAt: now,
+        updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        stats,
+        latestObd: latestDiagnostics?.obd || {},
+        availableSensorKeys,
+        samples: mergedSamples,
+        events: mergedEvents,
+        eventKeys: mergedEvents.map((event) => event.key || event.id).filter(Boolean),
+        summaryText: buildDailyDiagnosticSummaryText(stats, mergedEvents),
+      },
+      { merge: true }
+    );
+  });
+}
+
 function isCodec12SuccessPayload(payload) {
   const text = String(payload || "").toLowerCase();
 
@@ -57,15 +752,20 @@ function isCodec12SuccessPayload(payload) {
   return true;
 }
 
-function resolveNotificationPath(moduleName, eventType, entityId) {
+function resolveNotificationPath(moduleName, eventType, entityId, explicitPath) {
+  const explicitValue = String(explicitPath || "").trim();
   const moduleValue = String(moduleName || "").trim();
   const eventValue = String(eventType || "").trim();
   const entityValue = String(entityId || "").trim();
 
+  if (explicitValue.startsWith("/")) return explicitValue;
   if (moduleValue === "tools" && entityValue) return `/tools/${entityValue}`;
   if (moduleValue === "vehicles" && entityValue) return `/vehicles/${entityValue}`;
   if (moduleValue === "timesheets" && entityValue) return `/timesheets/${entityValue}`;
   if (moduleValue === "users" && entityValue) return `/users/${entityValue}/edit`;
+  if (moduleValue === "maintenance" && eventValue.startsWith("maintenance_part_order")) return "/maintenance/orders";
+  if (moduleValue === "maintenance" && entityValue) return `/maintenance/${entityValue}`;
+  if (moduleValue === "expenses") return "/expenses/scan";
   if (moduleValue === "projects") return "/projects";
   if (moduleValue === "notifications") return "/notifications";
 
@@ -133,24 +833,29 @@ async function sendPushForNotification(docSnap) {
     return;
   }
 
-  const path = resolveNotificationPath(data.module, data.eventType, data.entityId);
+  const path = resolveNotificationPath(data.module, data.eventType, data.entityId, data.notificationPath);
   const title = String(data.title || "Notificare WorkControl");
   const body = String(data.message || "");
+  const webPushTopic = `wc-${docSnap.id}`.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32);
 
   const response = await admin.messaging().sendEachForMulticast({
     tokens: tokenItems.map((item) => item.token),
-    notification: {
+    data: {
       title,
       body,
-    },
-    data: {
       path,
       notificationId: docSnap.id,
       module: String(data.module || ""),
       eventType: String(data.eventType || ""),
       entityId: String(data.entityId || ""),
+      soundEnabled: data.soundEnabled === false ? "false" : "true",
     },
     webpush: {
+      headers: {
+        Topic: webPushTopic,
+        TTL: "3600",
+        Urgency: "normal",
+      },
       fcmOptions: {
         link: path,
       },
@@ -623,6 +1328,14 @@ function shouldKeepRecord(lastSaved, record) {
   const minInterval = moving ? MIN_POINT_INTERVAL_MS_MOVING : MIN_POINT_INTERVAL_MS_IDLE;
   const movedMeters = distanceMeters(lastSaved.lat, lastSaved.lng, record.lat, record.lng);
 
+  if (
+    !moving &&
+    deltaMs <= IDLE_JITTER_MAX_INTERVAL_MS &&
+    movedMeters < IDLE_JITTER_DISTANCE_METERS
+  ) {
+    return false;
+  }
+
   if (deltaMs < minInterval && movedMeters < MIN_POINT_DISTANCE_METERS) {
     return false;
   }
@@ -662,6 +1375,171 @@ function computeDistanceIncrementKm(previousPoint, points) {
   return Number((totalMeters / 1000).toFixed(3));
 }
 
+function getRecordOdometerKm(record) {
+  const odometerMeters = typeof record?.io?.[16] === "number" ? record.io[16] : null;
+  if (odometerMeters === null) return null;
+
+  const odometerKm = odometerMeters / 1000;
+  return Number.isFinite(odometerKm) && odometerKm >= 0 ? odometerKm : null;
+}
+
+function getRecordRoundedOdometerKm(record) {
+  const odometerKm = getRecordOdometerKm(record);
+  return odometerKm !== null ? Number(odometerKm.toFixed(1)) : null;
+}
+
+function buildGpsSnapshotFromRecord(imei, record, now) {
+  const ignitionOn =
+    typeof record.io[239] === "number" ? record.io[239] === 1 : null;
+
+  return {
+    lat: record.lat,
+    lng: record.lng,
+    speedKmh: record.speedKmh,
+    gpsTimestamp: record.gpsTimestamp,
+    serverTimestamp: now,
+    expiresAt: now + LIVE_DIAGNOSTICS_TTL_MS,
+    ignitionOn,
+    odometerKm: getRecordRoundedOdometerKm(record),
+    tripOdometerKm:
+      typeof record.io[199] === "number"
+        ? Number((record.io[199] / 1000).toFixed(1))
+        : null,
+    imei,
+    online: true,
+    satellites: record.satellites,
+    altitude: record.altitude,
+    angle: record.angle,
+    rawIo: record.io || {},
+  };
+}
+
+async function writeVehicleLiveSnapshot(
+  vehicleRef,
+  vehicleId,
+  imei,
+  latestSnapshot,
+  latestDiagnostics,
+  currentKmIncrement,
+  dataUsageDelta,
+  now
+) {
+  const usageInitialValue = buildGpsDataUsageInitialValue(dataUsageDelta, now);
+  const updatePayload = {
+    gpsSnapshot: latestSnapshot,
+    liveDiagnostics: latestDiagnostics,
+    "tracker.imei": imei,
+    "tracker.lastSeenAt": now,
+    "tracker.updatedAt": now,
+    "tracker.protocol": "teltonika_codec_8e_tcp",
+    ...buildGpsDataUsageUpdateFields(dataUsageDelta, now),
+    updatedAt: now,
+  };
+
+  if (currentKmIncrement > 0) {
+    updatePayload.currentKm = admin.firestore.FieldValue.increment(currentKmIncrement);
+  }
+
+  try {
+    await vehicleRef.update(updatePayload);
+  } catch (error) {
+    if (error?.code !== 5 && error?.code !== "not-found") {
+      throw error;
+    }
+
+    await vehicleRef.set(
+      {
+        gpsSnapshot: latestSnapshot,
+        liveDiagnostics: latestDiagnostics,
+        ...(usageInitialValue ? { gpsDataUsage: usageInitialValue } : {}),
+        ...(currentKmIncrement > 0
+          ? {
+              currentKm: admin.firestore.FieldValue.increment(currentKmIncrement),
+            }
+          : {}),
+        tracker: {
+          imei,
+          lastSeenAt: now,
+          updatedAt: now,
+          protocol: "teltonika_codec_8e_tcp",
+        },
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  }
+}
+
+async function writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now) {
+  const usageUpdateFields = buildGpsDataUsageUpdateFields(dataUsageDelta, now);
+  if (!Object.keys(usageUpdateFields).length) return;
+
+  const usageInitialValue = buildGpsDataUsageInitialValue(dataUsageDelta, now);
+  const updatePayload = {
+    ...usageUpdateFields,
+    "tracker.imei": imei,
+    "tracker.lastSeenAt": now,
+    "tracker.updatedAt": now,
+    "tracker.protocol": "teltonika_codec_8e_tcp",
+    updatedAt: now,
+  };
+
+  try {
+    await vehicleRef.update(updatePayload);
+  } catch (error) {
+    if (error?.code !== 5 && error?.code !== "not-found") {
+      throw error;
+    }
+
+    await vehicleRef.set(
+      {
+        ...(usageInitialValue ? { gpsDataUsage: usageInitialValue } : {}),
+        tracker: {
+          imei,
+          lastSeenAt: now,
+          updatedAt: now,
+          protocol: "teltonika_codec_8e_tcp",
+        },
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  }
+}
+
+function computeOdometerIncrementKm(previousOdometerKm, points) {
+  if (!Array.isArray(points) || !points.length) {
+    return { incrementKm: 0, latestOdometerKm: previousOdometerKm ?? null };
+  }
+
+  let previous =
+    typeof previousOdometerKm === "number" && Number.isFinite(previousOdometerKm)
+      ? previousOdometerKm
+      : null;
+  let latest = previous;
+  let incrementKm = 0;
+
+  for (const point of points) {
+    const odometerKm = getRecordOdometerKm(point);
+    if (odometerKm === null) continue;
+
+    if (previous !== null) {
+      const deltaKm = odometerKm - previous;
+      if (deltaKm > 0 && deltaKm <= MAX_ODOMETER_INCREMENT_KM) {
+        incrementKm += deltaKm;
+      }
+    }
+
+    previous = odometerKm;
+    latest = odometerKm;
+  }
+
+  return {
+    incrementKm: Number(incrementKm.toFixed(3)),
+    latestOdometerKm: latest,
+  };
+}
+
 function getLastCleanupTs() {
   try {
     if (!fs.existsSync(LAST_CLEANUP_FILE)) return 0;
@@ -699,11 +1577,16 @@ async function runServerCleanup() {
   console.log("[CLEANUP START] incepe curatarea automata");
 
   await runCommandSafe("pm2 flush");
-  await runCommandSafe("journalctl --vacuum-time=7d");
+  await runCommandSafe("journalctl --vacuum-time=3d");
+  await runCommandSafe("journalctl --vacuum-size=100M");
   await runCommandSafe("apt clean");
   await runCommandSafe("apt autoclean");
   await runCommandSafe("apt autoremove -y");
   await runCommandSafe("find /var/log -type f -name '*.gz' -mtime +7 -delete");
+  await runCommandSafe("find /var/log -type f -name '*.log' -size +50M -exec truncate -s 0 {} \\;");
+  await runCommandSafe("npm cache clean --force");
+  await runCommandSafe("du -sh /var/log ~/.pm2/logs 2>/dev/null || true");
+  await runCommandSafe("df -h /");
 
   setLastCleanupTs(Date.now());
 
@@ -729,7 +1612,7 @@ function startCleanupScheduler() {
   }, 60 * 60 * 1000);
 }
 
-async function saveRecordsToFirestore(imei, records) {
+async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
   const cacheEntry = trackerBindingCache.get(imei);
   let binding = cacheEntry?.expiresAt > Date.now() ? cacheEntry.binding : null;
 
@@ -762,6 +1645,7 @@ async function saveRecordsToFirestore(imei, records) {
   }
 
   const vehicleId = binding.vehicleId;
+  const vehicleRef = db.collection("vehicles").doc(vehicleId);
   const now = Date.now();
 
   const validRecords = records
@@ -787,51 +1671,48 @@ async function saveRecordsToFirestore(imei, records) {
     lastSavedPointByImei.set(imei, previousSavedPoint);
   }
 
-  const effectiveRecords =
-    recordsForStorage.length > 0
-      ? recordsForStorage
-      : [validRecords[validRecords.length - 1]];
-
   const distanceIncrementKm = computeDistanceIncrementKm(
     previousSavedPointFromMemory,
-    effectiveRecords
+    recordsForStorage
   );
+  let previousOdometerKm = lastOdometerKmByImei.get(imei);
+  const hasOdometerInBatch = validRecords.some((record) => getRecordOdometerKm(record) !== null);
 
-  let latestSnapshot = null;
-  const groups = new Map();
+  if (hasOdometerInBatch && (typeof previousOdometerKm !== "number" || !Number.isFinite(previousOdometerKm))) {
+    const vehicleSnap = await vehicleRef.get().catch(() => null);
+    const snapshotOdometerKm = Number(vehicleSnap?.data()?.gpsSnapshot?.odometerKm);
+    previousOdometerKm = Number.isFinite(snapshotOdometerKm) ? snapshotOdometerKm : null;
+  }
 
-  for (const record of effectiveRecords) {
+  const odometerIncrement = computeOdometerIncrementKm(previousOdometerKm, validRecords);
+  if (typeof odometerIncrement.latestOdometerKm === "number" && Number.isFinite(odometerIncrement.latestOdometerKm)) {
+    lastOdometerKmByImei.set(imei, odometerIncrement.latestOdometerKm);
+  }
+
+  const currentKmIncrement = odometerIncrement.incrementKm > 0
+    ? odometerIncrement.incrementKm
+    : distanceIncrementKm;
+
+  const latestRecord = validRecords[validRecords.length - 1] || null;
+  const latestDiagnostics = latestRecord ? buildLiveDiagnosticsSnapshot(imei, latestRecord, now) : null;
+  const latestSnapshot = latestRecord ? buildGpsSnapshotFromRecord(imei, latestRecord, now) : null;
+  const diagnosticGroups = new Map();
+  const positionGroups = new Map();
+
+  for (const record of validRecords) {
     const dayKey = getDayKeyFromTs(record.gpsTimestamp);
-    if (!groups.has(dayKey)) groups.set(dayKey, []);
-    groups.get(dayKey).push(record);
+    if (!diagnosticGroups.has(dayKey)) diagnosticGroups.set(dayKey, []);
+    diagnosticGroups.get(dayKey).push(record);
+  }
 
-    const odometerMeters =
-      typeof record.io[16] === "number" ? record.io[16] : null;
-
-    const ignitionOn =
-      typeof record.io[239] === "number" ? record.io[239] === 1 : null;
-
-    latestSnapshot = {
-      lat: record.lat,
-      lng: record.lng,
-      speedKmh: record.speedKmh,
-      gpsTimestamp: record.gpsTimestamp,
-      serverTimestamp: now,
-      ignitionOn,
-      odometerKm:
-        odometerMeters !== null
-          ? Number((odometerMeters / 1000).toFixed(1))
-          : null,
-      imei,
-      online: true,
-      satellites: record.satellites,
-      altitude: record.altitude,
-      angle: record.angle,
-    };
+  for (const record of recordsForStorage) {
+    const dayKey = getDayKeyFromTs(record.gpsTimestamp);
+    if (!positionGroups.has(dayKey)) positionGroups.set(dayKey, []);
+    positionGroups.get(dayKey).push(record);
   }
 
   if (recordsForStorage.length > 0) {
-    for (const [dayKey, dayRecords] of groups.entries()) {
+    for (const [dayKey, dayRecords] of positionGroups.entries()) {
       const dayRef = db
         .collection("vehicles")
         .doc(vehicleId)
@@ -856,9 +1737,6 @@ async function saveRecordsToFirestore(imei, records) {
         );
 
         for (const record of dayChunk) {
-          const odometerMeters =
-            typeof record.io[16] === "number" ? record.io[16] : null;
-
           const ignitionOn =
             typeof record.io[239] === "number" ? record.io[239] === 1 : null;
 
@@ -876,10 +1754,12 @@ async function saveRecordsToFirestore(imei, records) {
             serverTimestamp: now,
             eventIoId: record.eventIoId,
             ignitionOn,
-            odometerKm:
-              odometerMeters !== null
-                ? Number((odometerMeters / 1000).toFixed(1))
+            odometerKm: getRecordRoundedOdometerKm(record),
+            tripOdometerKm:
+              typeof record.io[199] === "number"
+                ? Number((record.io[199] / 1000).toFixed(1))
                 : null,
+            rawIo: record.io || {},
           };
 
           const pointRef = dayRef.collection("points").doc(buildPointId(record));
@@ -895,32 +1775,46 @@ async function saveRecordsToFirestore(imei, records) {
     }
   }
 
+  for (const [dayKey, dayRecords] of diagnosticGroups.entries()) {
+    await updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRecords, now);
+  }
+
   if (latestSnapshot) {
     const lastSnapshotWriteAt = lastSnapshotWriteByVehicle.get(vehicleId) || 0;
     const shouldWriteSnapshot =
       now - lastSnapshotWriteAt >= SNAPSHOT_WRITE_MIN_INTERVAL_MS ||
-      (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH;
+      (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH ||
+      currentKmIncrement > 0;
     if (shouldWriteSnapshot) {
-      await db.collection("vehicles").doc(vehicleId).set(
-        {
-          gpsSnapshot: latestSnapshot,
-          ...(distanceIncrementKm > 0
-            ? {
-                currentKm: admin.firestore.FieldValue.increment(distanceIncrementKm),
-              }
-            : {}),
-          tracker: {
-            imei,
-            lastSeenAt: now,
-            updatedAt: now,
-            protocol: "teltonika_codec_8e_tcp",
-          },
-          updatedAt: now,
-        },
-        { merge: true }
+      await writeVehicleLiveSnapshot(
+        vehicleRef,
+        vehicleId,
+        imei,
+        latestSnapshot,
+        latestDiagnostics,
+        currentKmIncrement,
+        dataUsageDelta,
+        now
       );
       lastSnapshotWriteByVehicle.set(vehicleId, now);
+    } else {
+      await writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now);
     }
+  } else {
+    const usageInitialValue = buildGpsDataUsageInitialValue(dataUsageDelta, now);
+    await vehicleRef.set(
+      {
+        ...(usageInitialValue ? { gpsDataUsage: usageInitialValue } : {}),
+        tracker: {
+          imei,
+          lastSeenAt: now,
+          updatedAt: now,
+          protocol: "teltonika_codec_8e_tcp",
+        },
+        updatedAt: now,
+      },
+      { merge: true }
+    );
   }
 
   if (!healthyLoggedImei.has(imei)) {
@@ -977,6 +1871,10 @@ function sendCodec12CommandToDevice(imei, commandText, meta) {
       timeout,
       requestedAt: Date.now(),
     });
+  }
+
+  if (typeof entry.reportTxBytes === "function") {
+    entry.reportTxBytes(packet.length);
   }
 
   entry.socket.write(packet, (err) => {
@@ -1138,6 +2036,8 @@ const server = net.createServer((socket) => {
     stage: "imei",
     imei: null,
     buffer: Buffer.alloc(0),
+    pendingRxBytes: 0,
+    pendingTxBytes: 0,
   };
 
   socket.on("timeout", () => {
@@ -1147,6 +2047,7 @@ const server = net.createServer((socket) => {
 
   socket.on("data", (chunk) => {
     try {
+      session.pendingRxBytes += toByteCount(chunk.length);
       session.buffer = Buffer.concat([session.buffer, chunk]);
 
       if (session.buffer.length > MAX_BUFFER_BYTES) {
@@ -1191,13 +2092,16 @@ const server = net.createServer((socket) => {
           activeDevices.set(imei, {
             socket,
             lastSeenAt: Date.now(),
+            reportTxBytes: (bytes) => addSessionTxBytes(session, bytes),
           });
 
           session.buffer = session.buffer.subarray(2 + imeiLength);
           session.stage = "avl";
 
           console.log(`[IMEI ACCEPTED] imei=${imei} remote=${remote}`);
-          socket.write(Buffer.from([0x01]));
+          const imeiAck = Buffer.from([0x01]);
+          addSessionTxBytes(session, imeiAck.length);
+          socket.write(imeiAck);
           continue;
         }
 
@@ -1239,6 +2143,7 @@ const server = net.createServer((socket) => {
             activeDevices.set(session.imei, {
               socket,
               lastSeenAt: Date.now(),
+              reportTxBytes: (bytes) => addSessionTxBytes(session, bytes),
             });
           }
 
@@ -1247,9 +2152,11 @@ const server = net.createServer((socket) => {
 
             const ack = Buffer.alloc(4);
             ack.writeUInt32BE(packet.recordCount, 0);
+            addSessionTxBytes(session, ack.length);
             socket.write(ack);
 
-            void saveRecordsToFirestore(session.imei, packet.records).catch((error) => {
+            const dataUsageDelta = takeSessionDataUsageDelta(session, packet.records.length);
+            void saveRecordsToFirestore(session.imei, packet.records, dataUsageDelta).catch((error) => {
               console.error(`[FIRESTORE SAVE ERROR] imei=${session.imei}`, error);
             });
 
@@ -1324,7 +2231,8 @@ server.on("error", (error) => {
 
 watchVehicleCommands();
 startCleanupScheduler();
-startNotificationPushBridge();
+// Push-ul este trimis de Firebase Cloud Function `sendPushOnNotificationCreated`.
+// Daca il pornim si aici, aceeasi notificare poate ajunge de doua ori pe telefon.
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER STARTED] GPS gateway listening on 0.0.0.0:${PORT}`);

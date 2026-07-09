@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { getAllUsers } from "../services/usersService";
+import { deleteUserProfile, getAllUsers, subscribeUsers } from "../services/usersService";
 import type { AppUserItem } from "../../../types/user";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
-import { Search, UserPlus, Users, ShieldAlert } from "lucide-react";
+import { Search, UserPlus, Users, ShieldAlert, Trash2 } from "lucide-react";
 
 function UserRowSkeleton() {
   return (
@@ -21,22 +21,46 @@ function UserRowSkeleton() {
       <td><div className="skeleton" style={{ height: 13, width: "85%" }} /></td>
       <td><div className="skeleton" style={{ height: 22, width: 60, borderRadius: "var(--radius-xs)" }} /></td>
       <td><div className="skeleton" style={{ height: 22, width: 55, borderRadius: "var(--radius-xs)" }} /></td>
+      <td><div className="skeleton" style={{ height: 13, width: 120 }} /></td>
       <td><div className="skeleton" style={{ height: 30, width: 80, borderRadius: "var(--radius-sm)" }} /></td>
     </tr>
   );
 }
 
+function formatLastSeenAt(value?: number) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("ro-RO", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+const USER_ONLINE_WINDOW_MS = 75_000;
+
+function isUserOnline(user: AppUserItem) {
+  const lastActivity = user.lastActiveAt || user.lastSeenAt || 0;
+  return Boolean(user.isOnline && lastActivity && Date.now() - lastActivity <= USER_ONLINE_WINDOW_MS);
+}
+
 export default function UsersPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const [users, setUsers] = useState<AppUserItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingUserId, setDeletingUserId] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const [onlineTick, setOnlineTick] = useState(Date.now());
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setOnlineTick(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const load = useCallback(async () => {
@@ -57,6 +81,52 @@ export default function UsersPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    const unsubscribe = subscribeUsers(
+      (data) => {
+        if (!mountedRef.current) return;
+        setUsers(Array.isArray(data) ? data : []);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[UsersPage][subscribeUsers]", err);
+        if (!mountedRef.current) return;
+        setError("Nu am putut incarca live utilizatorii. Verifica regulile Firebase.");
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [reloadToken]);
+
+  const handleDeleteUser = useCallback(async (targetUser: AppUserItem) => {
+    if (targetUser.id === user?.uid || targetUser.uid === user?.uid) {
+      setError("Nu poti sterge propriul cont din pagina Utilizatori.");
+      return;
+    }
+
+    const label = targetUser.fullName || targetUser.email || targetUser.uid || targetUser.id;
+    const confirmed = window.confirm(
+      `Sigur vrei sa stergi utilizatorul ${label} Actiunea nu poate fi anulata.`
+    );
+    if (!confirmed) return;
+
+    setDeletingUserId(targetUser.id);
+    setError("");
+
+    try {
+      await deleteUserProfile(targetUser.id);
+      if (!mountedRef.current) return;
+      setUsers((current) => current.filter((item) => item.id !== targetUser.id));
+    } catch (err) {
+      console.error("[UsersPage][deleteUser]", err);
+      if (!mountedRef.current) return;
+      setError("Nu am putut sterge utilizatorul. Verifica regulile Firebase si incearca din nou.");
+    } finally {
+      if (mountedRef.current) setDeletingUserId("");
+    }
+  }, [user?.uid]);
+
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return users;
@@ -68,6 +138,7 @@ export default function UsersPage() {
   }, [users, search]);
 
   const activeCount = useMemo(() => users.filter((u) => u.active !== false).length, [users]);
+  const onlineCount = useMemo(() => users.filter(isUserOnline).length, [users, onlineTick]);
 
   // Non-admin guard
   if (role !== "admin") {
@@ -100,7 +171,7 @@ export default function UsersPage() {
             <p className="tools-subtitle">
               {loading
                 ? "Se încarcă..."
-                : `${users.length} conturi · ${activeCount} active`}
+                : `${users.length} conturi · ${activeCount} active · ${onlineCount} online`}
             </p>
           </div>
           <div className="tools-header-actions">
@@ -138,7 +209,10 @@ export default function UsersPage() {
             <button
               type="button"
               style={{ marginLeft: "auto", fontWeight: 700, background: "none", border: "none", cursor: "pointer", color: "inherit" }}
-              onClick={() => void load()}
+              onClick={() => {
+                setReloadToken((value) => value + 1);
+                void load();
+              }}
             >
               Reîncarcă
             </button>
@@ -151,7 +225,7 @@ export default function UsersPage() {
             <table className="users-table">
               <thead>
                 <tr>
-                  <th>Nume</th><th>Email</th><th>Rol</th><th>Status</th><th>Acțiuni</th>
+                  <th>Nume</th><th>Email</th><th>Rol</th><th>Status</th><th>Last seen</th><th>Acțiuni</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,21 +252,29 @@ export default function UsersPage() {
                   <th>Email</th>
                   <th>Rol</th>
                   <th>Status</th>
+                  <th>Last seen</th>
                   <th>Acțiuni</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredUsers.map((u) => {
                   const themeClass = getUserThemeClass(u.themeKey || null);
+                  const online = isUserOnline(u);
                   return (
                     <tr key={u.id} className={`user-table-row ${themeClass}`}>
-                      <td>
+                      <td className="users-table-main-cell">
                         <div className="user-table-name">
                           <span className="user-accent-avatar">
-                            {getUserInitials(u.fullName || u.email || "U")}
+                            {u.avatarThumbUrl || u.avatarUrl ? (
+                              <img src={u.avatarThumbUrl || u.avatarUrl} alt="" />
+                            ) : (
+                              getUserInitials(u.fullName || u.email || "U")
+                            )}
                           </span>
                           <div className="user-table-meta">
-                            <span className="user-accent-name">{u.fullName || "—"}</span>
+                            <Link to={`/users/${u.id}`} className="user-accent-name user-profile-name-link">
+                              {u.fullName || "—"}
+                            </Link>
                             <span className="simple-list-subtitle" style={{ fontSize: 11 }}>{u.uid}</span>
                           </div>
                         </div>
@@ -205,11 +287,34 @@ export default function UsersPage() {
                         <span className={u.active !== false ? "badge badge-green" : "badge badge-red"}>
                           {u.active !== false ? "activ" : "inactiv"}
                         </span>
+                        <span
+                          className={online ? "badge badge-green" : "badge badge-muted"}
+                          style={{ marginLeft: 6 }}
+                        >
+                          {online ? "online" : "offline"}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: 12, color: "var(--text-soft)", whiteSpace: "nowrap" }}>
+                        Last seen at: {formatLastSeenAt(u.lastSeenAt)}
                       </td>
                       <td>
+                        <Link to={`/users/${u.id}`} className="secondary-btn" style={{ fontSize: 12, padding: "6px 12px", marginRight: 8 }}>
+                          Profil
+                        </Link>
                         <Link to={`/users/${u.id}/edit`} className="secondary-btn" style={{ fontSize: 12, padding: "6px 12px" }}>
                           Editează
                         </Link>
+                        <button
+                          type="button"
+                          className="danger-btn"
+                          style={{ fontSize: 12, padding: "6px 10px", marginLeft: 8 }}
+                          disabled={deletingUserId === u.id || u.id === user?.uid || u.uid === user?.uid}
+                          onClick={() => void handleDeleteUser(u)}
+                          title={u.id === user?.uid || u.uid === user?.uid ? "Nu poti sterge propriul cont" : "Sterge utilizator"}
+                        >
+                          <Trash2 size={13} />
+                          {deletingUserId === u.id ? "Se sterge..." : "Sterge"}
+                        </button>
                       </td>
                     </tr>
                   );

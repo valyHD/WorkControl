@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, CalendarCheck, Gauge, Hash, Save } from "lucide-react";
 import type { AppUser } from "../../../types/tool";
 import type { VehicleFormValues } from "../../../types/vehicle";
 import VehicleForm from "../components/VehicleForm";
 import type { VehiclePendingDocument } from "../components/VehicleDocumentUploader";
 import {
   createVehicle,
+  enrichVehicleDocumentsWithAi,
   getVehicleById,
   getVehicleUsers,
   isPlateNumberUsed,
@@ -16,6 +18,8 @@ import {
   uploadVehicleDocuments,
 } from "../services/vehiclesService";
 import { useAuth } from "../../../providers/AuthProvider";
+import ActionBar from "../../../components/ActionBar";
+import PageQuickActions from "../../../components/PageQuickActions";
 
 const emptyValues: VehicleFormValues = {
   plateNumber: "",
@@ -43,6 +47,8 @@ const emptyValues: VehicleFormValues = {
   nextItpDate: "",
   nextRcaDate: "",
   nextCascoDate: "",
+  nextRovinietaDate: "",
+  nextOilServiceKm: 0,
 
   coverImageUrl: "",
   coverThumbUrl: "",
@@ -50,17 +56,47 @@ const emptyValues: VehicleFormValues = {
   documents: [],
 };
 
+const assistantFieldAliases: Record<string, string[]> = {
+  currentKm: ["km curenti", "kilometraj actual", "kilometraj curent"],
+  initialRecordedKm: ["km reali la inregistrare", "km initiali"],
+  nextItpDate: ["itp pana la", "itp"],
+  nextRcaDate: ["rca pana la", "rca"],
+  nextCascoDate: ["casco pana la", "casco"],
+  nextRovinietaDate: ["rovinieta pana la", "rovinieta"],
+  serviceIntervalKm: ["revizie la fiecare", "interval service"],
+  nextServiceKm: ["prag service"],
+  nextOilServiceKm: ["revizie ulei"],
+  plateNumber: ["numar inmatriculare"],
+  brand: ["marca"],
+  model: ["model"],
+  vin: ["serie sasiu", "vin"],
+  fuelType: ["combustibil"],
+  status: ["status"],
+};
+
+function normalizeAssistantText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export default function VehicleFormPage() {
   const { vehicleId } = useParams();
   const isEdit = Boolean(vehicleId);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const location = useLocation();
+  const { role, user } = useAuth();
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [initialValues, setInitialValues] = useState<VehicleFormValues>(emptyValues);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [submitStatus, setSubmitStatus] = useState("");
   const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
@@ -77,7 +113,7 @@ export default function VehicleFormPage() {
           const vehicle = await getVehicleById(vehicleId);
 
           if (vehicle) {
-            if (user?.uid && vehicle.ownerUserId && vehicle.ownerUserId !== user.uid) {
+            if (role !== "admin" && user?.uid && vehicle.ownerUserId && vehicle.ownerUserId !== user.uid) {
               setForbidden(true);
               return;
             }
@@ -108,6 +144,8 @@ export default function VehicleFormPage() {
               nextItpDate: vehicle.nextItpDate,
               nextRcaDate: vehicle.nextRcaDate,
               nextCascoDate: vehicle.nextCascoDate,
+              nextRovinietaDate: vehicle.nextRovinietaDate,
+              nextOilServiceKm: vehicle.nextOilServiceKm,
 
               coverImageUrl: vehicle.coverImageUrl,
               coverThumbUrl: vehicle.coverThumbUrl,
@@ -116,8 +154,12 @@ export default function VehicleFormPage() {
             });
           }
         } else {
+          const params = new URLSearchParams(location.search);
           setInitialValues({
             ...emptyValues,
+            plateNumber: (params.get("plate") || "").toUpperCase(),
+            brand: params.get("brand") || "",
+            model: params.get("model") || "",
             ownerUserId: user?.uid ?? "",
             ownerUserName: user?.displayName ?? "",
             ownerThemeKey: user?.themeKey ?? null,
@@ -136,7 +178,28 @@ export default function VehicleFormPage() {
     }
 
     void load();
-  }, [vehicleId, user]);
+  }, [location.search, role, vehicleId, user]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const assistantField = new URLSearchParams(location.search).get("assistantField") || "";
+    const aliases = assistantFieldAliases[assistantField];
+    if (!aliases?.length) return;
+
+    window.setTimeout(() => {
+      const normalizedAliases = aliases.map(normalizeAssistantText);
+      const label = Array.from(document.querySelectorAll(".tool-form-label")).find((item) => {
+        const text = normalizeAssistantText(item.textContent || "");
+        return normalizedAliases.some((alias) => text.includes(alias) || alias.includes(text));
+      });
+      const block = label?.closest(".tool-form-block");
+      const control = block?.querySelector("input, select, textarea") as HTMLElement | null;
+
+      (block || control)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      control?.focus();
+    }, 220);
+  }, [loading, location.search]);
 
   async function handleSubmit(
     values: VehicleFormValues,
@@ -145,6 +208,7 @@ export default function VehicleFormPage() {
   ) {
     setSubmitting(true);
     setError("");
+    setSubmitStatus("");
 
     try {
       const cleanPlate = values.plateNumber.trim().toUpperCase();
@@ -181,6 +245,7 @@ export default function VehicleFormPage() {
         vin: values.vin.trim(),
         fuelType: values.fuelType.trim(),
         maintenanceNotes: values.maintenanceNotes.trim(),
+        currentKm: Number(values.currentKm || 0),
         initialRecordedKm: Number(values.initialRecordedKm || values.currentKm || 0),
         serviceIntervalKm: Number(values.serviceIntervalKm || 15000),
         nextServiceKm:
@@ -203,13 +268,17 @@ export default function VehicleFormPage() {
         const newVehicleId = await createVehicle(normalizedValues);
 
         if (selectedFiles.length > 0) {
+          setSubmitStatus("Se incarca pozele...");
           const uploaded = await uploadVehicleImages(newVehicleId, selectedFiles);
           await saveVehicleImages(newVehicleId, [], uploaded);
         }
 
         if (selectedDocuments.length > 0) {
+          setSubmitStatus("Se incarca documentele...");
           const uploadedDocs = await uploadVehicleDocuments(newVehicleId, selectedDocuments);
-          await saveVehicleDocuments(newVehicleId, [], uploadedDocs);
+          setSubmitStatus("Se citesc documentele cu AI...");
+          const analyzedDocs = await enrichVehicleDocumentsWithAi(uploadedDocs);
+          await saveVehicleDocuments(newVehicleId, [], analyzedDocs);
         }
 
         navigate(`/vehicles/${newVehicleId}`);
@@ -219,13 +288,17 @@ export default function VehicleFormPage() {
       await updateVehicle(vehicleId, normalizedValues);
 
       if (selectedFiles.length > 0) {
+        setSubmitStatus("Se incarca pozele...");
         const uploaded = await uploadVehicleImages(vehicleId, selectedFiles);
         await saveVehicleImages(vehicleId, normalizedValues.images, uploaded);
       }
 
       if (selectedDocuments.length > 0) {
+        setSubmitStatus("Se incarca documentele...");
         const uploadedDocs = await uploadVehicleDocuments(vehicleId, selectedDocuments);
-        await saveVehicleDocuments(vehicleId, normalizedValues.documents, uploadedDocs);
+        setSubmitStatus("Se citesc documentele cu AI...");
+        const analyzedDocs = await enrichVehicleDocumentsWithAi(uploadedDocs);
+        await saveVehicleDocuments(vehicleId, normalizedValues.documents, analyzedDocs);
       }
 
       navigate(`/vehicles/${vehicleId}`);
@@ -234,6 +307,7 @@ export default function VehicleFormPage() {
       setError("Nu am putut salva masina.");
     } finally {
       setSubmitting(false);
+      setSubmitStatus("");
     }
   }
 
@@ -255,26 +329,61 @@ export default function VehicleFormPage() {
     return (
       <div className="placeholder-page">
         <h2>Nu poti edita aceasta masina</h2>
-        <p>Doar responsabilul principal poate modifica aceasta masina.</p>
+        <p>Doar responsabilul principal sau un administrator poate modifica aceasta masina.</p>
       </div>
     );
   }
 
   return (
     <section className="page-section">
-      <div className="panel">
-        <div className="tools-header">
-          <div>
-            <h2 className="panel-title">{title}</h2>
-            <p className="tools-subtitle">
-              Completeaza datele masinii, responsabilul, soferul si mentenanta.
-            </p>
-          </div>
+      <ActionBar
+        title={title}
+        subtitle={`Completeaza datele masinii, responsabilul, soferul si mentenanta.${submitStatus ? ` ${submitStatus}` : ""}`}
+        actions={[
+          {
+            label: "Inapoi la masini",
+            href: "/vehicles",
+            icon: <ArrowLeft size={16} />,
+            tooltip: "Revino la lista de masini",
+          },
+        ]}
+      />
 
-          <Link to="/vehicles" className="secondary-btn">
-            Inapoi la masini
-          </Link>
-        </div>
+      <PageQuickActions
+        actions={[
+          {
+            label: "Salveaza",
+            href: "#vehicle-save",
+            icon: <Save size={16} />,
+            assistantAction: "save-vehicle",
+            tooltip: "Salveaza masina",
+            variant: "primary",
+          },
+          {
+            label: "Numar",
+            href: "#vehicle-plateNumber",
+            icon: <Hash size={16} />,
+            assistantField: "plateNumber",
+            tooltip: "Mergi la numarul de inmatriculare",
+          },
+          {
+            label: "Km curenti",
+            href: "#vehicle-currentKm",
+            icon: <Gauge size={16} />,
+            assistantField: "currentKm",
+            tooltip: "Mergi la kilometrajul curent",
+          },
+          {
+            label: "ITP",
+            href: "#vehicle-nextItpDate",
+            icon: <CalendarCheck size={16} />,
+            assistantField: "nextItpDate",
+            tooltip: "Mergi la data ITP",
+          },
+        ]}
+      />
+
+      <div className="panel" data-assistant-section="vehicle-form">
 
         {error && <div className="tool-message">{error}</div>}
 

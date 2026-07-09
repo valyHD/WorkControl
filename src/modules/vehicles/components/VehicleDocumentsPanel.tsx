@@ -1,10 +1,13 @@
 import { ExternalLink, Download, FileText, Trash2 } from "lucide-react";
 import type { VehicleDocumentCategory, VehicleDocumentItem } from "../../../types/vehicle";
+import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
   service: "Service + facturi",
+  itp: "ITP",
+  rca: "RCA / Asigurare",
+  casco: "CASCO",
   leasing_rate: "Rate leasing",
-  rca_itp: "RCA / ITP",
   rovinieta: "Roviniete",
   amenda: "Amenzi",
   other: "Altele",
@@ -37,39 +40,8 @@ export default function VehicleDocumentsPanel({
   deletingDocumentId,
   onDelete,
 }: Props) {
-  function getDownloadUrl(item: VehicleDocumentItem): string {
-    const separator = item.url.includes("?") ? "&" : "?";
-    const fileName = encodeURIComponent(item.name);
-    return `${item.url}${separator}response-content-disposition=attachment%3B%20filename%3D%22${fileName}%22`;
-  }
-
   async function handleDownloadDocument(item: VehicleDocumentItem) {
-    const downloadUrl = getDownloadUrl(item);
-
-    try {
-      const response = await fetch(downloadUrl, { credentials: "omit" });
-      if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = item.name;
-      link.rel = "noopener noreferrer";
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch {
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = item.name;
-      link.rel = "noopener noreferrer";
-      link.style.display = "none";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    }
+    await downloadFileFromUrl({ url: item.url, fileName: item.name });
   }
 
   if (!documents.length) {
@@ -90,8 +62,10 @@ export default function VehicleDocumentsPanel({
     },
     {
       service: [],
+      itp: [],
+      rca: [],
+      casco: [],
       leasing_rate: [],
-      rca_itp: [],
       rovinieta: [],
       amenda: [],
       other: [],
@@ -120,6 +94,10 @@ export default function VehicleDocumentsPanel({
                         <div className="vehicle-doc-card__name">{item.name}</div>
                         <div className="vehicle-doc-card__meta">
                           {(item.sizeBytes / 1024).toFixed(1)} KB · {item.extension.toUpperCase() || "document"}
+                          {item.expiryDate ? ` · expira ${item.expiryDate}` : ""}
+                          {item.aiAnalysis?.confidence
+                             ? ` · AI ${Math.round(item.aiAnalysis.confidence * 100)}%`
+                            : ""}
                         </div>
                       </div>
                     </div>
@@ -140,7 +118,7 @@ export default function VehicleDocumentsPanel({
                     )}
 
                     <div className="vehicle-doc-card__actions">
-                      <a className="secondary-btn" href={item.url} rel="noreferrer">
+                      <a className="secondary-btn" href={item.url} target="_blank" rel="noreferrer">
                         <ExternalLink size={14} /> Deschide
                       </a>
                       <a

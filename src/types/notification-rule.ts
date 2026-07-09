@@ -6,6 +6,8 @@ export type NotificationRuleModule =
   | "users"
   | "projects"
   | "notifications"
+  | "maintenance"
+  | "expenses"
   | "web"
   | "server"
   | "system"
@@ -18,33 +20,72 @@ export type NotificationRuleEventType =
   | "tool_deleted"
   | "tool_holder_changed"
   | "tool_status_changed"
+  | "tool_images_updated"
+  | "tool_cover_changed"
+  | "tool_image_deleted"
+  | "tool_claimed"
   | "vehicle_created"
   | "vehicle_updated"
   | "vehicle_deleted"
   | "vehicle_driver_changed"
   | "vehicle_status_changed"
+  | "vehicle_images_updated"
+  | "vehicle_cover_changed"
+  | "vehicle_image_deleted"
+  | "vehicle_documents_updated"
+  | "vehicle_document_deleted"
+  | "vehicle_claimed"
   | "vehicle_started"
   | "vehicle_block_start_requested"
   | "timesheet_started"
   | "timesheet_stopped"
   | "timesheet_updated"
+  | "timesheet_corrected"
+  | "timesheet_deleted"
+  | "timesheet_location_recorded"
+  | "timesheet_work_interval_reminder"
+  | "timesheet_start_daily_reminder"
+  | "timesheet_stop_after_8h_reminder"
   | "leave_request_submitted"
   | "leave_request_approved"
+  | "leave_request_rejected"
   | "leave_request_deleted"
   | "project_created"
   | "project_updated"
+  | "project_status_changed"
+  | "project_deleted"
   | "user_created"
   | "user_updated"
   | "user_role_changed"
   | "user_activation_changed"
+  | "user_site_entered"
   | "notification_created"
   | "notification_read"
+  | "notification_rule_created"
+  | "notification_rule_updated"
+  | "notification_rule_deleted"
   | "vehicle_command_requested"
   | "vehicle_command_result"
   | "vehicle_service_due_soon"
   | "vehicle_document_itp_due_soon"
   | "vehicle_document_rca_due_soon"
   | "vehicle_document_casco_due_soon"
+  | "vehicle_document_rovinieta_due_soon"
+  | "vehicle_oil_service_due_soon"
+  | "maintenance_client_created"
+  | "maintenance_client_updated"
+  | "maintenance_client_deleted"
+  | "maintenance_lift_updated"
+  | "maintenance_report_created"
+  | "maintenance_branding_updated"
+  | "maintenance_part_order_created"
+  | "maintenance_part_order_updated"
+  | "maintenance_part_order_status_changed"
+  | "maintenance_part_order_deleted"
+  | "expense_document_created"
+  | "expense_invoice_created"
+  | "expense_reimbursable_created"
+  | "control_panel_settings_updated"
   | "notification_rule_changed"
   | "backup_requested"
   | "backup_completed"
@@ -71,6 +112,13 @@ export interface NotificationRuleItem {
   entityId: string;
   entityLabel: string;
   enabled: boolean;
+  scheduleTime: string;
+  stopTime: string;
+  weekdays: number[];
+  reminderDelayHours: number;
+  reminderRepeatMinutes: number;
+  reminderActiveMinutes: number;
+  soundEnabled: boolean;
   recipients: NotificationRuleRecipients;
   createdAt: number;
   updatedAt: number;
@@ -83,5 +131,12 @@ export interface NotificationRuleFormValues {
   entityId: string;
   entityLabel: string;
   enabled: boolean;
+  scheduleTime: string;
+  stopTime: string;
+  weekdays: number[];
+  reminderDelayHours: number;
+  reminderRepeatMinutes: number;
+  reminderActiveMinutes: number;
+  soundEnabled: boolean;
   recipients: NotificationRuleRecipients;
 }
