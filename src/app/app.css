@@ -1256,32 +1256,66 @@ h3.panel-title {
 .attention-pulse,
 .attention-pulse-soft {
   position: relative;
-  border-color: rgba(37, 99, 235, 0.34) !important;
-  border-radius: var(--radius-md) !important;
+  isolation: isolate;
+  border-color: rgba(37, 99, 235, 0.26) !important;
+  border-radius: max(var(--radius-md), 18px) !important;
   background-clip: padding-box;
+  outline: 0 solid transparent;
   box-shadow:
-    0 0 0 1px rgba(37, 99, 235, 0.16),
-    0 0 0 7px rgba(37, 99, 235, 0.07),
-    0 12px 28px rgba(37, 99, 235, 0.1);
+    0 0 0 1px rgba(37, 99, 235, 0.14),
+    0 10px 26px rgba(37, 99, 235, 0.08);
+}
+
+.attention-pulse::before,
+.attention-pulse-soft::before,
+.assistant-highlight::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: calc(max(var(--radius-md), 18px) + 5px);
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.26), rgba(20, 184, 166, 0.18), rgba(37, 99, 235, 0.08)) border-box;
+  opacity: 0.78;
+  padding: 1px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: assistant-ring-breathe 2.35s ease-in-out infinite;
+}
+
+.attention-pulse::after,
+.attention-pulse-soft::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: -2;
+  border-radius: calc(max(var(--radius-md), 18px) + 3px);
+  pointer-events: none;
+  background: radial-gradient(circle at 18% 0%, rgba(37, 99, 235, 0.13), transparent 58%);
+  opacity: 0.65;
+  filter: blur(2px);
 }
 
 .attention-pulse {
-  animation: workcontrol-attention-pulse 1.7s ease-in-out infinite;
+  animation: workcontrol-attention-pulse 2.15s ease-in-out infinite;
 }
 
 .attention-pulse-soft {
-  animation: workcontrol-attention-soft-pulse 2.4s ease-in-out infinite;
+  animation: workcontrol-attention-soft-pulse 2.75s ease-in-out infinite;
 }
 
 button.attention-pulse,
 a.attention-pulse,
 .primary-btn.attention-pulse,
 .secondary-btn.attention-pulse {
-  border-radius: var(--radius-sm) !important;
+  border-radius: 999px !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.55) inset,
-    0 0 0 7px rgba(37, 99, 235, 0.12),
-    0 14px 28px rgba(37, 99, 235, 0.18);
+    0 0 0 1px rgba(255, 255, 255, 0.58) inset,
+    0 12px 26px rgba(37, 99, 235, 0.16);
 }
 
 .attention-pulse:disabled,
@@ -1292,15 +1326,15 @@ a.attention-pulse,
 .assistant-highlight {
   position: relative !important;
   z-index: 4;
-  border-color: rgba(20, 184, 166, 0.55) !important;
-  border-radius: var(--radius-md) !important;
+  isolation: isolate;
+  border-color: rgba(20, 184, 166, 0.42) !important;
+  border-radius: max(var(--radius-md), 18px) !important;
   outline: none !important;
   background-clip: padding-box;
   box-shadow:
-    0 0 0 1px rgba(20, 184, 166, 0.22),
-    0 0 0 8px rgba(37, 99, 235, 0.08),
-    0 16px 34px rgba(20, 184, 166, 0.14) !important;
-  animation: assistant-highlight-pulse 1.45s ease-in-out infinite;
+    0 0 0 1px rgba(20, 184, 166, 0.18),
+    0 12px 28px rgba(20, 184, 166, 0.11) !important;
+  animation: assistant-highlight-pulse 2.15s ease-in-out infinite;
 }
 
 input.assistant-highlight,
@@ -1308,6 +1342,17 @@ select.assistant-highlight,
 textarea.assistant-highlight,
 .tool-input.assistant-highlight {
   border-radius: var(--radius-sm) !important;
+  box-shadow:
+    0 0 0 1px rgba(20, 184, 166, 0.16),
+    0 0 0 4px rgba(20, 184, 166, 0.1),
+    0 10px 24px rgba(20, 184, 166, 0.08) !important;
+}
+
+input.assistant-highlight::before,
+select.assistant-highlight::before,
+textarea.assistant-highlight::before,
+.tool-input.assistant-highlight::before {
+  content: none;
 }
 
 .assistant-highlight::after {
@@ -1318,32 +1363,43 @@ textarea.assistant-highlight,
   transform: translateX(-50%);
   z-index: 8;
   max-width: min(260px, 84vw);
-  padding: 6px 9px;
-  border: 1px solid rgba(37, 99, 235, 0.28);
-  border-radius: 12px;
-  color: #064e3b;
-  background: #ecfdf5;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
-  font-size: 0.76rem;
-  font-weight: 800;
+  padding: 7px 10px;
+  border: 1px solid rgba(20, 184, 166, 0.24);
+  border-radius: 999px;
+  color: #0f766e;
+  background: rgba(240, 253, 250, 0.96);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.14);
+  font-size: 0.74rem;
+  font-weight: 850;
   line-height: 1.25;
   white-space: nowrap;
   pointer-events: none;
+}
+
+@keyframes assistant-ring-breathe {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.992);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.008);
+  }
 }
 
 @keyframes assistant-highlight-pulse {
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(20, 184, 166, 0.22),
-      0 0 0 7px rgba(37, 99, 235, 0.07),
-      0 14px 30px rgba(20, 184, 166, 0.13);
+      0 0 0 1px rgba(20, 184, 166, 0.16),
+      0 10px 24px rgba(20, 184, 166, 0.09);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(20, 184, 166, 0.28),
-      0 0 0 12px rgba(20, 184, 166, 0.1),
-      0 18px 38px rgba(37, 99, 235, 0.15);
+      0 0 0 1px rgba(20, 184, 166, 0.24),
+      0 14px 32px rgba(20, 184, 166, 0.14);
   }
 }
 
@@ -1351,15 +1407,13 @@ textarea.assistant-highlight,
   0%,
   100% {
     box-shadow:
-      0 0 0 1px rgba(37, 99, 235, 0.16),
-      0 0 0 6px rgba(37, 99, 235, 0.07),
-      0 12px 26px rgba(37, 99, 235, 0.1);
+      0 0 0 1px rgba(37, 99, 235, 0.13),
+      0 8px 22px rgba(37, 99, 235, 0.07);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(37, 99, 235, 0.22),
-      0 0 0 11px rgba(37, 99, 235, 0.11),
-      0 16px 34px rgba(37, 99, 235, 0.15);
+      0 0 0 1px rgba(37, 99, 235, 0.2),
+      0 12px 28px rgba(37, 99, 235, 0.12);
   }
 }
 
@@ -1368,14 +1422,12 @@ textarea.assistant-highlight,
   100% {
     box-shadow:
       0 0 0 1px rgba(37, 99, 235, 0.1),
-      0 0 0 5px rgba(37, 99, 235, 0.05),
-      0 8px 18px rgba(37, 99, 235, 0.07);
+      0 6px 18px rgba(37, 99, 235, 0.05);
   }
   50% {
     box-shadow:
-      0 0 0 1px rgba(37, 99, 235, 0.14),
-      0 0 0 9px rgba(37, 99, 235, 0.08),
-      0 12px 26px rgba(37, 99, 235, 0.1);
+      0 0 0 1px rgba(37, 99, 235, 0.16),
+      0 10px 24px rgba(37, 99, 235, 0.08);
   }
 }
 
@@ -7704,26 +7756,32 @@ li,
 
 .expense-upload-dropzone--attention {
   min-height: 126px;
-  border-width: 2px;
-  border-color: #2563eb;
-  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+  border-width: 1.5px;
+  border-color: rgba(37, 99, 235, 0.42);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(37, 99, 235, 0.1), transparent 42%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
   color: #1d4ed8;
-  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.16);
-  animation: expense-upload-pulse 1.9s ease-in-out infinite;
+  box-shadow:
+    0 0 0 1px rgba(37, 99, 235, 0.1),
+    0 12px 28px rgba(37, 99, 235, 0.1);
+  animation: expense-upload-pulse 2.25s ease-in-out infinite;
 }
 
 .expense-upload-dropzone--attention::after {
-  content: "APASA AICI";
+  content: "Pas recomandat";
   position: absolute;
   top: 10px;
   right: 10px;
-  padding: 5px 9px;
+  padding: 6px 10px;
   border-radius: 999px;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 950;
-  letter-spacing: 0.08em;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: rgba(255, 255, 255, 0.88);
+  color: #1d4ed8;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.1);
 }
 
 .expense-upload-dropzone.has-file {
@@ -7891,17 +7949,23 @@ li,
 }
 
 .expense-submit-button--ready {
-  box-shadow: 0 15px 28px rgba(37, 99, 235, 0.32);
-  animation: expense-submit-pulse 1.8s ease-in-out infinite;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.28) inset,
+    0 13px 26px rgba(37, 99, 235, 0.22);
+  animation: expense-submit-pulse 2.2s ease-in-out infinite;
 }
 
 @keyframes expense-upload-pulse {
   0%,
   100% {
-    box-shadow: 0 16px 32px rgba(37, 99, 235, 0.16);
+    box-shadow:
+      0 0 0 1px rgba(37, 99, 235, 0.1),
+      0 10px 24px rgba(37, 99, 235, 0.08);
   }
   50% {
-    box-shadow: 0 18px 38px rgba(37, 99, 235, 0.3);
+    box-shadow:
+      0 0 0 1px rgba(37, 99, 235, 0.18),
+      0 14px 32px rgba(37, 99, 235, 0.14);
   }
 }
 
@@ -7911,7 +7975,7 @@ li,
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-1px);
+    transform: translateY(-0.5px);
   }
 }
 
