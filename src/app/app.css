@@ -12557,3 +12557,130 @@ html.is-samsung-internet textarea {
   position: relative;
   z-index: 1;
 }
+
+/* Compact mobile dashboards: keep the main operational cards visible without long scrolling. */
+@media (max-width: 640px) {
+  .dashboard-modern-page .dashboard-action-strip,
+  .timesheets-management-page .wc-page-hero__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    width: 100%;
+  }
+
+  .dashboard-modern-page .dashboard-action-strip .primary-btn,
+  .dashboard-modern-page .dashboard-action-strip .secondary-btn,
+  .timesheets-management-page .wc-page-hero__actions .primary-btn,
+  .timesheets-management-page .wc-page-hero__actions .secondary-btn {
+    width: auto;
+    min-height: 36px;
+    padding: 7px 8px;
+    border-radius: 12px;
+    font-size: 11.5px;
+    line-height: 1.12;
+    gap: 5px;
+    justify-content: center;
+    white-space: normal;
+  }
+
+  .dashboard-modern-page .dashboard-action-strip svg,
+  .timesheets-management-page .wc-page-hero__actions svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .dashboard-modern-page .wc-kpi-grid,
+  .timesheets-management-page .wc-kpi-grid,
+  .my-timesheets-modern-page .wc-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card,
+  .timesheets-management-page .wc-kpi-card,
+  .my-timesheets-modern-page .wc-kpi-card {
+    min-height: 76px;
+    padding: 9px 10px 8px;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.055);
+  }
+
+  .dashboard-modern-page .wc-kpi-card::before,
+  .timesheets-management-page .wc-kpi-card::before,
+  .my-timesheets-modern-page .wc-kpi-card::before {
+    width: 3px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__head,
+  .timesheets-management-page .wc-kpi-card__head,
+  .my-timesheets-modern-page .wc-kpi-card__head {
+    gap: 5px;
+    font-size: 9.5px;
+    line-height: 1.12;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__head > span:first-child,
+  .timesheets-management-page .wc-kpi-card__head > span:first-child,
+  .my-timesheets-modern-page .wc-kpi-card__head > span:first-child {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__icon,
+  .timesheets-management-page .wc-kpi-card__icon,
+  .my-timesheets-modern-page .wc-kpi-card__icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__icon svg,
+  .timesheets-management-page .wc-kpi-card__icon svg,
+  .my-timesheets-modern-page .wc-kpi-card__icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__value,
+  .timesheets-management-page .wc-kpi-card__value,
+  .my-timesheets-modern-page .wc-kpi-card__value {
+    margin-top: 7px;
+    font-size: 19px;
+    line-height: 1;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__helper,
+  .timesheets-management-page .wc-kpi-card__helper,
+  .my-timesheets-modern-page .wc-kpi-card__helper {
+    margin-top: 4px;
+    font-size: 10.5px;
+    line-height: 1.12;
+  }
+}
+
+@media (max-width: 380px) {
+  .dashboard-modern-page .dashboard-action-strip .primary-btn,
+  .dashboard-modern-page .dashboard-action-strip .secondary-btn,
+  .timesheets-management-page .wc-page-hero__actions .primary-btn,
+  .timesheets-management-page .wc-page-hero__actions .secondary-btn {
+    min-height: 34px;
+    padding: 6px 7px;
+    font-size: 11px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card,
+  .timesheets-management-page .wc-kpi-card,
+  .my-timesheets-modern-page .wc-kpi-card {
+    min-height: 70px;
+    padding: 8px 9px 7px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__value,
+  .timesheets-management-page .wc-kpi-card__value,
+  .my-timesheets-modern-page .wc-kpi-card__value {
+    font-size: 17px;
+  }
+}
