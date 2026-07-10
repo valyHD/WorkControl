@@ -1723,6 +1723,7 @@ export default function VehicleLiveRouteCard({
   }, [gpsSimTotalDurationMs, gpsSimVisible, simRenderNow, vehicle.gpsSim]);
   const gpsSimDone =
     gpsSimVisible && gpsSimTotalDurationMs > 0 && gpsSimElapsedMs >= gpsSimTotalDurationMs;
+  const gpsSimLiveVisible = gpsSimVisible && !gpsSimDone;
   const gpsSimRunning =
     gpsSimVisible && vehicle.gpsSim?.status !== "paused" && !gpsSimDone;
   useEffect(() => {
@@ -1779,10 +1780,9 @@ export default function VehicleLiveRouteCard({
 
   const gpsSimHistorySegments: VehiclePositionItem[][] = useMemo(() => {
     const history = vehicle.gpsSimHistory ?? [];
-    if (!history.length) return [];
     const displayImei = vehicle.gpsSnapshot?.imei || vehicle.tracker?.imei || vehicle.id;
 
-    return history
+    const persistedHistorySegments = history
       .map((simulation, simIndex) => {
         const points = simulation.points ?? [];
         const startedAt = simulation.startedAt || points[0]?.ts || 0;
@@ -1819,8 +1819,24 @@ export default function VehicleLiveRouteCard({
         );
       })
       .filter((segment) => segment.length > 0);
+
+    const completedActiveSegment =
+      gpsSimVisible && gpsSimDone
+        ? safeRoutePoints(
+            gpsSimPositions.filter((point) =>
+              isWithinRange(point.gpsTimestamp, fromTs, historyDisplayToTs)
+            )
+          )
+        : [];
+
+    return completedActiveSegment.length > 0
+      ? [...persistedHistorySegments, completedActiveSegment]
+      : persistedHistorySegments;
   }, [
     fromTs,
+    gpsSimDone,
+    gpsSimPositions,
+    gpsSimVisible,
     historyDisplayToTs,
     vehicle.gpsSimHistory,
     vehicle.gpsSnapshot?.imei,
@@ -1845,7 +1861,7 @@ export default function VehicleLiveRouteCard({
     return gpsSimPositions.slice(0, gpsSimCurrentIndex + 1);
   }, [gpsSimCurrentIndex, gpsSimPositions]);
 
-  const gpsSimOverlayActive = gpsSimVisible || simulationActive;
+  const gpsSimOverlayActive = gpsSimLiveVisible || simulationActive;
   const localActiveRouteStartTs =
     simulationActive && simulationPositions.length > 0
       ? simulationPositions[0]?.gpsTimestamp || 0
@@ -1882,13 +1898,13 @@ export default function VehicleLiveRouteCard({
   ]);
 
   const shouldUseLocalSimulation = simulationActive && simulationPositions.length > 0;
-  const hasLiveSimulation = gpsSimVisible || shouldUseLocalSimulation;
+  const hasLiveSimulation = gpsSimLiveVisible || shouldUseLocalSimulation;
   const hasPlannedSimulation = simulationActive && simulationPlannedPositions.length > 0;
   const hasSimulationOverlay =
     gpsSimOverlayActive || hasLiveSimulation || gpsSimHistoryPositions.length > 0;
   const effectiveSimPositions = shouldUseLocalSimulation
     ? simulationPositions
-    : gpsSimVisible
+    : gpsSimLiveVisible
        ? gpsSimVisiblePrefix
       : [];
   const displayedHistorySimulationPositions = useMemo(

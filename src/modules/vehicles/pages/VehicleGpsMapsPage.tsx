@@ -328,16 +328,49 @@ function getHiddenIntervals(vehicle: VehicleItem, now: number) {
 
   if (vehicle.gpsSim && vehicle.gpsSim.active !== false && vehicle.gpsSim.points?.length) {
     const startTs = vehicle.gpsSim.startedAt || vehicle.gpsSim.points[0]?.ts || 0;
-    const endTs = Math.max(
-      now + 24 * 60 * 60 * 1000,
-      startTs + Math.max(getRouteTotalDurationMs(vehicle), 24 * 60 * 60 * 1000)
+    const totalMs = getRouteTotalDurationMs(vehicle);
+    const elapsedMs = getRouteElapsedMs(vehicle, now);
+    const routeDone = totalMs > 0 && elapsedMs >= totalMs;
+    const routeEndTs = Math.max(
+      vehicle.gpsSim.points[vehicle.gpsSim.points.length - 1]?.ts || 0,
+      startTs + totalMs
     );
+    const endTs = routeDone
+      ? routeEndTs
+      : Math.max(
+          now + 24 * 60 * 60 * 1000,
+          startTs + Math.max(totalMs, 24 * 60 * 60 * 1000)
+        );
     if (startTs > 0 && endTs > startTs) {
       intervals.push({ from: startTs, to: endTs });
     }
   }
 
   return intervals;
+}
+
+function isPersistedGpsRouteDone(vehicle: VehicleItem, now: number) {
+  if (!vehicle.gpsSim || vehicle.gpsSim.active === false || !vehicle.gpsSim.points?.length) {
+    return false;
+  }
+
+  const totalMs = getRouteTotalDurationMs(vehicle);
+  return totalMs > 0 && getRouteElapsedMs(vehicle, now) >= totalMs;
+}
+
+function mapCompletedActiveRouteSegments(
+  vehicle: VehicleItem,
+  fromTs: number,
+  toTs: number,
+  now: number
+) {
+  if (!isPersistedGpsRouteDone(vehicle, now)) return [];
+
+  const segment = mapGpsRoutePoints(vehicle, now, "full").filter(
+    (point) => point.gpsTimestamp >= fromTs && point.gpsTimestamp <= toTs
+  );
+
+  return segment.length > 0 ? [segment] : [];
 }
 
 function filterHiddenRealPositions(
@@ -757,7 +790,9 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   const [storedMapView, setStoredMapView] = useState<FleetMapView | null>(() =>
     readFleetMapView(vehicle.id)
   );
-  const activeRoute = Boolean(vehicle.gpsSim && vehicle.gpsSim.active !== false && vehicle.gpsSim.points?.length);
+  const hasPersistedRoute = Boolean(vehicle.gpsSim && vehicle.gpsSim.active !== false && vehicle.gpsSim.points?.length);
+  const persistedRouteDone = hasPersistedRoute && isPersistedGpsRouteDone(vehicle, now);
+  const activeRoute = hasPersistedRoute && !persistedRouteDone;
   const { from, to } = useMemo(() => toLocalDayRange(now), [now]);
   const mapZoom = storedMapView?.zoom ?? 13;
   const realRouteRenderPointLimit = useMemo(
@@ -807,16 +842,19 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   }, [activeRoute]);
 
   const activeRouteVisiblePositions = useMemo(
-    () => mapGpsRoutePoints(vehicle, now, "visible"),
-    [now, vehicle]
+    () => (activeRoute ? mapGpsRoutePoints(vehicle, now, "visible") : []),
+    [activeRoute, now, vehicle]
   );
   const activeRouteFullPositions = useMemo(
-    () => mapGpsRoutePoints(vehicle, now, "full"),
-    [now, vehicle]
+    () => (activeRoute ? mapGpsRoutePoints(vehicle, now, "full") : []),
+    [activeRoute, now, vehicle]
   );
   const savedRouteSegments = useMemo(
-    () => mapSavedRouteSegments(vehicle, from, to),
-    [from, to, vehicle]
+    () => [
+      ...mapSavedRouteSegments(vehicle, from, to),
+      ...mapCompletedActiveRouteSegments(vehicle, from, to, now),
+    ],
+    [from, now, to, vehicle]
   );
   const hiddenIntervals = useMemo(() => getHiddenIntervals(vehicle, now), [now, vehicle]);
   const realRouteSegments = useMemo(
@@ -852,8 +890,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
         realRouteSegments
           .map((segment) =>
             buildRenderableRealRouteSegment(segment, realRouteRenderPointLimit)
-          )
-          .filter((segment) => segment.length > 1),
+          ),
         !activeRoute &&
           currentPosition &&
           currentPosition.gpsTimestamp >= from &&
