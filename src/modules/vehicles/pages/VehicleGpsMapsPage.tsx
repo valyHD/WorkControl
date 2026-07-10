@@ -843,7 +843,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
 
   useEffect(() => {
     setLiveRealTrail([]);
-  }, [vehicle.id]);
+  }, [from, vehicle.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), activeRoute ? ACTIVE_ROUTE_REFRESH_MS : ROUTE_REFRESH_MS);
@@ -870,7 +870,21 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
     () => splitVisibleRealRouteSegments(routePositions, hiddenIntervals),
     [hiddenIntervals, routePositions]
   );
-  const snapshotPosition = useMemo(() => gpsSnapshotToPosition(vehicle), [vehicle]);
+  const snapshotPosition = useMemo(() => gpsSnapshotToPosition(vehicle), [
+    vehicle.gpsSnapshot?.altitude,
+    vehicle.gpsSnapshot?.angle,
+    vehicle.gpsSnapshot?.gpsTimestamp,
+    vehicle.gpsSnapshot?.imei,
+    vehicle.gpsSnapshot?.ignitionOn,
+    vehicle.gpsSnapshot?.lat,
+    vehicle.gpsSnapshot?.lng,
+    vehicle.gpsSnapshot?.odometerKm,
+    vehicle.gpsSnapshot?.satellites,
+    vehicle.gpsSnapshot?.serverTimestamp,
+    vehicle.gpsSnapshot?.speedKmh,
+    vehicle.id,
+    vehicle.tracker?.imei,
+  ]);
 
   useEffect(() => {
     if (activeRoute) {
@@ -887,10 +901,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
     }
 
     setLiveRealTrail((current) =>
-      appendLiveTrailPoint(
-        current.filter((point) => point.gpsTimestamp >= from && point.gpsTimestamp <= to),
-        snapshotPosition
-      )
+      appendLiveTrailPoint(current, snapshotPosition)
     );
   }, [activeRoute, from, snapshotPosition, to]);
 

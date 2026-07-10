@@ -2390,10 +2390,7 @@ export default function VehicleLiveRouteCard({
     }
 
     setLiveRealTrail((current) =>
-      appendLiveTrailPoint(
-        current.filter((point) => isWithinRange(point.gpsTimestamp, fromTs, displayToTs)),
-        latestSnapshotPosition
-      )
+      appendLiveTrailPoint(current, latestSnapshotPosition)
     );
   }, [
     displayToTs,

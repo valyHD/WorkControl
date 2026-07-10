@@ -103,15 +103,20 @@ export function appendLiveTrailPoint(
 ) {
   if (!point) return trail;
 
-  const clean = sanitizePositions(trail);
-  const last = clean[clean.length - 1];
+  const last = trail[trail.length - 1];
   if (!last) return [point];
 
-  if (point.gpsTimestamp <= last.gpsTimestamp) return clean;
-  const gapMs = point.gpsTimestamp - last.gpsTimestamp;
+  if (point.gpsTimestamp <= last.gpsTimestamp) return trail;
+
+  const clean = sanitizePositions(trail);
+  const cleanLast = clean[clean.length - 1];
+  if (!cleanLast) return [point];
+  if (point.gpsTimestamp <= cleanLast.gpsTimestamp) return trail;
+
+  const gapMs = point.gpsTimestamp - cleanLast.gpsTimestamp;
   if (gapMs > TRAIL_MAX_GAP_MS) return [point];
 
-  if (!shouldAppendPoint(last, point)) {
+  if (!shouldAppendPoint(cleanLast, point)) {
     return [...clean.slice(0, -1), point].slice(-maxPoints);
   }
 
