@@ -437,6 +437,20 @@ function shouldRenderFallbackRealRouteSegment(segment: VehiclePositionItem[]) {
   );
 }
 
+function shouldPreferFallbackRealRouteSegment(
+  cleanSegment: VehiclePositionItem[],
+  renderedSegment: VehiclePositionItem[]
+) {
+  if (!shouldRenderFallbackRealRouteSegment(cleanSegment)) return false;
+  if (renderedSegment.length <= 1) return true;
+
+  const cleanDistanceKm = getRouteSegmentRawDistanceKm(cleanSegment);
+  const renderedDistanceKm = getRouteSegmentRawDistanceKm(renderedSegment);
+  const missingDistanceKm = cleanDistanceKm - renderedDistanceKm;
+
+  return missingDistanceKm >= 0.35 && cleanDistanceKm >= renderedDistanceKm * 1.18;
+}
+
 function isRouteSegmentNearHiddenBoundary(
   segment: VehiclePositionItem[],
   intervals: Array<{ from: number; to: number }>
@@ -678,11 +692,12 @@ function buildRenderableRealRouteSegment(
 ) {
   const clean = sanitizePositions(rawSegment);
   const movingOnly = filterRouteRenderJitter(filterTrackableRoutePositions(clean));
-  if (movingOnly.length <= 1 && shouldRenderFallbackRealRouteSegment(clean)) {
+  const anchored = withRealStopAnchorsForRender(clean, movingOnly);
+  if (shouldPreferFallbackRealRouteSegment(clean, anchored)) {
     const fallback = filterRouteRenderJitter(clean);
     return samplePositions(fallback.length > 1 ? fallback : clean, maxPoints);
   }
-  return samplePositions(withRealStopAnchorsForRender(clean, movingOnly), maxPoints);
+  return samplePositions(anchored, maxPoints);
 }
 
 function FitFleetMap({
