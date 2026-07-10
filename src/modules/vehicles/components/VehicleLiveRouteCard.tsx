@@ -449,7 +449,7 @@ function buildHiddenRealGpsIntervals(vehicle: VehicleItem, activeFallbackEndTs: 
     .sort((a, b) => a.startTs - b.startTs)
     .reduce<Array<{ startTs: number; endTs: number }>>((merged, item) => {
       const previous = merged[merged.length - 1];
-      if (!previous || item.startTs > previous.endTs + 60_000) {
+      if (!previous || item.startTs > previous.endTs) {
         merged.push({ ...item });
         return merged;
       }
@@ -1875,14 +1875,13 @@ export default function VehicleLiveRouteCard({
   const localActiveRouteEndTs =
     localActiveRouteStartTs > 0
       ? Math.max(
-          Date.now() + 24 * 60 * 60 * 1000,
+          localActiveRouteStartTs + 24 * 60 * 60 * 1000,
           simulationPositions[simulationPositions.length - 1]?.gpsTimestamp || localActiveRouteStartTs
         )
       : 0;
   const gpsSimStartedAt = vehicle.gpsSim?.startedAt || 0;
   const hiddenRealGpsActiveEndTs = gpsSimOverlayActive && gpsSimStartedAt > 0
      ? Math.max(
-        Date.now() + 24 * 60 * 60 * 1000,
         gpsSimStartedAt + Math.max(gpsSimTotalDurationMs, 24 * 60 * 60 * 1000)
       )
     : 0;
@@ -2378,7 +2377,7 @@ export default function VehicleLiveRouteCard({
 
   useEffect(() => {
     if (!selectedDayIsToday || gpsSimOverlayActive || hasLiveSimulation) {
-      setLiveRealTrail([]);
+      setLiveRealTrail((current) => (current.length ? [] : current));
       return;
     }
 

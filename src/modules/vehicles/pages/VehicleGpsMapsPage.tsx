@@ -842,7 +842,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   }, [vehicle.id]);
 
   useEffect(() => {
-    setLiveRealTrail([]);
+    setLiveRealTrail((current) => (current.length ? [] : current));
   }, [from, vehicle.id]);
 
   useEffect(() => {
@@ -888,7 +888,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
 
   useEffect(() => {
     if (activeRoute) {
-      setLiveRealTrail([]);
+      setLiveRealTrail((current) => (current.length ? [] : current));
       return;
     }
 
