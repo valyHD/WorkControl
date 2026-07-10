@@ -52,6 +52,9 @@ const ROUTE_STOP_ANCHOR_MAX_DISTANCE_KM = 15;
 const ROUTE_STOP_ANCHOR_CONTEXT_GAP_MS = 90 * 60 * 1000;
 const ROUTE_STOP_ANCHOR_CLUSTER_KM = 0.25;
 const ROUTE_STOP_ANCHOR_CLUSTER_MS = 15 * 60 * 1000;
+const REAL_ROUTE_FALLBACK_MIN_DISTANCE_KM = 0.45;
+const REAL_ROUTE_FALLBACK_MIN_AVG_SPEED_KMH = 3;
+const REAL_ROUTE_FALLBACK_MIN_ODOMETER_KM = 0.1;
 
 type FleetMapView = {
   center: [number, number];
@@ -401,11 +404,36 @@ function getRouteSegmentDurationMs(segment: VehiclePositionItem[]) {
   return Math.max(0, last.gpsTimestamp - first.gpsTimestamp);
 }
 
+function getRouteSegmentOdometerDeltaKm(segment: VehiclePositionItem[]) {
+  const first = segment[0];
+  const last = segment[segment.length - 1];
+  if (!first || !last) return 0;
+  return getRouteOdometerDeltaKm(first, last);
+}
+
 function getRouteSegmentMaxSpeedKmh(segment: VehiclePositionItem[]) {
   return segment.reduce(
     (maxSpeed, point) =>
       Math.max(maxSpeed, Number.isFinite(point.speedKmh) ? Number(point.speedKmh) : 0),
     0
+  );
+}
+
+function shouldRenderFallbackRealRouteSegment(segment: VehiclePositionItem[]) {
+  if (segment.length <= 1) return false;
+
+  const rawDistanceKm = getRouteSegmentRawDistanceKm(segment);
+  if (rawDistanceKm < REAL_ROUTE_FALLBACK_MIN_DISTANCE_KM) return false;
+
+  const durationHours = getRouteSegmentDurationMs(segment) / 3_600_000;
+  const averageSpeedKmh = durationHours > 0 ? rawDistanceKm / durationHours : 0;
+  const odometerDeltaKm = getRouteSegmentOdometerDeltaKm(segment);
+  const maxSpeedKmh = getRouteSegmentMaxSpeedKmh(segment);
+
+  return (
+    odometerDeltaKm >= REAL_ROUTE_FALLBACK_MIN_ODOMETER_KM ||
+    maxSpeedKmh >= LIVE_ROUTE_ENDPOINT_MOVING_SPEED_KMH ||
+    averageSpeedKmh >= REAL_ROUTE_FALLBACK_MIN_AVG_SPEED_KMH
   );
 }
 
@@ -650,6 +678,10 @@ function buildRenderableRealRouteSegment(
 ) {
   const clean = sanitizePositions(rawSegment);
   const movingOnly = filterRouteRenderJitter(filterTrackableRoutePositions(clean));
+  if (movingOnly.length <= 1 && shouldRenderFallbackRealRouteSegment(clean)) {
+    const fallback = filterRouteRenderJitter(clean);
+    return samplePositions(fallback.length > 1 ? fallback : clean, maxPoints);
+  }
   return samplePositions(withRealStopAnchorsForRender(clean, movingOnly), maxPoints);
 }
 
