@@ -46,6 +46,10 @@ import {
   type DateRangePreset,
   type VehicleDistanceBucket,
 } from "../utils/vehicleGps";
+import {
+  appendLiveTrailPoint,
+  getRenderableLiveTrail,
+} from "../utils/vehicleLiveTrail";
 import VehicleGpsStatsCard from "./VehicleGpsStatsCard";
 import VehicleTripTimeline from "./VehicleTripTimeline";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -1440,6 +1444,7 @@ export default function VehicleLiveRouteCard({
   const [analysisRoutePositions, setAnalysisRoutePositions] = useState<VehiclePositionItem[]>([]);
   const [isOffline, setIsOffline] = useState(false);
   const [lastDataAt, setLastDataAt] = useState<number | null>(null);
+  const [liveRealTrail, setLiveRealTrail] = useState<VehiclePositionItem[]>([]);
   const [simRenderNow, setSimRenderNow] = useState(() => Date.now());
   const [historyWindowTs] = useState(() => Date.now());
   const [historyDaysOpen, setHistoryDaysOpen] = useState(false);
@@ -1543,6 +1548,7 @@ export default function VehicleLiveRouteCard({
     setLoading(true);
     setPositions([]);
     setAnalysisRoutePositions([]);
+    setLiveRealTrail([]);
     setLastDataAt(null);
     setIsOffline(false);
   }, [fromTs, toTs, vehicle.id]);
@@ -2369,6 +2375,35 @@ export default function VehicleLiveRouteCard({
     vehicle.id,
     vehicle.tracker?.imei,
   ]);
+
+  useEffect(() => {
+    if (!selectedDayIsToday || gpsSimOverlayActive || hasLiveSimulation) {
+      setLiveRealTrail([]);
+      return;
+    }
+
+    if (
+      !latestSnapshotPosition ||
+      !isWithinRange(latestSnapshotPosition.gpsTimestamp, fromTs, displayToTs)
+    ) {
+      return;
+    }
+
+    setLiveRealTrail((current) =>
+      appendLiveTrailPoint(
+        current.filter((point) => isWithinRange(point.gpsTimestamp, fromTs, displayToTs)),
+        latestSnapshotPosition
+      )
+    );
+  }, [
+    displayToTs,
+    fromTs,
+    gpsSimOverlayActive,
+    hasLiveSimulation,
+    latestSnapshotPosition,
+    selectedDayIsToday,
+  ]);
+
   const stabilizedLatestPosition = useMemo(() => {
     if (!latestSnapshotPosition || hasLiveSimulation) return latestSnapshotPosition;
 
@@ -2393,6 +2428,25 @@ export default function VehicleLiveRouteCard({
   const routeRenderPositions = useMemo(
     () => samplePositions(deferredPositions, routeRenderPointLimit),
     [deferredPositions, routeRenderPointLimit]
+  );
+  const liveRealTrailRouteSegment = useMemo(
+    () =>
+      gpsSimOverlayActive || hasLiveSimulation
+        ? []
+        : getRenderableLiveTrail(
+            liveRealTrail.filter((point) =>
+              isWithinRange(point.gpsTimestamp, fromTs, displayToTs)
+            ),
+            realRouteRenderPointLimit
+          ),
+    [
+      displayToTs,
+      fromTs,
+      gpsSimOverlayActive,
+      hasLiveSimulation,
+      liveRealTrail,
+      realRouteRenderPointLimit,
+    ]
   );
   const realRouteRenderSegments = useMemo(
     () =>
@@ -2437,6 +2491,9 @@ export default function VehicleLiveRouteCard({
           positions,
           opacity: 1,
         })),
+        ...(liveRealTrailRouteSegment.length > 1
+          ? [{ id: "real-live", positions: liveRealTrailRouteSegment, opacity: 1 }]
+          : []),
         ...historySimulationRouteRenderSegments.map((positions, index) => ({
           id: `history-sim-${index}`,
           positions,
@@ -2466,6 +2523,7 @@ export default function VehicleLiveRouteCard({
       activeSimulationRouteRenderPositions,
       historySimulationRouteRenderSegments,
       isCompactViewport,
+      liveRealTrailRouteSegment,
       mapZoom,
       realRouteRenderSegments,
     ]
@@ -2480,6 +2538,7 @@ export default function VehicleLiveRouteCard({
     () => {
       const renderedRoutePoints = safeRoutePoints([
         ...realRouteRenderSegments.flat(),
+        ...liveRealTrailRouteSegment,
         ...historySimulationRouteRenderSegments.flat(),
         ...activeSimulationRouteRenderPositions,
       ]);
@@ -2493,6 +2552,7 @@ export default function VehicleLiveRouteCard({
     [
       activeSimulationRouteRenderPositions,
       historySimulationRouteRenderSegments,
+      liveRealTrailRouteSegment,
       plannedRouteRenderPositions,
       realRouteRenderSegments,
       routeRenderPositions,
@@ -2811,6 +2871,7 @@ export default function VehicleLiveRouteCard({
           )}
 
           {displayPositions.length > 0 ||
+          liveRealTrailRouteSegment.length > 1 ||
           hasPlannedSimulation ||
           renderedStopItems.length > 0 ||
           Boolean(currentMapPosition && hasLiveSimulation) ? (

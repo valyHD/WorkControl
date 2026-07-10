@@ -352,11 +352,11 @@ export default function GpsSimulatorPanel({
   ]);
   const localActiveRoutePositions = useMemo(() => {
     if (!state.config || !state.localStartedAt || !localRoutePositions.length) return [];
-    if (!["running", "paused", "done"].includes(state.status)) return [];
+    if (!["running", "paused"].includes(state.status)) return [];
 
     const elapsedMs =
-      state.status === "done"
-        ? state.config.totalDurationMs
+      state.status === "paused" && state.progress
+        ? state.progress.elapsedMs
         : Math.max(0, simNow - state.localStartedAt);
 
     return getRoutePositionsUntil(
@@ -414,9 +414,12 @@ export default function GpsSimulatorPanel({
   // Notifica parent-ul cand ruta de test este activa.
   useEffect(() => {
     const active =
-      persistedSimVisible || state.status === "running" || state.status === "done";
+      persistedRunning ||
+      persistedPaused ||
+      state.status === "running" ||
+      state.status === "paused";
     onSimulationActiveChange?.(active);
-  }, [onSimulationActiveChange, persistedSimVisible, state.status]);
+  }, [onSimulationActiveChange, persistedPaused, persistedRunning, state.status]);
 
   useEffect(() => {
     return () => { onSimulationActiveChange?.(false); };

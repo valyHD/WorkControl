@@ -25,6 +25,10 @@ import {
   samplePositions,
   sanitizePositions,
 } from "../utils/vehicleGps";
+import {
+  appendLiveTrailPoint,
+  getRenderableLiveTrail,
+} from "../utils/vehicleLiveTrail";
 
 const ROUTE_REFRESH_MS = 10_000;
 const ACTIVE_ROUTE_REFRESH_MS = 3_000;
@@ -785,6 +789,7 @@ function RememberFleetMapView({
 
 function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleItem; focused?: boolean }) {
   const [routePositions, setRoutePositions] = useState<VehiclePositionItem[]>([]);
+  const [liveRealTrail, setLiveRealTrail] = useState<VehiclePositionItem[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [storedMapView, setStoredMapView] = useState<FleetMapView | null>(() =>
@@ -837,6 +842,10 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   }, [vehicle.id]);
 
   useEffect(() => {
+    setLiveRealTrail([]);
+  }, [vehicle.id]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), activeRoute ? ACTIVE_ROUTE_REFRESH_MS : ROUTE_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [activeRoute]);
@@ -862,6 +871,29 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
     [hiddenIntervals, routePositions]
   );
   const snapshotPosition = useMemo(() => gpsSnapshotToPosition(vehicle), [vehicle]);
+
+  useEffect(() => {
+    if (activeRoute) {
+      setLiveRealTrail([]);
+      return;
+    }
+
+    if (
+      !snapshotPosition ||
+      snapshotPosition.gpsTimestamp < from ||
+      snapshotPosition.gpsTimestamp > to
+    ) {
+      return;
+    }
+
+    setLiveRealTrail((current) =>
+      appendLiveTrailPoint(
+        current.filter((point) => point.gpsTimestamp >= from && point.gpsTimestamp <= to),
+        snapshotPosition
+      )
+    );
+  }, [activeRoute, from, snapshotPosition, to]);
+
   const stabilizedSnapshotPosition = useMemo(() => {
     if (!snapshotPosition || activeRoute) return snapshotPosition;
 
@@ -900,6 +932,16 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
       ),
     [activeRoute, currentPosition, from, realRouteRenderPointLimit, realRouteSegments, to]
   );
+  const liveRealRouteRenderSegment = useMemo(
+    () =>
+      activeRoute
+        ? []
+        : getRenderableLiveTrail(
+            liveRealTrail.filter((point) => point.gpsTimestamp >= from && point.gpsTimestamp <= to),
+            realRouteRenderPointLimit
+          ),
+    [activeRoute, from, liveRealTrail, realRouteRenderPointLimit, to]
+  );
   const savedRouteRenderSegments = useMemo(
     () =>
       savedRouteSegments
@@ -919,6 +961,9 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
           positions,
           opacity: 1,
         })),
+        ...(liveRealRouteRenderSegment.length > 1
+          ? [{ id: "real-live", positions: liveRealRouteRenderSegment, opacity: 1 }]
+          : []),
         ...savedRouteRenderSegments.map((positions, index) => ({
           id: `saved-${index}`,
           positions,
@@ -943,6 +988,7 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
         })),
     [
       activeRouteRenderPositions,
+      liveRealRouteRenderSegment,
       mapZoom,
       realRouteRenderSegments,
       savedRouteRenderSegments,
@@ -952,11 +998,13 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
     () =>
       sanitizePositions([
         ...realRouteRenderSegments.flat(),
+        ...liveRealRouteRenderSegment,
         ...savedRouteRenderSegments.flat(),
         ...activeRouteRenderPositions,
       ]),
     [
       activeRouteRenderPositions,
+      liveRealRouteRenderSegment,
       realRouteRenderSegments,
       savedRouteRenderSegments,
     ]
