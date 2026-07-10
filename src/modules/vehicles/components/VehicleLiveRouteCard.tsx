@@ -1825,11 +1825,42 @@ export default function VehicleLiveRouteCard({
       })
       .filter((segment) => segment.length > 0);
 
-    return persistedHistorySegments;
+    const localRouteStartTs =
+      simulationActive && simulationPositions.length > 0
+        ? simulationPositions[0]?.gpsTimestamp || 0
+        : 0;
+    const activeRouteStartTs =
+      vehicle.gpsSim?.startedAt || gpsSimPositions[0]?.gpsTimestamp || 0;
+    const hasPendingPreviousRoute =
+      gpsSimVisible &&
+      localRouteStartTs > 0 &&
+      activeRouteStartTs > 0 &&
+      activeRouteStartTs < localRouteStartTs - 1000;
+    if (!hasPendingPreviousRoute) return persistedHistorySegments;
+
+    const cutoffTs = gpsSimDone
+      ? Number.POSITIVE_INFINITY
+      : activeRouteStartTs + gpsSimElapsedMs;
+    const pendingPreviousRoute = safeRoutePoints(
+      gpsSimPositions
+        .filter((point) => point.gpsTimestamp <= cutoffTs)
+        .filter((point) => isWithinRange(point.gpsTimestamp, fromTs, historyDisplayToTs))
+    );
+
+    return pendingPreviousRoute.length > 0
+      ? [...persistedHistorySegments, pendingPreviousRoute]
+      : persistedHistorySegments;
   }, [
     fromTs,
+    gpsSimDone,
+    gpsSimElapsedMs,
+    gpsSimPositions,
+    gpsSimVisible,
     historyDisplayToTs,
+    simulationActive,
+    simulationPositions,
     vehicle.gpsSimHistory,
+    vehicle.gpsSim?.startedAt,
     vehicle.gpsSnapshot?.imei,
     vehicle.id,
     vehicle.tracker?.imei,
