@@ -5,7 +5,11 @@ import { router } from "./app/router";
 import "./app/app.css";
 import { AuthProvider } from "./providers/AuthProvider";
 import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
-import { isDynamicImportFailure, reloadOnceForFreshAssets } from "./lib/routing/dynamicImportRecovery";
+import {
+  isDynamicImportFailure,
+  reloadOnceForFreshAssets,
+} from "./lib/routing/dynamicImportRecovery";
+import { initSentry } from "./lib/monitoring/sentry";
 
 const FORCE_LIGHT_BACKGROUND =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC")';
@@ -46,6 +50,7 @@ function applyForcedLightSurface() {
 
 markBrowserCompatibilityFlags();
 applyForcedLightSurface();
+initSentry();
 
 window.addEventListener("unhandledrejection", (event) => {
   if (isDynamicImportFailure(event.reason)) {

@@ -1,0 +1,9 @@
+coverage
+dist
+dist-ssr
+node_modules
+playwright-report
+test-results
+.firebase
+package-lock.json
+*.tsbuildinfo

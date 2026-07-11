@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Code Review"
+  short_description: "Auto-route review of branches, diffs, and agent changes"
+  default_prompt: "Use $workcontrol-code-review for review-only requests. Add $workcontrol-quality-check when the user also requests executable checks."
+
+policy:
+  allow_implicit_invocation: true

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { captureRuntimeError } from "../monitoring/sentry";
 
 type Props = {
   children: ReactNode;
@@ -24,6 +25,9 @@ export class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("[AppErrorBoundary]", error, errorInfo);
+    captureRuntimeError(error, {
+      componentStack: errorInfo.componentStack,
+    });
     try {
       localStorage.setItem(
         "wc_last_runtime_error",
@@ -45,7 +49,8 @@ export class AppErrorBoundary extends Component<Props, State> {
           <div className="auth-card">
             <h1 className="auth-title">Aplicația s-a protejat de un crash</h1>
             <p className="auth-subtitle">
-              {this.state.message}. Reîncarcă pagina. Ultima eroare a fost salvată local pentru debug.
+              {this.state.message}. Reîncarcă pagina. Ultima eroare a fost salvată local pentru
+              debug.
             </p>
             <button className="primary-btn" type="button" onClick={() => window.location.reload()}>
               Reîncarcă aplicația

@@ -49,6 +49,10 @@ import type {
   VehicleStatus,
   VehicleTrackerEventItem,
 } from "../../../types/vehicle";
+import {
+  assertValidVehicleKm,
+  normalizeVehiclePlate,
+} from "../utils/vehicleValidation";
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
@@ -453,7 +457,7 @@ function isValidLatLng(lat: number, lng: number): boolean {
 }
 
 function normalizePlateNumber(value: string): string {
-  return value.trim().toUpperCase();
+  return normalizeVehiclePlate(value);
 }
 
 function toVehicleStatus(value: unknown): VehicleStatus {
@@ -1282,6 +1286,8 @@ export async function isPlateNumberUsed(
 }
 
 export async function createVehicle(values: VehicleFormValues): Promise<string> {
+  assertValidVehicleKm(values.currentKm, "Km curenti");
+  assertValidVehicleKm(values.initialRecordedKm, "Km initiali");
   const now = Date.now();
   const savedValues = {
     ...values,
@@ -1327,6 +1333,8 @@ export async function updateVehicle(
   vehicleId: string,
   values: VehicleFormValues
 ): Promise<void> {
+  assertValidVehicleKm(values.currentKm, "Km curenti");
+  assertValidVehicleKm(values.initialRecordedKm, "Km initiali");
   const existingSnap = await getDoc(doc(db, "vehicles", vehicleId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
 

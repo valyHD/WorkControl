@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Firebase Feature"
+  short_description: "Auto-route Auth, Firestore, Storage, and Functions work"
+  default_prompt: "Use $workcontrol-firebase-feature for Firebase work, paired with $workcontrol-create-feature for new capabilities or $workcontrol-debug-bug for defects."
+
+policy:
+  allow_implicit_invocation: true

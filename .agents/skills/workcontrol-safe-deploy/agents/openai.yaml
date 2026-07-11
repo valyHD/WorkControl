@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Safe Deploy"
+  short_description: "Auto-route explicit Firebase publishing requests"
+  default_prompt: "Use $workcontrol-safe-deploy only for explicit publishing intent, after $workcontrol-quality-check, and require final confirmation before deployment."
+
+policy:
+  allow_implicit_invocation: true

@@ -16,6 +16,7 @@ import { db } from "../../../lib/firebase/firebase";
 import type { LeaveRequestFormValues, LeaveRequestItem, LeaveRequestType } from "../../../types/leave";
 import type { TimesheetItem } from "../../../types/timesheet";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import { calculateLeaveIntervalDays } from "../utils/leaveDateUtils";
 
 const leaveRequestsCollection = collection(db, "leaveRequests");
 
@@ -100,14 +101,6 @@ function toIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function getRequestedDays(startIso: string, endIso: string): number {
-  const start = new Date(`${startIso}T00:00:00`);
-  const end = new Date(`${endIso}T00:00:00`);
-  const diff = end.getTime() - start.getTime();
-  if (Number.isNaN(diff) || diff < 0) return 0;
-  return Math.floor(diff / 86_400_000) + 1;
-}
-
 function getLegalReasonByType(type: LeaveRequestType): string {
   if (type === "concediu_odihna") return "Art. 144-151 Codul muncii (concediu de odihna anual)";
   if (type === "zi_libera_platita") return "Zi libera platita conform regulament intern / contract";
@@ -115,7 +108,7 @@ function getLegalReasonByType(type: LeaveRequestType): string {
 }
 
 export function buildLeaveRequestPdf(values: LeaveRequestFormValues, issuedAt: number, isApproved = false): string {
-  const requestedDays = getRequestedDays(values.periodStart, values.periodEnd);
+  const requestedDays = calculateLeaveIntervalDays(values.periodStart, values.periodEnd);
   const kind =
     values.requestType === "concediu_odihna"
       ? "concediu de odihna"
@@ -167,7 +160,7 @@ function mapLeaveDoc(id: string, data: Record<string, any>): LeaveRequestItem {
 
 export async function saveLeaveRequest(userId: string, values: LeaveRequestFormValues): Promise<string> {
   const now = Date.now();
-  const requestedDays = getRequestedDays(values.periodStart, values.periodEnd);
+  const requestedDays = calculateLeaveIntervalDays(values.periodStart, values.periodEnd);
   const requestedMinutes = requestedDays * 8 * 60;
 
   if (requestedDays <= 0) {
