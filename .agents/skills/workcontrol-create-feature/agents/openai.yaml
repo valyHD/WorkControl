@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Create Feature"
+  short_description: "Auto-route new WorkControl features and workflows"
+  default_prompt: "Use $workcontrol-create-feature for new WorkControl behavior. Combine with $workcontrol-firebase-feature for Firebase and $workcontrol-ui-modernization for major UI work."
+
+policy:
+  allow_implicit_invocation: true

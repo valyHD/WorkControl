@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Task Router"
+  short_description: "Select and order skills for WorkControl tasks"
+  default_prompt: "Use $workcontrol-task-router to classify this WorkControl request, split mixed subtasks, and select the minimum ordered skill set without executing it."
+
+policy:
+  allow_implicit_invocation: true

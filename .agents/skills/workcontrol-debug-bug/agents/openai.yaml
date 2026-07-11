@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Debug Bug"
+  short_description: "Auto-route broken or regressed WorkControl behavior"
+  default_prompt: "Use $workcontrol-debug-bug for broken or regressed behavior. Combine with $workcontrol-firebase-feature when Firebase is involved; use $workcontrol-create-feature for new behavior."
+
+policy:
+  allow_implicit_invocation: true

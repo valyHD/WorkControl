@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl UI Modernization"
+  short_description: "Auto-route WorkControl visual and responsive redesigns"
+  default_prompt: "Use $workcontrol-ui-modernization for visual or responsive redesigns. Add $workcontrol-create-feature first when new product logic is required."
+
+policy:
+  allow_implicit_invocation: true

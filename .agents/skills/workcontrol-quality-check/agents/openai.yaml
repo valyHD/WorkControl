@@ -1,0 +1,7 @@
+interface:
+  display_name: "WorkControl Quality Check"
+  short_description: "Auto-route readiness, tests, and quality verification"
+  default_prompt: "Use $workcontrol-quality-check for executable readiness checks. Pair it after $workcontrol-code-review or before $workcontrol-safe-deploy when requested."
+
+policy:
+  allow_implicit_invocation: true
