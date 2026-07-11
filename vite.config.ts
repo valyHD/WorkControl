@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 const chunkGroups: Record<string, string[]> = {
@@ -12,6 +12,17 @@ const chunkGroups: Record<string, string[]> = {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: "jsdom",
+    setupFiles: "./src/test/setup.ts",
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["tests/e2e/**", "node_modules/**", "dist/**"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "coverage",
+    },
+  },
   build: {
     sourcemap: false,
     cssCodeSplit: true,
@@ -19,7 +30,12 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           for (const [chunkName, packages] of Object.entries(chunkGroups)) {
-            if (packages.some((pkg) => id.includes(`/node_modules/${pkg}/`) || id.includes(`\\node_modules\\${pkg}\\`))) {
+            if (
+              packages.some(
+                (pkg) =>
+                  id.includes(`/node_modules/${pkg}/`) || id.includes(`\\node_modules\\${pkg}\\`)
+              )
+            ) {
               return chunkName;
             }
           }
