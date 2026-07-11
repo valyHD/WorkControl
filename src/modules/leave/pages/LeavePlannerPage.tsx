@@ -20,6 +20,11 @@ import PageQuickActions from "../../../components/PageQuickActions";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
+import {
+  inferAssistantLeaveRange,
+  parseAssistantLeaveDate,
+  toLeaveIsoDate,
+} from "../utils/leaveDateUtils";
 
 const weekDays = ["L", "Ma", "Mi", "J", "V", "S", "D"];
 
@@ -32,12 +37,7 @@ type UserCalendarData = {
 
 type SignaturePoint = { x: number; y: number };
 
-function toIsoDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+const toIsoDate = toLeaveIsoDate;
 
 function getMonthMatrix(baseDate: Date): Date[] {
   const year = baseDate.getFullYear();
@@ -184,95 +184,12 @@ function getLeaveRequestFileName(request: LeaveRequestItem) {
   return `cerere-concediu-${name}-${request.periodStart}-${request.periodEnd}.pdf`;
 }
 
-const ASSISTANT_LEAVE_MONTHS: Record<string, number> = {
-  ianuarie: 1,
-  ian: 1,
-  februarie: 2,
-  feb: 2,
-  martie: 3,
-  mar: 3,
-  aprilie: 4,
-  apr: 4,
-  mai: 5,
-  iunie: 6,
-  iun: 6,
-  iulie: 7,
-  iul: 7,
-  august: 8,
-  aug: 8,
-  septembrie: 9,
-  sept: 9,
-  sep: 9,
-  octombrie: 10,
-  oct: 10,
-  noiembrie: 11,
-  noi: 11,
-  decembrie: 12,
-  dec: 12,
-};
-
-function normalizeAssistantLeaveText(value: unknown) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function assistantLeaveField(fields: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = String(fields[key] ?? "").trim();
     if (value) return value;
   }
   return "";
-}
-
-function assistantLeaveDate(value: unknown) {
-  const raw = String(value ?? "").trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const normalized = normalizeAssistantLeaveText(raw);
-  const named = normalized.match(/\b(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?\b/);
-  if (named) {
-    const month = ASSISTANT_LEAVE_MONTHS[named[2]];
-    const year = named[3] ? Number(named[3].length === 2 ? `20${named[3]}` : named[3]) : new Date().getFullYear();
-    if (month) return toIsoDate(new Date(year, month - 1, Number(named[1])));
-  }
-  const numeric = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b/);
-  if (numeric) {
-    const year = numeric[3] ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3]) : new Date().getFullYear();
-    return toIsoDate(new Date(year, Number(numeric[2]) - 1, Number(numeric[1])));
-  }
-  return "";
-}
-
-function inferAssistantLeaveRange(text: string) {
-  const normalized = normalizeAssistantLeaveText(text);
-  const currentYear = new Date().getFullYear();
-  const lastWeek = normalized.match(/ultima\s+saptamana\s+(?:din|de|in)?\s*([a-z]+)/);
-  if (lastWeek) {
-    const month = ASSISTANT_LEAVE_MONTHS[lastWeek[1]];
-    if (month) {
-      const end = new Date(currentYear, month, 0);
-      while (end.getDay() !== 0) end.setDate(end.getDate() - 1);
-      const start = new Date(end);
-      start.setDate(end.getDate() - 6);
-      return { startDate: toIsoDate(start), endDate: toIsoDate(end) };
-    }
-  }
-
-  const range = normalized.match(
-    /(?:intre|din)?\s*(\d{1,2})(?:\s+[a-z]+)?\s+(?:si|pana\s+pe|pana\s+la|pana|-)\s+(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?/
-  );
-  if (!range) return null;
-  const month = ASSISTANT_LEAVE_MONTHS[range[3]];
-  if (!month) return null;
-  const year = range[4] ? Number(range[4].length === 2 ? `20${range[4]}` : range[4]) : currentYear;
-  return {
-    startDate: toIsoDate(new Date(year, month - 1, Number(range[1]))),
-    endDate: toIsoDate(new Date(year, month - 1, Number(range[2]))),
-  };
 }
 
 export default function LeavePlannerPage() {
@@ -378,11 +295,11 @@ export default function LeavePlannerPage() {
         ].filter(Boolean).join(" ")
       );
       const startDate =
-        assistantLeaveDate(assistantLeaveField(detail, ["startDate", "periodStart", "dataInceput", "inceput"])) ||
+        parseAssistantLeaveDate(assistantLeaveField(detail, ["startDate", "periodStart", "dataInceput", "inceput"])) ||
         inferredRange?.startDate ||
         "";
       const endDate =
-        assistantLeaveDate(assistantLeaveField(detail, ["endDate", "periodEnd", "dataSfarsit", "sfarsit"])) ||
+        parseAssistantLeaveDate(assistantLeaveField(detail, ["endDate", "periodEnd", "dataSfarsit", "sfarsit"])) ||
         inferredRange?.endDate ||
         startDate;
       const reason = assistantLeaveField(detail, ["reason", "motiv", "observatii"]);
