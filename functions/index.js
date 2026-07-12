@@ -3246,6 +3246,28 @@ exports.saveBillingCostSettings = onCall(
   }
 );
 
+exports.getWorkControlHealth = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 15,
+    memory: '128MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    return {
+      status: 'ok',
+      checkedAt: Date.now(),
+      region: process.env.FUNCTION_REGION || 'europe-west1',
+      nodeVersion: process.version,
+      uptimeSeconds: Math.round(process.uptime()),
+      services: {
+        firestoreAdmin: Boolean(db),
+        messagingAdmin: Boolean(messaging),
+      },
+    };
+  }
+);
+
 exports.sendPushOnNotificationCreated = onDocumentCreated(
   {
     document: 'notifications/{notificationId}',
