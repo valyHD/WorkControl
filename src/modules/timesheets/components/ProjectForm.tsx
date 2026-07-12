@@ -25,12 +25,13 @@ export default function ProjectForm({ initialValues, submitting, onSubmit }: Pro
   }
 
   return (
-    <form className="tool-form" onSubmit={handleSubmit}>
+    <form className="tool-form" data-assistant-section="project-form" onSubmit={handleSubmit}>
       <div className="tool-form-grid">
         <div className="tool-form-block">
           <label className="tool-form-label">Nume proiect</label>
           <input
             className="tool-input"
+            data-assistant-field="projectName"
             value={values.name}
             onChange={(e) => setValues((prev) => ({ ...prev, name: e.target.value }))}
             placeholder="Ex: Montaj lift A"

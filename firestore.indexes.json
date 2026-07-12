@@ -119,6 +119,29 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "aiCommandLogs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "transcriptFingerprint",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAtServer",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "leaveRequests",
       "queryScope": "COLLECTION",
       "fields": [
@@ -161,6 +184,12 @@
           "queryScope": "COLLECTION_GROUP"
         }
       ]
+    },
+    {
+      "collectionGroup": "aiCommandLogs",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
     }
   ]
 }

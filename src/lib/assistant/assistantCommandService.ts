@@ -1,6 +1,18 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase/firebase";
 import type { AssistantCommandType } from "./runtime/assistantClassifier";
+import {
+  normalizeAndValidateAssistantV3Contract,
+  sanitizeAssistantV3PageContext,
+} from "./core/assistantV3Contract";
+import type {
+  AssistantV3Contract,
+  AssistantV3EntityReference,
+  AssistantV3OpenForm,
+  AssistantV3PageContext,
+  AssistantV3SelectedEntity,
+  AssistantV3ToolCall,
+} from "./core/assistantV3Types";
 
 export type AssistantCommandIntent =
   | "update_vehicle"
@@ -41,18 +53,18 @@ export type AssistantCommandIntent =
   | "create_manual_notification";
 
 export type AssistantCommandEntityType =
-  | "vehicle"
-  | "tool"
-  | "project"
-  | "user"
-  | "maintenanceClient"
-  | "page"
-  | "currentPage"
-  | "none";
+  "vehicle" | "tool" | "project" | "user" | "maintenanceClient" | "page" | "currentPage" | "none";
 
 export type AssistantCommandFieldValue = string | number | boolean | null | string[] | number[];
 
 export type AssistantCommandContext = {
+  route?: string;
+  page?: string;
+  selectedEntity?: AssistantV3SelectedEntity | null;
+  openForm?: AssistantV3OpenForm | null;
+  availableActions?: string[];
+  allowedFields?: string[];
+  role?: string;
   currentPathname?: string;
   currentSearch?: string;
   currentHash?: string;
@@ -96,6 +108,7 @@ export type AssistantCommandPlanStep = {
 };
 
 export type AssistantCommandInterpretation = {
+  version?: "3";
   commandType?: AssistantCommandType;
   intent: AssistantCommandIntent;
   targetModule?: string;
@@ -130,19 +143,36 @@ export type AssistantCommandInterpretation = {
   endDate: string;
   confidence: number;
   response?: string;
+  toolCalls?: AssistantV3ToolCall[];
+  entityReferences?: AssistantV3EntityReference[];
+  missingInformation?: string[];
+  confirmationRequired?: boolean;
 };
+
+export type AssistantCommandInterpretationV3 = AssistantCommandInterpretation & AssistantV3Contract;
 
 export async function interpretAssistantCommand(
   command: string,
   context?: AssistantCommandContext
-): Promise<AssistantCommandInterpretation | null> {
+): Promise<AssistantCommandInterpretationV3 | null> {
   const cleanCommand = command.trim();
   if (!cleanCommand) return null;
 
-  const interpretCommand = httpsCallable<{ command: string; context?: AssistantCommandContext }, AssistantCommandInterpretation>(
-    functions,
-    "interpretAssistantCommand"
-  );
-  const result = await interpretCommand({ command: cleanCommand, context });
-  return result.data || null;
+  const safeContext = sanitizeAssistantV3PageContext(context);
+  const interpretCommand = httpsCallable<
+    { command: string; context: AssistantV3PageContext },
+    unknown
+  >(functions, "interpretAssistantCommand");
+  const result = await interpretCommand({ command: cleanCommand, context: safeContext });
+  if (!result.data) return null;
+
+  const validated = normalizeAndValidateAssistantV3Contract(cleanCommand, result.data);
+  if (!validated.ok) {
+    throw new Error(`Contract Assistant V3 invalid: ${validated.errors.join(" ")}`);
+  }
+
+  return {
+    ...(result.data as AssistantCommandInterpretation),
+    ...validated.value,
+  };
 }

@@ -28,6 +28,7 @@ import WorkflowStepper from "../../../components/product/WorkflowStepper";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import { getLatestTimesheetProjectForUser } from "../../timesheets/services/timesheetsService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import { ASSISTANT_FILL_EXPENSE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 
 const emptyFilters: ExpenseFilters = {
   yearMonth: new Date().toISOString().slice(0, 7),
@@ -138,6 +139,16 @@ export default function ExpenseScanPage() {
   const previousProfileCompanyNameRef = useRef(currentUser?.primaryCompanyName || "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+
+  useEffect(() => {
+    const handleDraft = (event: Event) => {
+      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      if (fields.projectId !== undefined) setProjectId(String(fields.projectId));
+      if (fields.companyName !== undefined) setCompanyName(String(fields.companyName));
+    };
+    window.addEventListener(ASSISTANT_FILL_EXPENSE_FORM_EVENT, handleDraft);
+    return () => window.removeEventListener(ASSISTANT_FILL_EXPENSE_FORM_EVENT, handleDraft);
+  }, []);
 
   async function loadData() {
     setLoading(true);

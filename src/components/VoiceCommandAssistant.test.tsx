@@ -2,18 +2,16 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssistantCommandInterpretation } from "../lib/assistant/assistantCommandService";
-import type { AssistantRuntimePlan } from "../lib/assistant/runtime/assistantTypes";
+import type { AssistantCommandInterpretationV3 } from "../lib/assistant/assistantCommandService";
 import type { VehicleFormValues } from "../types/vehicle";
 import VehicleForm from "../modules/vehicles/components/VehicleForm";
 import VoiceCommandAssistant from "./VoiceCommandAssistant";
 
-const assistantMocks = vi.hoisted(() => ({
-  interpretAssistantCommand: vi.fn(),
-  buildAssistantRuntimePlan: vi.fn(),
-  logAssistantAudit: vi.fn(),
-  scheduleAssistantNextStepHighlight: vi.fn(),
-  updateRun: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  interpret: vi.fn(),
+  audit: vi.fn(),
+  updateVehicle: vi.fn(),
+  vehicles: vi.fn(),
 }));
 
 vi.mock("firebase/firestore", () => ({
@@ -35,47 +33,45 @@ vi.mock("../providers/AuthProvider", () => ({
   }),
 }));
 vi.mock("../lib/assistant/assistantCommandService", () => ({
-  interpretAssistantCommand: assistantMocks.interpretAssistantCommand,
-}));
-vi.mock("../lib/assistant/runtime/assistantExecutor", () => ({
-  buildAssistantRuntimePlan: assistantMocks.buildAssistantRuntimePlan,
+  interpretAssistantCommand: mocks.interpret,
 }));
 vi.mock("../lib/assistant/runtime/assistantAudit", () => ({
-  logAssistantAudit: assistantMocks.logAssistantAudit,
-}));
-vi.mock("../lib/assistant/runtime/assistantButtonHighlighter", () => ({
-  scheduleAssistantNextStepHighlight: assistantMocks.scheduleAssistantNextStepHighlight,
+  logAssistantAudit: mocks.audit,
 }));
 vi.mock("../modules/vehicles/services/vehiclesService", () => ({
   getMyVehicleForUser: vi.fn(),
-  getVehicleById: vi.fn(),
-  getVehiclesList: vi.fn().mockResolvedValue([]),
-  updateVehicle: vi.fn(),
+  getVehicleById: vi.fn().mockResolvedValue({
+    id: "vehicle-1",
+    plateNumber: "B33LGR",
+    brand: "Dacia",
+    model: "Logan",
+    status: "activa",
+    currentKm: 6000,
+    initialRecordedKm: 5900,
+  }),
+  getVehiclesList: mocks.vehicles,
+  updateVehicle: mocks.updateVehicle,
 }));
-vi.mock("../modules/maintenance/services/maintenanceService", () => ({
-  getMaintenanceClients: vi.fn().mockResolvedValue([]),
+vi.mock("../modules/tools/services/toolsService", () => ({
+  getToolById: vi.fn(),
+  getToolsList: vi.fn().mockResolvedValue([]),
+  updateTool: vi.fn(),
 }));
 vi.mock("../modules/timesheets/services/timesheetsService", () => ({
   createProject: vi.fn(),
-  getActiveProjectsList: vi.fn().mockResolvedValue([]),
   getActiveTimesheetForUser: vi.fn(),
-  getLatestTimesheetProjectForUser: vi.fn(),
+  getProjectsList: vi.fn().mockResolvedValue([]),
   getProjectById: vi.fn(),
-  getUserTimesheetProjectPreference: vi.fn(),
   saveUserTimesheetProjectPreference: vi.fn(),
   startTimesheet: vi.fn(),
   stopTimesheet: vi.fn(),
+  updateProject: vi.fn(),
 }));
-vi.mock("../modules/timesheets/services/geocodingService", () => ({
-  reverseGeocode: vi.fn(),
-}));
+vi.mock("../modules/timesheets/services/geocodingService", () => ({ reverseGeocode: vi.fn() }));
 vi.mock("../modules/users/services/usersService", () => ({
   getAllUsers: vi.fn().mockResolvedValue([]),
+  updateUserProfile: vi.fn(),
   updateUserWorkDetails: vi.fn(),
-}));
-vi.mock("../modules/tools/services/toolsService", () => ({
-  getToolsList: vi.fn().mockResolvedValue([]),
-  updateTool: vi.fn(),
 }));
 vi.mock("../modules/vehicles/components/VehicleImageUploader", () => ({
   default: () => <div data-testid="vehicle-image-uploader" />,
@@ -84,16 +80,24 @@ vi.mock("../modules/vehicles/components/VehicleDocumentUploader", () => ({
   default: () => <div data-testid="vehicle-document-uploader" />,
 }));
 
-function interpretation(
-  overrides: Partial<AssistantCommandInterpretation>
-): AssistantCommandInterpretation {
+function contract(
+  overrides: Partial<AssistantCommandInterpretationV3>
+): AssistantCommandInterpretationV3 {
   return {
+    version: "3",
+    commandType: "navigation",
     intent: "open_page",
+    toolCalls: [{ id: "navigation.open", input: { path: "/dashboard", query: "dashboard" } }],
+    targetPage: "/dashboard",
+    entityReferences: [{ type: "page", query: "dashboard", id: "" }],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: false,
+    response: "Deschid pagina.",
     entityType: "page",
-    entityQuery: "",
+    entityQuery: "dashboard",
     fieldsToUpdate: {},
     targetText: "",
-    targetPage: "",
     pageHint: "",
     buttonHint: "",
     missingFields: [],
@@ -103,9 +107,35 @@ function interpretation(
     reportType: "",
     startDate: "",
     endDate: "",
-    confidence: 0.98,
     ...overrides,
   };
+}
+
+function navigationContract(path: string) {
+  return contract({
+    targetPage: path,
+    toolCalls: [{ id: "navigation.open", input: { path, query: path } }],
+  });
+}
+
+function updateVehicleContract(query = "B33LGR") {
+  return contract({
+    commandType: "entity_update",
+    intent: "update_vehicle",
+    toolCalls: [
+      { id: "vehicles.update", input: { entityQuery: query, fields: { currentKm: 6616 } } },
+    ],
+    targetPage: "",
+    entityReferences: [{ type: "vehicle", query, id: "" }],
+    confirmationRequired: true,
+    response: "Schimb kilometrii masinii.",
+    entityType: "vehicle",
+    entityQuery: query,
+    fieldsToUpdate: { currentKm: 6616 },
+    risk: "medium",
+    needsConfirmation: true,
+    spokenSummary: "Schimb kilometrii masinii.",
+  });
 }
 
 function vehicleValues(): VehicleFormValues {
@@ -151,7 +181,7 @@ function AssistantTestSurface({ withVehicleForm = false }: { withVehicleForm?: b
         <VehicleForm
           initialValues={vehicleValues()}
           users={[]}
-          onSubmit={vi.fn().mockResolvedValue(undefined)}
+          onSubmit={vi.fn()}
           submitting={false}
         />
       ) : (
@@ -174,191 +204,106 @@ function renderAssistant(initialPath: string, withVehicleForm = false) {
 }
 
 async function sendCommand(command: string) {
-  fireEvent.pointerDown(screen.getByRole("button", { name: "Tine apasat pentru comanda vocala" }), {
-    pointerId: 1,
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Tine apasat pentru comanda vocala" }));
   const input = await screen.findByPlaceholderText("Sau scrie comanda...");
   const user = userEvent.setup();
   await user.type(input, command);
   await user.click(screen.getByRole("button", { name: "Trimite comanda" }));
 }
 
-function readyVehiclePlan(): AssistantRuntimePlan {
-  return {
-    intent: "update_vehicle",
-    entityType: "vehicle",
-    parsedIntent: interpretation({
-      commandType: "entity_update",
-      intent: "update_vehicle",
-      entityType: "vehicle",
-      entityQuery: "B33LGR",
-      fieldsToUpdate: { currentKm: 6616 },
-      risk: "medium",
-      needsConfirmation: true,
-      spokenSummary: "Schimb kilometrii masinii.",
-    }),
-    resolvedEntity: {
-      entityType: "vehicle",
-      entityId: "vehicle-1",
-      label: "Dacia Logan B33LGR",
-      query: "B33LGR",
-      score: 1,
-      data: { currentKm: 6000 },
-    },
-    fieldsToUpdate: { currentKm: 6616 },
-    changes: [
-      {
-        naturalName: "kilometri",
-        fieldKey: "currentKm",
-        label: "Km curenti",
-        oldValue: 6000,
-        newValue: 6616,
-        displayOldValue: "6000",
-        displayNewValue: "6616",
-      },
-    ],
-    beforeData: { currentKm: 6000 },
-    afterData: { currentKm: 6616 },
-    risk: "medium",
-    confidence: 0.97,
-    needsConfirmation: true,
-    spokenSummary: "Schimb kilometrii masinii.",
-    status: "ready",
-    message: "Schimb Km curenti de la 6000 la 6616.",
-    executionPlan: [
-      { id: "confirm", type: "confirm", label: "Astept confirmarea.", requiresConfirmation: true },
-      { id: "update", type: "service_update", label: "Actualizez masina." },
-    ],
-    run: assistantMocks.updateRun,
-  };
-}
-
-describe("VoiceCommandAssistant critical behavior", () => {
+describe("VoiceCommandAssistant V3 controlled behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    assistantMocks.updateRun.mockResolvedValue({
-      result: "Kilometrii au fost actualizati.",
-      afterData: { currentKm: 6616 },
-    });
-    assistantMocks.interpretAssistantCommand.mockImplementation(async (command: string) => {
+    mocks.vehicles.mockResolvedValue([
+      {
+        id: "vehicle-1",
+        plateNumber: "B33LGR",
+        brand: "Dacia",
+        model: "Logan",
+        status: "activa",
+        currentKm: 6000,
+        initialRecordedKm: 5900,
+      },
+    ]);
+    mocks.interpret.mockImplementation(async (command: string) => {
       const normalized = command.toLowerCase();
-      if (normalized.includes("conced")) {
-        return interpretation({ commandType: "navigation", targetPage: "/my-leave" });
-      }
-      if (normalized.includes("mentenanta")) {
-        return interpretation({ commandType: "navigation", targetPage: "/maintenance" });
-      }
-      if (normalized.includes("dashboard")) {
-        return interpretation({ commandType: "navigation", targetPage: "/dashboard" });
-      }
+      if (normalized.includes("conced")) return navigationContract("/my-leave");
+      if (normalized.includes("mentenanta")) return navigationContract("/maintenance");
+      if (normalized.includes("dashboard")) return navigationContract("/dashboard");
       if (normalized.includes("schimba data")) {
-        return interpretation({
-          commandType: "entity_update",
+        return contract({
+          commandType: "unknown",
           intent: "unknown",
-          entityType: "none",
+          toolCalls: [],
+          entityReferences: [],
+          targetPage: "",
+          missingInformation: ["campul exact"],
           confidence: 0.4,
-          needsConfirmation: true,
+          confirmationRequired: false,
+          response: "Ce data vrei sa modific?",
+          entityType: "none",
+          entityQuery: "",
         });
       }
-      return interpretation({
-        commandType: "entity_update",
-        intent: "update_vehicle",
-        entityType: "vehicle",
-        entityQuery: "Logan",
-        fieldsToUpdate: { currentKm: 6616 },
-        risk: "medium",
-        needsConfirmation: true,
-      });
+      return updateVehicleContract();
     });
-    assistantMocks.buildAssistantRuntimePlan.mockResolvedValue(readyVehiclePlan());
   });
 
-  it("navigates from the vehicle form without changing the plate or dispatching form-fill", async () => {
+  it("navigates from a vehicle form without changing any field", async () => {
     renderAssistant("/vehicles/vehicle-1/edit", true);
     const plateInput = screen.getByDisplayValue("B33LGR");
-    const inputEventSpy = vi.fn();
-    const fillEventSpy = vi.fn();
-    plateInput.addEventListener("input", inputEventSpy);
-    window.addEventListener("workcontrol:assistant-fill-vehicle-form", fillEventSpy);
+    const inputSpy = vi.fn();
+    const fillSpy = vi.fn();
+    plateInput.addEventListener("input", inputSpy);
+    window.addEventListener("workcontrol:assistant-fill-vehicle-form", fillSpy);
 
     await sendCommand("Du-te pe pagina concedii.");
 
     await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("/my-leave"));
     expect(plateInput).toHaveValue("B33LGR");
-    expect(inputEventSpy).not.toHaveBeenCalled();
-    expect(fillEventSpy).not.toHaveBeenCalled();
-    window.removeEventListener("workcontrol:assistant-fill-vehicle-form", fillEventSpy);
+    expect(inputSpy).not.toHaveBeenCalled();
+    expect(fillSpy).not.toHaveBeenCalled();
+    window.removeEventListener("workcontrol:assistant-fill-vehicle-form", fillSpy);
   });
 
   it.each([
     ["/my-leave", "Deschide mentenanta", "/maintenance"],
     ["/maintenance?tab=clients", "Arata dashboard", "/dashboard"],
-  ])(
-    "navigates from %s without altering the visible form field",
-    async (from, command, expected) => {
-      renderAssistant(from);
-      const input = screen.getByDisplayValue("Valoare initiala");
-
-      await sendCommand(command);
-
-      await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent(expected));
-      expect(input).toHaveValue("Valoare initiala");
-    }
-  );
-
-  it("asks for clarification for the ambiguous command schimba data", async () => {
-    renderAssistant("/vehicles/vehicle-1/edit");
+  ])("navigates from %s without altering the visible input", async (from, command, expected) => {
+    renderAssistant(from);
     const input = screen.getByDisplayValue("Valoare initiala");
-
-    await sendCommand("schimba data");
-
-    expect(await screen.findAllByText(/nu exista un plan valid confirmat/i)).not.toHaveLength(0);
-    expect(screen.getByTestId("current-path")).toHaveTextContent("/vehicles/vehicle-1/edit");
+    await sendCommand(command);
+    await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent(expected));
     expect(input).toHaveValue("Valoare initiala");
-    expect(assistantMocks.updateRun).not.toHaveBeenCalled();
   });
 
-  it("shows old and new values and executes only after confirmation", async () => {
+  it("asks one clarification for an ambiguous command and executes nothing", async () => {
     renderAssistant("/vehicles/vehicle-1/edit");
-
-    await sendCommand("schimba kilometrii Loganului la 6616");
-
-    expect(await screen.findByText("Confirmare actiune")).toBeInTheDocument();
-    expect(screen.getByText(/Km curenti: 6000 -> 6616/)).toBeInTheDocument();
-    expect(assistantMocks.updateRun).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByRole("button", { name: "Confirma" }));
-    await waitFor(() => expect(assistantMocks.updateRun).toHaveBeenCalledTimes(1));
+    await sendCommand("schimba data");
+    expect(await screen.findAllByText(/am nevoie de: campul exact/i)).not.toHaveLength(0);
+    expect(mocks.updateVehicle).not.toHaveBeenCalled();
   });
 
-  it("renders a controlled selector when entity resolution is ambiguous", async () => {
-    assistantMocks.buildAssistantRuntimePlan.mockResolvedValue({
-      ...readyVehiclePlan(),
-      status: "needs_clarification",
-      run: undefined,
-      message: "Am gasit doua masini Logan. Pe care o alegi?",
-      options: [
-        {
-          entityType: "vehicle",
-          entityId: "vehicle-1",
-          label: "Dacia Logan B33LGR",
-          score: 0.9,
-          data: {},
-        },
-        {
-          entityType: "vehicle",
-          entityId: "vehicle-2",
-          label: "Dacia Logan B44ABC",
-          score: 0.88,
-          data: {},
-        },
-      ],
-    });
+  it("shows old and new values and updates only after confirmation", async () => {
+    renderAssistant("/vehicles/vehicle-1/edit");
+    await sendCommand("schimba kilometrii B33LGR la 6616");
+    expect(await screen.findByText("Confirmă modificările")).toBeInTheDocument();
+    expect(screen.getByText("6000")).toBeInTheDocument();
+    expect(screen.getByText("6616")).toBeInTheDocument();
+    expect(mocks.updateVehicle).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Confirmă" }));
+    await waitFor(() => expect(mocks.updateVehicle).toHaveBeenCalledTimes(1));
+  });
+
+  it("renders controlled choices when entity resolution is ambiguous", async () => {
+    mocks.vehicles.mockResolvedValue([
+      { id: "vehicle-1", plateNumber: "B33LGR", brand: "Dacia", model: "Logan", currentKm: 6000 },
+      { id: "vehicle-2", plateNumber: "B44ABC", brand: "Dacia", model: "Logan", currentKm: 7000 },
+    ]);
+    mocks.interpret.mockResolvedValue(updateVehicleContract("Logan"));
     renderAssistant("/vehicles");
-
     await sendCommand("schimba kilometrii Loganului la 6616");
-
-    expect(await screen.findByRole("button", { name: /Dacia Logan B33LGR/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Dacia Logan B44ABC/ })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: /B33LGR Dacia Logan/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /B44ABC Dacia Logan/ })).toBeInTheDocument();
   });
 });

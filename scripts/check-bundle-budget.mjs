@@ -12,8 +12,10 @@ function sumGzip(predicate) {
   return assets.filter(predicate).reduce((total, asset) => total + asset.gzipBytes, 0);
 }
 
-function findGzip(prefix) {
-  return assets.find((asset) => asset.name.startsWith(prefix))?.gzipBytes || 0;
+function findGzip(prefix, extension = ".js") {
+  return assets.find(
+    (asset) => asset.name.startsWith(prefix) && asset.name.endsWith(extension)
+  )?.gzipBytes || 0;
 }
 
 const checks = [

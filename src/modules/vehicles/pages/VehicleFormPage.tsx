@@ -20,6 +20,7 @@ import {
 import { useAuth } from "../../../providers/AuthProvider";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
+import { ASSISTANT_FILL_VEHICLE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 
 const emptyValues: VehicleFormValues = {
   plateNumber: "",
@@ -179,6 +180,25 @@ export default function VehicleFormPage() {
 
     void load();
   }, [location.search, role, vehicleId, user]);
+
+  useEffect(() => {
+    if (isEdit) return undefined;
+    const handleDraft = (event: Event) => {
+      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      setInitialValues((current) => ({
+        ...current,
+        plateNumber: String(fields.plateNumber ?? current.plateNumber).toUpperCase(),
+        brand: String(fields.brand ?? current.brand),
+        model: String(fields.model ?? current.model),
+        year: String(fields.year ?? current.year),
+        vin: String(fields.vin ?? current.vin),
+        fuelType: String(fields.fuelType ?? current.fuelType),
+        currentKm: fields.currentKm === undefined ? current.currentKm : Number(fields.currentKm),
+      }));
+    };
+    window.addEventListener(ASSISTANT_FILL_VEHICLE_FORM_EVENT, handleDraft);
+    return () => window.removeEventListener(ASSISTANT_FILL_VEHICLE_FORM_EVENT, handleDraft);
+  }, [isEdit]);
 
   useEffect(() => {
     if (loading) return;
