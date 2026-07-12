@@ -8,7 +8,7 @@ import { getUserThemeClass } from "../../../lib/ui/userTheme";
 import { CarFront, List, MapPinned, Search } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { VehicleGpsVisibilityToggle } from "../components/VehicleGpsVisibilityGate";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 
 function VehicleCardSkeleton() {
@@ -124,8 +124,8 @@ export default function VehiclesPage() {
   const activeCount = vehicles.filter((v) => v.status === "activa").length;
 
   return (
-    <section className="page-section">
-      <ProductPageHeader
+    <PageLayout>
+      <PageHeader
         eyebrow="Flotă"
         title="Mașini"
         description={loading ? "Se încarcă flota..." : `${total} vehicule · ${activeCount} active`}
@@ -292,6 +292,6 @@ export default function VehiclesPage() {
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }

@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 const useEmulator = process.env.WORKCONTROL_E2E_EMULATOR === "true";
@@ -193,7 +194,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await login(page);
     await expect(page.getByText("Ce se întâmplă azi în firmă")).toBeVisible();
     await page.keyboard.press("Control+K");
-    await expect(page.getByRole("dialog", { name: "Căutare globală" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Cautare globala" })).toBeVisible();
     await page.keyboard.press("Escape");
 
     await page.goto("/projects");
@@ -314,5 +315,78 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
         return fieldString(document, "currentKm");
       })
       .toBe("6616");
+  });
+
+  test("product experience navigation, focus, responsive layout and GPS visual guard", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await login(page);
+
+    const viewports = [
+      { width: 360, height: 800 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1366, height: 768 },
+      { width: 1920, height: 1080 },
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto("/dashboard");
+      await expect(page.getByRole("heading", { name: /Ce se/i }).first()).toBeVisible();
+      const overflow = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      }));
+      expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const menuButton = page.getByRole("button", { name: "Deschide meniul" });
+    await menuButton.click();
+    await expect(page.locator(".mobile-drawer")).toHaveAttribute("aria-hidden", "false");
+    await page.keyboard.press("Escape");
+    await expect(menuButton).toBeFocused();
+
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.keyboard.press("Control+K");
+    const commandDialog = page.getByRole("dialog", { name: "Cautare globala" });
+    await expect(commandDialog).toBeVisible();
+    await page.getByRole("textbox", { name: "Cauta" }).fill("ui lab");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/control-panel\/ui-lab$/);
+    await expect(page.getByRole("heading", { name: "UI Lab" }).first()).toBeVisible();
+    await page.waitForTimeout(100);
+
+    const accessibility = await new AxeBuilder({ page }).include(".wc-ui-lab").analyze();
+    expect(
+      accessibility.violations.filter(
+        (violation) => violation.impact === "critical" || violation.impact === "serious"
+      )
+    ).toEqual([]);
+
+    await expect(page).toHaveScreenshot("ui-lab-desktop.png", {
+      animations: "disabled",
+      fullPage: true,
+      mask: [
+        page.locator(".desktop-logout-btn").first(),
+        page.locator("[data-assistant-action='open-assistant']"),
+      ],
+      maxDiffPixelRatio: 0.01,
+    });
+
+    await page.goto("/vehicles/gps-map");
+    await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
+    await expect(page).toHaveScreenshot("fleet-gps-foundation.png", {
+      animations: "disabled",
+      fullPage: true,
+      mask: [
+        page.locator(".leaflet-tile-pane"),
+        page.locator(".desktop-logout-btn").first(),
+        page.locator("[data-assistant-action='open-assistant']"),
+      ],
+      maxDiffPixelRatio: 0.02,
+    });
   });
 });

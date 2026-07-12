@@ -5,6 +5,7 @@ import { useAuth } from "../providers/AuthProvider";
 import { RouteErrorPage } from "../lib/errors/RouteErrorPage";
 import { lazyWithRetry } from "../lib/routing/dynamicImportRecovery";
 import { VehicleGpsVisibilityGate } from "../modules/vehicles/components/VehicleGpsVisibilityGate";
+import { Skeleton } from "../components/experience";
 
 const DashboardPage = lazyWithRetry(() => import("../modules/dashboard/pages/DashboardPage"));
 const UsersPage = lazyWithRetry(() => import("../modules/users/pages/UsersPage"));
@@ -37,6 +38,7 @@ const ProjectsPage = lazyWithRetry(() => import("../modules/timesheets/pages/Pro
 const NotificationsPage = lazyWithRetry(() => import("../modules/notifications/pages/NotificationsPage"));
 const ControlPanelPage = lazyWithRetry(() => import("../modules/reports/pages/ReportsPage"));
 const BackupPreviewPage = lazyWithRetry(() => import("../modules/reports/pages/BackupPreviewPage"));
+const UiLabPage = lazyWithRetry(() => import("../modules/reports/pages/UiLabPage"));
 const NotificationRulesPage = lazyWithRetry(
   () => import("../modules/notifications/pages/NotificationRulesPage")
 );
@@ -55,11 +57,9 @@ const AuditLogPage = lazyWithRetry(() => import("../modules/audit/pages/AuditLog
 
 function RouteLoader() {
   return (
-    <div className="auth-page">
-      <div className="auth-card">
-        <h1 className="auth-title">Se incarca pagina...</h1>
-        <p className="auth-subtitle">Pregatim modulele necesare.</p>
-      </div>
+    <div className="wc-route-loader" aria-live="polite">
+      <span>Se incarca pagina...</span>
+      <Skeleton lines={4} label="Pregatim modulele necesare" />
     </div>
   );
 }
@@ -151,6 +151,7 @@ export const router = createBrowserRouter([
       { path: "/notifications", element: withSuspense(<NotificationsPage />) },
       { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
       { path: "/control-panel/backup-preview", element: withSuspense(<BackupPreviewPage />) },
+      { path: "/control-panel/ui-lab", element: withSuspense(<UiLabPage />) },
       { path: "/maintenance", element: withSuspense(<MaintenancePage />) },
       { path: "/maintenance/manage", element: withSuspense(<MaintenancePage />) },
       { path: "/maintenance/parts", element: withSuspense(<MaintenancePartOrdersPage />) },

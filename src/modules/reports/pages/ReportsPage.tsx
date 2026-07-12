@@ -14,7 +14,7 @@ import {
   type ProfessionalBackupView,
   saveControlPanelSettings,
 } from "../services/controlPanelService";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 
 const BACKUP_PREVIEW_STORAGE_KEY = "workcontrol_uploaded_backup_preview";
@@ -345,8 +345,8 @@ export default function ControlPanelPage() {
   }
 
   return (
-    <section className="page-section">
-      <ProductPageHeader
+    <PageLayout>
+      <PageHeader
         eyebrow="Administrare"
         title="Control Panel"
         description="Configurare, costuri, sănătate și instrumente administrative organizate pe domenii."
@@ -792,6 +792,6 @@ export default function ControlPanelPage() {
           </div>
         </div>
       </div>
-    </section>
+    </PageLayout>
   );
 }

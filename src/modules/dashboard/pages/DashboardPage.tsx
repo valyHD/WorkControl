@@ -34,9 +34,9 @@ import EmptyState from "../../../components/EmptyState";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import {
   ProductContentLayout,
-  ProductPageHeader,
   ProductQuickActions,
 } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
   getEffectiveWorkedMinutes,
@@ -353,8 +353,8 @@ export default function DashboardPage() {
   if (loading) return <DashboardSkeleton />;
 
   return (
-    <section className="page-section dashboard-modern-page">
-      <ProductPageHeader
+    <PageLayout className="dashboard-modern-page">
+      <PageHeader
         eyebrow="Command Center"
         title="Ce se întâmplă azi în firmă"
         description="Pontaje, flotă, proiecte și alerte într-o singură privire."
@@ -586,6 +586,6 @@ export default function DashboardPage() {
 
       </div>
       </ProductContentLayout>
-    </section>
+    </PageLayout>
   );
 }

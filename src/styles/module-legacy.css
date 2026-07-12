@@ -1,0 +1,328 @@
+
+/* ================================================================
+   TOOLS PAGE HEADER / FILTERS
+   ================================================================ */
+.tools-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+/* when tools-header is inside .panel, add lateral padding */
+.panel > .tools-header {
+  padding: 16px 20px 0;
+  margin-bottom: 14px;
+}
+
+.tools-header-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* tools-subtitle: padding when directly inside .panel (not inside tools-header) */
+.tools-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+/* when tools-subtitle is a direct .panel child (not wrapped in tools-header) */
+.panel > .tools-subtitle {
+  padding: 6px 20px 0;
+}
+
+.tools-filters {
+  display: grid;
+  grid-template-columns: 1.5fr 240px;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 0 20px;
+}
+
+/* filter chips */
+.filters-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  border: 1.5px solid var(--line-mid);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.filter-chip:hover { border-color: rgba(37,99,235,.25); color: var(--primary-deep); background: var(--primary-soft); }
+.filter-chip.active { border-color: rgba(37,99,235,.3); color: var(--primary-deep); background: var(--primary-soft); font-weight: 800; }
+
+/* ================================================================
+   TOOL CARDS (grid)
+   ================================================================ */
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+/* when tools-grid is directly inside .panel */
+.panel > .tools-grid {
+  padding: 16px 20px 20px;
+}
+
+.tool-card-link { display: block; }
+
+.tool-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+  height: 100%;
+}
+.tool-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+  border-color: rgba(96,165,250,.35);
+}
+
+.tool-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 0;
+  margin-bottom: 12px;
+  gap: 10px;
+}
+
+.tool-card-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 18px;
+  overflow: hidden;
+  border: 1.5px solid rgba(37,99,235,.12);
+  flex-shrink: 0;
+}
+.tool-card-avatar-image { width: 100%; height: 100%; object-fit: cover; }
+
+.tool-card-body { padding: 0 18px; }
+/* title/code/meta get lateral padding whether wrapped in tool-card-body or not */
+.tool-card-title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -.25px;
+  margin-bottom: 6px;
+  padding: 0 18px;
+}
+.tool-card-code {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: 'DM Mono', monospace;
+  margin-bottom: 5px;
+  padding: 0 18px;
+}
+.tool-card-meta {
+  font-size: 13px;
+  color: var(--text-soft);
+  font-weight: 500;
+  margin-bottom: 4px;
+  padding: 0 18px;
+}
+/* override padding when inside explicit tool-card-body */
+.tool-card-body .tool-card-title,
+.tool-card-body .tool-card-code,
+.tool-card-body .tool-card-meta {
+  padding: 0;
+}
+
+/* transfer section */
+.tool-card-transfer {
+  margin-top: 12px;
+  padding: 0 18px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-alt);
+}
+
+/* per-user assigned color on tool card */
+.tool-card-assigned {
+  border-left: 3px solid var(--user-border);
+}
+.tool-card-assigned:hover {
+  box-shadow: var(--shadow-md), 0 4px 20px var(--user-glow);
+}
+
+/* ================================================================
+   DETAIL VIEWS
+   ================================================================ */
+.tool-details-grid { display: grid; grid-template-columns: 1.2fr 0.9fr; gap: 20px; }
+.tool-inner-panel  {
+  background: var(--surface-alt);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.tool-details-header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.tool-details-avatar {
+  width: 88px; height: 88px;
+  border-radius: 22px;
+  background: var(--primary-soft);
+  color: var(--primary-deep);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800;
+  overflow: hidden;
+  border: 1.5px solid rgba(37,99,235,.14);
+  flex-shrink: 0;
+}
+.tool-details-avatar-image { width: 100%; height: 100%; object-fit: cover; }
+
+/* placeholder inside panel — no double border */
+.panel .placeholder-page {
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 20px;
+}
+
+/* profile detail lines */
+.tool-detail-line {
+  font-size: 13.5px; color: var(--text-soft);
+  margin-bottom: 10px; display: flex; gap: 8px;
+  padding: 0 20px;
+}
+.tool-detail-line strong { color: var(--text); font-weight: 700; }
+/* last detail line needs bottom spacing */
+.tool-detail-line:last-of-type { margin-bottom: 16px; }
+
+/* ================================================================
+   GALLERY
+   ================================================================ */
+.tool-gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 16px 20px; }
+
+.tool-gallery-item {
+  background: var(--surface-alt);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  padding: 9px;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: border-color var(--transition), transform var(--transition-fast);
+}
+.tool-gallery-item:hover { border-color: rgba(96,165,250,.35); transform: translateY(-2px); }
+
+.tool-gallery-image { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-xs); }
+.tool-gallery-actions { display: flex; flex-direction: column; gap: 6px; }
+
+.tool-cover-chip {
+  display: inline-flex; align-items: center;
+  padding: 4px 9px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--primary-deep);
+  font-size: 11px; font-weight: 800;
+  border: 1px solid rgba(37,99,235,.16);
+}
+
+/* ================================================================
+   QR / SCAN
+   ================================================================ */
+.tool-qr-preview {
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; margin-bottom: 12px;
+  background: var(--surface-alt);
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.tool-qr-text { color: var(--text-muted); font-size: 13px; margin: 0; padding:10px }
+.tool-qr-value-box {
+  background: var(--surface-alt); border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-sm); padding: 11px 13px;
+  word-break: break-all; color: var(--text-soft);
+  font-family: 'DM Mono', monospace; font-size: 12.5px; margin-bottom: 12px;
+}
+.tool-qr-scanner { width: 100%; min-height: 300px; overflow: hidden; border-radius: var(--radius-sm); background: var(--text); }
+.tool-scan-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; }
+
+/* ================================================================
+   ALERT / MESSAGE
+   ================================================================ */
+.tool-message {
+  margin: 0 18px 14px;
+  padding: 10px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+  border: 1.5px solid var(--warning-line);
+}
+
+/* ================================================================
+   QUICK ACTION CARDS (dashboard)
+   ================================================================ */
+.quick-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 20px;
+}
+
+.quick-action-card {
+  display: block;
+  background: var(--surface-alt);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.quick-action-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+  border-color: rgba(96,165,250,.3);
+  background: var(--surface);
+}
+
+/* icon inside quick action */
+.quick-action-icon {
+  width: 38px; height: 38px;
+  border-radius: var(--radius-xs);
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 12px;
+  border: 1px solid rgba(37,99,235,.1);
+  transition: background var(--transition);
+}
+.quick-action-card:hover .quick-action-icon {
+  background: rgba(37,99,235,.14);
+}
+
+.quick-action-title { font-size: 14px; font-weight: 800; margin-bottom: 4px; letter-spacing: -.2px; }
+.quick-action-subtitle { font-size: 12px; color: var(--text-muted); font-weight: 500; line-height: 1.4; }
+

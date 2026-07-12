@@ -7,7 +7,7 @@ import { getUserThemeClass } from "../../../lib/ui/userTheme";
 import SafeImage, { preloadImageUrls } from "../../../components/SafeImage";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { Plus, QrCode } from "lucide-react";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 
 export default function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
@@ -58,8 +58,8 @@ export default function ToolsPage() {
   }, [tools, search, statusFilter]);
 
   return (
-    <section className="page-section">
-      <ProductPageHeader
+    <PageLayout>
+      <PageHeader
         eyebrow="Active și inventar"
         title="Scule"
         description={`${tools.length} scule · responsabil, deținător, stare și locație`}
@@ -182,6 +182,6 @@ const prioritizeImage = index < 18;
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }

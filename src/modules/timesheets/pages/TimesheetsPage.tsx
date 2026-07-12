@@ -20,7 +20,7 @@ import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import EmptyState from "../../../components/EmptyState";
@@ -375,8 +375,8 @@ export default function TimesheetsPage() {
   }
 
   return (
-    <section className="page-section timesheets-management-page">
-      <ProductPageHeader
+    <PageLayout className="timesheets-management-page">
+      <PageHeader
         eyebrow="Echipă și pontaje"
         title="Pontaje"
         description="Orele lucrate, proiectele și activitatea echipei, fără filtre ascunse."
@@ -615,6 +615,6 @@ export default function TimesheetsPage() {
           </div>
         </div>
       ) : null}
-    </section>
+    </PageLayout>
   );
 }
