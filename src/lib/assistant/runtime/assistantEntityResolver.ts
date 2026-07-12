@@ -1,13 +1,19 @@
 import { getProjectsList } from "../../../modules/timesheets/services/timesheetsService";
 import { getToolsList } from "../../../modules/tools/services/toolsService";
 import { getAllUsers } from "../../../modules/users/services/usersService";
-import { getVehicleById, getVehiclesList } from "../../../modules/vehicles/services/vehiclesService";
+import {
+  getVehicleById,
+  getVehiclesList,
+} from "../../../modules/vehicles/services/vehiclesService";
 import type { ProjectItem } from "../../../types/timesheet";
 import type { ToolItem } from "../../../types/tool";
 import type { AppUserItem } from "../../../types/user";
 import type { VehicleItem } from "../../../types/vehicle";
 import { compactVehiclePlate, rankAssistantMatches, scoreAssistantText } from "./assistantFuzzy";
-import { getToolIdFromAssistantPath, getVehicleIdFromAssistantPath } from "./assistantConversationMemory";
+import {
+  getToolIdFromAssistantPath,
+  getVehicleIdFromAssistantPath,
+} from "./assistantConversationMemory";
 import type {
   AssistantEntityResolution,
   AssistantResolvedEntity,
@@ -23,7 +29,9 @@ function vehicleLabel(vehicle: VehicleItem) {
     vehicle.vin,
     vehicle.currentDriverUserName,
     vehicle.ownerUserName,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function toolLabel(tool: ToolItem) {
@@ -35,7 +43,9 @@ function toolLabel(tool: ToolItem) {
     tool.currentHolderUserName,
     tool.ownerUserName,
     tool.locationLabel,
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function projectLabel(project: ProjectItem) {
@@ -63,7 +73,11 @@ function buildResolution<T>(
   }));
 
   if (options.length === 0) {
-    return { status: "not_found", options, message: `Nu am gasit ${entityType} pentru "${query}".` };
+    return {
+      status: "not_found",
+      options,
+      message: `Nu am gasit ${entityType} pentru "${query}".`,
+    };
   }
 
   const [first, second] = options;
@@ -72,7 +86,11 @@ function buildResolution<T>(
   }
 
   if (options.length >= 2 && first.score >= 0.3) {
-    return { status: "ambiguous", options, message: "Am gasit mai multe rezultate posibile. Alege varianta corecta." };
+    return {
+      status: "ambiguous",
+      options,
+      message: "Am gasit mai multe rezultate posibile. Alege varianta corecta.",
+    };
   }
 
   if (first.score >= 0.55 && (!second || first.score - second.score >= 0.15)) {
@@ -82,14 +100,21 @@ function buildResolution<T>(
   return { status: "not_found", options, message: `Nu am gasit ${entityType} pentru "${query}".` };
 }
 
-async function resolveContextEntity(entityType: AssistantRuntimeEntityType, context: AssistantRuntimeContext) {
+async function resolveContextEntity(
+  entityType: AssistantRuntimeEntityType,
+  context: AssistantRuntimeContext
+) {
   const lastEntity =
     context.memory?.lastEntity?.entityType === entityType && context.memory.lastEntity.entityId
       ? context.memory.lastEntity
       : null;
 
   if (entityType === "vehicle") {
-    const id = getVehicleIdFromAssistantPath(context.currentPathname) || context.memory?.lastVehicleId || lastEntity?.entityId || "";
+    const id =
+      getVehicleIdFromAssistantPath(context.currentPathname) ||
+      context.memory?.lastVehicleId ||
+      lastEntity?.entityId ||
+      "";
     if (id) {
       const vehicle = await getVehicleById(id);
       if (vehicle) {
@@ -109,7 +134,11 @@ async function resolveContextEntity(entityType: AssistantRuntimeEntityType, cont
   }
 
   if (entityType === "tool") {
-    const id = getToolIdFromAssistantPath(context.currentPathname) || context.memory?.lastToolId || lastEntity?.entityId || "";
+    const id =
+      getToolIdFromAssistantPath(context.currentPathname) ||
+      context.memory?.lastToolId ||
+      lastEntity?.entityId ||
+      "";
     if (id) {
       const tools = await getToolsList();
       const tool = tools.find((item) => item.id === id);
@@ -181,7 +210,9 @@ export async function resolveAssistantEntity(
 ): Promise<AssistantEntityResolution> {
   const cleanQuery = query.trim();
   const contextEntity = await resolveContextEntity(entityType, context);
-  if (contextEntity && (!cleanQuery || ["vehicle", "tool"].includes(entityType))) return contextEntity;
+  // Context is only a pronoun/omitted-target fallback. An explicit query must
+  // always be resolved against the requested entity collection.
+  if (contextEntity && !cleanQuery) return contextEntity;
 
   if (entityType === "vehicle") {
     const vehicles = await getVehiclesList();
@@ -189,8 +220,12 @@ export async function resolveAssistantEntity(
       .map((vehicle) => {
         const compactPlate = compactVehiclePlate(vehicle.plateNumber);
         const compactQuery = compactVehiclePlate(cleanQuery);
-        const plateBoost = compactPlate && compactQuery && compactPlate.includes(compactQuery) ? 0.35 : 0;
-        return { item: vehicle, score: Math.min(1, scoreAssistantText(vehicleLabel(vehicle), cleanQuery) + plateBoost) };
+        const plateBoost =
+          compactPlate && compactQuery && compactPlate.includes(compactQuery) ? 0.35 : 0;
+        return {
+          item: vehicle,
+          score: Math.min(1, scoreAssistantText(vehicleLabel(vehicle), cleanQuery) + plateBoost),
+        };
       })
       .filter((entry) => entry.score >= 0.25)
       .sort((a, b) => b.score - a.score);

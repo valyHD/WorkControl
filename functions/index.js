@@ -9,6 +9,16 @@ const {
   refreshBillingMetrics: refreshBillingMetricsCache,
 } = require('./billingMetricsRuntime');
 const { getLiveFirebaseCostEstimate } = require('./liveCostEstimateRuntime');
+const {
+  buildAssistantTraceDocument,
+  fingerprintAssistantTranscript,
+  isAssistantOutcomeTransitionAllowed,
+  normalizeAssistantOutcomePayload,
+} = require('./assistantObservability');
+const {
+  decodeAssistantAudioPayload,
+  requestAssistantTranscription,
+} = require('./assistantTranscription');
 
 admin.initializeApp();
 
@@ -199,6 +209,10 @@ const ASSISTANT_COMMAND_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
+    version: {
+      type: 'string',
+      enum: ['3'],
+    },
     commandType: {
       type: 'string',
       enum: ['navigation', 'form_fill', 'entity_update', 'create_entity', 'timesheet_action', 'question', 'unknown'],
@@ -244,6 +258,75 @@ const ASSISTANT_COMMAND_SCHEMA = {
         'unknown',
       ],
     },
+    toolCalls: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          input: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              path: { type: 'string' },
+              query: { type: 'string' },
+              entityQuery: { type: 'string' },
+              fields: {
+                type: 'object',
+                additionalProperties: {
+                  anyOf: [
+                    { type: 'string' },
+                    { type: 'number' },
+                    { type: 'boolean' },
+                    { type: 'null' },
+                    { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
+                  ],
+                },
+              },
+              projectId: { type: 'string' },
+              projectQuery: { type: 'string' },
+              createProjectIfMissing: { type: 'boolean' },
+              explanation: { type: 'string' },
+              name: { type: 'string' },
+            },
+            required: [
+              'path',
+              'query',
+              'entityQuery',
+              'fields',
+              'projectId',
+              'projectQuery',
+              'createProjectIfMissing',
+              'explanation',
+              'name',
+            ],
+          },
+        },
+        required: ['id', 'input'],
+      },
+    },
+    entityReferences: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          type: { type: 'string', enum: ['vehicle', 'tool', 'project', 'user', 'maintenanceClient', 'page', 'currentPage', 'none'] },
+          query: { type: 'string' },
+          id: { type: 'string' },
+        },
+        required: ['type', 'query', 'id'],
+      },
+    },
+    missingInformation: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+    confirmationRequired: { type: 'boolean' },
+    response: { type: 'string' },
     targetModule: {
       type: 'string',
       description: 'Modulul principal WorkControl: vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, navigation, assistant.',
@@ -347,7 +430,7 @@ const ASSISTANT_COMMAND_SCHEMA = {
     },
     confidence: {
       type: 'number',
-      description: 'Incredere intre 0 si 1. Sub 0.65 cand nu esti sigur.',
+      description: 'Incredere intre 0 si 1. Sub 0.85 necesita clarificare.',
     },
     risk: {
       type: 'string',
@@ -392,8 +475,14 @@ const ASSISTANT_COMMAND_SCHEMA = {
     },
   },
   required: [
+    'version',
     'commandType',
     'intent',
+    'toolCalls',
+    'entityReferences',
+    'missingInformation',
+    'confirmationRequired',
+    'response',
     'targetModule',
     'entityType',
     'entityQuery',
@@ -1790,6 +1879,44 @@ function buildWorkControlAssistantExamples() {
     '110. "adauga client cu numele text lung confuz fara lift" => create_maintenance_client confidence sub 0.85 si missingFields ["liftNumbers"].',
     '111. "deschide pagina mentenanta la formularul de client si adauga Isomat lift 210869" => create_maintenance_client, nu navigation simplu.',
     '112. "du-ma la pagina mentenanta la formularul de client" => navigation/open_page /maintenance?tab=clients&assistant=client, fara fields.',
+    '113. "iesi din formularul de concediu si mergi la dashboard" => navigation/open_dashboard cu navigation.open; nu trimite si nu modifica formularul.',
+    '114. "pune-l si pana vineri" => form_fill/fill_leave_form cu leave.draft numai daca formularul si comanda anterioara dau contextul; confirmation required.',
+    '115. "deschide lista de utilizatori" => navigation/open_page /users.',
+    '116. "arata profilul meu" => navigation/open_page /my-profile.',
+    '117. "arata ultima activitate a lui Ionut" => navigation/open_user_activity entityQuery Ionut.',
+    '118. "deschide utilizatoru Razvan" => navigation/open_user_activity; accepta greseala de dictare utilizatoru.',
+    '119. "schimba functia lui Ionut in tehnician lifturi" => entity_update/update_user cu users.update si confirmation required.',
+    '120. "pune departamentul lui Mihai la interventii" => entity_update/update_user cu users.update.',
+    '121. "schimba rolul lui Razvan in manager" => entity_update/update_user, risk high, users.update si confirmation required.',
+    '122. "schimba telefonul meu in 0722000000" => entity_update/update_profile_field cu users.update pentru utilizatorul curent.',
+    '123. "schimba departamentul in service" => clarification, confidence sub 0.85, missingInformation ["user"], fara toolCalls.',
+    '124. "deschide istoricul lui Ion" cu mai multi utilizatori Ion => clarification si optiuni, fara navigare.',
+    '125. "schimba-i si telefonul in 0722111111" => update_user numai daca lastEntity este user; altfel clarification.',
+    '126. "schimba rolul lui Razvan in admin" ca angajat => users.update planificat dar blocat permission_denied, fara executie.',
+    '127. "pune din nou rolul manager pentru Razvan" cand rolul este deja manager => duplicate, fara executie.',
+    '128. "reincearca schimbarea rolului" dupa esec => cere din nou confirmarea; retry nu ocoleste permisiunile sau confirmarea.',
+    '129. "deschide scanarea bonurilor" => navigation/open_expense_scan /expenses/scan?assistant=upload.',
+    '130. "arata facturile neplatite" => navigation/open_expense_invoices /expenses/invoices.',
+    '131. "du-ma la rapoarte de cheltuieli" => navigation/open_page /expenses/reports.',
+    '132. "deschide cheltuelile" => navigation/open_expense_scan; accepta greseala cheltuelile.',
+    '133. "completeaza categoria bonului cu combustibil" => form_fill/fill_current_page cu expenses.draft numai in formularul de cheltuiala, confirmation required.',
+    '134. "pune proiectul Service 2 si nota deplasare la bon" => un singur draft expenses.draft cu ambele campuri, fara salvare automata.',
+    '135. "completeaza bonul" => clarification, confidence sub 0.85, missingInformation ["fields"], fara toolCalls.',
+    '136. "pune si proiectul Service 3" => expenses.draft numai daca openForm este expense; altfel clarification.',
+    '137. "completeaza firma bonului cu OMV" fara permisiune => expenses.draft blocat permission_denied.',
+    '138. "scaneaza din nou acelasi bon" cand bonul este duplicat => no-execution duplicate; nu incarca sau salveaza automat.',
+    '139. "reincearca completarea bonului" dupa esec => cere reconfirmare inainte de expenses.draft.',
+    '140. "iesi din formularul bonului si du-ma la mentenanta" => navigation/open_page /maintenance, fara form_fill.',
+    '141. "deschide notificarile" => navigation/open_page /notifications.',
+    '142. "arata alertele mele" => navigation/open_page /notifications; alerte este sinonim pentru notificari.',
+    '143. "cauta notificarile despre pontaj" => navigation/open_page /notifications cu assistantSearch pontaj.',
+    '144. "creeaza notificare pentru Razvan: verifica pontajul" => create_manual_notification dar no-execution daca nu exista tool controlat de notificari.',
+    '145. "trimite notificarea verifica pontajul" => clarification, confidence sub 0.85, missingInformation ["targetUser"].',
+    '146. "marcheaza toate notificarile citite" => no-execution daca registry-ul nu are tool controlat; nu trata drept simpla navigare executabila.',
+    '147. "sterge notificarea de ieri" => unknown/no-execution, risk high; intentul de stergere nu este suportat.',
+    '148. "trimite o notificare tuturor utilizatorilor" fara rol permis => permission_denied si no-execution.',
+    '149. "reincearca trimiterea notificarii pentru Razvan" => retry necesita tool suportat si confirmare noua; altfel no-execution.',
+    '150. "trimite din nou notificarea care a plecat" => duplicate/no-execution; nu repeta efectul deja reusit.',
   ];
 }
 
@@ -1797,16 +1924,36 @@ function buildAssistantPrompt(today, context) {
   const safeContext = context && typeof context === 'object' && !Array.isArray(context) ? context : {};
   const memory = safeContext.memory && typeof safeContext.memory === 'object' && !Array.isArray(safeContext.memory) ? safeContext.memory : {};
   const contextText = JSON.stringify({
-    currentPathname: toSafeString(safeContext.currentPathname),
-    currentSearch: toSafeString(safeContext.currentSearch),
-    currentHash: toSafeString(safeContext.currentHash),
-    userRole: toSafeString(safeContext.userRole),
+    route: toSafeString(safeContext.route || safeContext.currentPathname),
+    page: toSafeString(safeContext.page),
+    selectedEntity:
+      safeContext.selectedEntity && typeof safeContext.selectedEntity === 'object' && !Array.isArray(safeContext.selectedEntity)
+        ? {
+            type: toSafeString(safeContext.selectedEntity.type),
+            id: toSafeString(safeContext.selectedEntity.id),
+            label: toSafeString(safeContext.selectedEntity.label),
+          }
+        : null,
+    openForm:
+      safeContext.openForm && typeof safeContext.openForm === 'object' && !Array.isArray(safeContext.openForm)
+        ? { id: toSafeString(safeContext.openForm.id), mode: toSafeString(safeContext.openForm.mode) }
+        : null,
+    availableActions: Array.isArray(safeContext.availableActions)
+      ? safeContext.availableActions.slice(0, 50).map((item) => toSafeString(item)).filter(Boolean)
+      : [],
+    allowedFields: Array.isArray(safeContext.allowedFields)
+      ? safeContext.allowedFields.slice(0, 100).map((item) => toSafeString(item)).filter(Boolean)
+      : [],
+    role: toSafeString(safeContext.role || safeContext.userRole),
     memory: {
-      lastEntity: memory.lastEntity || null,
-      lastVehicleId: toSafeString(memory.lastVehicleId),
-      lastToolId: toSafeString(memory.lastToolId),
-      lastProjectId: toSafeString(memory.lastProjectId),
-      lastUserId: toSafeString(memory.lastUserId),
+      lastEntity:
+        memory.lastEntity && typeof memory.lastEntity === 'object' && !Array.isArray(memory.lastEntity)
+          ? {
+              type: toSafeString(memory.lastEntity.type || memory.lastEntity.entityType),
+              id: toSafeString(memory.lastEntity.id || memory.lastEntity.entityId),
+              label: toSafeString(memory.lastEntity.label),
+            }
+          : null,
       lastPage: toSafeString(memory.lastPage),
       lastCommand: toSafeString(memory.lastCommand),
     },
@@ -1816,17 +1963,21 @@ function buildAssistantPrompt(today, context) {
     'Esti interpretul AI pentru WorkControl. Functionezi ca agent, nu ca autocomplete, script sau clicker.',
     'FAZA 1: primesti transcriptul. Nu executi nimic.',
     'FAZA 2: intelegi intentia si intorci STRICT JSON conform schemei. Nu adauga explicatii in afara JSON.',
+    'Contractul este Assistant V3: version este mereu "3"; toolCalls contine doar tool-uri controlate; entityReferences si missingInformation sunt explicite.',
     'FAZA 3: pregatesti date pentru validare: modul, entitate, campuri, navigare, confirmare, confidence, reasoning si executionPlan.',
     'FAZA 4: daca nu esti sigur, NU ghici. Pune confidence sub 0.85, missingFields potrivite si intent unknown sau intentul sigur incomplet.',
     'FAZA 5: executia se face doar in frontend dupa validare si confirmare. Tu nu executi.',
     `Data curenta este ${today}. Converteste azi/maine/poimaine si datele relative in YYYY-MM-DD.`,
     `Context pagina si memorie: ${contextText}. Foloseste contextul doar cand comanda se refera clar la "asta", "acesta", "si", "tot aici".`,
     'Returneaza doar JSON. Campurile fields si fieldsToUpdate trebuie sa fie identice pentru modificari/completari.',
+    'Tool id-uri permise: navigation.open, vehicles.update, vehicles.draft, tools.update, tools.draft, timesheets.projects.update, timesheets.projects.create, timesheets.projects.draft, users.update, users.draft, timesheets.start, timesheets.stop, maintenance.draft, leave.draft, expenses.draft.',
+    'Pentru fiecare toolCall completeaza toate cheile input; foloseste string gol, false si obiect gol pentru cheile nefolosite.',
+    'response este mesajul scurt pentru utilizator; confirmationRequired reflecta riscul intregului plan.',
     'commandType valori: navigation, form_fill, entity_update, create_entity, timesheet_action, question, unknown.',
     'intent valori permise sunt exact cele din schema. Nu inventa intentii.',
     'targetModule valori recomandate: navigation, vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, projects, assistant.',
     'entityType valori: vehicle, tool, project, user, maintenanceClient, page, currentPage, none.',
-    'formSchemaId valori: maintenance-client, leave-request, vehicle, tool, user, timesheet sau string gol.',
+    'formSchemaId valori: maintenance-client, leave-request, expense, vehicle, tool, user, project, timesheet sau string gol.',
     'Nu transforma navigarea in completare. "du-ma la pontajul meu" nu porneste pontajul.',
     'Nu transforma textul comenzii in valoare de input. Nu exista regula "daca gasesc input scriu acolo".',
     'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
@@ -1844,6 +1995,23 @@ function buildAssistantPrompt(today, context) {
   ].join('\n');
 }
 
+async function persistAssistantInterpretationTrace(params) {
+  try {
+    const trace = buildAssistantTraceDocument(params);
+    const traceRef = await db.collection('aiCommandLogs').add({
+      ...trace,
+      createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return traceRef.id;
+  } catch (error) {
+    logger.error('[assistantObservability][trace write]', {
+      code: toSafeString(error?.code).slice(0, 80) || 'unknown',
+    });
+    return '';
+  }
+}
+
 exports.interpretAssistantCommand = onCall(
   {
     region: 'europe-west1',
@@ -1856,6 +2024,7 @@ exports.interpretAssistantCommand = onCall(
       throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
     }
 
+    const startedAtMs = Date.now();
     const command = toSafeString(request.data?.command).slice(0, 600);
     const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;
     const model = toSafeString(process.env.OPENAI_ASSISTANT_MODEL) || 'gpt-4.1-mini';
@@ -1865,44 +2034,83 @@ exports.interpretAssistantCommand = onCall(
     }
 
     if (!apiKey) {
+      await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: null,
+        model,
+        openAiResponse: null,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+        failureCategory: 'configuration_missing',
+      });
       throw new HttpsError('failed-precondition', 'OPENAI_API_KEY nu este configurat in Firebase Functions.');
     }
 
     const today = new Date().toISOString().slice(0, 10);
     const prompt = buildAssistantPrompt(today, request.data?.context);
 
-    const openaiResponse = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        input: [
-          {
-            role: 'system',
-            content: [{ type: 'input_text', text: prompt }],
-          },
-          {
-            role: 'user',
-            content: [{ type: 'input_text', text: command }],
-          },
-        ],
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'workcontrol_assistant_command',
-            strict: true,
-            schema: ASSISTANT_COMMAND_SCHEMA,
-          },
+    let openaiResponse;
+    try {
+      openaiResponse = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          model,
+          input: [
+            {
+              role: 'system',
+              content: [{ type: 'input_text', text: prompt }],
+            },
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: command }],
+            },
+          ],
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'workcontrol_assistant_command',
+              strict: true,
+              schema: ASSISTANT_COMMAND_SCHEMA,
+            },
+          },
+        }),
+      });
+    } catch {
+      logger.error('[interpretAssistantCommand][openai]', { category: 'network_error' });
+      await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: null,
+        model,
+        openAiResponse: null,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+        failureCategory: 'network_error',
+      });
+      throw new HttpsError('internal', 'OpenAI nu a putut interpreta comanda.');
+    }
 
     const responseText = await openaiResponse.text();
     if (!openaiResponse.ok) {
-      logger.error('[interpretAssistantCommand][openai]', responseText);
+      logger.error('[interpretAssistantCommand][openai]', {
+        category: 'http_error',
+        status: openaiResponse.status,
+      });
+      await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: null,
+        model,
+        openAiResponse: null,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+        failureCategory: `openai_http_${openaiResponse.status}`,
+      });
       throw new HttpsError('internal', 'OpenAI nu a putut interpreta comanda.');
     }
 
@@ -1910,7 +2118,20 @@ exports.interpretAssistantCommand = onCall(
     try {
       parsedResponse = JSON.parse(responseText);
     } catch (error) {
-      logger.error('[interpretAssistantCommand][parse response]', error, responseText);
+      logger.error('[interpretAssistantCommand][parse response]', {
+        category: 'invalid_json',
+        code: toSafeString(error?.code).slice(0, 80) || 'parse_error',
+      });
+      await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: null,
+        model,
+        openAiResponse: null,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+        failureCategory: 'invalid_openai_response',
+      });
       throw new HttpsError('internal', 'Raspuns invalid de la OpenAI.');
     }
 
@@ -1941,9 +2162,47 @@ exports.interpretAssistantCommand = onCall(
               endDate: toSafeString(interpreted.dateRange.endDate),
             }
           : { startDate: '', endDate: '' };
-      return {
+      const toolCalls = Array.isArray(interpreted.toolCalls)
+        ? interpreted.toolCalls.slice(0, 8).map((toolCall) => {
+            const input = toolCall && typeof toolCall.input === 'object' && !Array.isArray(toolCall.input)
+              ? toolCall.input
+              : {};
+            return {
+              id: toSafeString(toolCall?.id),
+              input: {
+                path: toSafeString(input.path),
+                query: toSafeString(input.query),
+                entityQuery: toSafeString(input.entityQuery),
+                fields: input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields) ? input.fields : {},
+                projectId: toSafeString(input.projectId),
+                projectQuery: toSafeString(input.projectQuery),
+                createProjectIfMissing: Boolean(input.createProjectIfMissing),
+                explanation: toSafeString(input.explanation),
+                name: toSafeString(input.name),
+              },
+            };
+          }).filter((toolCall) => toolCall.id)
+        : [];
+      const entityReferences = Array.isArray(interpreted.entityReferences)
+        ? interpreted.entityReferences.slice(0, 8).map((reference) => ({
+            type: toSafeString(reference?.type) || 'none',
+            query: toSafeString(reference?.query),
+            id: toSafeString(reference?.id),
+          }))
+        : [];
+      const missingInformation = Array.isArray(interpreted.missingInformation)
+        ? interpreted.missingInformation.map((item) => toSafeString(item)).filter(Boolean)
+        : missingFields;
+      const confirmationRequired = Boolean(interpreted.confirmationRequired ?? interpreted.needsConfirmation);
+      const normalizedInterpretation = {
+        version: '3',
         commandType,
         intent: toSafeString(interpreted.intent) || 'unknown',
+        toolCalls,
+        entityReferences,
+        missingInformation,
+        confirmationRequired,
+        response: toSafeString(interpreted.response || interpreted.spokenSummary),
         targetModule: toSafeString(interpreted.targetModule),
         entityType: toSafeString(interpreted.entityType) || 'none',
         entityQuery: toSafeString(interpreted.entityQuery),
@@ -2000,9 +2259,144 @@ exports.interpretAssistantCommand = onCall(
             }))
           : [],
       };
+      const traceId = await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: normalizedInterpretation,
+        model,
+        openAiResponse: parsedResponse,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+      });
+      return { ...normalizedInterpretation, traceId };
     } catch (error) {
-      logger.error('[interpretAssistantCommand][parse output]', error, outputText);
+      if (error instanceof HttpsError) throw error;
+      logger.error('[interpretAssistantCommand][parse output]', {
+        category: 'invalid_output',
+        code: toSafeString(error?.code).slice(0, 80) || 'parse_error',
+      });
+      await persistAssistantInterpretationTrace({
+        ownerUserId: request.auth.uid,
+        transcript: command,
+        interpreted: null,
+        model,
+        openAiResponse: parsedResponse,
+        latencyMs: Date.now() - startedAtMs,
+        nowMs: startedAtMs,
+        failureCategory: 'invalid_assistant_output',
+      });
       throw new HttpsError('internal', 'Nu am putut interpreta comanda.');
+    }
+  }
+);
+
+exports.recordAssistantTraceOutcome = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 15,
+    memory: '256MiB',
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
+    }
+
+    let payload;
+    try {
+      payload = normalizeAssistantOutcomePayload(request.data);
+    } catch {
+      throw new HttpsError('invalid-argument', 'Rezultat de audit invalid.');
+    }
+
+    let traceRef;
+    if (payload.traceId) {
+      traceRef = db.collection('aiCommandLogs').doc(payload.traceId);
+    } else {
+      const fingerprint = fingerprintAssistantTranscript(payload.transcript, request.auth.uid);
+      const matchingTraces = await db
+        .collection('aiCommandLogs')
+        .where('ownerUserId', '==', request.auth.uid)
+        .where('transcriptFingerprint', '==', fingerprint)
+        .orderBy('createdAtServer', 'desc')
+        .limit(1)
+        .get();
+      traceRef = matchingTraces.empty ? null : matchingTraces.docs[0].ref;
+    }
+
+    if (!traceRef) {
+      throw new HttpsError('not-found', 'Urma asistentului nu a fost gasita.');
+    }
+
+    await db.runTransaction(async (transaction) => {
+      const trace = await transaction.get(traceRef);
+      if (!trace.exists) {
+        throw new HttpsError('not-found', 'Urma asistentului nu a fost gasita.');
+      }
+      if (trace.get('ownerUserId') !== request.auth.uid) {
+        throw new HttpsError('permission-denied', 'Nu poti actualiza aceasta urma.');
+      }
+
+      const currentStatus = toSafeString(trace.get('outcome.status'));
+      if (!isAssistantOutcomeTransitionAllowed(currentStatus, payload.status)) {
+        throw new HttpsError('failed-precondition', 'Statusul urmei nu permite aceasta actualizare.');
+      }
+
+      transaction.update(traceRef, {
+        outcome: {
+          status: payload.status,
+          source: 'client_callable',
+          failureCategory: payload.status === 'failed' ? 'client_execution_failed' : '',
+          details: payload.details,
+        },
+        updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+
+    return { status: 'recorded', traceId: traceRef.id };
+  }
+);
+
+exports.transcribeAssistantAudio = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    secrets: [openaiApiKey],
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
+    }
+
+    let audio;
+    try {
+      audio = decodeAssistantAudioPayload(request.data);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'invalid_audio';
+      if (code === 'consent_required') {
+        throw new HttpsError('failed-precondition', 'Este necesar acordul explicit pentru trimiterea audio.');
+      }
+      throw new HttpsError('invalid-argument', 'Inregistrarea audio este invalida sau prea mare.');
+    }
+
+    const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new HttpsError('failed-precondition', 'OPENAI_API_KEY nu este configurat in Firebase Functions.');
+    }
+
+    try {
+      const transcript = await requestAssistantTranscription({
+        ...audio,
+        apiKey,
+        model: toSafeString(process.env.OPENAI_TRANSCRIPTION_MODEL) || 'gpt-4o-mini-transcribe',
+      });
+      return { transcript };
+    } catch (error) {
+      logger.error('[transcribeAssistantAudio]', {
+        category: 'transcription_failed',
+        status: Number(error?.status) || 0,
+      });
+      throw new HttpsError('internal', 'Transcrierea audio nu a reusit.');
     }
   }
 );

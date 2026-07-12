@@ -16,8 +16,14 @@ export function checkAssistantPermission(params: PermissionCheckParams) {
   if (!user?.uid) return { ok: false, message: "Trebuie sa fii autentificat." };
   if (user.role === "admin") return { ok: true, message: "" };
 
-  if (intent === "delete_entity" || intent === "update_user") {
+  if (intent === "delete_entity") {
     return { ok: false, message: "Nu ai permisiune sa modifici aceasta resursa." };
+  }
+
+  if (intent === "update_user") {
+    return entity?.entityType === "user" && entity.entityId === user.uid
+      ? { ok: true, message: "" }
+      : { ok: false, message: "Nu ai permisiune sa modifici acest utilizator." };
   }
 
   if (user.role === "manager") {

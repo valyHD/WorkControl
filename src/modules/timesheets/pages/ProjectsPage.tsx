@@ -13,6 +13,7 @@ import {
 import ProjectForm from "../components/ProjectForm";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { PageHeader, PageLayout } from "../../../components/experience";
+import { ASSISTANT_FILL_PROJECT_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 
 type TimesheetGroupMode = "day" | "week" | "month";
 
@@ -128,6 +129,10 @@ export default function ProjectsPage() {
     name: "",
     status: "activ",
   });
+  const [createDraft, setCreateDraft] = useState<ProjectFormValues>({
+    name: "",
+    status: "activ",
+  });
 
   async function load() {
     setLoading(true);
@@ -145,6 +150,21 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    const handleDraft = (event: Event) => {
+      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+      setCreateDraft((current) => ({
+        name: String(fields.name ?? current.name),
+        status:
+          fields.status === "inactiv" || fields.status === "finalizat"
+            ? fields.status
+            : "activ",
+      }));
+    };
+    window.addEventListener(ASSISTANT_FILL_PROJECT_FORM_EVENT, handleDraft);
+    return () => window.removeEventListener(ASSISTANT_FILL_PROJECT_FORM_EVENT, handleDraft);
   }, []);
 
   const timesheetsByProject = useMemo(() => {
@@ -261,10 +281,7 @@ export default function ProjectsPage() {
 
         <div style={{ marginTop: 20 }}>
           <ProjectForm
-            initialValues={{
-              name: "",
-              status: "activ",
-            }}
+            initialValues={createDraft}
             submitting={submitting}
             onSubmit={handleCreate}
           />

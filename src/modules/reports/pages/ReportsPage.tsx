@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { Bot, CreditCard, Database, FileClock, HeartPulse, MapPinned, Rocket, Server, Settings } from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
 import BillingCostPanel from "../components/BillingCostPanel";
+import AssistantObservabilityPanel from "../components/AssistantObservabilityPanel";
 import type { ControlPanelSettings } from "../services/controlPanelService";
 import {
   buildProfessionalBackupView,
@@ -415,6 +416,7 @@ export default function ControlPanelPage() {
             <div className="quick-action-subtitle">Butonul asistentului rămâne disponibil în partea dreaptă a aplicației.</div>
           </div>
         </div>
+        <AssistantObservabilityPanel isAdmin={role === "admin"} />
       </div>
 
       <div id="firebase" className="panel">
