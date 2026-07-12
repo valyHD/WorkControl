@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
+  AlertCircle,
+  BarChart3,
+  BriefcaseBusiness,
   CalendarDays,
+  CircleDot,
+  Columns3,
   Download,
   FileSpreadsheet,
   Filter,
+  LayoutDashboard,
   MapPinned,
   Plus,
   Search,
@@ -15,12 +21,13 @@ import {
 import { useAuth } from "../../../providers/AuthProvider";
 import type { TimesheetItem } from "../../../types/timesheet";
 import type { AppUserItem } from "../../../types/user";
-import { formatMinutes, getTimesheetsList } from "../services/timesheetsService";
+import { formatMinutes, getTimesheetsManagementList } from "../services/timesheetsService";
 import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
-import { PageHeader, PageLayout } from "../../../components/experience";
+import { DetailsDrawer, PageHeader, PageLayout } from "../../../components/experience";
+import ProductTabs from "../../../components/product/ProductTabs";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import EmptyState from "../../../components/EmptyState";
@@ -50,6 +57,40 @@ import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 
 type SortKey = "date" | "employee" | "department" | "project" | "duration" | "status";
+type TimesheetManagerView =
+  "overview" | "active" | "all" | "employees" | "projects" | "exceptions" | "reports";
+
+type SavedTimesheetFilter = {
+  period: TimesheetPeriodKey;
+  userFilter: string;
+  projectFilter: string;
+  statusFilter: string;
+  departmentFilter: string;
+  activeOnly: boolean;
+  incompleteOnly: boolean;
+};
+
+const TIMESHEET_VIEWS = new Set<TimesheetManagerView>([
+  "overview",
+  "active",
+  "all",
+  "employees",
+  "projects",
+  "exceptions",
+  "reports",
+]);
+const TIMESHEET_FILTER_STORAGE_KEY = "workcontrol:timesheets:manager-filter";
+const DEFAULT_COLUMN_KEYS = new Set([
+  "date",
+  "employee",
+  "department",
+  "project",
+  "start",
+  "stop",
+  "duration",
+  "status",
+  "actions",
+]);
 
 function normalizeSearchText(value: string) {
   return value
@@ -98,6 +139,7 @@ function downloadCsv(fileName: string, rows: Array<Array<unknown>>) {
 export default function TimesheetsPage() {
   const { role } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [timesheets, setTimesheets] = useState<TimesheetItem[]>([]);
   const [users, setUsers] = useState<AppUserItem[]>([]);
@@ -116,8 +158,25 @@ export default function TimesheetsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [previewTimesheet, setPreviewTimesheet] = useState<TimesheetItem | null>(null);
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<Set<string>>(
+    () => new Set(DEFAULT_COLUMN_KEYS)
+  );
+  const [savedFilter, setSavedFilter] = useState<SavedTimesheetFilter | null>(() => {
+    try {
+      const stored = window.localStorage.getItem(TIMESHEET_FILTER_STORAGE_KEY);
+      return stored ? (JSON.parse(stored) as SavedTimesheetFilter) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const assistantParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const activeView = useMemo<TimesheetManagerView>(() => {
+    const requested = assistantParams.get("view") as TimesheetManagerView | null;
+    return requested && TIMESHEET_VIEWS.has(requested) ? requested : "overview";
+  }, [assistantParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,7 +184,10 @@ export default function TimesheetsPage() {
     async function load() {
       setLoading(true);
       try {
-        const [timesheetsData, usersData] = await Promise.all([getTimesheetsList(), getAllUsers()]);
+        const [timesheetsData, usersData] = await Promise.all([
+          getTimesheetsManagementList(),
+          getAllUsers(),
+        ]);
         if (cancelled) return;
         setTimesheets(timesheetsData);
         setUsers(usersData);
@@ -157,6 +219,54 @@ export default function TimesheetsPage() {
     if (assistantMode === "no-project") setProjectFilter("__no_project__");
   }, [assistantParams]);
 
+  function handleViewChange(nextView: string) {
+    if (!TIMESHEET_VIEWS.has(nextView as TimesheetManagerView)) return;
+    const params = new URLSearchParams(location.search);
+    params.set("view", nextView);
+    if (nextView === "active") {
+      setActiveOnly(true);
+      setIncompleteOnly(false);
+      setPeriod("today");
+    } else if (nextView === "exceptions") {
+      setActiveOnly(false);
+      setIncompleteOnly(true);
+      setPeriod("month");
+    } else if (nextView === "reports") {
+      setActiveOnly(false);
+      setIncompleteOnly(false);
+      setPeriod("month");
+    } else {
+      setActiveOnly(false);
+      setIncompleteOnly(false);
+    }
+    navigate({ pathname: location.pathname, search: params.toString() }, { replace: true });
+  }
+
+  function saveCurrentFilter() {
+    const next: SavedTimesheetFilter = {
+      period,
+      userFilter,
+      projectFilter,
+      statusFilter,
+      departmentFilter,
+      activeOnly,
+      incompleteOnly,
+    };
+    window.localStorage.setItem(TIMESHEET_FILTER_STORAGE_KEY, JSON.stringify(next));
+    setSavedFilter(next);
+  }
+
+  function applySavedFilter() {
+    if (!savedFilter) return;
+    setPeriod(savedFilter.period);
+    setUserFilter(savedFilter.userFilter);
+    setProjectFilter(savedFilter.projectFilter);
+    setStatusFilter(savedFilter.statusFilter);
+    setDepartmentFilter(savedFilter.departmentFilter);
+    setActiveOnly(savedFilter.activeOnly);
+    setIncompleteOnly(savedFilter.incompleteOnly);
+  }
+
   const usersById = useMemo(() => {
     const map = new Map<string, AppUserItem>();
     users.forEach((item) => map.set(getUserId(item), item));
@@ -179,9 +289,11 @@ export default function TimesheetsPage() {
 
   const departments = useMemo(
     () =>
-      [...new Set(users.map((item) => item.department).filter((item): item is string => Boolean(item)))].sort(
-        (a, b) => a.localeCompare(b)
-      ),
+      [
+        ...new Set(
+          users.map((item) => item.department).filter((item): item is string => Boolean(item))
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
     [users]
   );
 
@@ -229,10 +341,17 @@ export default function TimesheetsPage() {
     return [...filteredTimesheets].sort((a, b) => {
       if (sortKey === "employee") return multiplier * a.userName.localeCompare(b.userName);
       if (sortKey === "department") {
-        return multiplier * ((usersById.get(a.userId)?.department || "").localeCompare(usersById.get(b.userId)?.department || ""));
+        return (
+          multiplier *
+          (usersById.get(a.userId)?.department || "").localeCompare(
+            usersById.get(b.userId)?.department || ""
+          )
+        );
       }
-      if (sortKey === "project") return multiplier * getProjectLabel(a).localeCompare(getProjectLabel(b));
-      if (sortKey === "duration") return multiplier * (getEffectiveWorkedMinutes(a) - getEffectiveWorkedMinutes(b));
+      if (sortKey === "project")
+        return multiplier * getProjectLabel(a).localeCompare(getProjectLabel(b));
+      if (sortKey === "duration")
+        return multiplier * (getEffectiveWorkedMinutes(a) - getEffectiveWorkedMinutes(b));
       if (sortKey === "status") return multiplier * a.status.localeCompare(b.status);
       return multiplier * ((a.startAt || 0) - (b.startAt || 0));
     });
@@ -247,29 +366,83 @@ export default function TimesheetsPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [activeOnly, departmentFilter, incompleteOnly, period, projectFilter, search, statusFilter, userFilter]);
+  }, [
+    activeOnly,
+    departmentFilter,
+    incompleteOnly,
+    period,
+    projectFilter,
+    search,
+    statusFilter,
+    userFilter,
+  ]);
 
   const todayKey = getLocalDateKey();
   const monthKey = getLocalMonthKey();
-  const todayItems = useMemo(() => timesheets.filter((item) => item.workDate === todayKey), [timesheets, todayKey]);
-  const monthItems = useMemo(() => timesheets.filter((item) => item.yearMonth === monthKey), [monthKey, timesheets]);
-  const activeToday = useMemo(() => todayItems.filter((item) => item.status === "activ"), [todayItems]);
-  const incompleteItems = useMemo(() => filteredTimesheets.filter(isIncompleteTimesheet), [filteredTimesheets]);
-  const topProject = useMemo(() => buildProjectMinuteBuckets(filteredTimesheets, Date.now(), 1)[0], [filteredTimesheets]);
+  const todayItems = useMemo(
+    () => timesheets.filter((item) => item.workDate === todayKey),
+    [timesheets, todayKey]
+  );
+  const monthItems = useMemo(
+    () => timesheets.filter((item) => item.yearMonth === monthKey),
+    [monthKey, timesheets]
+  );
+  const activeToday = useMemo(
+    () => todayItems.filter((item) => item.status === "activ"),
+    [todayItems]
+  );
+  const incompleteItems = useMemo(
+    () => filteredTimesheets.filter(isIncompleteTimesheet),
+    [filteredTimesheets]
+  );
+  const topProject = useMemo(
+    () => buildProjectMinuteBuckets(filteredTimesheets, Date.now(), 1)[0],
+    [filteredTimesheets]
+  );
 
-  const userTimesheetIndex = useMemo(() => buildUserTimesheetIndex(filteredTimesheets), [filteredTimesheets]);
+  const userTimesheetIndex = useMemo(
+    () => buildUserTimesheetIndex(filteredTimesheets),
+    [filteredTimesheets]
+  );
   const selectedUser = useMemo(
     () => users.find((item) => getUserId(item) === (selectedUserId || userFilter)) ?? null,
     [selectedUserId, userFilter, users]
   );
-  const selectedUserItems = selectedUser ? userTimesheetIndex.get(getUserId(selectedUser)) ?? [] : [];
+  const selectedUserItems = selectedUser
+    ? (userTimesheetIndex.get(getUserId(selectedUser)) ?? [])
+    : [];
   const selectedUserSummary = selectedUser
     ? getUserTimesheetSummary({ user: selectedUser, items: selectedUserItems, range: periodRange })
     : null;
 
   const columns = useMemo<DataTableColumn<TimesheetItem>[]>(
     () => [
-      { key: "date", header: "Data", sortable: true, render: (item) => item.workDate || formatDateTime(item.startAt) },
+      {
+        key: "select",
+        header: "Selecteaza",
+        render: (item) => (
+          <input
+            type="checkbox"
+            aria-label={`Selecteaza pontajul ${item.userName || item.id}`}
+            checked={selectedIds.has(item.id)}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setSelectedIds((current) => {
+                const next = new Set(current);
+                if (checked) next.add(item.id);
+                else next.delete(item.id);
+                return next;
+              });
+            }}
+          />
+        ),
+      },
+      {
+        key: "date",
+        header: "Data",
+        sortable: true,
+        render: (item) => item.workDate || formatDateTime(item.startAt),
+      },
       {
         key: "employee",
         header: "Angajat",
@@ -278,10 +451,19 @@ export default function TimesheetsPage() {
           const userItem = usersById.get(item.userId);
           const themeClass = getUserThemeClass(item.userThemeKey ?? userItem?.themeKey ?? null);
           return (
-            <button type="button" className={`wc-person-cell wc-person-cell--button user-history-row ${themeClass}`} onClick={() => setSelectedUserId(item.userId)}>
+            <button
+              type="button"
+              className={`wc-person-cell wc-person-cell--button user-history-row ${themeClass}`}
+              onClick={() => setSelectedUserId(item.userId)}
+            >
               <span className="user-accent-avatar">{getUserInitials(item.userName || "U")}</span>
               <span>
-                <UserProfileLink userId={item.userId} name={item.userName || userItem?.fullName} themeKey={item.userThemeKey ?? userItem?.themeKey} className="user-accent-name" />
+                <UserProfileLink
+                  userId={item.userId}
+                  name={item.userName || userItem?.fullName}
+                  themeKey={item.userThemeKey ?? userItem?.themeKey}
+                  className="user-accent-name"
+                />
                 <small>{userItem?.roleTitle || userItem?.email || "-"}</small>
               </span>
             </button>
@@ -294,35 +476,82 @@ export default function TimesheetsPage() {
         sortable: true,
         render: (item) => usersById.get(item.userId)?.department || "-",
       },
-      { key: "project", header: "Proiect", sortable: true, render: (item) => getProjectLabel(item) },
+      {
+        key: "project",
+        header: "Proiect",
+        sortable: true,
+        render: (item) => getProjectLabel(item),
+      },
       { key: "start", header: "Start", render: (item) => formatTime(item.startAt) },
       { key: "stop", header: "Stop", render: (item) => formatTime(item.stopAt) },
-      { key: "duration", header: "Durata", sortable: true, render: (item) => formatMinutes(getEffectiveWorkedMinutes(item)) },
+      {
+        key: "duration",
+        header: "Durata",
+        sortable: true,
+        render: (item) => formatMinutes(getEffectiveWorkedMinutes(item)),
+      },
       { key: "break", header: "Pauza", render: () => "-" },
-      { key: "startLocation", header: "Locatie start", render: (item) => formatTimesheetLocation(item.startLocation) || "-" },
-      { key: "stopLocation", header: "Locatie stop", render: (item) => formatTimesheetLocation(item.stopLocation) || "-" },
+      {
+        key: "startLocation",
+        header: "Locatie start",
+        render: (item) => formatTimesheetLocation(item.startLocation) || "-",
+      },
+      {
+        key: "stopLocation",
+        header: "Locatie stop",
+        render: (item) => formatTimesheetLocation(item.stopLocation) || "-",
+      },
       {
         key: "status",
         header: "Status",
         sortable: true,
-        render: (item) => <StatusBadge tone={getTimesheetStatusTone(item.status)}>{getTimesheetStatusLabel(item.status)}</StatusBadge>,
+        render: (item) => (
+          <StatusBadge tone={getTimesheetStatusTone(item.status)}>
+            {getTimesheetStatusLabel(item.status)}
+          </StatusBadge>
+        ),
       },
-      { key: "notes", header: "Observatii", render: (item) => item.explanation || item.startExplanation || item.stopExplanation || "-" },
+      {
+        key: "notes",
+        header: "Observatii",
+        render: (item) => item.explanation || item.startExplanation || item.stopExplanation || "-",
+      },
       {
         key: "actions",
         header: "Actiuni",
         render: (item) => (
           <div className="wc-table-actions">
-            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">Detalii</Link>
-            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">Editeaza</Link>
-            {item.status === "activ" ? <Link to={`/timesheets/${item.id}`} className="danger-btn danger-btn--compact">Inchide</Link> : null}
-            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">Observatie</Link>
-            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact"><MapPinned size={13} /> Harta</Link>
+            <button
+              type="button"
+              className="secondary-btn secondary-btn--compact"
+              onClick={() => setPreviewTimesheet(item)}
+            >
+              Detalii
+            </button>
+            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">
+              Editeaza
+            </Link>
+            {item.status === "activ" ? (
+              <Link to={`/timesheets/${item.id}`} className="danger-btn danger-btn--compact">
+                Inchide
+              </Link>
+            ) : null}
+            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">
+              Observatie
+            </Link>
+            <Link to={`/timesheets/${item.id}`} className="secondary-btn secondary-btn--compact">
+              <MapPinned size={13} /> Harta
+            </Link>
           </div>
         ),
       },
     ],
-    [usersById]
+    [selectedIds, usersById]
+  );
+
+  const displayedColumns = useMemo(
+    () => columns.filter((column) => column.key === "select" || visibleColumnKeys.has(column.key)),
+    [columns, visibleColumnKeys]
   );
 
   function handleSort(key: string) {
@@ -336,7 +565,19 @@ export default function TimesheetsPage() {
 
   function handleExport(items = filteredTimesheets, fileName = "pontaje.csv") {
     downloadCsv(fileName, [
-      ["Data", "Angajat", "Departament", "Proiect", "Start", "Stop", "Durata", "Status", "Locatie start", "Locatie stop", "Observatii"],
+      [
+        "Data",
+        "Angajat",
+        "Departament",
+        "Proiect",
+        "Start",
+        "Stop",
+        "Durata",
+        "Status",
+        "Locatie start",
+        "Locatie stop",
+        "Observatii",
+      ],
       ...items.map((item) => {
         const userItem = usersById.get(item.userId);
         return [
@@ -381,22 +622,99 @@ export default function TimesheetsPage() {
         title="Pontaje"
         description="Orele lucrate, proiectele și activitatea echipei, fără filtre ascunse."
         actions={[
-          { id: "export", label: "Export Excel", icon: FileSpreadsheet, onClick: () => handleExport(), assistantAction: "export-timesheets" },
-          { id: "monthly", label: "Raport lunar", icon: CalendarDays, onClick: () => setPeriod("month"), assistantAction: "timesheets-month" },
-          { id: "manual", label: "Pontaj manual", icon: Plus, to: "/my-timesheets", assistantAction: "add-manual-timesheet" },
-          { id: "active", label: "Pontaje active", icon: TimerReset, tone: "primary", onClick: () => setActiveOnly(true), assistantAction: "open-active-timesheets" },
+          {
+            id: "export",
+            label: "Export Excel",
+            icon: FileSpreadsheet,
+            onClick: () => handleExport(),
+            assistantAction: "export-timesheets",
+          },
+          {
+            id: "monthly",
+            label: "Raport lunar",
+            icon: CalendarDays,
+            onClick: () => setPeriod("month"),
+            assistantAction: "timesheets-month",
+          },
+          {
+            id: "manual",
+            label: "Pontaj manual",
+            icon: Plus,
+            to: "/my-timesheets",
+            assistantAction: "add-manual-timesheet",
+          },
+          {
+            id: "active",
+            label: "Pontaje active",
+            icon: TimerReset,
+            tone: "primary",
+            onClick: () => setActiveOnly(true),
+            assistantAction: "open-active-timesheets",
+          },
         ]}
       />
 
-      <div className="wc-kpi-grid wc-kpi-grid--five">
-        <KpiCard label="Total ore azi" value={formatMinutes(sumTimesheetMinutes(todayItems))} helper={`${todayItems.length} pontaje`} tone="green" icon={TimerReset} />
-        <KpiCard label="Total ore luna curenta" value={formatMinutes(sumTimesheetMinutes(monthItems))} helper={`${monthItems.length} pontaje`} tone="blue" icon={CalendarDays} />
-        <KpiCard label="Angajati activi azi" value={new Set(activeToday.map((item) => item.userId)).size} helper={`${activeToday.length} pontaje active`} tone="blue" icon={Users} />
-        <KpiCard label="Pontaje incomplete" value={incompleteItems.length} helper={incompleteItems.length ? "necesita inchidere" : "niciun blocaj"} tone={incompleteItems.length ? "orange" : "green"} icon={Filter} />
-        <KpiCard label="Proiect top" value={topProject?.label || "-"} helper={topProject?.displayValue || "fara ore"} tone="purple" icon={UserRound} />
+      <ProductTabs
+        activeId={activeView}
+        onChange={handleViewChange}
+        tabs={[
+          { id: "overview", label: "Overview", icon: LayoutDashboard },
+          { id: "active", label: "Active acum", icon: CircleDot, badge: activeToday.length },
+          { id: "all", label: "Toate pontajele", icon: CalendarDays },
+          { id: "employees", label: "Angajati", icon: Users, badge: users.length },
+          { id: "projects", label: "Proiecte", icon: BriefcaseBusiness, to: "/projects" },
+          { id: "exceptions", label: "Exceptii", icon: AlertCircle, badge: incompleteItems.length },
+          { id: "reports", label: "Rapoarte", icon: BarChart3 },
+        ]}
+        label="Sectiuni management pontaje"
+      />
+
+      <div className="wc-kpi-grid wc-kpi-grid--five" hidden={activeView !== "overview"}>
+        <KpiCard
+          label="Total ore azi"
+          value={formatMinutes(sumTimesheetMinutes(todayItems))}
+          helper={`${todayItems.length} pontaje`}
+          tone="green"
+          icon={TimerReset}
+        />
+        <KpiCard
+          label="Total ore luna curenta"
+          value={formatMinutes(sumTimesheetMinutes(monthItems))}
+          helper={`${monthItems.length} pontaje`}
+          tone="blue"
+          icon={CalendarDays}
+        />
+        <KpiCard
+          label="Angajati activi azi"
+          value={new Set(activeToday.map((item) => item.userId)).size}
+          helper={`${activeToday.length} pontaje active`}
+          tone="blue"
+          icon={Users}
+        />
+        <KpiCard
+          label="Pontaje incomplete"
+          value={incompleteItems.length}
+          helper={incompleteItems.length ? "necesita inchidere" : "niciun blocaj"}
+          tone={incompleteItems.length ? "orange" : "green"}
+          icon={Filter}
+        />
+        <KpiCard
+          label="Proiect top"
+          value={topProject?.label || "-"}
+          helper={topProject?.displayValue || "fara ore"}
+          tone="purple"
+          icon={UserRound}
+        />
       </div>
 
-      <div className="wc-filter-drawer wc-filter-drawer--always-open">
+      <div
+        className="wc-filter-drawer wc-filter-drawer--always-open"
+        hidden={
+          !(["all", "active", "exceptions", "reports"] as TimesheetManagerView[]).includes(
+            activeView
+          )
+        }
+      >
         <FilterBar
           title="Filtre pontaje"
           subtitle={periodRange.label}
@@ -404,7 +722,11 @@ export default function TimesheetsPage() {
         >
           <label>
             Perioada
-            <select className="tool-input" value={period} onChange={(event) => setPeriod(event.target.value as TimesheetPeriodKey)}>
+            <select
+              className="tool-input"
+              value={period}
+              onChange={(event) => setPeriod(event.target.value as TimesheetPeriodKey)}
+            >
               <option value="today">Azi</option>
               <option value="yesterday">Ieri</option>
               <option value="week">Saptamana asta</option>
@@ -417,36 +739,64 @@ export default function TimesheetsPage() {
             <>
               <label>
                 De la
-                <input className="tool-input" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} />
+                <input
+                  className="tool-input"
+                  type="date"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
               </label>
               <label>
                 Pana la
-                <input className="tool-input" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} />
+                <input
+                  className="tool-input"
+                  type="date"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
               </label>
             </>
           ) : null}
           <label data-assistant-action="filter-timesheets-user">
             User
-            <select className="tool-input" value={userFilter} onChange={(event) => setUserFilter(event.target.value)}>
+            <select
+              className="tool-input"
+              value={userFilter}
+              onChange={(event) => setUserFilter(event.target.value)}
+            >
               <option value="">Toti userii</option>
               {users.map((item) => (
-                <option key={getUserId(item)} value={getUserId(item)}>{getUserDisplayName(item)}</option>
+                <option key={getUserId(item)} value={getUserId(item)}>
+                  {getUserDisplayName(item)}
+                </option>
               ))}
             </select>
           </label>
           <label>
             Proiect
-            <select className="tool-input" value={projectFilter} onChange={(event) => setProjectFilter(event.target.value)}>
+            <select
+              className="tool-input"
+              value={projectFilter}
+              onChange={(event) => setProjectFilter(event.target.value)}
+            >
               <option value="">Toate proiectele</option>
               <option value="__no_project__">Fara proiect</option>
-              {allProjects.filter(([key]) => key !== "__no_project__").map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
+              {allProjects
+                .filter(([key]) => key !== "__no_project__")
+                .map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
             </select>
           </label>
           <label>
             Status
-            <select className="tool-input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <select
+              className="tool-input"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
               <option value="">Toate statusurile</option>
               <option value="activ">Activ</option>
               <option value="inchis">Inchis</option>
@@ -457,37 +807,81 @@ export default function TimesheetsPage() {
           </label>
           <label>
             Departament
-            <select className="tool-input" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
+            <select
+              className="tool-input"
+              value={departmentFilter}
+              onChange={(event) => setDepartmentFilter(event.target.value)}
+            >
               <option value="">Toate departamentele</option>
-              {departments.map((item) => <option key={item} value={item}>{item}</option>)}
+              {departments.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
             </select>
           </label>
           <label className="wc-filter-check">
-            <input type="checkbox" checked={activeOnly} onChange={(event) => setActiveOnly(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={activeOnly}
+              onChange={(event) => setActiveOnly(event.target.checked)}
+            />
             Doar active
           </label>
           <label className="wc-filter-check">
-            <input type="checkbox" checked={incompleteOnly} onChange={(event) => setIncompleteOnly(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={incompleteOnly}
+              onChange={(event) => setIncompleteOnly(event.target.checked)}
+            />
             Doar incomplete
           </label>
           <label className="wc-filter-search">
             <Search size={15} />
-            <input className="tool-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cauta user, proiect, status sau locatie" />
+            <input
+              className="tool-input"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Cauta user, proiect, status sau locatie"
+            />
           </label>
-          <button type="button" className="secondary-btn" data-assistant-action="filter-timesheets-today" onClick={() => setPeriod("today")}>Azi</button>
+          <button
+            type="button"
+            className="secondary-btn"
+            data-assistant-action="filter-timesheets-today"
+            onClick={() => setPeriod("today")}
+          >
+            Azi
+          </button>
+          <button type="button" className="secondary-btn" onClick={saveCurrentFilter}>
+            Salveaza filtrul
+          </button>
+          {savedFilter ? (
+            <button type="button" className="secondary-btn" onClick={applySavedFilter}>
+              Aplica filtrul salvat
+            </button>
+          ) : null}
         </FilterBar>
       </div>
 
-      <div className="panel">
+      <div className="panel" hidden={activeView !== "employees"}>
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Vizualizare rapida angajat</h2>
-            <p className="panel-subtitle">Selecteaza un angajat si vezi imediat ore, proiecte si zile lipsa.</p>
+            <p className="panel-subtitle">
+              Selecteaza un angajat si vezi imediat ore, proiecte si zile lipsa.
+            </p>
           </div>
-          <select className="tool-input wc-employee-select" value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)}>
+          <select
+            className="tool-input wc-employee-select"
+            value={selectedUserId}
+            onChange={(event) => setSelectedUserId(event.target.value)}
+          >
             <option value="">Selecteaza angajat</option>
             {users.map((item) => (
-              <option key={getUserId(item)} value={getUserId(item)}>{getUserDisplayName(item)}</option>
+              <option key={getUserId(item)} value={getUserId(item)}>
+                {getUserDisplayName(item)}
+              </option>
             ))}
           </select>
         </div>
@@ -495,48 +889,177 @@ export default function TimesheetsPage() {
           <UserSummaryCard
             user={selectedUser}
             stats={[
-              { label: "Total ore", value: formatMinutes(selectedUserSummary.totalMinutes), tone: "green" },
-              { label: "Media / zi", value: formatMinutes(selectedUserSummary.averageMinutesPerDay), tone: "blue" },
+              {
+                label: "Total ore",
+                value: formatMinutes(selectedUserSummary.totalMinutes),
+                tone: "green",
+              },
+              {
+                label: "Media / zi",
+                value: formatMinutes(selectedUserSummary.averageMinutesPerDay),
+                tone: "blue",
+              },
               { label: "Proiecte", value: selectedUserSummary.projectCount, tone: "muted" },
-              { label: "Zile lipsa", value: selectedUserSummary.missingDays.length, tone: selectedUserSummary.missingDays.length ? "red" : "green" },
-              { label: "Incomplete", value: selectedUserSummary.incomplete.length, tone: selectedUserSummary.incomplete.length ? "orange" : "green" },
+              {
+                label: "Zile lipsa",
+                value: selectedUserSummary.missingDays.length,
+                tone: selectedUserSummary.missingDays.length ? "red" : "green",
+              },
+              {
+                label: "Incomplete",
+                value: selectedUserSummary.incomplete.length,
+                tone: selectedUserSummary.incomplete.length ? "orange" : "green",
+              },
             ]}
             actions={
               <>
-                <button type="button" className="secondary-btn" onClick={() => setUserFilter(getUserId(selectedUser))}>Vezi toate pontajele</button>
-                <button type="button" className="secondary-btn" onClick={() => handleExport(selectedUserItems, `pontaje-${getUserDisplayName(selectedUser)}.csv`)}>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => setUserFilter(getUserId(selectedUser))}
+                >
+                  Vezi toate pontajele
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() =>
+                    handleExport(
+                      selectedUserItems,
+                      `pontaje-${getUserDisplayName(selectedUser)}.csv`
+                    )
+                  }
+                >
                   <Download size={15} /> Export pontaj angajat
                 </button>
               </>
             }
           />
         ) : (
-          <EmptyState icon={UserRound} title="Alege un angajat" subtitle="Dupa selectare apar total ore, proiecte, zile lipsa si pontaje incomplete." />
+          <EmptyState
+            icon={UserRound}
+            title="Alege un angajat"
+            subtitle="Dupa selectare apar total ore, proiecte, zile lipsa si pontaje incomplete."
+          />
         )}
       </div>
 
-      <div className="content-grid timesheet-chart-grid">
-        <TimesheetChartCard title="Ore lucrate pe zile" subtitle={periodRange.label} bars={buildDayMinuteBuckets(filteredTimesheets)} />
-        <TimesheetChartCard title="Ore pe proiecte" bars={buildProjectMinuteBuckets(filteredTimesheets)} />
-        <TimesheetChartCard title="Prezenta echipa azi" bars={[
-          { label: "Pontati", value: new Set(todayItems.map((item) => item.userId)).size, tone: "green" },
-          { label: "Nepontati", value: Math.max(0, users.filter((item) => item.active !== false).length - new Set(todayItems.map((item) => item.userId)).size), tone: "red" },
-          { label: "Zi inchisa", value: todayItems.filter((item) => item.status === "inchis" || item.status === "corectat").length, tone: "blue" },
-        ]} />
-        <TimesheetChartCard title="Ore per utilizator" bars={buildUserMinuteBuckets(filteredTimesheets)} />
+      <div
+        className="content-grid timesheet-chart-grid"
+        hidden={activeView !== "overview" && activeView !== "reports"}
+      >
+        <TimesheetChartCard
+          title="Ore lucrate pe zile"
+          subtitle={periodRange.label}
+          bars={buildDayMinuteBuckets(filteredTimesheets)}
+        />
+        <TimesheetChartCard
+          title="Ore pe proiecte"
+          bars={buildProjectMinuteBuckets(filteredTimesheets)}
+        />
+        <TimesheetChartCard
+          title="Prezenta echipa azi"
+          bars={[
+            {
+              label: "Pontati",
+              value: new Set(todayItems.map((item) => item.userId)).size,
+              tone: "green",
+            },
+            {
+              label: "Nepontati",
+              value: Math.max(
+                0,
+                users.filter((item) => item.active !== false).length -
+                  new Set(todayItems.map((item) => item.userId)).size
+              ),
+              tone: "red",
+            },
+            {
+              label: "Zi inchisa",
+              value: todayItems.filter(
+                (item) => item.status === "inchis" || item.status === "corectat"
+              ).length,
+              tone: "blue",
+            },
+          ]}
+        />
+        <TimesheetChartCard
+          title="Ore per utilizator"
+          bars={buildUserMinuteBuckets(filteredTimesheets)}
+        />
         <TimesheetChartCard title="Statusuri" bars={buildStatusBuckets(filteredTimesheets)} />
       </div>
 
-      <div className="panel">
+      <div
+        className="panel"
+        hidden={!(["active", "all", "exceptions"] as TimesheetManagerView[]).includes(activeView)}
+      >
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Tabel avansat pontaje</h2>
-            <p className="panel-subtitle">{filteredTimesheets.length} rezultate in perioada selectata.</p>
+            <p className="panel-subtitle">
+              {filteredTimesheets.length} rezultate in perioada selectata.
+            </p>
           </div>
-          <StatusBadge tone="blue">Pagina {page}/{totalPages}</StatusBadge>
+          <div className="wc-table-management-actions">
+            {selectedIds.size ? (
+              <>
+                <StatusBadge tone="blue">{selectedIds.size} selectate</StatusBadge>
+                <button
+                  type="button"
+                  className="secondary-btn secondary-btn--compact"
+                  onClick={() =>
+                    handleExport(
+                      filteredTimesheets.filter((item) => selectedIds.has(item.id)),
+                      "pontaje-selectate.csv"
+                    )
+                  }
+                >
+                  <Download size={14} /> Exporta selectia
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn secondary-btn--compact"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Goleste selectia
+                </button>
+              </>
+            ) : null}
+            <details className="wc-column-picker">
+              <summary>
+                <Columns3 size={15} /> Coloane
+              </summary>
+              <div>
+                {columns
+                  .filter((column) => column.key !== "select")
+                  .map((column) => (
+                    <label key={column.key}>
+                      <input
+                        type="checkbox"
+                        checked={visibleColumnKeys.has(column.key)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setVisibleColumnKeys((current) => {
+                            const next = new Set(current);
+                            if (checked) next.add(column.key);
+                            else next.delete(column.key);
+                            return next;
+                          });
+                        }}
+                      />
+                      {column.header}
+                    </label>
+                  ))}
+              </div>
+            </details>
+            <StatusBadge tone="blue">
+              Pagina {page}/{totalPages}
+            </StatusBadge>
+          </div>
         </div>
         <DataTable
-          columns={columns}
+          columns={displayedColumns}
           rows={pagedTimesheets}
           rowKey={(item) => item.id}
           rowClassName={(item) => `timesheet-row-status-${item.status}`}
@@ -551,13 +1074,24 @@ export default function TimesheetsPage() {
             const userItem = usersById.get(item.userId);
             const themeClass = getUserThemeClass(item.userThemeKey ?? userItem?.themeKey ?? null);
             return (
-              <Link key={item.id} to={`/timesheets/${item.id}`} className={`wc-timesheet-mobile-card user-history-row ${themeClass}`}>
+              <Link
+                key={item.id}
+                to={`/timesheets/${item.id}`}
+                className={`wc-timesheet-mobile-card user-history-row ${themeClass}`}
+              >
                 <div>
                   <strong>{item.userName || userItem?.fullName || "Utilizator"}</strong>
-                  <StatusBadge tone={getTimesheetStatusTone(item.status)}>{getTimesheetStatusLabel(item.status)}</StatusBadge>
+                  <StatusBadge tone={getTimesheetStatusTone(item.status)}>
+                    {getTimesheetStatusLabel(item.status)}
+                  </StatusBadge>
                 </div>
-                <p>{getProjectLabel(item)} - {item.workDate}</p>
-                <p>{formatTime(item.startAt)} - {formatTime(item.stopAt)} / {formatMinutes(getEffectiveWorkedMinutes(item))}</p>
+                <p>
+                  {getProjectLabel(item)} - {item.workDate}
+                </p>
+                <p>
+                  {formatTime(item.startAt)} - {formatTime(item.stopAt)} /{" "}
+                  {formatMinutes(getEffectiveWorkedMinutes(item))}
+                </p>
                 <small>{formatTimesheetLocation(item.startLocation) || "-"}</small>
               </Link>
             );
@@ -565,30 +1099,59 @@ export default function TimesheetsPage() {
         </div>
 
         <div className="wc-pagination">
-          <button type="button" className="secondary-btn" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Inapoi</button>
-          <span>{(page - 1) * pageSize + 1}-{Math.min(page * pageSize, sortedTimesheets.length)} din {sortedTimesheets.length}</span>
-          <button type="button" className="secondary-btn" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Inainte</button>
+          <button
+            type="button"
+            className="secondary-btn"
+            disabled={page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            Inapoi
+          </button>
+          <span>
+            {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, sortedTimesheets.length)} din{" "}
+            {sortedTimesheets.length}
+          </span>
+          <button
+            type="button"
+            className="secondary-btn"
+            disabled={page >= totalPages}
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+          >
+            Inainte
+          </button>
         </div>
       </div>
 
-      {selectedUser && selectedUserSummary ? (
+      {activeView === "employees" && selectedUser && selectedUserSummary ? (
         <div className="panel">
           <div className="panel-head">
             <div>
               <h2 className="panel-title">Detalii pontaj utilizator</h2>
-              <p className="panel-subtitle">{getUserDisplayName(selectedUser)} - {periodRange.label}</p>
+              <p className="panel-subtitle">
+                {getUserDisplayName(selectedUser)} - {periodRange.label}
+              </p>
             </div>
           </div>
           <div className="content-grid">
-            <TimesheetChartCard title="Ore lucrate pe zile" bars={buildDayMinuteBuckets(selectedUserItems)} />
-            <TimesheetChartCard title="Ore pe proiecte" bars={buildProjectMinuteBuckets(selectedUserItems)} />
+            <TimesheetChartCard
+              title="Ore lucrate pe zile"
+              bars={buildDayMinuteBuckets(selectedUserItems)}
+            />
+            <TimesheetChartCard
+              title="Ore pe proiecte"
+              bars={buildProjectMinuteBuckets(selectedUserItems)}
+            />
           </div>
           <div className="content-grid" style={{ marginTop: 16 }}>
             <div className="tool-inner-panel">
               <h3 className="panel-title">Zile fara pontaj</h3>
               {selectedUserSummary.missingDays.length ? (
                 <div className="wc-chip-list">
-                  {selectedUserSummary.missingDays.slice(0, 20).map((day) => <span key={day} className="badge badge-red">{day}</span>)}
+                  {selectedUserSummary.missingDays.slice(0, 20).map((day) => (
+                    <span key={day} className="badge badge-red">
+                      {day}
+                    </span>
+                  ))}
                 </div>
               ) : (
                 <p className="tools-subtitle">Nu exista zile lipsa in perioada selectata.</p>
@@ -602,9 +1165,13 @@ export default function TimesheetsPage() {
                     <Link key={item.id} to={`/timesheets/${item.id}`} className="simple-list-item">
                       <div className="simple-list-text">
                         <div className="simple-list-label">{getProjectLabel(item)}</div>
-                        <div className="simple-list-subtitle">{item.workDate} - {formatTime(item.startAt)}</div>
+                        <div className="simple-list-subtitle">
+                          {item.workDate} - {formatTime(item.startAt)}
+                        </div>
                       </div>
-                      <StatusBadge tone={getTimesheetStatusTone(item.status)}>{getTimesheetStatusLabel(item.status)}</StatusBadge>
+                      <StatusBadge tone={getTimesheetStatusTone(item.status)}>
+                        {getTimesheetStatusLabel(item.status)}
+                      </StatusBadge>
                     </Link>
                   ))}
                 </div>
@@ -615,6 +1182,53 @@ export default function TimesheetsPage() {
           </div>
         </div>
       ) : null}
+
+      <DetailsDrawer
+        open={Boolean(previewTimesheet)}
+        title={
+          previewTimesheet
+            ? `Pontaj ${previewTimesheet.userName || "utilizator"}`
+            : "Detalii pontaj"
+        }
+        description={
+          previewTimesheet
+            ? `${previewTimesheet.workDate} - ${getProjectLabel(previewTimesheet)}`
+            : undefined
+        }
+        onClose={() => setPreviewTimesheet(null)}
+      >
+        {previewTimesheet ? (
+          <div className="wc-operational-detail-list">
+            <div>
+              <span>Status</span>
+              <StatusBadge tone={getTimesheetStatusTone(previewTimesheet.status)}>
+                {getTimesheetStatusLabel(previewTimesheet.status)}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Interval</span>
+              <strong>
+                {formatTime(previewTimesheet.startAt)} - {formatTime(previewTimesheet.stopAt)}
+              </strong>
+            </div>
+            <div>
+              <span>Durata</span>
+              <strong>{formatMinutes(getEffectiveWorkedMinutes(previewTimesheet))}</strong>
+            </div>
+            <div>
+              <span>Locatie start</span>
+              <strong>{formatTimesheetLocation(previewTimesheet.startLocation) || "-"}</strong>
+            </div>
+            <div>
+              <span>Locatie stop</span>
+              <strong>{formatTimesheetLocation(previewTimesheet.stopLocation) || "-"}</strong>
+            </div>
+            <Link className="primary-btn" to={`/timesheets/${previewTimesheet.id}`}>
+              Deschide fisa completa
+            </Link>
+          </div>
+        ) : null}
+      </DetailsDrawer>
     </PageLayout>
   );
 }

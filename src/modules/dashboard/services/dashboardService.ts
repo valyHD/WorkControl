@@ -1,11 +1,4 @@
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import type { AppUserItem } from "../../../types/user";
 import type { ToolItem } from "../../../types/tool";
@@ -50,6 +43,7 @@ export type DashboardStats = {
 };
 
 export type DashboardData = {
+  scope: "personal" | "management";
   stats: DashboardStats;
   users: AppUserItem[];
   tools: ToolItem[];
@@ -57,11 +51,28 @@ export type DashboardData = {
   timesheets: TimesheetItem[];
   projects: ProjectItem[];
   notifications: DashboardNotificationItem[];
+  maintenance: DashboardMaintenanceSummary;
+};
+
+export type DashboardMaintenanceSummary = {
+  clients: number;
+  lifts: number;
+  expiredLifts: number;
+  expiringSoonLifts: number;
+  isPartial: boolean;
 };
 
 type DashboardReferenceData = Pick<DashboardData, "users" | "tools" | "vehicles" | "projects">;
 
 const DASHBOARD_REFERENCE_CACHE_MS = 15 * 60_000;
+const DASHBOARD_LIMITS = {
+  users: 250,
+  tools: 250,
+  vehicles: 150,
+  projects: 200,
+  timesheets: 500,
+  maintenanceClients: 160,
+} as const;
 let referenceCache: { expiresAt: number; data: DashboardReferenceData } | null = null;
 let referenceRequest: Promise<DashboardReferenceData> | null = null;
 
@@ -218,10 +229,7 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
   };
 }
 
-function mapNotificationDoc(
-  id: string,
-  data: Record<string, any>
-): DashboardNotificationItem {
+function mapNotificationDoc(id: string, data: Record<string, any>): DashboardNotificationItem {
   return {
     id,
     title: data.title ?? "",
@@ -247,10 +255,22 @@ async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
 
   referenceRequest = (async () => {
     const [usersSnap, toolsSnap, vehiclesSnap, projectsSnap] = await Promise.all([
-      getDocs(query(collection(db, "users"), orderBy("fullName", "asc"))),
-      getDocs(query(collection(db, "tools"), orderBy("updatedAt", "desc"))),
-      getDocs(query(collection(db, "vehicles"), orderBy("updatedAt", "desc"))),
-      getDocs(query(collection(db, "projects"), orderBy("name", "asc"))),
+      getDocs(
+        query(collection(db, "users"), orderBy("fullName", "asc"), limit(DASHBOARD_LIMITS.users))
+      ),
+      getDocs(
+        query(collection(db, "tools"), orderBy("updatedAt", "desc"), limit(DASHBOARD_LIMITS.tools))
+      ),
+      getDocs(
+        query(
+          collection(db, "vehicles"),
+          orderBy("updatedAt", "desc"),
+          limit(DASHBOARD_LIMITS.vehicles)
+        )
+      ),
+      getDocs(
+        query(collection(db, "projects"), orderBy("name", "asc"), limit(DASHBOARD_LIMITS.projects))
+      ),
     ]);
     const data = {
       users: usersSnap.docs.map((d) => mapUserDoc(d.id, d.data())),
@@ -269,10 +289,85 @@ async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
   }
 }
 
+function parseDateOnly(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const timestamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+async function getDashboardMaintenanceSummary(): Promise<DashboardMaintenanceSummary> {
+  const snap = await getDocs(
+    query(
+      collection(db, "maintenanceClients"),
+      orderBy("updatedAt", "desc"),
+      limit(DASHBOARD_LIMITS.maintenanceClients)
+    )
+  );
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const soonUtc = todayUtc + 30 * 24 * 60 * 60 * 1000;
+  let lifts = 0;
+  let expiredLifts = 0;
+  let expiringSoonLifts = 0;
+
+  snap.docs.forEach((item) => {
+    const data = item.data();
+    const legacyLifts = Array.isArray(data.liftNumbers)
+      ? data.liftNumbers
+      : data.liftNumber
+        ? [data.liftNumber]
+        : [];
+    const structuredLifts = Array.isArray(data.addresses)
+      ? data.addresses.flatMap((address: Record<string, unknown>) =>
+          Array.isArray(address.lifts) ? address.lifts : []
+        )
+      : [];
+    const identities = new Set<string>();
+    legacyLifts.forEach((lift: unknown) => {
+      const value = String(lift || "").trim();
+      if (value) identities.add(value);
+    });
+    structuredLifts.forEach((lift: Record<string, unknown>) => {
+      const value = String(lift.serialNumber || lift.label || "").trim();
+      if (value) identities.add(value);
+    });
+    lifts += identities.size;
+
+    const expiryByLift =
+      data.liftExpiryDates && typeof data.liftExpiryDates === "object"
+        ? Object.values(data.liftExpiryDates as Record<string, unknown>)
+        : [];
+    const expiryValues = [
+      ...expiryByLift,
+      ...structuredLifts.map((lift: Record<string, unknown>) => lift.inspectionExpiryDate),
+      ...(identities.size === 1 ? [data.expiryDate] : []),
+    ];
+    const uniqueExpiries = new Set(
+      expiryValues.map(parseDateOnly).filter((value): value is number => value !== null)
+    );
+    uniqueExpiries.forEach((expiry) => {
+      if (expiry < todayUtc) expiredLifts += 1;
+      else if (expiry <= soonUtc) expiringSoonLifts += 1;
+    });
+  });
+
+  return {
+    clients: snap.size,
+    lifts,
+    expiredLifts,
+    expiringSoonLifts,
+    isPartial: snap.size >= DASHBOARD_LIMITS.maintenanceClients,
+  };
+}
+
 export async function getDashboardData(
   currentUserId?: string,
-  dayKey = getLocalDateKey(Date.now())
+  dayKey = getLocalDateKey(Date.now()),
+  currentRole = "admin"
 ): Promise<DashboardData> {
+  const managementScope = currentRole === "admin" || currentRole === "manager";
   const notificationsRequest = currentUserId
     ? getDocs(
         query(
@@ -283,14 +378,47 @@ export async function getDashboardData(
         )
       )
     : Promise.resolve(null);
-  const [references, timesheetsSnap, notificationsSnap] = await Promise.all([
-    getDashboardReferenceData(),
-    getDocs(query(collection(db, "timesheets"), where("workDate", "==", dayKey))),
+  const timesheetsRequest = managementScope
+    ? getDocs(
+        query(
+          collection(db, "timesheets"),
+          where("workDate", "==", dayKey),
+          limit(DASHBOARD_LIMITS.timesheets)
+        )
+      )
+    : currentUserId
+      ? getDocs(
+          query(
+            collection(db, "timesheets"),
+            where("userId", "==", currentUserId),
+            orderBy("startAt", "desc"),
+            limit(20)
+          )
+        )
+      : Promise.resolve(null);
+  const [references, timesheetsSnap, notificationsSnap, maintenance] = await Promise.all([
+    managementScope
+      ? getDashboardReferenceData()
+      : Promise.resolve({ users: [], tools: [], vehicles: [], projects: [] }),
+    timesheetsRequest,
     notificationsRequest,
+    managementScope
+      ? getDashboardMaintenanceSummary()
+      : Promise.resolve({
+          clients: 0,
+          lifts: 0,
+          expiredLifts: 0,
+          expiringSoonLifts: 0,
+          isPartial: false,
+        }),
   ]);
 
   const { users, tools, vehicles, projects } = references;
-  const timesheets = timesheetsSnap.docs.map((d) => mapTimesheetDoc(d.id, d.data()));
+  const timesheets = timesheetsSnap
+    ? timesheetsSnap.docs
+        .map((d) => mapTimesheetDoc(d.id, d.data()))
+        .filter((item) => managementScope || item.workDate === dayKey)
+    : [];
   const notifications = notificationsSnap
     ? notificationsSnap.docs.map((d) => mapNotificationDoc(d.id, d.data()))
     : [];
@@ -316,6 +444,7 @@ export async function getDashboardData(
   };
 
   return {
+    scope: managementScope ? "management" : "personal",
     stats,
     users,
     tools,
@@ -323,5 +452,6 @@ export async function getDashboardData(
     timesheets,
     projects,
     notifications,
+    maintenance,
   };
 }

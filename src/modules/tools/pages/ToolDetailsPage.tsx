@@ -406,6 +406,7 @@ await claimToolForCurrentUser(
         </div>
 
         <UniversalTimeline
+          entityType="tool"
           items={events.map((event) => ({
             id: event.id,
             title: event.message,

@@ -18,6 +18,10 @@ const maintenanceMocks = vi.hoisted(() => ({
     return vi.fn();
   }),
   subscribeMaintenanceReportHistory: vi.fn(() => vi.fn()),
+  subscribeMaintenanceReportsOverview: vi.fn((onData: (items: never[]) => void) => {
+    onData([]);
+    return vi.fn();
+  }),
   uploadMaintenanceBrandingAsset: vi.fn(),
 }));
 
@@ -63,6 +67,23 @@ describe("MaintenancePage client form", () => {
       onData([]);
       return vi.fn();
     });
+    maintenanceMocks.subscribeMaintenanceReportsOverview.mockImplementation((onData) => {
+      onData([]);
+      return vi.fn();
+    });
+  });
+
+  it("uses one bounded overview subscription instead of one listener per client", async () => {
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=dashboard"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(maintenanceMocks.subscribeMaintenanceReportsOverview).toHaveBeenCalledTimes(1);
+    });
+    expect(maintenanceMocks.subscribeMaintenanceReportHistory).not.toHaveBeenCalled();
   });
 
   it("fills the controlled client form and waits for Save", async () => {

@@ -23,7 +23,11 @@ import type {
   TimesheetStatsSummary,
 } from "../../../types/timesheet";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
-import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
+import {
+  buildAuditChanges,
+  buildAuditSnapshot,
+  type AuditFieldDescriptor,
+} from "../../audit/utils/auditMetadata";
 import { simplifyTimesheetAddressLabel } from "../utils/timesheetLocation";
 
 const projectsCollection = collection(db, "projects");
@@ -47,8 +51,7 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
 
 function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
   const rawStatus = (data.status ?? "activ") as TimesheetItem["status"];
-  const normalizedStatus =
-    rawStatus === "neinchis" && data.stopAt ? "corectat" : rawStatus;
+  const normalizedStatus = rawStatus === "neinchis" && data.stopAt ? "corectat" : rawStatus;
 
   return {
     id,
@@ -58,7 +61,7 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     projectId: data.projectId ?? "",
     projectCode: data.projectCode ?? "",
     projectName: data.projectName ?? "",
-userThemeKey: data.userThemeKey ?? null,
+    userThemeKey: data.userThemeKey ?? null,
     status: normalizedStatus,
     explanation: data.explanation ?? "",
     startExplanation: data.startExplanation ?? "",
@@ -109,7 +112,7 @@ function getDateParts(ts: number) {
   const dayNum = tmp.getUTCDay() || 7;
   tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((tmp.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  const weekNo = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 
   return {
     workDate: `${y}-${m}-${d}`,
@@ -154,7 +157,9 @@ function buildTimesheetExplanationSummary(params: {
       getStopExplanationLabel(params.stopPolicyFlag),
       String(params.stopExplanation ?? "")
     ),
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export async function getProjectsList(): Promise<ProjectItem[]> {
@@ -227,10 +232,7 @@ export async function createProject(values: ProjectFormValues): Promise<string> 
   return refDoc.id;
 }
 
-export async function updateProject(
-  projectId: string,
-  values: ProjectFormValues
-): Promise<void> {
+export async function updateProject(projectId: string, values: ProjectFormValues): Promise<void> {
   const existingSnap = await getDoc(doc(db, "projects", projectId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
   const previousStatus = existingData?.status ?? "";
@@ -482,17 +484,35 @@ export async function getTimesheetsList(): Promise<TimesheetItem[]> {
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
 
-export async function getTimesheetsForUser(userId: string, maxItems = 500): Promise<TimesheetItem[]> {
+export async function getTimesheetsManagementList(maxItems = 1000): Promise<TimesheetItem[]> {
+  const safeLimit = Math.max(50, Math.min(1500, Math.floor(maxItems)));
+  const snap = await getDocs(
+    query(timesheetsCollection, orderBy("startAt", "desc"), limit(safeLimit))
+  );
+  return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
+}
+
+export async function getTimesheetsForUser(
+  userId: string,
+  maxItems = 500
+): Promise<TimesheetItem[]> {
   const safeLimit = Math.max(1, Math.min(500, Math.floor(maxItems)));
   const snap = await getDocs(
-    query(timesheetsCollection, where("userId", "==", userId), orderBy("startAt", "desc"), limit(safeLimit))
+    query(
+      timesheetsCollection,
+      where("userId", "==", userId),
+      orderBy("startAt", "desc"),
+      limit(safeLimit)
+    )
   );
   return snap.docs
     .map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()))
     .sort((a, b) => b.startAt - a.startAt);
 }
 
-export async function getLatestTimesheetProjectForUser(userId: string): Promise<ProjectItem | null> {
+export async function getLatestTimesheetProjectForUser(
+  userId: string
+): Promise<ProjectItem | null> {
   if (!userId) return null;
 
   const activeTimesheet = await getActiveTimesheetForUser(userId);

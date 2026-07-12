@@ -25,7 +25,12 @@ vi.mock("firebase/firestore", () => firestoreMocks);
 vi.mock("../../../lib/firebase/firebase", () => ({ db: { project: "test" } }));
 vi.mock("../../notifications/services/notificationsService", () => notificationMocks);
 
-import { computeTimesheetStats, startTimesheet, stopTimesheet } from "./timesheetsService";
+import {
+  computeTimesheetStats,
+  getTimesheetsManagementList,
+  startTimesheet,
+  stopTimesheet,
+} from "./timesheetsService";
 import type { TimesheetItem } from "../../../types/timesheet";
 
 function timesheet(overrides: Partial<TimesheetItem> = {}): TimesheetItem {
@@ -119,6 +124,19 @@ describe("timesheetsService critical rules", () => {
     expect(firestoreMocks.updateDoc).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ workedMinutes: 95, stopAt: Date.parse("2026-07-10T09:35:00.000Z") })
+    );
+  });
+
+  it("bounds the manager list query", async () => {
+    firestoreMocks.getDocs.mockResolvedValue({ docs: [] });
+
+    await getTimesheetsManagementList(5000);
+
+    expect(firestoreMocks.limit).toHaveBeenCalledWith(1500);
+    expect(firestoreMocks.query).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ orderBy: ["startAt", "desc"] }),
+      expect.objectContaining({ limit: 1500 })
     );
   });
 });

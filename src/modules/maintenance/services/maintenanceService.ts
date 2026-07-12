@@ -1,6 +1,7 @@
 import {
   addDoc,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
@@ -176,7 +177,7 @@ export function subscribeMaintenanceClients(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(maintenanceClientsCollection, orderBy("updatedAt", "desc")),
+    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(500)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>)));
     },
@@ -553,6 +554,27 @@ export function subscribeMaintenanceReportHistory(
     ),
     (snap) => {
       onData(snap.docs.map((docItem) => mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>)));
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
+}
+
+export function subscribeMaintenanceReportsOverview(
+  onData: (items: MaintenanceReportHistoryItem[]) => void,
+  onError?: (error: Error) => void,
+  maxItems = 300
+): () => void {
+  const safeLimit = Math.max(25, Math.min(500, Math.floor(maxItems)));
+  return onSnapshot(
+    query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(safeLimit)),
+    (snap) => {
+      onData(
+        snap.docs.map((docItem) =>
+          mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>)
+        )
+      );
     },
     (error) => {
       onError?.(error);

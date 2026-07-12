@@ -13,7 +13,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { CheckCheck } from "lucide-react";
+import { Bell, BellRing, CheckCheck, History, Settings, SlidersHorizontal } from "lucide-react";
 import { db } from "../../../lib/firebase/firebase";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
@@ -21,6 +21,8 @@ import { resolveNotificationPath } from "../../../lib/notifications/notification
 import UserProfileLink from "../../../components/UserProfileLink";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import { pruneNotificationsForUser } from "../services/notificationsService";
+import { PageHeader, PageLayout } from "../../../components/experience";
+import ProductTabs from "../../../components/product/ProductTabs";
 import {
   activatePushNotifications,
   hasPushVapidKey,
@@ -77,7 +79,7 @@ function getActivationMessage(result: PushActivationResult | null): string {
 }
 
 export default function NotificationsPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [permissionState, setPermissionState] = useState<string>(
@@ -88,6 +90,7 @@ export default function NotificationsPage() {
   const [deletingId, setDeletingId] = useState("");
   const [markingAllRead, setMarkingAllRead] = useState(false);
   const [bulkReadError, setBulkReadError] = useState("");
+  const [activeTab, setActiveTab] = useState<"inbox" | "unread" | "critical" | "preferences">("inbox");
 
   const pushConfigReady = hasPushVapidKey();
 
@@ -194,7 +197,8 @@ export default function NotificationsPage() {
         query(
           collection(db, "notifications"),
           where("userId", "==", user.uid),
-          where("read", "==", false)
+          where("read", "==", false),
+          limit(100)
         )
       );
 
@@ -304,6 +308,19 @@ export default function NotificationsPage() {
     () => notifications.reduce((count, notification) => count + (notification.read ? 0 : 1), 0),
     [notifications]
   );
+  const criticalNotifications = useMemo(
+    () =>
+      notifications.filter((notification) => {
+        const text = `${notification.module || ""} ${notification.eventType || ""} ${notification.title}`.toLowerCase();
+        return /critic|eroare|error|urgent|securitate|offline|expirat/.test(text);
+      }),
+    [notifications]
+  );
+  const visibleNotifications = useMemo(() => {
+    if (activeTab === "unread") return notifications.filter((notification) => !notification.read);
+    if (activeTab === "critical") return criticalNotifications;
+    return notifications;
+  }, [activeTab, criticalNotifications, notifications]);
 
   if (!user) {
     return (
@@ -315,7 +332,36 @@ export default function NotificationsPage() {
   }
 
   return (
-    <section className="page-section">
+    <PageLayout className="notifications-operational-page">
+      <PageHeader
+        eyebrow="Comunicare"
+        title="Notificări"
+        description={`${unreadCount} necitite din ultimele ${notifications.length} notificări păstrate`}
+        actions={[
+          {
+            id: "read-all",
+            label: markingAllRead ? "Se marchează" : "Citește tot",
+            icon: CheckCheck,
+            onClick: () => void handleMarkAllRead(),
+            disabled: markingAllRead || unreadCount === 0,
+            assistantAction: "mark-all-notifications-read",
+          },
+        ]}
+      />
+      <ProductTabs
+        activeId={activeTab}
+        onChange={(id) => {
+          if (id === "inbox" || id === "unread" || id === "critical" || id === "preferences") setActiveTab(id);
+        }}
+        tabs={[
+          { id: "inbox", label: "Inbox", icon: Bell, badge: notifications.length },
+          { id: "unread", label: "Necitite", icon: BellRing, badge: unreadCount },
+          { id: "critical", label: "Critice", icon: SlidersHorizontal, badge: criticalNotifications.length },
+          ...(role === "admin" || role === "manager" ? [{ id: "rules", label: "Reguli", icon: Settings, to: "/notification-rules" }] : []),
+          ...(role === "admin" || role === "manager" ? [{ id: "history", label: "Istoric trimiteri", icon: History, to: "/history?category=notifications" }] : []),
+          { id: "preferences", label: "Preferințe", icon: Settings },
+        ]}
+      />
       <div className="panel">
         <div className="tools-header">
           <div>
@@ -325,7 +371,7 @@ export default function NotificationsPage() {
             </p>
           </div>
 
-          <div className="tools-header-actions notifications-activate-box">
+          <div className="tools-header-actions notifications-activate-box" hidden={activeTab !== "preferences"}>
             <button
               className="secondary-btn notifications-mark-all-btn"
               type="button"
@@ -361,14 +407,19 @@ export default function NotificationsPage() {
           </div>
         </div>
 
-        {notifications.length === 0 ? (
+        {activeTab === "preferences" ? (
+          <div className="wc-notification-preferences">
+            <h3>Preferințe dispozitiv</h3>
+            <p>Activează notificările push numai pe dispozitivele pe care vrei să primești alerte în fundal.</p>
+          </div>
+        ) : visibleNotifications.length === 0 ? (
           <div className="placeholder-page">
             <h2>Nu ai notificari</h2>
             <p>Cand vor exista evenimente noi, ele apar aici.</p>
           </div>
         ) : (
           <div className="simple-list">
-            {notifications.map((notification) => {
+            {visibleNotifications.map((notification) => {
               const userThemeClass = getUserThemeClass(
                 notification.actorUserThemeKey ?? null
               );
@@ -429,6 +480,6 @@ export default function NotificationsPage() {
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }

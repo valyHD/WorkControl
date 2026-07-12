@@ -26,6 +26,8 @@ import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { subscribeNotificationRules } from "../../notifications/services/notificationRulesService";
 import type { NotificationRuleItem } from "../../../types/notification-rule";
+import type { LeaveRequestItem } from "../../../types/leave";
+import { getLeaveRequestsForUser } from "../../leave/services/leaveRequestsService";
 import KpiCard from "../../../components/KpiCard";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import TimesheetStatusCard from "../../../components/TimesheetStatusCard";
@@ -127,8 +129,18 @@ function isTimesheetAttentionTime(
 
   if (relevantRules.length === 0) {
     return mode === "start"
-      ? dayIsWorkday && isMinuteInWindow(currentMinutes, DEFAULT_START_ATTENTION_FROM_MINUTES, DEFAULT_START_ATTENTION_TO_MINUTES)
-      : dayIsWorkday && isMinuteInWindow(currentMinutes, DEFAULT_STOP_ATTENTION_FROM_MINUTES, DEFAULT_STOP_ATTENTION_TO_MINUTES);
+      ? dayIsWorkday &&
+          isMinuteInWindow(
+            currentMinutes,
+            DEFAULT_START_ATTENTION_FROM_MINUTES,
+            DEFAULT_START_ATTENTION_TO_MINUTES
+          )
+      : dayIsWorkday &&
+          isMinuteInWindow(
+            currentMinutes,
+            DEFAULT_STOP_ATTENTION_FROM_MINUTES,
+            DEFAULT_STOP_ATTENTION_TO_MINUTES
+          );
   }
 
   return relevantRules.some((rule) => {
@@ -138,7 +150,11 @@ function isTimesheetAttentionTime(
 
     if (mode === "start") {
       if (rule.eventType === "timesheet_start_daily_reminder") {
-        return isMinuteInWindow(currentMinutes, startMinutes, Math.min(1439, startMinutes + activeMinutes));
+        return isMinuteInWindow(
+          currentMinutes,
+          startMinutes,
+          Math.min(1439, startMinutes + activeMinutes)
+        );
       }
       if (rule.eventType === "timesheet_work_interval_reminder") {
         return isMinuteInWindow(currentMinutes, startMinutes, stopMinutes);
@@ -147,10 +163,18 @@ function isTimesheetAttentionTime(
     }
 
     if (rule.eventType === "timesheet_stop_after_8h_reminder") {
-      return isMinuteInWindow(currentMinutes, startMinutes, Math.min(1439, startMinutes + activeMinutes));
+      return isMinuteInWindow(
+        currentMinutes,
+        startMinutes,
+        Math.min(1439, startMinutes + activeMinutes)
+      );
     }
     if (rule.eventType === "timesheet_work_interval_reminder") {
-      return isMinuteInWindow(currentMinutes, stopMinutes, Math.min(1439, stopMinutes + activeMinutes));
+      return isMinuteInWindow(
+        currentMinutes,
+        stopMinutes,
+        Math.min(1439, stopMinutes + activeMinutes)
+      );
     }
     return false;
   });
@@ -165,6 +189,7 @@ export default function MyTimesheetsPage() {
   const [timesheets, setTimesheets] = useState<TimesheetItem[]>([]);
   const [activeTimesheet, setActiveTimesheet] = useState<TimesheetItem | null>(null);
   const [notificationRules, setNotificationRules] = useState<NotificationRuleItem[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequestItem[]>([]);
   const [attentionClock, setAttentionClock] = useState(() => Date.now());
 
   const [loading, setLoading] = useState(true);
@@ -172,42 +197,47 @@ export default function MyTimesheetsPage() {
   const [projectError, setProjectError] = useState("");
   const [preferredProjectId, setPreferredProjectId] = useState("");
 
-  const load = useCallback(async (silent = false) => {
-    if (!user?.uid) return;
+  const load = useCallback(
+    async (silent = false) => {
+      if (!user?.uid) return;
 
-    if (!silent) {
-      setLoading(true);
-    }
-    try {
-      const [projectsData, timesheetsData, activeData, savedProjectId] = await Promise.all([
-        getActiveProjectsList(),
-        getTimesheetsForUser(user.uid),
-        getActiveTimesheetForUser(user.uid),
-        getUserTimesheetProjectPreference(user.uid),
-      ]);
-      const fallbackProjectId = readSavedProjectId(user.uid);
-      const nextPreferredProjectId =
-        [fallbackProjectId, savedProjectId].find((projectId) =>
-          projectsData.some((project) => project.id === projectId)
-        ) || "";
+      if (!silent) {
+        setLoading(true);
+      }
+      try {
+        const [projectsData, timesheetsData, activeData, savedProjectId, leaveData] =
+          await Promise.all([
+            getActiveProjectsList(),
+            getTimesheetsForUser(user.uid),
+            getActiveTimesheetForUser(user.uid),
+            getUserTimesheetProjectPreference(user.uid),
+            getLeaveRequestsForUser(user.uid, 20),
+          ]);
+        const fallbackProjectId = readSavedProjectId(user.uid);
+        const nextPreferredProjectId =
+          [fallbackProjectId, savedProjectId].find((projectId) =>
+            projectsData.some((project) => project.id === projectId)
+          ) || "";
 
-      setProjects(projectsData);
-      setTimesheets(timesheetsData);
-      setActiveTimesheet(activeData);
-      setPreferredProjectId(nextPreferredProjectId);
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.uid]);
+        setProjects(projectsData);
+        setTimesheets(timesheetsData);
+        setActiveTimesheet(activeData);
+        setLeaveRequests(leaveData);
+        setPreferredProjectId(nextPreferredProjectId);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [user?.uid]
+  );
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    return subscribeNotificationRules(
-      setNotificationRules,
-      (error) => console.warn("[MyTimesheetsPage][notification rules]", error)
+    return subscribeNotificationRules(setNotificationRules, (error) =>
+      console.warn("[MyTimesheetsPage][notification rules]", error)
     );
   }, []);
 
@@ -316,7 +346,10 @@ export default function MyTimesheetsPage() {
     }
   }
 
-  const stats = useMemo(() => computeTimesheetStats(timesheets, attentionClock), [attentionClock, timesheets]);
+  const stats = useMemo(
+    () => computeTimesheetStats(timesheets, attentionClock),
+    [attentionClock, timesheets]
+  );
   const recentTimesheets = useMemo(() => timesheets.slice(0, 10), [timesheets]);
   const lastSevenTimesheets = useMemo(() => {
     const from = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -359,7 +392,17 @@ export default function MyTimesheetsPage() {
     () => timesheets.filter((item) => item.status === "neinchis" || item.status === "activ"),
     [timesheets]
   );
-  const activeMinutes = activeTimesheet ? getEffectiveWorkedMinutes(activeTimesheet, attentionClock) : 0;
+  const activeMinutes = activeTimesheet
+    ? getEffectiveWorkedMinutes(activeTimesheet, attentionClock)
+    : 0;
+  const nextApprovedLeave = useMemo(() => {
+    const today = getLocalDateKey(attentionClock);
+    return (
+      leaveRequests
+        .filter((item) => item.status === "aprobat" && item.periodEnd >= today)
+        .sort((a, b) => a.periodStart.localeCompare(b.periodStart))[0] ?? null
+    );
+  }, [attentionClock, leaveRequests]);
   const currentStatus = activeTimesheet
     ? {
         title: "Lucrezi acum",
@@ -384,7 +427,12 @@ export default function MyTimesheetsPage() {
               : "Alege proiectul si porneste pontajul cand incepi lucrul.",
         };
   const timesheetAttentionActive = useMemo(
-    () => isTimesheetAttentionTime(notificationRules, activeTimesheet ? "stop" : "start", attentionClock),
+    () =>
+      isTimesheetAttentionTime(
+        notificationRules,
+        activeTimesheet ? "stop" : "start",
+        attentionClock
+      ),
     [activeTimesheet, attentionClock, notificationRules]
   );
 
@@ -402,11 +450,31 @@ export default function MyTimesheetsPage() {
       <PageHeader
         eyebrow="Spațiul meu de lucru"
         title="Pontajul meu"
-        description={activeTimesheet ? "Cronometrul este activ și se actualizează în timp real." : "Alege proiectul și pornește pontajul când începi lucrul."}
-        meta={<StatusBadge tone={activeTimesheet ? "green" : "muted"}>{currentStatus.label}</StatusBadge>}
+        description={
+          activeTimesheet
+            ? "Cronometrul este activ și se actualizează în timp real."
+            : "Alege proiectul și pornește pontajul când începi lucrul."
+        }
+        meta={
+          <StatusBadge tone={activeTimesheet ? "green" : "muted"}>
+            {currentStatus.label}
+          </StatusBadge>
+        }
         actions={[
-          { id: "projects", label: "Proiecte", to: "/projects", icon: TimerReset, assistantAction: "open-projects" },
-          { id: "leave", label: "Concedii", to: "/my-leave", icon: CalendarDays, assistantAction: "open-leave" },
+          {
+            id: "projects",
+            label: "Proiecte",
+            to: "/projects",
+            icon: TimerReset,
+            assistantAction: "open-projects",
+          },
+          {
+            id: "leave",
+            label: "Concedii",
+            to: "/my-leave",
+            icon: CalendarDays,
+            assistantAction: "open-leave",
+          },
         ]}
       />
       <TimesheetStatusCard
@@ -420,11 +488,18 @@ export default function MyTimesheetsPage() {
           <div className="my-timesheet-live-grid">
             <div>
               <span>Proiect curent</span>
-              <strong>{getProjectDisplayName(activeTimesheet.projectName, activeTimesheet.projectCode)}</strong>
+              <strong>
+                {getProjectDisplayName(activeTimesheet.projectName, activeTimesheet.projectCode)}
+              </strong>
             </div>
             <div>
               <span>Ora start</span>
-              <strong>{new Date(activeTimesheet.startAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}</strong>
+              <strong>
+                {new Date(activeTimesheet.startAt).toLocaleTimeString("ro-RO", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </strong>
             </div>
             <div>
               <span>Durata live</span>
@@ -439,11 +514,50 @@ export default function MyTimesheetsPage() {
       </TimesheetStatusCard>
 
       <div className="wc-kpi-grid wc-kpi-grid--four">
-        <KpiCard label="Ore azi" value={formatMinutes(todayLiveMinutes)} helper={liveTodayTimesheets.length ? `${liveTodayTimesheets.length} pontaje` : "nicio sesiune"} tone="green" icon={Clock3} />
-        <KpiCard label="Ore saptamana asta" value={formatMinutes(stats.weekMinutes)} helper={`${missingWeekDays.length} zile lipsa`} tone={missingWeekDays.length ? "orange" : "green"} icon={TrendingUp} />
-        <KpiCard label="Ore luna asta" value={formatMinutes(stats.monthMinutes)} helper={`medie ${formatMinutes(stats.avgMinutesPerWorkedDayMonth)} / zi`} tone="blue" icon={CalendarDays} />
-        <KpiCard label="Pontaje incomplete" value={incompleteTimesheets.length} helper={incompleteTimesheets.length ? "verifica istoricul" : "totul este inchis"} tone={incompleteTimesheets.length ? "red" : "green"} icon={AlertTriangle} />
+        <KpiCard
+          label="Ore azi"
+          value={formatMinutes(todayLiveMinutes)}
+          helper={
+            liveTodayTimesheets.length ? `${liveTodayTimesheets.length} pontaje` : "nicio sesiune"
+          }
+          tone="green"
+          icon={Clock3}
+        />
+        <KpiCard
+          label="Ore saptamana asta"
+          value={formatMinutes(stats.weekMinutes)}
+          helper={`${missingWeekDays.length} zile lipsa`}
+          tone={missingWeekDays.length ? "orange" : "green"}
+          icon={TrendingUp}
+        />
+        <KpiCard
+          label="Ore luna asta"
+          value={formatMinutes(stats.monthMinutes)}
+          helper={`medie ${formatMinutes(stats.avgMinutesPerWorkedDayMonth)} / zi`}
+          tone="blue"
+          icon={CalendarDays}
+        />
+        <KpiCard
+          label="Pontaje incomplete"
+          value={incompleteTimesheets.length}
+          helper={incompleteTimesheets.length ? "verifica istoricul" : "totul este inchis"}
+          tone={incompleteTimesheets.length ? "red" : "green"}
+          icon={AlertTriangle}
+        />
       </div>
+
+      <Link className="wc-upcoming-leave-strip" to="/my-leave?tab=requests">
+        <CalendarDays size={18} />
+        <div>
+          <span>Urmatorul concediu aprobat</span>
+          <strong>
+            {nextApprovedLeave
+              ? `${nextApprovedLeave.periodStart} - ${nextApprovedLeave.periodEnd}`
+              : "Nu exista concedii aprobate programate"}
+          </strong>
+        </div>
+        <span>Vezi concediile</span>
+      </Link>
 
       <div className="content-grid">
         <TimesheetForm
@@ -489,17 +603,16 @@ export default function MyTimesheetsPage() {
           <div className="panel-body">
             <div className="simple-list">
               {projects.length === 0 ? (
-                <EmptyState title="Nu exista proiecte active" subtitle="Un manager poate crea rapid un proiect nou." />
+                <EmptyState
+                  title="Nu exista proiecte active"
+                  subtitle="Un manager poate crea rapid un proiect nou."
+                />
               ) : (
                 projects.map((project) => (
                   <div key={project.id} className="simple-list-item">
                     <div className="simple-list-text">
-                      <div className="simple-list-label">
-                        {project.name || "Fara nume"}
-                      </div>
-                      <div className="simple-list-subtitle">
-                        status: {project.status}
-                      </div>
+                      <div className="simple-list-label">{project.name || "Fara nume"}</div>
+                      <div className="simple-list-subtitle">status: {project.status}</div>
                     </div>
                     <StatusBadge tone={project.id === preferredProjectId ? "blue" : "green"}>
                       {project.id === preferredProjectId ? "selectat" : project.status}
@@ -521,7 +634,11 @@ export default function MyTimesheetsPage() {
       <TimesheetCalendar timesheets={timesheets} />
 
       <div className="content-grid timesheet-chart-grid">
-        <TimesheetChartCard title="Ore lucrate pe zile" subtitle="Istoricul personal" bars={buildDayMinuteBuckets(timesheets.slice(0, 40))} />
+        <TimesheetChartCard
+          title="Ore lucrate pe zile"
+          subtitle="Istoricul personal"
+          bars={buildDayMinuteBuckets(timesheets.slice(0, 40))}
+        />
         <TimesheetChartCard title="Ore pe proiecte" bars={buildProjectMinuteBuckets(timesheets)} />
       </div>
 
@@ -531,7 +648,11 @@ export default function MyTimesheetsPage() {
             <h2 className="panel-title">Ultimele 7 zile</h2>
             <p className="panel-subtitle">Istoric scurt, totaluri si statusuri clare.</p>
           </div>
-          <StatusBadge tone="blue">{formatMinutes(lastSevenTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0))}</StatusBadge>
+          <StatusBadge tone="blue">
+            {formatMinutes(
+              lastSevenTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0)
+            )}
+          </StatusBadge>
         </div>
 
         {lastSevenTimesheets.length === 0 ? (
@@ -546,20 +667,33 @@ export default function MyTimesheetsPage() {
               >
                 <div className="simple-list-text">
                   <div className="user-inline-meta">
-                    <span className="user-accent-avatar">{getUserInitials(item.userName || "Eu")}</span>
+                    <span className="user-accent-avatar">
+                      {getUserInitials(item.userName || "Eu")}
+                    </span>
                     <span className="simple-list-label user-accent-name">
                       {getProjectDisplayName(item.projectName, item.projectCode)}
                     </span>
                   </div>
                   <div className="simple-list-subtitle">
-                    {item.workDate} - {new Date(item.startAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}
+                    {item.workDate} -{" "}
+                    {new Date(item.startAt).toLocaleTimeString("ro-RO", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                     {" / "}
-                    {item.stopAt ? new Date(item.stopAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" }) : "-"}
+                    {item.stopAt
+                      ? new Date(item.stopAt).toLocaleTimeString("ro-RO", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "-"}
                     {" / "}
                     {formatMinutes(getEffectiveWorkedMinutes(item))}
                   </div>
                 </div>
-                <StatusBadge tone={getTimesheetStatusTone(item.status)}>{getTimesheetStatusLabel(item.status)}</StatusBadge>
+                <StatusBadge tone={getTimesheetStatusTone(item.status)}>
+                  {getTimesheetStatusLabel(item.status)}
+                </StatusBadge>
               </Link>
             ))}
           </div>

@@ -345,7 +345,7 @@ export default function ControlPanelPage() {
   }
 
   return (
-    <PageLayout>
+    <PageLayout className="control-panel-operational-page">
       <PageHeader
         eyebrow="Administrare"
         title="Control Panel"
@@ -356,14 +356,15 @@ export default function ControlPanelPage() {
       <ProductTabs
         activeId={(location.hash || "#general").replace("#", "")}
         tabs={[
-          { id: "general", label: "General", to: "/control-panel#general", icon: Settings },
+          { id: "general", label: "Health", to: "/control-panel#general", icon: HeartPulse },
           { id: "firebase", label: "Firebase", to: "/control-panel#firebase", icon: Database },
-          { id: "ai", label: "AI", to: "/control-panel#ai", icon: Bot },
-          { id: "gps", label: "GPS", to: "/vehicles/gps-map", icon: MapPinned },
-          { id: "server", label: "Server", to: "/control-panel#system", icon: Server },
           { id: "billing", label: "Billing", to: "/control-panel#billing", icon: CreditCard },
-          { id: "deploy", label: "Deploy", to: "/control-panel#deploy", icon: Rocket },
-          { id: "health", label: "Health", to: "/control-panel#system", icon: HeartPulse },
+          { id: "gps", label: "GPS", to: "/vehicles/gps-map", icon: MapPinned },
+          { id: "system", label: "Functions", to: "/control-panel#system", icon: Server },
+          { id: "notifications", label: "Notificări", to: "/notification-rules", icon: Settings },
+          { id: "ai", label: "AI", to: "/control-panel#ai", icon: Bot },
+          { id: "backup", label: "Backup", to: "/control-panel/backup-preview", icon: Rocket },
+          { id: "ui-lab", label: "UI Lab", to: "/control-panel/ui-lab", icon: Settings },
           { id: "logs", label: "Logs", to: "/history", icon: FileClock },
         ]}
       />
