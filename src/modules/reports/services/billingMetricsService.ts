@@ -72,6 +72,30 @@ export type BillingControlPanelData = {
   canary: GpsCostOptimizationStatus;
 };
 
+export type LiveFirebaseCostEstimate = {
+  status: "current" | "delayed" | "unavailable";
+  currency: "EUR";
+  source: string;
+  dataAsOfMs: number | null;
+  lagSeconds: number | null;
+  sampledWindowMinutes: number;
+  refreshSeconds: number;
+  costPerMinuteEur: number | null;
+  projectedHourlyEur: number | null;
+  estimatedLastHourEur: number | null;
+  readsPerMinute: number | null;
+  writesPerMinute: number | null;
+  deletesPerMinute: number | null;
+  readsLastHour: number | null;
+  writesLastHour: number | null;
+  deletesLastHour: number | null;
+  excludes: string[];
+  exchangeRate: {
+    source: string;
+    rateDate: string | null;
+  };
+};
+
 const EMPTY_METRICS: BillingMetrics = {
   currency: "EUR",
   sourceCurrency: null,
@@ -101,6 +125,9 @@ const EMPTY_METRICS: BillingMetrics = {
   freshnessStatus: "awaiting_export",
   source: "cloud_billing_bigquery_standard",
 };
+
+let liveEstimateCache: { value: LiveFirebaseCostEstimate; expiresAt: number } | null = null;
+let liveEstimateRequest: Promise<LiveFirebaseCostEstimate> | null = null;
 
 function finiteOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
@@ -194,6 +221,42 @@ function mapCanaryStatus(value: unknown): GpsCostOptimizationStatus {
   };
 }
 
+function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
+  const data = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const exchangeRate =
+    data.exchangeRate && typeof data.exchangeRate === "object"
+      ? (data.exchangeRate as Record<string, unknown>)
+      : {};
+  const status =
+    data.status === "current" || data.status === "delayed" ? data.status : "unavailable";
+
+  return {
+    status,
+    currency: "EUR",
+    source: String(data.source || "cloud_monitoring_firestore_operations"),
+    dataAsOfMs: finiteOrNull(data.dataAsOfMs),
+    lagSeconds: finiteOrNull(data.lagSeconds),
+    sampledWindowMinutes: Math.max(1, finiteOr(data.sampledWindowMinutes, 5)),
+    refreshSeconds: Math.max(30, finiteOr(data.refreshSeconds, 60)),
+    costPerMinuteEur: finiteOrNull(data.costPerMinuteEur),
+    projectedHourlyEur: finiteOrNull(data.projectedHourlyEur),
+    estimatedLastHourEur: finiteOrNull(data.estimatedLastHourEur),
+    readsPerMinute: finiteOrNull(data.readsPerMinute),
+    writesPerMinute: finiteOrNull(data.writesPerMinute),
+    deletesPerMinute: finiteOrNull(data.deletesPerMinute),
+    readsLastHour: finiteOrNull(data.readsLastHour),
+    writesLastHour: finiteOrNull(data.writesLastHour),
+    deletesLastHour: finiteOrNull(data.deletesLastHour),
+    excludes: Array.isArray(data.excludes)
+      ? data.excludes.map((item) => String(item)).slice(0, 10)
+      : [],
+    exchangeRate: {
+      source: String(exchangeRate.source || "ECB"),
+      rateDate: exchangeRate.rateDate ? String(exchangeRate.rateDate) : null,
+    },
+  };
+}
+
 export async function getBillingControlPanelData(): Promise<BillingControlPanelData> {
   const callable = httpsCallable<
     Record<string, never>,
@@ -235,6 +298,31 @@ export async function refreshBillingMetricsNow() {
   );
   const result = await callable({});
   return result.data;
+}
+
+export async function getLiveFirebaseCostEstimate(options: { force?: boolean } = {}) {
+  const now = Date.now();
+  if (!options.force && liveEstimateCache && liveEstimateCache.expiresAt > now) {
+    return liveEstimateCache.value;
+  }
+  if (liveEstimateRequest) return liveEstimateRequest;
+
+  liveEstimateRequest = (async () => {
+    const callable = httpsCallable<Record<string, never>, unknown>(
+      functions,
+      "getLiveFirebaseCostEstimate"
+    );
+    const result = await callable({});
+    const value = mapLiveCostEstimate(result.data);
+    liveEstimateCache = { value, expiresAt: Date.now() + 45_000 };
+    return value;
+  })();
+
+  try {
+    return await liveEstimateRequest;
+  } finally {
+    liveEstimateRequest = null;
+  }
 }
 
 export function getLocalGpsRouteCostMetrics() {
