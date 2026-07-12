@@ -59,6 +59,21 @@ const OBD_COOLANT_CRITICAL_C = Number(process.env.OBD_COOLANT_CRITICAL_C || 115)
 const OBD_OIL_WARNING_C = Number(process.env.OBD_OIL_WARNING_C || 120);
 const OBD_LOW_VOLTAGE_V = Number(process.env.OBD_LOW_VOLTAGE_V || 11.5);
 const OBD_LOW_FUEL_PCT = Number(process.env.OBD_LOW_FUEL_PCT || 10);
+const GPS_COST_CONFIG_CACHE_MS = 60_000;
+const GPS_COST_DEFAULT_FLUSH_SECONDS = 45;
+const GPS_COST_MIN_FLUSH_SECONDS = 30;
+const GPS_COST_MAX_FLUSH_SECONDS = 60;
+const GPS_COST_MAX_BUFFERED_RECORDS = 500;
+const GPS_COST_FLUSH_CHECK_MS = 5_000;
+const gpsCostBuffers = new Map();
+let gpsCostConfigCache = {
+  value: {
+    enabled: false,
+    canaryTrackerImeis: new Set(),
+    diagnosticFlushSeconds: GPS_COST_DEFAULT_FLUSH_SECONDS,
+  },
+  expiresAt: 0,
+};
 
 function toByteCount(value) {
   const numeric = Number(value);
@@ -95,6 +110,196 @@ function normalizeGpsDataUsageDelta(delta) {
     recordsCount,
     frameCount,
   };
+}
+
+function mergeGpsDataUsageDeltas(current, incoming) {
+  const left = normalizeGpsDataUsageDelta(current) || {
+    rxBytes: 0,
+    txBytes: 0,
+    totalBytes: 0,
+    recordsCount: 0,
+    frameCount: 0,
+  };
+  const right = normalizeGpsDataUsageDelta(incoming);
+  if (!right) return normalizeGpsDataUsageDelta(left);
+
+  return normalizeGpsDataUsageDelta({
+    rxBytes: left.rxBytes + right.rxBytes,
+    txBytes: left.txBytes + right.txBytes,
+    recordsCount: left.recordsCount + right.recordsCount,
+    frameCount: left.frameCount + right.frameCount,
+  });
+}
+
+function normalizeGpsCostConfig(data) {
+  const rawImeis = Array.isArray(data?.canaryTrackerImeis) ? data.canaryTrackerImeis : [];
+  const flushSeconds = Number(data?.diagnosticFlushSeconds);
+
+  return {
+    enabled: data?.enabled === true,
+    canaryTrackerImeis: new Set(
+      rawImeis
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .slice(0, 100)
+    ),
+    diagnosticFlushSeconds: Math.max(
+      GPS_COST_MIN_FLUSH_SECONDS,
+      Math.min(
+        GPS_COST_MAX_FLUSH_SECONDS,
+        Number.isFinite(flushSeconds) ? Math.round(flushSeconds) : GPS_COST_DEFAULT_FLUSH_SECONDS
+      )
+    ),
+  };
+}
+
+async function getGpsCostOptimizationConfig() {
+  const now = Date.now();
+  if (gpsCostConfigCache.expiresAt > now) return gpsCostConfigCache.value;
+
+  try {
+    const snap = await db
+      .collection("systemPrivateSettings")
+      .doc("gpsCostOptimization")
+      .get();
+    const value = normalizeGpsCostConfig(snap.exists ? snap.data() : null);
+    gpsCostConfigCache = { value, expiresAt: now + GPS_COST_CONFIG_CACHE_MS };
+  } catch (error) {
+    console.warn("[GPS COST CONFIG] Nu am putut actualiza configuratia; pastrez valoarea cache.", error);
+    gpsCostConfigCache.expiresAt = now + GPS_COST_CONFIG_CACHE_MS;
+  }
+
+  return gpsCostConfigCache.value;
+}
+
+function getGpsCostBuffer(vehicleId, imei) {
+  let buffer = gpsCostBuffers.get(imei);
+  if (!buffer) {
+    buffer = {
+      vehicleId,
+      imei,
+      recordsByDay: new Map(),
+      dataUsageDelta: null,
+      bufferedRecords: 0,
+      lastFlushAt: Date.now(),
+      flushing: null,
+      counters: {
+        packetsReceived: 0,
+        diagnosticWrites: 0,
+        usageWrites: 0,
+        flushes: 0,
+      },
+    };
+    gpsCostBuffers.set(imei, buffer);
+  }
+  return buffer;
+}
+
+function restoreGpsCostBuffer(buffer, recordsByDay, dataUsageDelta) {
+  for (const [dayKey, records] of recordsByDay.entries()) {
+    const existing = buffer.recordsByDay.get(dayKey) || [];
+    buffer.recordsByDay.set(dayKey, [...records, ...existing]);
+    buffer.bufferedRecords += records.length;
+  }
+  buffer.dataUsageDelta = mergeGpsDataUsageDeltas(dataUsageDelta, buffer.dataUsageDelta);
+}
+
+async function flushGpsCostBuffer(imei, reason = "interval") {
+  const buffer = gpsCostBuffers.get(imei);
+  if (!buffer) return;
+  if (buffer.flushing) return buffer.flushing;
+  if (buffer.bufferedRecords <= 0 && !buffer.dataUsageDelta) return;
+
+  const recordsByDay = buffer.recordsByDay;
+  let dataUsageDelta = buffer.dataUsageDelta;
+  const recordsCount = buffer.bufferedRecords;
+  let diagnosticWrites = 0;
+  let usageWrite = false;
+  buffer.recordsByDay = new Map();
+  buffer.dataUsageDelta = null;
+  buffer.bufferedRecords = 0;
+
+  buffer.flushing = (async () => {
+    const startedAt = Date.now();
+    const vehicleRef = db.collection("vehicles").doc(buffer.vehicleId);
+    try {
+      for (const [dayKey, dayRecords] of recordsByDay.entries()) {
+        if (!dayRecords.length) continue;
+        await updateDailyDiagnostics(
+          vehicleRef,
+          buffer.vehicleId,
+          buffer.imei,
+          dayKey,
+          dayRecords,
+          Date.now()
+        );
+        recordsByDay.delete(dayKey);
+        diagnosticWrites += 1;
+        buffer.counters.diagnosticWrites += 1;
+      }
+
+      if (dataUsageDelta) {
+        await writeVehicleDataUsageOnly(vehicleRef, buffer.imei, dataUsageDelta, Date.now());
+        dataUsageDelta = null;
+        usageWrite = true;
+        buffer.counters.usageWrites += 1;
+      }
+
+      buffer.lastFlushAt = Date.now();
+      buffer.counters.flushes += 1;
+      console.log(
+        `[GPS COST METRICS] ${JSON.stringify({
+          imei: buffer.imei,
+          vehicleId: buffer.vehicleId,
+          reason,
+          records: recordsCount,
+          diagnosticWrites,
+          usageWrite,
+          durationMs: Date.now() - startedAt,
+          totals: buffer.counters,
+        })}`
+      );
+    } catch (error) {
+      restoreGpsCostBuffer(buffer, recordsByDay, dataUsageDelta);
+      console.error(`[GPS COST FLUSH ERROR] imei=${buffer.imei} reason=${reason}`, error);
+      throw error;
+    } finally {
+      buffer.flushing = null;
+    }
+  })();
+
+  return buffer.flushing;
+}
+
+async function queueGpsCostAggregation({
+  vehicleId,
+  imei,
+  diagnosticGroups,
+  dataUsageDelta,
+  flushSeconds,
+}) {
+  const buffer = getGpsCostBuffer(vehicleId, imei);
+  for (const [dayKey, records] of diagnosticGroups.entries()) {
+    const existing = buffer.recordsByDay.get(dayKey) || [];
+    buffer.recordsByDay.set(dayKey, [...existing, ...records]);
+    buffer.bufferedRecords += records.length;
+  }
+  buffer.dataUsageDelta = mergeGpsDataUsageDeltas(buffer.dataUsageDelta, dataUsageDelta);
+  buffer.counters.packetsReceived += Array.from(diagnosticGroups.values()).reduce(
+    (sum, records) => sum + records.length,
+    0
+  );
+
+  const dueAt = buffer.lastFlushAt + flushSeconds * 1000;
+  if (Date.now() >= dueAt || buffer.bufferedRecords >= GPS_COST_MAX_BUFFERED_RECORDS) {
+    await flushGpsCostBuffer(imei, buffer.bufferedRecords >= GPS_COST_MAX_BUFFERED_RECORDS ? "buffer_limit" : "interval");
+  }
+}
+
+async function flushAllGpsCostBuffers(reason = "shutdown") {
+  await Promise.allSettled(
+    [...gpsCostBuffers.keys()].map((imei) => flushGpsCostBuffer(imei, reason))
+  );
 }
 
 function buildGpsDataUsageUpdateFields(delta, now) {
@@ -1647,6 +1852,9 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
   const vehicleId = binding.vehicleId;
   const vehicleRef = db.collection("vehicles").doc(vehicleId);
   const now = Date.now();
+  const gpsCostConfig = await getGpsCostOptimizationConfig();
+  const useGpsCostCanary =
+    gpsCostConfig.enabled && gpsCostConfig.canaryTrackerImeis.has(String(imei));
 
   const validRecords = records
     .filter(isValidGpsRecord)
@@ -1775,8 +1983,18 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
     }
   }
 
-  for (const [dayKey, dayRecords] of diagnosticGroups.entries()) {
-    await updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRecords, now);
+  if (useGpsCostCanary) {
+    await queueGpsCostAggregation({
+      vehicleId,
+      imei,
+      diagnosticGroups,
+      dataUsageDelta,
+      flushSeconds: gpsCostConfig.diagnosticFlushSeconds,
+    });
+  } else {
+    for (const [dayKey, dayRecords] of diagnosticGroups.entries()) {
+      await updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRecords, now);
+    }
   }
 
   if (latestSnapshot) {
@@ -1793,15 +2011,20 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
         latestSnapshot,
         latestDiagnostics,
         currentKmIncrement,
-        dataUsageDelta,
+        useGpsCostCanary ? null : dataUsageDelta,
         now
       );
       lastSnapshotWriteByVehicle.set(vehicleId, now);
     } else {
-      await writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now);
+      if (!useGpsCostCanary) {
+        await writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now);
+      }
     }
   } else {
-    const usageInitialValue = buildGpsDataUsageInitialValue(dataUsageDelta, now);
+    const usageInitialValue = buildGpsDataUsageInitialValue(
+      useGpsCostCanary ? null : dataUsageDelta,
+      now
+    );
     await vehicleRef.set(
       {
         ...(usageInitialValue ? { gpsDataUsage: usageInitialValue } : {}),
@@ -2219,6 +2442,9 @@ if (codecId === 0x0c) {
 
   socket.on("close", () => {
     clearActiveDeviceIfMatches(session.imei, socket);
+    if (session.imei) {
+      void flushGpsCostBuffer(session.imei, "disconnect").catch(() => undefined);
+    }
     if (!session.imei) {
       console.log(`[TCP DISCONNECTED] ${remote}`);
     }
@@ -2231,9 +2457,35 @@ server.on("error", (error) => {
 
 watchVehicleCommands();
 startCleanupScheduler();
+const gpsCostFlushTimer = setInterval(() => {
+  void (async () => {
+    const config = await getGpsCostOptimizationConfig();
+    const dueAfterMs = config.diagnosticFlushSeconds * 1000;
+    for (const [imei, buffer] of gpsCostBuffers.entries()) {
+      if (Date.now() - buffer.lastFlushAt >= dueAfterMs) {
+        await flushGpsCostBuffer(imei, "timer").catch(() => undefined);
+      }
+    }
+  })();
+}, GPS_COST_FLUSH_CHECK_MS);
+gpsCostFlushTimer.unref?.();
 // Push-ul este trimis de Firebase Cloud Function `sendPushOnNotificationCreated`.
 // Daca il pornim si aici, aceeasi notificare poate ajunge de doua ori pe telefon.
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER STARTED] GPS gateway listening on 0.0.0.0:${PORT}`);
 });
+
+let shutdownStarted = false;
+async function shutdownGpsGateway(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`[SERVER SHUTDOWN] signal=${signal}`);
+  clearInterval(gpsCostFlushTimer);
+  await flushAllGpsCostBuffers("shutdown");
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10_000).unref?.();
+}
+
+process.once("SIGINT", () => void shutdownGpsGateway("SIGINT"));
+process.once("SIGTERM", () => void shutdownGpsGateway("SIGTERM"));
