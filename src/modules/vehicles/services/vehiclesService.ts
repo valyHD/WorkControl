@@ -1139,7 +1139,7 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
 
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
   return onSnapshot(
-    query(vehiclesCollection, orderBy("plateNumber", "asc")),
+    query(vehiclesCollection, orderBy("plateNumber", "asc"), limit(250)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
     },

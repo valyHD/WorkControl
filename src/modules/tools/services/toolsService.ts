@@ -168,7 +168,7 @@ export async function getUsersList(): Promise<AppUser[]> {
 }
 
 export async function getToolsList(): Promise<ToolItem[]> {
-  const snap = await getDocs(query(toolsCollection, orderBy("updatedAt", "desc")));
+  const snap = await getDocs(query(toolsCollection, orderBy("updatedAt", "desc"), limit(500)));
   return snap.docs.map((docItem) => mapToolDoc(docItem.id, docItem.data()));
 }
 

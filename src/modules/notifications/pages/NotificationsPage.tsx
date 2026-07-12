@@ -197,7 +197,8 @@ export default function NotificationsPage() {
         query(
           collection(db, "notifications"),
           where("userId", "==", user.uid),
-          where("read", "==", false)
+          where("read", "==", false),
+          limit(100)
         )
       );
 

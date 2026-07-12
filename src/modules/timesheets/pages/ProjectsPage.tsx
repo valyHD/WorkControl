@@ -7,7 +7,7 @@ import {
   deleteProject,
   formatMinutes,
   getProjectsList,
-  getTimesheetsList,
+  getTimesheetsManagementList,
   updateProject,
 } from "../services/timesheetsService";
 import ProjectForm from "../components/ProjectForm";
@@ -134,7 +134,7 @@ export default function ProjectsPage() {
     try {
       const [projectsData, timesheetsData] = await Promise.all([
         getProjectsList(),
-        getTimesheetsList(),
+        getTimesheetsManagementList(1500),
       ]);
       setProjects(projectsData);
       setTimesheets(timesheetsData);

@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -220,7 +221,7 @@ function mapUserDoc(id: string, data: Record<string, unknown>): AppUserItem {
 }
 
 export async function getAllUsers(): Promise<AppUserItem[]> {
-  const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc")));
+  const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc"), limit(250)));
   return snap.docs.map((docItem) => mapUserDoc(docItem.id, docItem.data()));
 }
 
@@ -229,7 +230,7 @@ export function subscribeUsers(
   onError?: (error: unknown) => void
 ): () => void {
   return onSnapshot(
-    query(usersCollection, orderBy("fullName", "asc")),
+    query(usersCollection, orderBy("fullName", "asc"), limit(250)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapUserDoc(docItem.id, docItem.data())));
     },

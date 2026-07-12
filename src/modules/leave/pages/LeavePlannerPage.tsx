@@ -359,7 +359,7 @@ export default function LeavePlannerPage() {
       setExpandedUserId("");
       return undefined;
     }
-    const usersQuery = query(collection(db, "users"), orderBy("createdAt", "asc"));
+    const usersQuery = query(collection(db, "users"), orderBy("createdAt", "asc"), limit(250));
 
     return onSnapshot(usersQuery, (snap) => {
       const mapped = snap.docs.map((docItem) => {

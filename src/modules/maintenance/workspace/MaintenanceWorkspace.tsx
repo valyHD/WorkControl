@@ -447,9 +447,13 @@ export default function MaintenanceWorkspace() {
   const assistantReportKeyRef = useRef("");
   const assistantClientFormKeyRef = useRef("");
   const [gmailSenderEmail, setGmailSenderEmail] = useState("liftultau@gmail.com");
+  const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
+  const shouldLoadBranding = activeMaintenanceTab === "report" || activeMaintenanceTab === "companies";
+  const shouldLoadReportOverview = ["dashboard", "history", "checks"].includes(activeMaintenanceTab);
+  const shouldLoadTechnicians = activeMaintenanceTab === "report";
 
   useEffect(() => {
-    if (!["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab)) {
+    if (!shouldLoadClients) {
       return undefined;
     }
     setLoading(true);
@@ -466,10 +470,10 @@ export default function MaintenanceWorkspace() {
     );
 
     return unsubscribe;
-  }, [activeMaintenanceTab]);
+  }, [shouldLoadClients]);
 
   useEffect(() => {
-    if (activeMaintenanceTab !== "report" && activeMaintenanceTab !== "companies") {
+    if (!shouldLoadBranding) {
       return undefined;
     }
     const unsubscribe = subscribeMaintenanceCompanyBranding(
@@ -483,11 +487,11 @@ export default function MaintenanceWorkspace() {
     );
 
     return unsubscribe;
-  }, [activeMaintenanceTab]);
+  }, [shouldLoadBranding]);
 
   useEffect(() => {
     setReportHistoryByClient({});
-    if (!["dashboard", "history", "checks"].includes(activeMaintenanceTab)) {
+    if (!shouldLoadReportOverview) {
       return undefined;
     }
 
@@ -509,10 +513,10 @@ export default function MaintenanceWorkspace() {
         setLiveStatsError("Nu am putut incarca live istoricul rapoartelor.");
       }
     );
-  }, [activeMaintenanceTab]);
+  }, [shouldLoadReportOverview]);
 
   useEffect(() => {
-    if (activeMaintenanceTab !== "report") return undefined;
+    if (!shouldLoadTechnicians) return undefined;
     let active = true;
 
     getAllUsers()
@@ -528,7 +532,7 @@ export default function MaintenanceWorkspace() {
     return () => {
       active = false;
     };
-  }, [activeMaintenanceTab]);
+  }, [shouldLoadTechnicians]);
 
   useEffect(() => {
     if (!gmailSenderEmail && user?.email) {

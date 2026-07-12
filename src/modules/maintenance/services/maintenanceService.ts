@@ -177,7 +177,7 @@ export function subscribeMaintenanceClients(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(maintenanceClientsCollection, orderBy("updatedAt", "desc")),
+    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(500)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>)));
     },
