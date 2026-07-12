@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ElementType } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { logoutUser } from "../modules/auth/services/authService";
@@ -10,13 +10,24 @@ import { FloatingQuickLinks } from "../components/FloatingQuickLinks";
 import { getAuditLogs, logPageView } from "../modules/audit/services/auditLogService";
 import type { AuditLogItem } from "../types/audit";
 import {
-  LayoutDashboard, User, Users, Wrench, CarFront, Clock3, Clock4,
-  Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2, CalendarDays, ReceiptText, History, PackageSearch,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
 } from "lucide-react";
 import { collection, doc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
 import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
 import { clearFleetRouteSessionCache } from "../modules/vehicles/services/fleetRouteSync";
+import {
+  NAVIGATION_ITEMS,
+  getNavigationItemForPath,
+  getNavigationSectionsForRole,
+} from "../config/navigation";
+import { getPageExperience } from "../config/pageExperience";
+import { ConnectivityBanner, PageBreadcrumbs } from "../components/experience";
 
 const VoiceCommandAssistant = lazy(() => import("../components/VoiceCommandAssistant"));
 const GlobalCommandPalette = lazy(() => import("../components/product/GlobalCommandPalette"));
@@ -42,6 +53,7 @@ const pagePrefetchers: Record<string, () => Promise<unknown>> = {
   "/expenses/reports": () => import("../modules/expenses/pages/ExpenseReportsPage"),
   "/companies": () => import("../modules/companies/pages/CompaniesPage"),
   "/history": () => import("../modules/audit/pages/AuditLogPage"),
+  "/control-panel/ui-lab": () => import("../modules/reports/pages/UiLabPage"),
 };
 
 const prefetchedPaths = new Set<string>();
@@ -56,66 +68,7 @@ function prefetchPage(path: string) {
   });
 }
 
-type MenuItem = {
-  label: string; path: string; Icon: ElementType;
-  colorClass: "menu-icon-blue" | "menu-icon-violet" | "menu-icon-cyan" | "menu-icon-orange" | "menu-icon-green" | "menu-icon-rose";
-  section: string;
-};
-
-const menuSections: { label: string; items: MenuItem[] }[] = [
-  {
-    label: "Prezentare",
-    items: [
-      { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard, colorClass: "menu-icon-blue", section: "Principal" },
-      { label: "Profilul meu", path: "/my-profile", Icon: User, colorClass: "menu-icon-violet", section: "Principal" },
-      { label: "Concedii", path: "/my-leave", Icon: CalendarDays, colorClass: "menu-icon-orange", section: "Principal" },
-      { label: "Utilizatori", path: "/users", Icon: Users, colorClass: "menu-icon-cyan", section: "Principal" },
-    ],
-  },
-  {
-    label: "Echipa si pontaje",
-    items: [
-      { label: "Dashboard Pontaje", path: "/timesheets", Icon: Clock3, colorClass: "menu-icon-blue", section: "Pontaje" },
-      { label: "Pontajul meu", path: "/my-timesheets", Icon: Clock4, colorClass: "menu-icon-violet", section: "Pontaje" },
-      { label: "Proiecte", path: "/projects", Icon: Briefcase, colorClass: "menu-icon-cyan", section: "Pontaje" },
-    ],
-  },
-  {
-    label: "Active si financiar",
-    items: [
-      { label: "Scanare bonuri", path: "/expenses/scan", Icon: ReceiptText, colorClass: "menu-icon-rose", section: "Operational" },
-      { label: "Facturi", path: "/expenses/invoices", Icon: ReceiptText, colorClass: "menu-icon-cyan", section: "Operational" },
-      { label: "Rapoarte", path: "/expenses/reports", Icon: BarChart3, colorClass: "menu-icon-green", section: "Operational" },
-      { label: "Firme", path: "/companies", Icon: Building2, colorClass: "menu-icon-violet", section: "Operational" },
-      { label: "Scule", path: "/tools", Icon: Wrench, colorClass: "menu-icon-orange", section: "Operational" },
-      { label: "Masini", path: "/vehicles", Icon: CarFront, colorClass: "menu-icon-green", section: "Operational" },
-      { label: "Masina mea", path: "/my-vehicle", Icon: CarFront, colorClass: "menu-icon-blue", section: "Operational" },
-    ],
-  },
-  {
-    label: "Service lifturi",
-    items: [
-      { label: "Mentenanta", path: "/maintenance", Icon: Building2, colorClass: "menu-icon-violet", section: "Service Lift" },
-      { label: "Comenzi piese", path: "/maintenance/orders", Icon: PackageSearch, colorClass: "menu-icon-orange", section: "Service Lift" },
-    ],
-  },
-  {
-    label: "Comunicare",
-    items: [
-      { label: "Notificari", path: "/notifications", Icon: Bell, colorClass: "menu-icon-orange", section: "Notificari" },
-      { label: "Reguli notificari", path: "/notification-rules", Icon: BellRing, colorClass: "menu-icon-blue", section: "Notificari" },
-    ],
-  },
-  {
-    label: "Administrare",
-    items: [
-      { label: "Control Panel", path: "/control-panel", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Administrare" },
-      { label: "Istoric", path: "/history", Icon: History, colorClass: "menu-icon-orange", section: "Administrare" },
-    ],
-  },
-];
-
-const allItems = menuSections.flatMap((s) => s.items);
+const allItems = NAVIGATION_ITEMS;
 
 type PageChangeSummary = {
   latestAt: number;
@@ -139,15 +92,8 @@ function cleanAuditPath(path: string) {
   return String(path || "").split("?")[0].split("#")[0].trim();
 }
 
-function matchesMenuPath(pathname: string, menuPath: string) {
-  return pathname === menuPath || pathname.startsWith(`${menuPath}/`);
-}
-
 function getMenuItemForPath(pathname: string) {
-  const safePath = cleanAuditPath(pathname);
-  return [...allItems]
-    .sort((a, b) => b.path.length - a.path.length)
-    .find((item) => matchesMenuPath(safePath, item.path)) || null;
+  return getNavigationItemForPath(pathname);
 }
 
 function inferAuditPath(item: AuditLogItem) {
@@ -378,21 +324,28 @@ function NavItems({
   onNavigate,
   unreadCount,
   pageChangeMap,
+  role,
+  mobile = false,
 }: {
   onNavigate?: () => void;
   unreadCount: number;
   pageChangeMap: PageChangeMap;
+  role: string;
+  mobile?: boolean;
 }) {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const fromMyVehicleView = searchParams.get("view") === "my-vehicle";
+  const menuSections = getNavigationSectionsForRole(role || "angajat");
 
   return (
     <>
       {menuSections.map((section) => (
-        <div key={section.label}>
+        <div key={section.label} className={section.compact ? "nav-section nav-section--compact" : "nav-section"}>
           <div className="nav-section-label">{section.label}</div>
-          {section.items.map(({ label, path, Icon, colorClass }) => {
+          {[...section.items]
+            .sort((left, right) => mobile ? left.mobilePriority - right.mobilePriority : 0)
+            .map(({ label, path, icon: Icon, colorClass }) => {
             const changeCount = pageChangeMap[path]?.items.length || 0;
             return (
               <NavLink key={path} to={path} onClick={onNavigate}
@@ -455,8 +408,14 @@ function TopbarClock() {
 
 export default function AppShell() {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileDrawerRef = useRef<HTMLElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("wc_sidebar_collapsed:v1") === "true";
+  });
   const [unreadCount, setUnreadCount] = useState(0);
   const [auditItems, setAuditItems] = useState<AuditLogItem[]>([]);
   const [pageReadState, setPageReadState] = useState<PageReadState>({});
@@ -580,6 +539,48 @@ export default function AppShell() {
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
 
   useEffect(() => {
+    try {
+      window.localStorage.setItem("wc_sidebar_collapsed:v1", String(sidebarCollapsed));
+    } catch {
+      // The sidebar still works when localStorage is unavailable.
+    }
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen || !mobileDrawerRef.current) return;
+    const drawer = mobileDrawerRef.current;
+    const menuTrigger = menuButtonRef.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const getFocusable = () => Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector));
+    getFocusable()[0]?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileMenuOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusable();
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    drawer.addEventListener("keydown", handleKeyDown);
+    return () => {
+      drawer.removeEventListener("keydown", handleKeyDown);
+      (previous || menuTrigger)?.focus();
+    };
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
     if (!user?.uid) return;
     const item = getMenuItemForPath(location.pathname);
     logPageView({
@@ -609,14 +610,15 @@ export default function AppShell() {
   }
 
   const currentItem = getMenuItemForPath(location.pathname);
+  const pageExperience = getPageExperience(location.pathname);
   const pageChangeMap = useMemo(
     () => buildPageChangeMap(auditItems, pageReadState, pageReadsLoaded, user?.uid || ""),
     [auditItems, pageReadState, pageReadsLoaded, user?.uid]
   );
   const currentChanges = currentItem ? pageChangeMap[currentItem.path]?.items || [] : [];
-  const pageTitle = currentItem?.label || "WorkControl";
-  const pageSection = currentItem?.section || "";
-  const PageIcon = currentItem?.Icon || LayoutDashboard;
+  const pageTitle = pageExperience?.title || currentItem?.label || "WorkControl";
+  const PageIcon = currentItem?.icon || LayoutDashboard;
+  const breadcrumbs = pageExperience?.breadcrumbs || (currentItem ? [{ label: currentItem.label }] : []);
 
   const initials = (user?.displayName || "A")
     .split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -631,7 +633,8 @@ export default function AppShell() {
   }
 
   return (
-    <div className="shell">
+    <div className={`shell${sidebarCollapsed ? " shell--sidebar-collapsed" : ""}`}>
+      <a className="skip-link" href="#main-content">Sari la continut</a>
       {/* ── DESKTOP SIDEBAR ── */}
       <aside className="sidebar desktop-sidebar" aria-label="Navigare principală">
         <div className="brand">
@@ -642,9 +645,21 @@ export default function AppShell() {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <NavItems unreadCount={unreadCount} pageChangeMap={pageChangeMap} />
+          <NavItems unreadCount={unreadCount} pageChangeMap={pageChangeMap} role={role} />
         </nav>
         <div className="sidebar-footer">
+          <button
+            type="button"
+            className="nav-item sidebar-collapse-button"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={sidebarCollapsed ? "Extinde meniul" : "Restrange meniul"}
+            title={sidebarCollapsed ? "Extinde meniul" : "Restrange meniul"}
+          >
+            <span className="nav-item-icon-wrap menu-icon-cyan">
+              {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+            </span>
+            <span className="nav-item-label">Restrange meniul</span>
+          </button>
           <button type="button" className="nav-item desktop-logout-btn"
             onClick={() => void handleLogout()} disabled={loggingOut}
             style={{ width: "100%", background: "none", border: "none", cursor: loggingOut ? "wait" : "pointer", color: "var(--danger)" }}>
@@ -663,7 +678,7 @@ export default function AppShell() {
       )}
 
       {/* ── MOBILE DRAWER ── */}
-      <aside className={`mobile-drawer ${mobileMenuOpen ? "mobile-drawer-open" : ""}`}
+      <aside ref={mobileDrawerRef} className={`mobile-drawer ${mobileMenuOpen ? "mobile-drawer-open" : ""}`}
         aria-label="Meniu mobil" aria-hidden={!mobileMenuOpen}>
         <div className="mobile-drawer-header">
           <div className="brand" style={{ border: "none", padding: "0", marginBottom: 0 }}>
@@ -679,7 +694,7 @@ export default function AppShell() {
           </button>
         </div>
         <nav className="sidebar-nav">
-          <NavItems onNavigate={() => setMobileMenuOpen(false)} unreadCount={unreadCount} pageChangeMap={pageChangeMap} />
+          <NavItems mobile onNavigate={() => setMobileMenuOpen(false)} unreadCount={unreadCount} pageChangeMap={pageChangeMap} role={role} />
         </nav>
         <div className="mobile-drawer-footer">
           <button type="button" className="secondary-btn mobile-logout-btn"
@@ -695,7 +710,7 @@ export default function AppShell() {
         <header className="topbar">
           <div className="topbar-main-row">
             <div className="topbar-left">
-              <button type="button" className="mobile-menu-button"
+              <button ref={menuButtonRef} type="button" className="mobile-menu-button"
                 onClick={() => setMobileMenuOpen(true)} aria-label="Deschide meniul"
                 aria-expanded={mobileMenuOpen}>
                 <Menu size={20} strokeWidth={2.2} />
@@ -707,21 +722,7 @@ export default function AppShell() {
                   </span>
                   {pageTitle}
                 </h1>
-                <div className="topbar-breadcrumb">
-                  <span>WorkControl</span>
-                  {pageSection && (
-                    <>
-                      <ChevronRight size={11} className="topbar-breadcrumb-sep" />
-                      <span>{pageSection}</span>
-                    </>
-                  )}
-                  {pageSection !== pageTitle && (
-                    <>
-                      <ChevronRight size={11} className="topbar-breadcrumb-sep" />
-                      <span className="topbar-breadcrumb-current">{pageTitle}</span>
-                    </>
-                  )}
-                </div>
+                <PageBreadcrumbs items={breadcrumbs} />
               </div>
             </div>
 
@@ -754,6 +755,7 @@ export default function AppShell() {
         </header>
 
         <AppUpdateBanner />
+        <ConnectivityBanner />
         <InstallAppBanner />
         <NotificationPermissionBanner userId={user?.uid} />
         {currentItem && currentChanges.length > 0 && (

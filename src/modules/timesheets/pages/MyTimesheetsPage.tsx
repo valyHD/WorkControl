@@ -27,7 +27,7 @@ import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { subscribeNotificationRules } from "../../notifications/services/notificationRulesService";
 import type { NotificationRuleItem } from "../../../types/notification-rule";
 import KpiCard from "../../../components/KpiCard";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import TimesheetStatusCard from "../../../components/TimesheetStatusCard";
 import TimesheetChartCard from "../../../components/TimesheetChartCard";
 import StatusBadge from "../../../components/StatusBadge";
@@ -398,8 +398,8 @@ export default function MyTimesheetsPage() {
   }
 
   return (
-    <section className="page-section my-timesheets-modern-page">
-      <ProductPageHeader
+    <PageLayout className="my-timesheets-modern-page">
+      <PageHeader
         eyebrow="Spațiul meu de lucru"
         title="Pontajul meu"
         description={activeTimesheet ? "Cronometrul este activ și se actualizează în timp real." : "Alege proiectul și pornește pontajul când începi lucrul."}
@@ -619,6 +619,6 @@ export default function MyTimesheetsPage() {
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }

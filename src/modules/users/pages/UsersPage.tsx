@@ -4,7 +4,7 @@ import { deleteUserProfile, getAllUsers, subscribeUsers } from "../services/user
 import type { AppUserItem } from "../../../types/user";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 import { Search, UserPlus, Users, ShieldAlert, Trash2 } from "lucide-react";
 
 function UserRowSkeleton() {
@@ -163,8 +163,8 @@ export default function UsersPage() {
   }
 
   return (
-    <section className="page-section">
-      <ProductPageHeader
+    <PageLayout>
+      <PageHeader
         eyebrow="Echipă și acces"
         title="Utilizatori"
         description={loading ? "Se încarcă echipa..." : `${users.length} conturi · ${activeCount} active · ${onlineCount} online`}
@@ -331,6 +331,6 @@ export default function UsersPage() {
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }

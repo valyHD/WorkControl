@@ -1,4 +1,5 @@
 import { normalizeAssistantText, scoreAssistantText } from "./assistantFuzzy";
+import { ASSISTANT_ACTION_IDS } from "../assistantActionCatalog";
 
 export type AssistantPageActionType = "button" | "file" | "field" | "section" | "link" | "search";
 
@@ -20,17 +21,17 @@ export type AssistantPageActionMatch = AssistantPageAction & {
 export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   {
     pagePattern: "/expenses/scan",
-    id: "upload-receipt",
+    id: ASSISTANT_ACTION_IDS.uploadReceipt,
     label: "Incarca poza bon",
     aliases: ["incarca poza", "alege bon", "upload bon", "pune poza la bon", "fisier bon", "poza bon"],
     selector: "[data-assistant-action='upload-receipt']",
     priority: 1,
     actionType: "file",
-    nextActionIds: ["scan-receipt"],
+    nextActionIds: [ASSISTANT_ACTION_IDS.scanReceipt],
   },
   {
     pagePattern: "/expenses/scan",
-    id: "scan-receipt",
+    id: ASSISTANT_ACTION_IDS.scanReceipt,
     label: "Scaneaza si salveaza bon",
     aliases: ["scaneaza bon", "salveaza bon", "scanare bon", "citeste bon", "scaneaza si salveaza"],
     selector: "[data-assistant-action='scan-receipt']",
@@ -67,7 +68,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/my-leave",
-    id: "submit-leave-request",
+    id: ASSISTANT_ACTION_IDS.submitLeaveRequest,
     label: "Trimite cererea de concediu",
     aliases: ["trimite cerere", "programeaza concediu", "depune concediu", "trimite concediu"],
     selector: "[data-assistant-section='leave-form'] [data-assistant-action='submit-leave-request'], [data-assistant-action='submit-leave-request']",
@@ -159,7 +160,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/users/:userId/edit",
-    id: "save-user",
+    id: ASSISTANT_ACTION_IDS.saveUser,
     label: "Salveaza utilizatorul",
     aliases: ["salveaza utilizator", "salveaza user", "salveaza modificarile"],
     selector: "[data-assistant-action='save-user']",
@@ -204,7 +205,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/vehicles/new",
-    id: "save-vehicle",
+    id: ASSISTANT_ACTION_IDS.saveVehicle,
     label: "Salveaza masina",
     aliases: ["salveaza masina", "creeaza masina", "salveaza vehicul"],
     selector: "[data-assistant-action='save-vehicle']",
@@ -231,7 +232,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/vehicles/:vehicleId/edit",
-    id: "save-vehicle",
+    id: ASSISTANT_ACTION_IDS.saveVehicle,
     label: "Salveaza masina",
     aliases: ["salveaza masina", "salveaza vehicul"],
     selector: "[data-assistant-action='save-vehicle']",
@@ -258,7 +259,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/tools/new",
-    id: "save-tool",
+    id: ASSISTANT_ACTION_IDS.saveTool,
     label: "Salveaza scula",
     aliases: ["salveaza scula", "creeaza scula"],
     selector: "[data-assistant-action='save-tool']",
@@ -276,7 +277,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/tools/:toolId/edit",
-    id: "save-tool",
+    id: ASSISTANT_ACTION_IDS.saveTool,
     label: "Salveaza scula",
     aliases: ["salveaza scula", "salveaza modificarile"],
     selector: "[data-assistant-action='save-tool']",
@@ -323,7 +324,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/users/new",
-    id: "save-user",
+    id: ASSISTANT_ACTION_IDS.saveUser,
     label: "Salveaza utilizatorul",
     aliases: ["creeaza utilizator", "salveaza utilizator", "salveaza user"],
     selector: "[data-assistant-action='save-user']",
@@ -352,7 +353,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/my-profile",
-    id: "save-user",
+    id: ASSISTANT_ACTION_IDS.saveUser,
     label: "Salveaza profilul",
     aliases: ["salveaza profil", "salveaza utilizator", "salveaza user"],
     selector: "[data-assistant-action='save-user']",
@@ -361,7 +362,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-report-generator",
+    id: ASSISTANT_ACTION_IDS.maintenanceReport,
     label: "Generator raport mentenanta",
     aliases: ["raport revizie", "raport interventie", "genereaza raport", "generator raport"],
     selector: "[data-assistant-section='maintenance-report-generator']",
@@ -424,7 +425,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-add-client",
+    id: ASSISTANT_ACTION_IDS.maintenanceAddClient,
     label: "Adauga client mentenanta",
     aliases: ["adauga client", "client mentenanta", "formular client", "client nou"],
     selector: "[data-assistant-action='maintenance-add-client']",
@@ -442,7 +443,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-parts",
+    id: ASSISTANT_ACTION_IDS.maintenanceParts,
     label: "Piese mentenanta",
     aliases: ["piese", "comenzi piese", "piese lift", "mentenanta piese"],
     selector: "[data-assistant-action='maintenance-parts']",
@@ -451,7 +452,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance/orders",
-    id: "maintenance-parts",
+    id: ASSISTANT_ACTION_IDS.maintenanceParts,
     label: "Comenzi piese mentenanta",
     aliases: ["piese", "comenzi piese", "piese lift", "comanda noua"],
     selector: "[data-assistant-action='maintenance-parts']",
@@ -460,7 +461,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance/parts",
-    id: "maintenance-parts",
+    id: ASSISTANT_ACTION_IDS.maintenanceParts,
     label: "Comenzi piese mentenanta",
     aliases: ["piese", "comenzi piese", "piese lift", "comanda noua"],
     selector: "[data-assistant-action='maintenance-parts']",
@@ -469,7 +470,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-branding",
+    id: ASSISTANT_ACTION_IDS.maintenanceBranding,
     label: "Firme si branding mentenanta",
     aliases: ["firme mentenanta", "branding", "logo firma", "stampila firma"],
     selector: "[data-assistant-action='maintenance-branding']",
@@ -478,7 +479,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-history",
+    id: ASSISTANT_ACTION_IDS.maintenanceHistory,
     label: "Istoric clienti mentenanta",
     aliases: ["istoric rapoarte", "istoric mentenanta", "lista clienti", "rapoarte mentenanta"],
     selector: "[data-assistant-action='maintenance-history']",
@@ -487,7 +488,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance",
-    id: "maintenance-checks",
+    id: ASSISTANT_ACTION_IDS.maintenanceChecks,
     label: "Verificari lunare mentenanta",
     aliases: ["verificari lunare", "verifica revizii", "revizii lunare", "luna curenta"],
     selector: "[data-assistant-action='maintenance-checks']",
@@ -496,7 +497,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance/manage",
-    id: "maintenance-add-client",
+    id: ASSISTANT_ACTION_IDS.maintenanceAddClient,
     label: "Adauga client mentenanta",
     aliases: ["adauga client", "client mentenanta", "formular client", "client nou"],
     selector: "[data-assistant-action='maintenance-add-client']",
@@ -514,7 +515,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance/manage",
-    id: "maintenance-branding",
+    id: ASSISTANT_ACTION_IDS.maintenanceBranding,
     label: "Firme si branding mentenanta",
     aliases: ["firme mentenanta", "branding", "logo firma", "stampila firma"],
     selector: "[data-assistant-action='maintenance-branding']",
@@ -523,7 +524,7 @@ export const ASSISTANT_PAGE_ACTION_REGISTRY: AssistantPageAction[] = [
   },
   {
     pagePattern: "/maintenance/manage",
-    id: "maintenance-history",
+    id: ASSISTANT_ACTION_IDS.maintenanceHistory,
     label: "Istoric clienti mentenanta",
     aliases: ["istoric rapoarte", "istoric mentenanta", "lista clienti", "rapoarte mentenanta"],
     selector: "[data-assistant-action='maintenance-history']",

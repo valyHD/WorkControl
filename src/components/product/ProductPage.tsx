@@ -13,7 +13,7 @@ export type ProductAction = {
   assistantAction?: string;
 };
 
-type ProductPageHeaderProps = {
+export type ProductPageHeaderProps = {
   eyebrow?: string;
   title: ReactNode;
   description?: ReactNode;

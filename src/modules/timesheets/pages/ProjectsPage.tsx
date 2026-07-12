@@ -12,7 +12,7 @@ import {
 } from "../services/timesheetsService";
 import ProjectForm from "../components/ProjectForm";
 import UserProfileLink from "../../../components/UserProfileLink";
-import { ProductPageHeader } from "../../../components/product/ProductPage";
+import { PageHeader, PageLayout } from "../../../components/experience";
 
 type TimesheetGroupMode = "day" | "week" | "month";
 
@@ -245,8 +245,8 @@ export default function ProjectsPage() {
   }
 
   return (
-    <section className="page-section">
-      <ProductPageHeader
+    <PageLayout>
+      <PageHeader
         eyebrow="Echipă și pontaje"
         title="Proiecte"
         description="Creează proiecte, urmărește orele și păstrează starea lucrărilor într-un singur loc."
@@ -478,6 +478,6 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
-    </section>
+    </PageLayout>
   );
 }
