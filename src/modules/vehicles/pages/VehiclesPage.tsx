@@ -5,20 +5,31 @@ import type { VehicleItem } from "../../../types/vehicle";
 import { subscribeVehiclesList } from "../services/vehiclesService";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import { getUserThemeClass } from "../../../lib/ui/userTheme";
-import { CarFront, List, MapPinned, Search } from "lucide-react";
+import { CarFront, Grid3X3, List, MapPinned, Search, Table2 } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { VehicleGpsVisibilityToggle } from "../components/VehicleGpsVisibilityGate";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
+import DataTable, { type DataTableColumn } from "../../../components/DataTable";
+import StatusBadge from "../../../components/StatusBadge";
 
 function VehicleCardSkeleton() {
   return (
     <div className="tool-card" style={{ pointerEvents: "none" }}>
       <div className="tool-card-top">
-        <div className="skeleton" style={{ width: 56, height: 56, borderRadius: "var(--radius-md)" }} />
-        <div className="skeleton" style={{ width: 70, height: 22, borderRadius: "var(--radius-xs)" }} />
+        <div
+          className="skeleton"
+          style={{ width: 56, height: 56, borderRadius: "var(--radius-md)" }}
+        />
+        <div
+          className="skeleton"
+          style={{ width: 70, height: 22, borderRadius: "var(--radius-xs)" }}
+        />
       </div>
-      <div className="skeleton" style={{ height: 18, width: "55%", marginBottom: 8, marginTop: 4 }} />
+      <div
+        className="skeleton"
+        style={{ height: 18, width: "55%", marginBottom: 8, marginTop: 4 }}
+      />
       <div className="skeleton" style={{ height: 13, width: "40%", marginBottom: 6 }} />
       <div className="skeleton" style={{ height: 13, width: "65%", marginBottom: 6 }} />
       <div className="skeleton" style={{ height: 13, width: "50%" }} />
@@ -67,11 +78,46 @@ function getCurrentGpsDataUsageMonthKey() {
   return `${year}_${month}`;
 }
 
+function getGpsFreshness(vehicle: VehicleItem, now = Date.now()) {
+  const lastSeen = Number(
+    vehicle.gpsSnapshot?.serverTimestamp ||
+      vehicle.gpsSnapshot?.gpsTimestamp ||
+      vehicle.tracker?.lastSeenAt ||
+      0
+  );
+  if (!lastSeen) return { id: "missing", label: "Fara GPS", tone: "muted" as const };
+  const ageMinutes = Math.max(0, (now - lastSeen) / 60_000);
+  if (ageMinutes <= 10) return { id: "fresh", label: "GPS live", tone: "green" as const };
+  if (ageMinutes <= 120) return { id: "stale", label: "GPS intarziat", tone: "orange" as const };
+  return { id: "offline", label: "GPS offline", tone: "red" as const };
+}
+
+function hasVehicleDocumentAlert(vehicle: VehicleItem, now = Date.now()) {
+  const threshold = now + 30 * 24 * 60 * 60 * 1000;
+  return (vehicle.documents || []).some((document) => {
+    if (!document.expiryDate) return false;
+    const expiry = Date.parse(`${document.expiryDate}T00:00:00`);
+    return Number.isFinite(expiry) && expiry <= threshold;
+  });
+}
+
+function hasVehicleServiceAlert(vehicle: VehicleItem) {
+  return Boolean(
+    vehicle.status === "in_service" ||
+    vehicle.status === "avariata" ||
+    (vehicle.nextServiceKm > 0 && vehicle.nextServiceKm - vehicle.currentKm <= 1_000)
+  );
+}
+
 export default function VehiclesPage() {
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("toate");
+  const [driverFilter, setDriverFilter] = useState("toate");
+  const [gpsFilter, setGpsFilter] = useState("toate");
+  const [attentionFilter, setAttentionFilter] = useState("toate");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -84,14 +130,19 @@ export default function VehiclesPage() {
     });
 
     return () => {
-      try { unsubscribe?.(); } catch (err) {
+      try {
+        unsubscribe?.();
+      } catch (err) {
         console.error("[VehiclesPage][unsubscribe]", err);
       }
     };
   }, []);
 
   useEffect(() => {
-    preloadImageUrls(vehicles.map((vehicle) => vehicle.coverThumbUrl || vehicle.coverImageUrl), 48);
+    preloadImageUrls(
+      vehicles.map((vehicle) => vehicle.coverThumbUrl || vehicle.coverImageUrl),
+      48
+    );
   }, [vehicles]);
 
   const filteredVehicles = useMemo(() => {
@@ -113,15 +164,91 @@ export default function VehiclesPage() {
         owner.includes(q) ||
         driver.includes(q);
 
-      const matchesStatus =
-        statusFilter === "toate" || v.status === statusFilter;
+      const matchesStatus = statusFilter === "toate" || v.status === statusFilter;
+      const matchesDriver =
+        driverFilter === "toate" ||
+        (driverFilter === "assigned" ? Boolean(v.currentDriverUserId) : !v.currentDriverUserId);
+      const gpsFreshness = getGpsFreshness(v);
+      const matchesGps = gpsFilter === "toate" || gpsFreshness.id === gpsFilter;
+      const documentAlert = hasVehicleDocumentAlert(v);
+      const serviceAlert = hasVehicleServiceAlert(v);
+      const matchesAttention =
+        attentionFilter === "toate" ||
+        (attentionFilter === "documents" && documentAlert) ||
+        (attentionFilter === "service" && serviceAlert) ||
+        (attentionFilter === "alerts" && (documentAlert || serviceAlert));
 
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesStatus && matchesDriver && matchesGps && matchesAttention;
     });
-  }, [vehicles, search, statusFilter]);
+  }, [attentionFilter, driverFilter, gpsFilter, vehicles, search, statusFilter]);
 
   const total = vehicles.length;
   const activeCount = vehicles.filter((v) => v.status === "activa").length;
+  const tableColumns = useMemo<DataTableColumn<VehicleItem>[]>(
+    () => [
+      {
+        key: "vehicle",
+        header: "Masina",
+        render: (vehicle) => (
+          <Link className="wc-vehicle-table-identity" to={`/vehicles/${vehicle.id}`}>
+            <strong>{vehicle.plateNumber}</strong>
+            <span>{[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "-"}</span>
+          </Link>
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        render: (vehicle) => <VehicleStatusBadge status={vehicle.status} />,
+      },
+      {
+        key: "driver",
+        header: "Sofer",
+        render: (vehicle) => vehicle.currentDriverUserName || "Nealocat",
+      },
+      {
+        key: "gps",
+        header: "GPS",
+        render: (vehicle) => {
+          const freshness = getGpsFreshness(vehicle);
+          return <StatusBadge tone={freshness.tone}>{freshness.label}</StatusBadge>;
+        },
+      },
+      {
+        key: "documents",
+        header: "Documente",
+        render: (vehicle) => (
+          <StatusBadge tone={hasVehicleDocumentAlert(vehicle) ? "orange" : "green"}>
+            {hasVehicleDocumentAlert(vehicle) ? "Verifica" : `${vehicle.documents.length} OK`}
+          </StatusBadge>
+        ),
+      },
+      {
+        key: "service",
+        header: "Service",
+        render: (vehicle) => (
+          <StatusBadge tone={hasVehicleServiceAlert(vehicle) ? "orange" : "green"}>
+            {hasVehicleServiceAlert(vehicle) ? "Atentie" : "OK"}
+          </StatusBadge>
+        ),
+      },
+      {
+        key: "km",
+        header: "Kilometri",
+        render: (vehicle) => `${(vehicle.currentKm || 0).toLocaleString("ro-RO")} km`,
+      },
+      {
+        key: "actions",
+        header: "Actiuni",
+        render: (vehicle) => (
+          <Link className="secondary-btn secondary-btn--compact" to={`/vehicles/${vehicle.id}`}>
+            Detalii
+          </Link>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <PageLayout>
@@ -130,8 +257,21 @@ export default function VehiclesPage() {
         title="Mașini"
         description={loading ? "Se încarcă flota..." : `${total} vehicule · ${activeCount} active`}
         actions={[
-          { id: "gps", label: "Toate GPS-urile", to: "/vehicles/gps-map", icon: MapPinned, assistantAction: "open-fleet-gps" },
-          { id: "new", label: "Adaugă mașină", to: "/vehicles/new", icon: CarFront, tone: "primary", assistantAction: "create-vehicle" },
+          {
+            id: "gps",
+            label: "Toate GPS-urile",
+            to: "/vehicles/gps-map",
+            icon: MapPinned,
+            assistantAction: "open-fleet-gps",
+          },
+          {
+            id: "new",
+            label: "Adaugă mașină",
+            to: "/vehicles/new",
+            icon: CarFront,
+            tone: "primary",
+            assistantAction: "create-vehicle",
+          },
         ]}
       />
 
@@ -139,14 +279,43 @@ export default function VehiclesPage() {
         activeId="list"
         tabs={[
           { id: "list", label: "Listă flotă", to: "/vehicles", icon: List },
-          { id: "map", label: "Hartă GPS", to: "/vehicles/gps-map", icon: MapPinned, assistantAction: "open-fleet-gps" },
+          {
+            id: "map",
+            label: "Hartă GPS",
+            to: "/vehicles/gps-map",
+            icon: MapPinned,
+            assistantAction: "open-fleet-gps",
+          },
         ]}
       />
 
       <div className="panel">
         <div className="tools-header tools-header--compact">
-          <div><h2 className="panel-title">Flotă</h2><p className="tools-subtitle">Status, șofer, kilometri și documente.</p></div>
-          <VehicleGpsVisibilityToggle />
+          <div>
+            <h2 className="panel-title">Flotă</h2>
+            <p className="tools-subtitle">Status, șofer, kilometri și documente.</p>
+          </div>
+          <div className="wc-list-view-actions">
+            <div className="wc-segmented-control" aria-label="Mod afisare flota">
+              <button
+                type="button"
+                className={viewMode === "cards" ? "is-active" : ""}
+                onClick={() => setViewMode("cards")}
+                title="Afisare carduri"
+              >
+                <Grid3X3 size={16} />
+              </button>
+              <button
+                type="button"
+                className={viewMode === "table" ? "is-active" : ""}
+                onClick={() => setViewMode("table")}
+                title="Afisare tabel"
+              >
+                <Table2 size={16} />
+              </button>
+            </div>
+            <VehicleGpsVisibilityToggle />
+          </div>
         </div>
 
         {/* Filters */}
@@ -155,8 +324,12 @@ export default function VehiclesPage() {
             <Search
               size={15}
               style={{
-                position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)",
-                color: "var(--text-muted)", pointerEvents: "none",
+                position: "absolute",
+                left: 11,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "var(--text-muted)",
+                pointerEvents: "none",
               }}
             />
             <input
@@ -175,8 +348,40 @@ export default function VehiclesPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             {STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
+          </select>
+          <select
+            className="tool-input"
+            value={driverFilter}
+            onChange={(event) => setDriverFilter(event.target.value)}
+          >
+            <option value="toate">Toti soferii</option>
+            <option value="assigned">Cu sofer</option>
+            <option value="unassigned">Fara sofer</option>
+          </select>
+          <select
+            className="tool-input"
+            value={gpsFilter}
+            onChange={(event) => setGpsFilter(event.target.value)}
+          >
+            <option value="toate">Orice status GPS</option>
+            <option value="fresh">GPS live</option>
+            <option value="stale">GPS intarziat</option>
+            <option value="offline">GPS offline</option>
+            <option value="missing">Fara GPS</option>
+          </select>
+          <select
+            className="tool-input"
+            value={attentionFilter}
+            onChange={(event) => setAttentionFilter(event.target.value)}
+          >
+            <option value="toate">Toate alertele</option>
+            <option value="alerts">Necesita atentie</option>
+            <option value="documents">Documente</option>
+            <option value="service">Service</option>
           </select>
         </div>
 
@@ -185,24 +390,39 @@ export default function VehiclesPage() {
           <div className="placeholder-page">
             <h2>Eroare</h2>
             <p>{error}</p>
-            <button className="secondary-btn" onClick={() => window.location.reload()}>Re?ncarc?</button>
+            <button className="secondary-btn" onClick={() => window.location.reload()}>
+              Re?ncarc?
+            </button>
           </div>
         ) : loading ? (
           <div className="tools-grid">
-            {[1, 2, 3, 4, 5, 6].map((i) => <VehicleCardSkeleton key={i} />)}
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <VehicleCardSkeleton key={i} />
+            ))}
           </div>
         ) : filteredVehicles.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-state-icon"><CarFront size={22} strokeWidth={1.6} /></div>
+            <div className="empty-state-icon">
+              <CarFront size={22} strokeWidth={1.6} />
+            </div>
             <div className="empty-state-title">
-              {search || statusFilter !== "toate" ? "Nicio mașină nu corespunde filtrelor" : "Nicio mașină adăugată"}
+              {search || statusFilter !== "toate"
+                ? "Nicio mașină nu corespunde filtrelor"
+                : "Nicio mașină adăugată"}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>
               {search || statusFilter !== "toate"
-                 ? "Modifică filtrele de căutare."
+                ? "Modifică filtrele de căutare."
                 : "Apasă Adaugă mașină pentru a începe."}
             </div>
           </div>
+        ) : viewMode === "table" ? (
+          <DataTable
+            columns={tableColumns}
+            rows={filteredVehicles}
+            rowKey={(vehicle) => vehicle.id}
+            empty={null}
+          />
         ) : (
           <div className="tools-grid">
             {filteredVehicles.map((vehicle, index) => {
@@ -212,11 +432,7 @@ export default function VehiclesPage() {
               const prioritizeImage = index < 18;
 
               return (
-                <Link
-                  to={`/vehicles/${vehicle.id}`}
-                  key={vehicle.id}
-                  className="tool-card-link"
-                >
+                <Link to={`/vehicles/${vehicle.id}`} key={vehicle.id} className="tool-card-link">
                   <div className={`tool-card user-accent-card ${themeClass}`}>
                     <div className="tool-card-top">
                       <div className="tool-card-avatar">

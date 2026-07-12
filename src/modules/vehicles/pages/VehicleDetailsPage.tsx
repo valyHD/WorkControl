@@ -182,8 +182,9 @@ export default function VehicleDetailsPage() {
   const [commentText, setCommentText] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
   const estimatedKmUpdateRef = useRef({ km: 0, updatedAt: 0 });
-  const requestedTab = searchParams.get("tab") || (location.hash === "#vehicle-tracker-live-section" ? "gps" : "general");
-  const activeTab = ["general", "gps", "history", "documents", "maintenance", "expenses", "timeline"].includes(requestedTab)
+  const requestedTabRaw = searchParams.get("tab") || (location.hash === "#vehicle-tracker-live-section" ? "gps" : "general");
+  const requestedTab = requestedTabRaw === "history" ? "timeline" : requestedTabRaw;
+  const activeTab = ["general", "gps", "timeline", "maintenance", "documents", "expenses", "drivers", "settings"].includes(requestedTab)
     ? requestedTab
     : "general";
 
@@ -637,13 +638,14 @@ export default function VehicleDetailsPage() {
         onChange={selectVehicleTab}
         label="Detalii mașină"
         tabs={[
-          { id: "general", label: "General", assistantAction: "vehicle-tab-general" },
+          { id: "general", label: "Overview", assistantAction: "vehicle-tab-general" },
           { id: "gps", label: "GPS", assistantAction: "vehicle-tab-gps" },
-          { id: "history", label: "Istoric", badge: events.length, assistantAction: "vehicle-tab-history" },
-          { id: "documents", label: "Documente", badge: vehicle.documents.length, assistantAction: "vehicle-tab-documents" },
+          { id: "timeline", label: "Timeline", badge: events.length, assistantAction: "vehicle-tab-timeline" },
           { id: "maintenance", label: "Mentenanță", badge: maintenanceAlerts.length || undefined, assistantAction: "vehicle-tab-maintenance" },
+          { id: "documents", label: "Documente", badge: vehicle.documents.length, assistantAction: "vehicle-tab-documents" },
           { id: "expenses", label: "Cheltuieli", assistantAction: "vehicle-tab-expenses" },
-          { id: "timeline", label: "Timeline", assistantAction: "vehicle-tab-timeline" },
+          { id: "drivers", label: "Soferi", assistantAction: "vehicle-tab-drivers" },
+          { id: "settings", label: "Setari", assistantAction: "vehicle-tab-settings" },
         ]}
       />
 
@@ -806,7 +808,7 @@ export default function VehicleDetailsPage() {
       </VehicleSectionDropdown>
       </div>
 
-      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "general"}>
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "drivers"}>
       <VehicleSectionDropdown title="Schimba soferul curent">
         {canManageVehicle && <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />}
 
@@ -974,7 +976,7 @@ export default function VehicleDetailsPage() {
       </VehicleSectionDropdown>
       </div>
 
-      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "history"}>
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "timeline"}>
       <VehicleSectionDropdown title="Istoric evenimente si comentarii">
         <div>
         <div
@@ -1071,6 +1073,21 @@ export default function VehicleDetailsPage() {
               tone: event.type === "comment" ? "blue" : "muted",
             }))}
           />
+        </div>
+      </div>
+
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "settings"}>
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <h2 className="panel-title">Setari masina</h2>
+              <p className="panel-subtitle">Date administrative, responsabilitate si configurarea vehiculului.</p>
+            </div>
+          </div>
+          <div className="tool-form-actions">
+            {canManageVehicle ? <Link className="primary-btn" to={`/vehicles/${vehicle.id}/edit`}>Editeaza masina</Link> : null}
+            <Link className="secondary-btn" to={`/vehicles/${vehicle.id}/live`}>Date live FMC130</Link>
+          </div>
         </div>
       </div>
     </section>

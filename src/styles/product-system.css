@@ -864,6 +864,50 @@ a:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.wc-list-view-actions,
+.wc-segmented-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wc-segmented-control {
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+
+.wc-segmented-control button {
+  width: 34px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 3px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.wc-segmented-control button.is-active {
+  background: var(--surface);
+  color: var(--action);
+  box-shadow: var(--shadow-sm);
+}
+
+.wc-vehicle-table-identity {
+  display: grid;
+  gap: 2px;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.wc-vehicle-table-identity span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .wc-input-with-icon {
   position: relative;
   display: block;
