@@ -8,6 +8,7 @@ import {
   updateMaintenanceClient,
 } from "../services/maintenanceService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import EntityTimeline from "../../../components/product/EntityTimeline";
 import "./maintenance.css";
 
 type AddressLiftGroup = {
@@ -795,6 +796,12 @@ export default function MaintenanceClientDetailsPage() {
               ) : (
                 <p className="tools-subtitle">Nu există adrese.</p>
               )}
+            </div>
+
+            <div className="panel" style={{ marginTop: 16 }}>
+              <h3 className="panel-subtitle">Activitate client</h3>
+              <p className="tools-subtitle">Evenimente reale din istoricul WorkControl pentru acest client.</p>
+              <EntityTimeline entityType="client" entityId={client.id} />
             </div>
           </>
         ) : (

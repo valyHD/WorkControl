@@ -17,6 +17,7 @@ import {
 } from "../services/controlPanelService";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
+import SystemHealthPanel from "../components/SystemHealthPanel";
 
 const BACKUP_PREVIEW_STORAGE_KEY = "workcontrol_uploaded_backup_preview";
 
@@ -398,6 +399,8 @@ export default function ControlPanelPage() {
         {busyMessage && <div className="tool-message">{busyMessage}</div>}
         {error && <div className="tool-message">{error}</div>}
       </div>
+
+      <SystemHealthPanel isAdmin={role === "admin"} />
 
       <div id="billing"><BillingCostPanel isAdmin={role === "admin"} /></div>
 

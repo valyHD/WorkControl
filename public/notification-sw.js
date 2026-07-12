@@ -48,9 +48,10 @@ try {
   console.warn('[notification-sw] Firebase Messaging indisponibil. App shell ramane activ.', error);
 }
 
-const APP_SHELL_CACHE_NAME = 'workcontrol-app-shell-v6';
+const APP_SHELL_CACHE_NAME = 'workcontrol-app-shell-v7';
 const APP_SHELL_URLS = ['/', '/manifest.webmanifest'];
 const IMAGE_CACHE_NAME = 'workcontrol-image-cache-v1';
+const STATIC_CACHE_NAME = 'workcontrol-static-v1';
 const RECENT_NOTIFICATION_TTL_MS = 2 * 60 * 1000;
 const recentNotificationTags = new Map();
 const IMAGE_CACHEABLE_HOSTS = [
@@ -78,7 +79,10 @@ self.addEventListener('activate', (event) => {
     const cacheNames = await caches.keys();
     await Promise.all(
       cacheNames
-        .filter((name) => name.startsWith('workcontrol-app-shell-') && name !== APP_SHELL_CACHE_NAME)
+        .filter((name) =>
+          (name.startsWith('workcontrol-app-shell-') && name !== APP_SHELL_CACHE_NAME) ||
+          (name.startsWith('workcontrol-static-') && name !== STATIC_CACHE_NAME)
+        )
         .map((name) => caches.delete(name))
     );
     await self.clients.claim();
@@ -163,6 +167,20 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.method !== 'GET' || request.destination !== 'image') {
+    if (
+      request.method === 'GET' &&
+      ['script', 'style', 'font', 'worker'].includes(request.destination) &&
+      new URL(request.url).origin === self.location.origin
+    ) {
+      event.respondWith((async () => {
+        const cache = await caches.open(STATIC_CACHE_NAME);
+        const cachedResponse = await cache.match(request);
+        if (cachedResponse) return cachedResponse;
+        const networkResponse = await fetch(request);
+        if (networkResponse?.ok) await cache.put(request, networkResponse.clone());
+        return networkResponse;
+      })());
+    }
     return;
   }
 

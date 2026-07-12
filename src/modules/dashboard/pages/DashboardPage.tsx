@@ -49,6 +49,7 @@ import {
   getLiveFirebaseCostEstimate,
   type LiveFirebaseCostEstimate,
 } from "../../reports/services/billingMetricsService";
+import { getDashboardRoleProfile } from "../config/dashboardRoleProfile";
 
 type NotificationLite = {
   id: string;
@@ -134,6 +135,7 @@ export default function DashboardPage() {
   });
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const [billingEstimate, setBillingEstimate] = useState<LiveFirebaseCostEstimate | null>(null);
+  const roleProfile = useMemo(() => getDashboardRoleProfile(role || "angajat"), [role]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -390,9 +392,9 @@ export default function DashboardPage() {
   return (
     <PageLayout className="dashboard-modern-page">
       <PageHeader
-        eyebrow="Command Center"
-        title="Ce se întâmplă azi în firmă"
-        description="Pontaje, flotă, proiecte și alerte într-o singură privire."
+        eyebrow={roleProfile.eyebrow}
+        title={roleProfile.title}
+        description={roleProfile.description}
         meta={
           <span className="today-strip">
             <CalendarClock size={14} />

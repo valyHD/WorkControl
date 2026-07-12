@@ -121,6 +121,18 @@ function getDateParts(ts: number) {
   };
 }
 
+function getSafeOfflineActionTime(value?: number) {
+  const now = Date.now();
+  if (value === undefined) return now;
+  if (!Number.isFinite(value)) throw new Error("Ora actiunii offline este invalida.");
+  const oldestAllowed = now - 7 * 24 * 60 * 60 * 1000;
+  const newestAllowed = now + 5 * 60 * 1000;
+  if (value < oldestAllowed || value > newestAllowed) {
+    throw new Error("Actiunea offline este prea veche sau are o ora invalida.");
+  }
+  return Math.round(value);
+}
+
 function getProjectDisplayName(projectName?: string, projectCode?: string): string {
   const name = String(projectName ?? "").trim();
   const code = String(projectCode ?? "").trim();
@@ -325,13 +337,14 @@ export async function startTimesheet(params: {
   startExplanation?: string;
   startPolicyFlag?: string;
   startExpectedTime?: string;
+  occurredAt?: number;
 }): Promise<string> {
   const existing = await getActiveTimesheetForUser(params.userId);
   if (existing) {
     throw new Error("Exista deja un pontaj activ pentru acest utilizator.");
   }
 
-  const now = Date.now();
+  const now = getSafeOfflineActionTime(params.occurredAt);
   const parts = getDateParts(now);
   const startExplanation = String(params.startExplanation ?? "").trim();
   const startPolicyFlag = params.startPolicyFlag ?? "";
@@ -409,6 +422,7 @@ export async function stopTimesheet(params: {
   stopLocation: TimesheetLocation;
   stopPolicyFlag?: string;
   stopExpectedMinutes?: number;
+  occurredAt?: number;
 }): Promise<void> {
   const refDoc = doc(db, "timesheets", params.timesheetId);
   const snap = await getDoc(refDoc);
@@ -419,7 +433,7 @@ export async function stopTimesheet(params: {
 
   const data = snap.data();
   const startAt = data.startAt ?? Date.now();
-  const stopAt = Date.now();
+  const stopAt = Math.max(startAt, getSafeOfflineActionTime(params.occurredAt));
   const workedMinutes = Math.max(1, Math.round((stopAt - startAt) / 60000));
 
   let status: TimesheetItem["status"] = "inchis";

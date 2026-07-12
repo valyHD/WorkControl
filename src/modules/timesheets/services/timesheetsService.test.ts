@@ -127,6 +127,45 @@ describe("timesheetsService critical rules", () => {
     );
   });
 
+  it("preserves valid offline start and stop timestamps", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T10:00:00.000Z"));
+    firestoreMocks.getDocs.mockResolvedValue({ empty: true, docs: [] });
+    firestoreMocks.addDoc.mockResolvedValue({ id: "offline-timesheet" });
+    notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
+
+    const startedAt = Date.parse("2026-07-10T08:15:00.000Z");
+    await startTimesheet({
+      userId: "user-test",
+      userName: "Utilizator Test",
+      projectId: "project-test",
+      projectCode: "",
+      projectName: "Proiect Test",
+      startLocation: { lat: null, lng: null, label: "Offline" },
+      occurredAt: startedAt,
+    });
+    expect(firestoreMocks.addDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ startAt: startedAt, createdAt: startedAt })
+    );
+
+    firestoreMocks.getDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({ ...timesheet(), startAt: startedAt }),
+    });
+    const stoppedAt = Date.parse("2026-07-10T09:45:00.000Z");
+    await stopTimesheet({
+      timesheetId: "offline-timesheet",
+      explanation: "",
+      stopLocation: { lat: null, lng: null, label: "Offline" },
+      occurredAt: stoppedAt,
+    });
+    expect(firestoreMocks.updateDoc).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ stopAt: stoppedAt, workedMinutes: 90 })
+    );
+  });
+
   it("bounds the manager list query", async () => {
     firestoreMocks.getDocs.mockResolvedValue({ docs: [] });
 

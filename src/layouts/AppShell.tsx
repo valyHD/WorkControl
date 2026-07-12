@@ -28,6 +28,9 @@ import {
 } from "../config/navigation";
 import { getPageExperience } from "../config/pageExperience";
 import { ConnectivityBanner, PageBreadcrumbs } from "../components/experience";
+import ProductIntelligenceHub from "../components/product/ProductIntelligenceHub";
+import { trackWorkControlPage, useFeatureFlags } from "../lib/productIntelligence";
+import OfflineSyncCoordinator from "../components/product/OfflineSyncCoordinator";
 
 const VoiceCommandAssistant = lazy(() => import("../components/VoiceCommandAssistant"));
 const GlobalCommandPalette = lazy(() => import("../components/product/GlobalCommandPalette"));
@@ -45,6 +48,7 @@ const pagePrefetchers: Record<string, () => Promise<unknown>> = {
   "/my-timesheets": () => import("../modules/timesheets/pages/MyTimesheetsPage"),
   "/projects": () => import("../modules/timesheets/pages/ProjectsPage"),
   "/notifications": () => import("../modules/notifications/pages/NotificationsPage"),
+  "/inbox": () => import("../modules/inbox/pages/OperationalInboxPage"),
   "/control-panel": () => import("../modules/reports/pages/ReportsPage"),
   "/maintenance": () => import("../modules/maintenance/pages/MaintenancePage"),
   "/maintenance/orders": () => import("../modules/maintenance/pages/MaintenancePartOrdersPage"),
@@ -409,6 +413,7 @@ function TopbarClock() {
 export default function AppShell() {
   const location = useLocation();
   const { user, role } = useAuth();
+  const { flags } = useFeatureFlags();
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileDrawerRef = useRef<HTMLElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -590,7 +595,8 @@ export default function AppShell() {
       path: location.pathname,
       pageTitle: item?.label || "WorkControl",
     });
-  }, [location.pathname, user?.displayName, user?.email, user?.themeKey, user?.uid]);
+    if (flags.usageAnalytics) void trackWorkControlPage(location.pathname, role || "angajat");
+  }, [flags.usageAnalytics, location.pathname, role, user?.displayName, user?.email, user?.themeKey, user?.uid]);
 
   // Close on resize
   useEffect(() => {
@@ -727,6 +733,9 @@ export default function AppShell() {
             </div>
 
             <div className="topbar-right-cluster">
+              {flags.contextualHelp && user?.uid ? (
+                <ProductIntelligenceHub userId={user.uid} role={role || "angajat"} pathname={location.pathname} />
+              ) : null}
               <Suspense fallback={<span className="wc-command-trigger wc-command-trigger--loading" aria-hidden="true" />}>
                 <GlobalCommandPalette />
               </Suspense>
@@ -771,6 +780,7 @@ export default function AppShell() {
         </main>
       </div>
       <FloatingQuickLinks />
+      <OfflineSyncCoordinator />
       <Suspense fallback={null}><VoiceCommandAssistant /></Suspense>
     </div>
   );

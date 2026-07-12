@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ProjectFormValues,
   ProjectItem,
@@ -46,6 +46,15 @@ import {
   sumTimesheetMinutes,
 } from "../utils/timesheetAnalytics";
 import { CalendarDays, Clock3, TimerReset, TrendingUp, AlertTriangle } from "lucide-react";
+import {
+  getOfflineTimesheetQueue,
+  getPendingOfflineTimesheetStart,
+  flushOfflineTimesheetQueue,
+  queueOfflineTimesheetStart,
+  queueOfflineTimesheetStop,
+  type OfflineTimesheetAction,
+} from "../services/offlineTimesheetQueue";
+import { useFeatureFlags } from "../../../lib/productIntelligence";
 
 const TIMESHEETS_CHANGED_EVENT = "workcontrol:timesheets-changed";
 const DEFAULT_START_ATTENTION_FROM_MINUTES = 7 * 60;
@@ -61,6 +70,39 @@ function getProjectDisplayName(projectName?: string, projectCode?: string): stri
 
 function getTimesheetProjectStorageKey(userId: string): string {
   return `workcontrol:last-timesheet-project:${userId}`;
+}
+
+function buildOfflineActiveTimesheet(action: Extract<OfflineTimesheetAction, { type: "start" }>): TimesheetItem {
+  const workDate = getLocalDateKey(action.occurredAt);
+  return {
+    id: `offline:${action.id}`,
+    userId: action.payload.userId,
+    userName: action.payload.userName,
+    userThemeKey: action.payload.userThemeKey ?? null,
+    projectId: action.payload.projectId,
+    projectCode: action.payload.projectCode,
+    projectName: action.payload.projectName,
+    status: "activ",
+    explanation: action.payload.startExplanation || "",
+    startExplanation: action.payload.startExplanation || "",
+    startPolicyFlag: action.payload.startPolicyFlag || "",
+    stopExplanation: "",
+    stopPolicyFlag: "",
+    startExpectedTime: action.payload.startExpectedTime || "",
+    stopExpectedMinutes: null,
+    startAt: action.occurredAt,
+    stopAt: null,
+    workedMinutes: 0,
+    startLocation: action.payload.startLocation,
+    stopLocation: null,
+    startSource: "web",
+    stopSource: "",
+    workDate,
+    yearMonth: workDate.slice(0, 7),
+    weekKey: "",
+    createdAt: action.occurredAt,
+    updatedAt: action.occurredAt,
+  };
 }
 
 function readSavedProjectId(userId: string): string {
@@ -182,6 +224,7 @@ function isTimesheetAttentionTime(
 
 export default function MyTimesheetsPage() {
   const { user, role } = useAuth();
+  const { flags } = useFeatureFlags();
   const canUseCustomTimesheetLocation =
     (user?.email || "").trim().toLowerCase() === "ionut.matura23@gmail.com";
 
@@ -196,6 +239,9 @@ export default function MyTimesheetsPage() {
   const [projectSubmitting, setProjectSubmitting] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [preferredProjectId, setPreferredProjectId] = useState("");
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [offlineStatus, setOfflineStatus] = useState("");
+  const offlineSyncInProgress = useRef(false);
 
   const load = useCallback(
     async (silent = false) => {
@@ -231,9 +277,53 @@ export default function MyTimesheetsPage() {
     [user?.uid]
   );
 
+  const refreshOfflineState = useCallback(() => {
+    if (!user?.uid) return;
+    const queue = getOfflineTimesheetQueue(user.uid);
+    const queuedStart = getPendingOfflineTimesheetStart(user.uid);
+    setOfflineQueueCount(queue.length);
+    if (queuedStart) {
+      setActiveTimesheet((current) => current && !current.id.startsWith("offline:")
+        ? current
+        : buildOfflineActiveTimesheet(queuedStart));
+    }
+  }, [user?.uid]);
+
+  const syncOfflineActions = useCallback(async () => {
+    if (!user?.uid || !navigator.onLine || offlineSyncInProgress.current) return;
+    const queue = getOfflineTimesheetQueue(user.uid);
+    if (!queue.length) return;
+    offlineSyncInProgress.current = true;
+    setOfflineStatus("Se sincronizeaza actiunile de pontaj salvate offline...");
+    try {
+      await flushOfflineTimesheetQueue(user.uid);
+      setOfflineStatus("Pontajele offline au fost sincronizate.");
+      await load(true);
+    } catch (error) {
+      console.warn("[MyTimesheetsPage][offline-sync]", error);
+      setOfflineStatus("Sincronizarea pontajului asteapta o conexiune stabila.");
+    } finally {
+      offlineSyncInProgress.current = false;
+      refreshOfflineState();
+    }
+  }, [load, refreshOfflineState, user?.uid]);
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    refreshOfflineState();
+    const handleQueue = () => refreshOfflineState();
+    const handleOnline = () => void syncOfflineActions();
+    window.addEventListener("workcontrol:offline-timesheet-queue", handleQueue);
+    window.addEventListener("online", handleOnline);
+    if (navigator.onLine) void syncOfflineActions();
+    return () => {
+      window.removeEventListener("workcontrol:offline-timesheet-queue", handleQueue);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [refreshOfflineState, syncOfflineActions]);
 
   useEffect(() => {
     return subscribeNotificationRules(setNotificationRules, (error) =>
@@ -289,7 +379,7 @@ export default function MyTimesheetsPage() {
 
     handlePreferredProjectChange(project.id);
 
-    await startTimesheet({
+    const payload = {
       userId: user.uid,
       userName: user.displayName || user.email || "Utilizator",
       userThemeKey: (user as any)?.themeKey || null,
@@ -300,7 +390,16 @@ export default function MyTimesheetsPage() {
       startExplanation,
       startPolicyFlag,
       startExpectedTime,
-    });
+    };
+
+    if (flags.offlineTimesheets && !navigator.onLine) {
+      const action = queueOfflineTimesheetStart(payload);
+      setActiveTimesheet(buildOfflineActiveTimesheet(action));
+      setOfflineStatus("Pornirea a fost salvata pe dispozitiv si se va sincroniza automat.");
+      return;
+    }
+
+    await startTimesheet(payload);
 
     await load();
   }
@@ -315,13 +414,22 @@ export default function MyTimesheetsPage() {
       throw new Error("Nu exista pontaj activ.");
     }
 
-    await stopTimesheet({
+    const payload = {
       timesheetId: activeTimesheet.id,
       explanation,
       stopLocation: location,
       stopPolicyFlag,
       stopExpectedMinutes,
-    });
+    };
+
+    if (flags.offlineTimesheets && !navigator.onLine) {
+      queueOfflineTimesheetStop({ ...payload, userId: activeTimesheet.userId });
+      setActiveTimesheet(null);
+      setOfflineStatus("Oprirea a fost salvata pe dispozitiv si se va sincroniza automat.");
+      return;
+    }
+
+    await stopTimesheet(payload);
 
     await load();
   }
@@ -477,6 +585,12 @@ export default function MyTimesheetsPage() {
           },
         ]}
       />
+      {offlineQueueCount || offlineStatus ? (
+        <div className="wc-offline-queue-status" role="status">
+          <strong>{offlineQueueCount ? `${offlineQueueCount} actiuni de pontaj in asteptare` : "Pontaj sincronizat"}</strong>
+          <span>{offlineStatus || "Sincronizarea porneste automat cand revine internetul."}</span>
+        </div>
+      ) : null}
       <TimesheetStatusCard
         title={currentStatus.title}
         subtitle={currentStatus.subtitle}

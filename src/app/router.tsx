@@ -36,6 +36,7 @@ const TimesheetDetailsPage = lazyWithRetry(
 const MyTimesheetsPage = lazyWithRetry(() => import("../modules/timesheets/pages/MyTimesheetsPage"));
 const ProjectsPage = lazyWithRetry(() => import("../modules/timesheets/pages/ProjectsPage"));
 const NotificationsPage = lazyWithRetry(() => import("../modules/notifications/pages/NotificationsPage"));
+const OperationalInboxPage = lazyWithRetry(() => import("../modules/inbox/pages/OperationalInboxPage"));
 const ControlPanelPage = lazyWithRetry(() => import("../modules/reports/pages/ReportsPage"));
 const BackupPreviewPage = lazyWithRetry(() => import("../modules/reports/pages/BackupPreviewPage"));
 const UiLabPage = lazyWithRetry(() => import("../modules/reports/pages/UiLabPage"));
@@ -149,6 +150,7 @@ export const router = createBrowserRouter([
       { path: "/timesheets/:timesheetId", element: withSuspense(<TimesheetDetailsPage />) },
 
       { path: "/notifications", element: withSuspense(<NotificationsPage />) },
+      { path: "/inbox", element: withSuspense(<OperationalInboxPage />) },
       { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
       { path: "/control-panel/backup-preview", element: withSuspense(<BackupPreviewPage />) },
       { path: "/control-panel/ui-lab", element: withSuspense(<UiLabPage />) },

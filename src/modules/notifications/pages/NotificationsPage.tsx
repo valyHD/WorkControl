@@ -23,6 +23,8 @@ import { createAuditLog } from "../../audit/services/auditLogService";
 import { pruneNotificationsForUser } from "../services/notificationsService";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
+import SavedViewsBar from "../../../components/product/SavedViewsBar";
+import { useFeatureFlags } from "../../../lib/productIntelligence";
 import {
   activatePushNotifications,
   hasPushVapidKey,
@@ -80,6 +82,7 @@ function getActivationMessage(result: PushActivationResult | null): string {
 
 export default function NotificationsPage() {
   const { user, role } = useAuth();
+  const { flags } = useFeatureFlags();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [permissionState, setPermissionState] = useState<string>(
@@ -362,6 +365,18 @@ export default function NotificationsPage() {
           { id: "preferences", label: "Preferințe", icon: Settings },
         ]}
       />
+      {flags.savedViews ? (
+        <SavedViewsBar
+          namespace="notifications"
+          userId={user.uid}
+          value={{ activeTab }}
+          onApply={(view) => {
+            if (["inbox", "unread", "critical", "preferences"].includes(view.activeTab)) {
+              setActiveTab(view.activeTab as typeof activeTab);
+            }
+          }}
+        />
+      ) : null}
       <div className="panel">
         <div className="tools-header">
           <div>

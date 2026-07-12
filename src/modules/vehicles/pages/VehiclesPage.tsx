@@ -12,6 +12,18 @@ import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import StatusBadge from "../../../components/StatusBadge";
+import SavedViewsBar from "../../../components/product/SavedViewsBar";
+import { useFeatureFlags } from "../../../lib/productIntelligence";
+import { useAuth } from "../../../providers/AuthProvider";
+
+type VehicleSavedView = {
+  search: string;
+  statusFilter: string;
+  driverFilter: string;
+  gpsFilter: string;
+  attentionFilter: string;
+  viewMode: "cards" | "table";
+};
 
 function VehicleCardSkeleton() {
   return (
@@ -110,6 +122,8 @@ function hasVehicleServiceAlert(vehicle: VehicleItem) {
 }
 
 export default function VehiclesPage() {
+  const { user } = useAuth();
+  const { flags } = useFeatureFlags();
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -119,6 +133,23 @@ export default function VehiclesPage() {
   const [attentionFilter, setAttentionFilter] = useState("toate");
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [error, setError] = useState("");
+  const savedViewValue = useMemo<VehicleSavedView>(() => ({
+    search,
+    statusFilter,
+    driverFilter,
+    gpsFilter,
+    attentionFilter,
+    viewMode,
+  }), [attentionFilter, driverFilter, gpsFilter, search, statusFilter, viewMode]);
+
+  const applySavedView = (view: VehicleSavedView) => {
+    setSearch(view.search || "");
+    setStatusFilter(view.statusFilter || "toate");
+    setDriverFilter(view.driverFilter || "toate");
+    setGpsFilter(view.gpsFilter || "toate");
+    setAttentionFilter(view.attentionFilter || "toate");
+    setViewMode(view.viewMode === "table" ? "table" : "cards");
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -384,6 +415,15 @@ export default function VehiclesPage() {
             <option value="service">Service</option>
           </select>
         </div>
+
+        {flags.savedViews && user?.uid ? (
+          <SavedViewsBar
+            namespace="vehicles"
+            userId={user.uid}
+            value={savedViewValue}
+            onApply={applySavedView}
+          />
+        ) : null}
 
         {/* States */}
         {error ? (
