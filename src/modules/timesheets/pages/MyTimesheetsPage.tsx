@@ -27,6 +27,7 @@ import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { subscribeNotificationRules } from "../../notifications/services/notificationRulesService";
 import type { NotificationRuleItem } from "../../../types/notification-rule";
 import KpiCard from "../../../components/KpiCard";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
 import TimesheetStatusCard from "../../../components/TimesheetStatusCard";
 import TimesheetChartCard from "../../../components/TimesheetChartCard";
 import StatusBadge from "../../../components/StatusBadge";
@@ -398,6 +399,16 @@ export default function MyTimesheetsPage() {
 
   return (
     <section className="page-section my-timesheets-modern-page">
+      <ProductPageHeader
+        eyebrow="Spațiul meu de lucru"
+        title="Pontajul meu"
+        description={activeTimesheet ? "Cronometrul este activ și se actualizează în timp real." : "Alege proiectul și pornește pontajul când începi lucrul."}
+        meta={<StatusBadge tone={activeTimesheet ? "green" : "muted"}>{currentStatus.label}</StatusBadge>}
+        actions={[
+          { id: "projects", label: "Proiecte", to: "/projects", icon: TimerReset, assistantAction: "open-projects" },
+          { id: "leave", label: "Concedii", to: "/my-leave", icon: CalendarDays, assistantAction: "open-leave" },
+        ]}
+      />
       <TimesheetStatusCard
         title={currentStatus.title}
         subtitle={currentStatus.subtitle}

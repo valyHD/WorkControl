@@ -20,6 +20,7 @@ import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import EmptyState from "../../../components/EmptyState";
@@ -375,26 +376,17 @@ export default function TimesheetsPage() {
 
   return (
     <section className="page-section timesheets-management-page">
-      <div className="wc-page-hero">
-        <div>
-          <h1>Pontaje</h1>
-          <p>Monitorizeaza orele lucrate, proiectele si activitatea echipei.</p>
-        </div>
-        <div className="wc-page-hero__actions">
-          <button type="button" className="secondary-btn" data-assistant-action="export-timesheets" onClick={() => handleExport()}>
-            <FileSpreadsheet size={16} /> Export Excel
-          </button>
-          <button type="button" className="secondary-btn" onClick={() => setPeriod("month")}>
-            <CalendarDays size={16} /> Raport lunar
-          </button>
-          <Link to="/my-timesheets" className="secondary-btn" data-assistant-action="add-manual-timesheet">
-            <Plus size={16} /> Adauga pontaj manual
-          </Link>
-          <button type="button" className="primary-btn" data-assistant-action="open-active-timesheets" onClick={() => setActiveOnly(true)}>
-            <TimerReset size={16} /> Vezi pontaje active
-          </button>
-        </div>
-      </div>
+      <ProductPageHeader
+        eyebrow="Echipă și pontaje"
+        title="Pontaje"
+        description="Orele lucrate, proiectele și activitatea echipei, fără filtre ascunse."
+        actions={[
+          { id: "export", label: "Export Excel", icon: FileSpreadsheet, onClick: () => handleExport(), assistantAction: "export-timesheets" },
+          { id: "monthly", label: "Raport lunar", icon: CalendarDays, onClick: () => setPeriod("month"), assistantAction: "timesheets-month" },
+          { id: "manual", label: "Pontaj manual", icon: Plus, to: "/my-timesheets", assistantAction: "add-manual-timesheet" },
+          { id: "active", label: "Pontaje active", icon: TimerReset, tone: "primary", onClick: () => setActiveOnly(true), assistantAction: "open-active-timesheets" },
+        ]}
+      />
 
       <div className="wc-kpi-grid wc-kpi-grid--five">
         <KpiCard label="Total ore azi" value={formatMinutes(sumTimesheetMinutes(todayItems))} helper={`${todayItems.length} pontaje`} tone="green" icon={TimerReset} />
@@ -404,8 +396,7 @@ export default function TimesheetsPage() {
         <KpiCard label="Proiect top" value={topProject?.label || "-"} helper={topProject?.displayValue || "fara ore"} tone="purple" icon={UserRound} />
       </div>
 
-      <details className="wc-filter-drawer" open>
-        <summary><Filter size={16} /> Filtre</summary>
+      <div className="wc-filter-drawer wc-filter-drawer--always-open">
         <FilterBar
           title="Filtre pontaje"
           subtitle={periodRange.label}
@@ -485,7 +476,7 @@ export default function TimesheetsPage() {
           </label>
           <button type="button" className="secondary-btn" data-assistant-action="filter-timesheets-today" onClick={() => setPeriod("today")}>Azi</button>
         </FilterBar>
-      </details>
+      </div>
 
       <div className="panel">
         <div className="panel-head">

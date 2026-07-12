@@ -290,22 +290,22 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
             <span className="billing-live-meter__eyebrow">
               <i aria-hidden="true" /> APROAPE LIVE
             </span>
-            <h4>Ritm cost Firestore</h4>
+            <h4>Consum Firestore - intregul site</h4>
           </div>
           <Zap size={19} aria-hidden="true" />
         </div>
         <div className="billing-live-meter__values">
           <div>
-            <span>Acum</span>
+            <span>Medie pe minut ({liveEstimate?.sampledWindowMinutes ?? 15} min)</span>
             <strong>{liveMoney(liveEstimate?.costPerMinuteEur ?? null, "min")}</strong>
           </div>
           <div>
-            <span>Proiecție la ritmul actual</span>
-            <strong>{liveMoney(liveEstimate?.projectedHourlyEur ?? null, "oră")}</strong>
+            <span>Cost în ultimele 60 min raportate</span>
+            <strong>{liveMoney(liveEstimate?.estimatedLastHourEur ?? null)}</strong>
           </div>
           <div>
-            <span>Ultimele 60 min raportate</span>
-            <strong>{liveMoney(liveEstimate?.estimatedLastHourEur ?? null)}</strong>
+            <span>Citiri Firestore în ultimele 60 min</span>
+            <strong>{count(liveEstimate?.readsLastHour ?? null)}</strong>
           </div>
         </div>
         <div className="billing-live-meter__operations">
@@ -317,9 +317,9 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
         {liveLoading ? <small>Actualizez estimarea...</small> : null}
         {liveError ? <small className="is-error">{liveError}</small> : null}
         <small>
-          Estimare brută după operațiuni, medie pe {liveEstimate?.sampledWindowMinutes ?? 5}
-          min. Egress-ul este aproximat la 3,78 KiB/citire. Nu include storage, Functions, quota
-          gratuită sau discounturi.
+          Include toate operațiunile Firestore ale proiectului WorkControl, nu doar GPS-ul.
+          Costul pe 60 minute este o fereastră mobilă completă. Egress-ul este aproximat la
+          3,78 KiB/citire; Storage, Functions, quota gratuită și discounturile nu sunt incluse.
         </small>
       </section>
 

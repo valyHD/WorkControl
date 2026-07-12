@@ -6,7 +6,8 @@ import ToolStatusBadge from "../components/ToolStatusBadge";
 import { getUserThemeClass } from "../../../lib/ui/userTheme";
 import SafeImage, { preloadImageUrls } from "../../../components/SafeImage";
 import UserProfileLink from "../../../components/UserProfileLink";
-import { Camera, MessageSquare, QrCode, UserCheck } from "lucide-react";
+import { Plus, QrCode } from "lucide-react";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
 
 export default function ToolsPage() {
   const [tools, setTools] = useState<ToolItem[]>([]);
@@ -58,45 +59,20 @@ export default function ToolsPage() {
 
   return (
     <section className="page-section">
+      <ProductPageHeader
+        eyebrow="Active și inventar"
+        title="Scule"
+        description={`${tools.length} scule · responsabil, deținător, stare și locație`}
+        actions={[
+          { id: "scan", label: "Scanează QR", to: "/tools/scan", icon: QrCode, assistantAction: "scan-tool" },
+          { id: "new", label: "Adaugă sculă", to: "/tools/new", icon: Plus, tone: "primary", assistantAction: "create-tool" },
+        ]}
+      />
       <div className="panel">
         <div className="tools-header">
           <div>
-            <h2 className="panel-title">Scule</h2>
-            <p className="tools-subtitle">
-              Inventar complet, QR asociat, responsabil principal si detinator curent.
-            </p>
-          </div>
-
-          <div className="tools-header-actions">
-            <Link to="/tools/scan" className="secondary-btn">
-              Scaneaza QR
-            </Link>
-            <Link to="/tools/new" className="primary-btn">
-              Adauga scula
-            </Link>
-          </div>
-        </div>
-
-        <div className="asset-help-grid" aria-label="Instructiuni scule">
-          <div className="asset-help-card asset-help-card-blue">
-            <span className="asset-help-icon"><QrCode size={18} /></span>
-            <strong>Scaneaza sau cauta</strong>
-            <p>Foloseste QR-ul sau cautarea dupa nume, cod intern, responsabil ori detinator.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-amber">
-            <span className="asset-help-icon"><UserCheck size={18} /></span>
-            <strong>Dai scula cu aprobare</strong>
-            <p>Cand alegi alt detinator, acesta trebuie sa accepte solicitarea in pagina sculei.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-green">
-            <span className="asset-help-icon"><Camera size={18} /></span>
-            <strong>Tine pozele la zi</strong>
-            <p>Intra pe scula, editeaza si adauga poze clare cu starea ei, accesorii sau defecte.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-violet">
-            <span className="asset-help-icon"><MessageSquare size={18} /></span>
-            <strong>Scrie comentarii</strong>
-            <p>Pe pagina sculei poti lasa observatii, probleme, predari sau note de intretinere.</p>
+            <h2 className="panel-title">Inventar</h2>
+            <p className="tools-subtitle">Filtrează rapid și deschide fișa completă a unei scule.</p>
           </div>
         </div>
 

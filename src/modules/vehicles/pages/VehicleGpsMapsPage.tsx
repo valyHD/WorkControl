@@ -11,8 +11,11 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { ArrowLeft, CarFront, MapPinned, RefreshCw, RotateCcw } from "lucide-react";
+import { ArrowLeft, CarFront, List, MapPinned, RefreshCw, RotateCcw, Search } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
+import FilterBar from "../../../components/FilterBar";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
+import ProductTabs from "../../../components/product/ProductTabs";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { VehicleItem, VehiclePositionItem } from "../../../types/vehicle";
 import {
@@ -36,7 +39,7 @@ import {
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
 
-const ROUTE_REFRESH_MS = 10_000;
+const ROUTE_REFRESH_MS = 60_000;
 const ACTIVE_ROUTE_REFRESH_MS = 3_000;
 const ROUTE_PAGE_SIZE = 1800;
 const ROUTE_MAX_PAGES = 18;
@@ -1153,6 +1156,9 @@ export default function VehicleGpsMapsPage() {
   const location = useLocation();
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [driverFilter, setDriverFilter] = useState("all");
   const focusScrollKeyRef = useRef("");
   const vehicleOrderRef = useRef<Map<string, number>>(new Map());
   const nextVehicleOrderRef = useRef(0);
@@ -1201,6 +1207,25 @@ export default function VehicleGpsMapsPage() {
     );
   }, [requestedFocusQuery, requestedFocusVehicleId, vehicles]);
 
+  const driverOptions = useMemo(
+    () => Array.from(new Set(vehicles.map((vehicle) => vehicle.currentDriverUserName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ro")),
+    [vehicles]
+  );
+
+  const filteredVehicles = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase("ro-RO");
+    return vehicles.filter((vehicle) => {
+      const matchesSearch = !term || [vehicle.plateNumber, vehicle.brand, vehicle.model, vehicle.currentDriverUserName]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("ro-RO")
+        .includes(term);
+      const matchesStatus = statusFilter === "all" || vehicle.status === statusFilter;
+      const matchesDriver = driverFilter === "all" || vehicle.currentDriverUserName === driverFilter;
+      return matchesSearch && matchesStatus && matchesDriver;
+    });
+  }, [driverFilter, search, statusFilter, vehicles]);
+
   useEffect(() => {
     const unsubscribe = subscribeVehiclesList((items) => {
       setVehicles(keepFleetOrderStable(items ?? []));
@@ -1231,26 +1256,60 @@ export default function VehicleGpsMapsPage() {
 
   return (
     <section className="page-section vehicle-gps-map-page">
+      <ProductPageHeader
+        eyebrow="Flotă live"
+        title="Toate GPS-urile"
+        description={loading ? "Se încarcă pozițiile..." : `${filteredVehicles.length} din ${vehicles.length} vehicule afișate`}
+        actions={[
+          { id: "refresh", label: "Actualizează", icon: RefreshCw, onClick: () => setRefreshCommand((current) => ({ id: current.id + 1, forceFull: false })), assistantAction: "refresh-gps-routes" },
+          { id: "vehicles", label: "Lista mașini", icon: ArrowLeft, to: "/vehicles", assistantAction: "open-vehicles" },
+        ]}
+      />
+
+      <ProductTabs
+        activeId="map"
+        tabs={[
+          { id: "list", label: "Listă flotă", to: "/vehicles", icon: List },
+          { id: "map", label: "Hartă GPS", to: "/vehicles/gps-map", icon: MapPinned },
+        ]}
+      />
+
+      <FilterBar title="Filtre hartă" subtitle="Pozițiile și traseele nu sunt modificate de filtre." dataAssistantSection="fleet-gps-filters">
+        <label className="wc-filter-search">
+          Căutare
+          <span className="wc-input-with-icon"><Search size={15} /><input className="tool-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Număr, marcă, model sau șofer" /></span>
+        </label>
+        <label>
+          Status
+          <select className="tool-input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">Toate</option>
+            <option value="activa">Active</option>
+            <option value="in_service">În service</option>
+            <option value="indisponibila">Indisponibile</option>
+            <option value="avariata">Avariate</option>
+          </select>
+        </label>
+        <label>
+          Șofer
+          <select className="tool-input" value={driverFilter} onChange={(event) => setDriverFilter(event.target.value)}>
+            <option value="all">Toți șoferii</option>
+            {driverOptions.map((driver) => <option key={driver} value={driver}>{driver}</option>)}
+          </select>
+        </label>
+        <div className="wc-gps-legend" aria-label="Legendă GPS">
+          <span><i className="is-live" /> Live</span><span><i className="is-moving" /> Mișcare</span><span><i className="is-stationary" /> Staționar</span><span><i className="is-offline" /> Offline</span>
+        </div>
+      </FilterBar>
+
       <div className="panel">
         <div className="tools-header">
           <div>
             <h2 className="panel-title">Lista harta GPS</h2>
             <p className="tools-subtitle">
-              {loading ? "Se incarca..." : `${vehicles.length} masini`}
+              {loading ? "Se incarca..." : `${filteredVehicles.length} masini`}
             </p>
           </div>
           <div className="tools-header-actions">
-            <button
-              className="secondary-btn"
-              type="button"
-              title="Încarcă numai punctele GPS apărute de la ultima actualizare"
-              data-assistant-action="refresh-gps-routes"
-              onClick={() =>
-                setRefreshCommand((current) => ({ id: current.id + 1, forceFull: false }))
-              }
-            >
-              <RefreshCw size={15} /> Actualizează
-            </button>
             {role === "admin" ? (
               <button
                 className="secondary-btn"
@@ -1270,9 +1329,6 @@ export default function VehicleGpsMapsPage() {
                 <RotateCcw size={15} /> Reîncarcă complet
               </button>
             ) : null}
-            <Link to="/vehicles" className="secondary-btn">
-              <ArrowLeft size={15} /> Masini
-            </Link>
           </div>
         </div>
 
@@ -1285,9 +1341,9 @@ export default function VehicleGpsMapsPage() {
               </div>
             ))}
           </div>
-        ) : vehicles.length ? (
+        ) : filteredVehicles.length ? (
           <div className="vehicle-fleet-map-grid">
-            {vehicles.map((vehicle) => (
+            {filteredVehicles.map((vehicle) => (
               <VehicleFleetMapCard
                 key={vehicle.id}
                 vehicle={vehicle}

@@ -56,6 +56,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 
 const DEFAULT_OVERSPEED_THRESHOLD = 140;
 const LIVE_REFRESH_MS = 5000;
+const LIVE_ROUTE_SYNC_MS = 30_000;
 const ROUTE_RENDER_POINTS = 6000;
 const ROUTE_ANALYSIS_POINTS = 6000;
 const CRUMB_POINTS = 0;
@@ -1699,6 +1700,7 @@ export default function VehicleLiveRouteCard({
     async function loadLiveIncrement() {
       if (!stillCurrent() || selectedDayValue !== toDateInputValue()) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
 
       const loadedUntil = lastRealLoadedTsRef.current || fromTs;
       const incrementalFromTs = Math.max(fromTs, loadedUntil - LIVE_INCREMENTAL_OVERLAP_MS);
@@ -1729,7 +1731,7 @@ export default function VehicleLiveRouteCard({
       if (!stillCurrent() || selectedDayValue !== toDateInputValue()) return;
       liveTimer = window.setInterval(() => {
         void loadLiveIncrement();
-      }, LIVE_REFRESH_MS);
+      }, LIVE_ROUTE_SYNC_MS);
     });
 
     return () => {

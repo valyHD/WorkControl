@@ -2,9 +2,12 @@ import {
   addDoc,
   collection,
   getDocs,
+  limit,
+  orderBy,
   query,
   serverTimestamp,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
 import type {
@@ -41,6 +44,49 @@ type AppUserLite = {
   active?: boolean;
   themeKey?: string | null;
 };
+
+const NOTIFICATION_RETENTION_COUNT = 10;
+
+export function getNotificationIdsToPrune(ids: string[], keepCount = NOTIFICATION_RETENTION_COUNT) {
+  const safeKeepCount = Math.max(1, Math.floor(keepCount));
+  return ids.slice(safeKeepCount);
+}
+
+export async function pruneNotificationsForUser(
+  userId: string,
+  keepCount = NOTIFICATION_RETENTION_COUNT
+): Promise<number> {
+  if (!userId) return 0;
+
+  let deletedCount = 0;
+  for (let pass = 0; pass < 10; pass += 1) {
+    const snap = await getDocs(
+      query(
+        collection(db, "notifications"),
+        where("userId", "==", userId),
+        orderBy("createdAt", "desc"),
+        limit(500)
+      )
+    );
+    const idsToDelete = new Set(
+      getNotificationIdsToPrune(
+        snap.docs.map((notificationDoc) => notificationDoc.id),
+        keepCount
+      )
+    );
+    if (idsToDelete.size === 0) break;
+
+    const batch = writeBatch(db);
+    snap.docs.forEach((notificationDoc) => {
+      if (idsToDelete.has(notificationDoc.id)) batch.delete(notificationDoc.ref);
+    });
+    await batch.commit();
+    deletedCount += idsToDelete.size;
+    if (snap.size < 500) break;
+  }
+
+  return deletedCount;
+}
 
 function buildDefaultNotificationPath(input: DispatchNotificationEventInput): string {
   if (input.notificationPath?.startsWith("/")) return input.notificationPath;

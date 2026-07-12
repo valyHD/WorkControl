@@ -646,3 +646,47 @@
     right: 8px;
   }
 }
+.maintenance-lift-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.maintenance-lift-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--wc-v2-border, var(--line));
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.maintenance-lift-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.maintenance-lift-card > div,
+.maintenance-lift-card dl,
+.maintenance-lift-card dl > div {
+  display: grid;
+  gap: 3px;
+}
+
+.maintenance-lift-card span,
+.maintenance-lift-card dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.maintenance-lift-card dl {
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0;
+}
+
+.maintenance-lift-card dd {
+  margin: 0;
+  font-size: 13px;
+}

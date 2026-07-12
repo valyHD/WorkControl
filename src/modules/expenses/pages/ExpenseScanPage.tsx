@@ -24,6 +24,7 @@ import {
 import UserProfileLink from "../../../components/UserProfileLink";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
+import WorkflowStepper from "../../../components/product/WorkflowStepper";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import { getLatestTimesheetProjectForUser } from "../../timesheets/services/timesheetsService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
@@ -524,35 +525,15 @@ export default function ExpenseScanPage() {
       <div className="panel" data-assistant-section="expense-scan">
 
         <form className="tool-form expense-scan-form" onSubmit={(event) => void handleSubmit(event)}>
-          <div className="expense-scan-steps" aria-label="Pasi scanare bon">
-            <div className={`expense-scan-step ${selectedFile || submitting || scanDone ? "is-done" : "is-active"}`}>
-              <span className="expense-scan-step__marker">
-                {selectedFile || submitting || scanDone ? <CheckCircle2 size={15} /> : "1"}
-              </span>
-              <span>
-                <strong>Incarca poza</strong>
-                <small>Alege bonul sau factura din telefon.</small>
-              </span>
-            </div>
-            <div className={`expense-scan-step ${submitting ? "is-active" : scanDone ? "is-done" : selectedFile ? "is-active" : ""}`}>
-              <span className="expense-scan-step__marker">
-                {scanDone ? <CheckCircle2 size={15} /> : "2"}
-              </span>
-              <span>
-                <strong>Scaneaza si salveaza</strong>
-                <small>Apasa butonul albastru ca documentul sa fie citit.</small>
-              </span>
-            </div>
-            <div className={`expense-scan-step ${scanDone ? "is-done" : submitting ? "is-active" : ""}`}>
-              <span className="expense-scan-step__marker">
-                {scanDone ? <CheckCircle2 size={15} /> : "3"}
-              </span>
-              <span>
-                <strong>Confirmare</strong>
-                <small>Apare mesajul Rezolvat cand este salvat.</small>
-              </span>
-            </div>
-          </div>
+          <WorkflowStepper
+            activeStep={scanDone ? 3 : submitting ? 1 : selectedFile ? 1 : 0}
+            steps={[
+              { id: "upload", label: "Încarcă", description: "Poză sau PDF" },
+              { id: "ocr", label: "OCR", description: "Citire automată" },
+              { id: "verify", label: "Verifică", description: "Date extrase" },
+              { id: "save", label: "Salvează", description: "Istoric bonuri" },
+            ]}
+          />
 
           <div className="tool-form-grid">
             <div className="tool-form-block tool-form-block-full">

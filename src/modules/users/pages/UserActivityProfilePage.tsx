@@ -45,7 +45,7 @@ type ProfileData = {
   maintenanceReports: MaintenanceReportHistoryItem[];
 };
 
-const PROFILE_DATA_CACHE_TTL_MS = 30_000;
+const PROFILE_DATA_CACHE_TTL_MS = 5 * 60_000;
 const profileDataCache = new Map<string, { expiresAt: number; data: ProfileData }>();
 
 const MONTH_LABEL = new Intl.DateTimeFormat("ro-RO", { month: "long", year: "numeric" });
@@ -257,7 +257,7 @@ async function getMaintenanceReportsForUser(user: AppUserItem) {
   const emailName = normalizeText((user.email || "").split("@")[0] || "");
 
   try {
-    const snap = await getDocs(query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(500)));
+    const snap = await getDocs(query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(100)));
     return snap.docs
       .map((docItem) => mapMaintenanceReport(docItem.id, docItem.data() as Record<string, unknown>))
       .filter((report) => {
@@ -442,9 +442,12 @@ export default function UserActivityProfilePage() {
         const [tools, vehicles, expenses, maintenanceReports, ...perIdResults] = await Promise.all([
           getToolsList(),
           getVehiclesList(),
-          getExpenseDocuments(),
+          getExpenseDocuments(200),
           getMaintenanceReportsForUser(profileUser),
-          ...candidates.flatMap((candidate) => [getTimesheetsForUser(candidate), getLeaveRequestsForUser(candidate)]),
+          ...candidates.flatMap((candidate) => [
+            getTimesheetsForUser(candidate, 120),
+            getLeaveRequestsForUser(candidate, 80),
+          ]),
         ]);
 
         const timesheets = perIdResults

@@ -4,8 +4,8 @@ import { QRCodeSVG } from "qrcode.react";
 import type { ToolEventItem, ToolItem, AppUser } from "../../../types/tool";
 import ToolStatusBadge from "../components/ToolStatusBadge";
 import ToolChangeHolderCard from "../components/ToolChangeHolderCard";
-import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import UserProfileLink from "../../../components/UserProfileLink";
+import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
   acceptToolHolderChange,
   addToolComment,
@@ -405,36 +405,16 @@ await claimToolForCurrentUser(
           </div>
         </div>
 
-        {events.length === 0 ? (
-          <p className="tools-subtitle">Nu exista actiuni inregistrate.</p>
-        ) : (
-          <div className="simple-list">
-{events.map((event) => {
-  const userThemeClass = getUserThemeClass(event.actorUserThemeKey);
-
-  return (
-    <div key={event.id} className={`simple-list-item user-history-row ${userThemeClass}`}>
-      <div className="simple-list-text">
-        <div className="user-inline-meta">
-          <span className="user-accent-avatar">
-            {getUserInitials(event.actorUserName || "S")}
-          </span>
-          <UserProfileLink
-            userId={event.actorUserId}
-            name={event.actorUserName || "Sistem"}
-            themeKey={event.actorUserThemeKey}
-            className="simple-list-label user-accent-name"
-          />
-        </div>
-
-        <div className="simple-list-subtitle">{event.message}</div>
-        <div className="simple-list-subtitle">{formatDate(event.createdAt)}</div>
-      </div>
-    </div>
-  );
-})}
-          </div>
-        )}
+        <UniversalTimeline
+          items={events.map((event) => ({
+            id: event.id,
+            title: event.message,
+            description: event.actorUserName || "Sistem",
+            timestamp: event.createdAt,
+            tone: event.type === "comment" ? "blue" : "muted",
+          }))}
+          empty="Nu există acțiuni înregistrate."
+        />
       </div>
     </section>
   );

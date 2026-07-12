@@ -482,8 +482,11 @@ export async function getTimesheetsList(): Promise<TimesheetItem[]> {
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
 
-export async function getTimesheetsForUser(userId: string): Promise<TimesheetItem[]> {
-  const snap = await getDocs(query(timesheetsCollection, where("userId", "==", userId)));
+export async function getTimesheetsForUser(userId: string, maxItems = 500): Promise<TimesheetItem[]> {
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(maxItems)));
+  const snap = await getDocs(
+    query(timesheetsCollection, where("userId", "==", userId), orderBy("startAt", "desc"), limit(safeLimit))
+  );
   return snap.docs
     .map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()))
     .sort((a, b) => b.startAt - a.startAt);

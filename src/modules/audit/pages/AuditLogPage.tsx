@@ -4,7 +4,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import UserProfileLink from "../../../components/UserProfileLink";
 import type { AuditLogCategory, AuditLogItem } from "../../../types/audit";
-import { subscribeAuditLogs } from "../services/auditLogService";
+import { getAuditLogs } from "../services/auditLogService";
 import { getAllUsers } from "../../users/services/usersService";
 import type { AppUserItem } from "../../../types/user";
 
@@ -61,7 +61,8 @@ export default function AuditLogPage() {
   const location = useLocation();
   const [items, setItems] = useState<AuditLogItem[]>([]);
   const [users, setUsers] = useState<AppUserItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [activityRequested, setActivityRequested] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [userId, setUserId] = useState("");
@@ -89,34 +90,22 @@ export default function AuditLogPage() {
     if (assistantPath !== null) setPath(assistantPath);
   }, [location.search]);
 
-  useEffect(() => {
-    let mounted = true;
-    getAllUsers()
-      .then((nextUsers) => {
-        if (mounted) setUsers(nextUsers);
-      })
-      .catch((err) => console.warn("[AuditLogPage][users]", err));
-
-    const unsubscribe = subscribeAuditLogs(
-      (nextItems) => {
-        if (!mounted) return;
-        setItems(nextItems);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("[AuditLogPage][subscribe]", err);
-        if (!mounted) return;
-        setError("Nu am putut incarca istoricul.");
-        setLoading(false);
-      },
-      1000
-    );
-
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, []);
+  async function loadActivity() {
+    if (loading) return;
+    setActivityRequested(true);
+    setLoading(true);
+    setError("");
+    try {
+      const [nextItems, nextUsers] = await Promise.all([getAuditLogs(200), getAllUsers()]);
+      setItems(nextItems);
+      setUsers(nextUsers);
+    } catch (err) {
+      console.error("[AuditLogPage][load]", err);
+      setError("Nu am putut incarca istoricul.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const categories = useMemo(() => getUniqueValues(items, (item) => item.category), [items]);
   const actions = useMemo(() => getUniqueValues(items, (item) => item.action), [items]);
@@ -160,14 +149,30 @@ export default function AuditLogPage() {
           <div>
             <h2 className="panel-title">Istoric activitate</h2>
             <p className="panel-subtitle">
-              {canViewAll
-                ? "Intrari pe site, pagini accesate, pontaje, notificari, scule, masini, bonuri si modificari importante."
-                : "Istoricul tau: actiuni facute de tine sau notificari/modificari care te privesc."}
+              Activitatea nu este incarcata automat, pentru a reduce consumul Firestore.
             </p>
           </div>
+          <button
+            className="primary-btn"
+            type="button"
+            disabled={loading}
+            onClick={() => void loadActivity()}
+            data-assistant-action="load-audit-activity"
+          >
+            <Activity size={16} />
+            {loading ? "Se incarca..." : activityRequested ? "Reincarca activitatea" : "Afiseaza activitatea"}
+          </button>
         </div>
 
-        <div className="expense-kpi-grid audit-kpi-grid">
+        {!activityRequested ? (
+          <div className="placeholder-page">
+            <Activity size={28} />
+            <h3>Activitatea este ascunsa</h3>
+            <p>Apasa Afiseaza activitatea numai cand ai nevoie de istoric.</p>
+          </div>
+        ) : null}
+
+        {activityRequested ? <div className="expense-kpi-grid audit-kpi-grid">
           <div className="kpi-card">
             <div className="kpi-label">Evenimente incarcate</div>
             <div className="kpi-value">{items.length}</div>
@@ -180,9 +185,9 @@ export default function AuditLogPage() {
             <div className="kpi-label">Notificari livrate</div>
             <div className="kpi-value">{notificationCount}</div>
           </div>
-        </div>
+        </div> : null}
 
-        <div className="panel-body audit-filters">
+        {activityRequested ? <div className="panel-body audit-filters">
           <div className="tool-form-grid">
             <div className="tool-form-block tool-form-block-full">
               <label className="tool-form-label">
@@ -244,14 +249,14 @@ export default function AuditLogPage() {
               </select>
             </div>
           </div>
-        </div>
+        </div> : null}
       </div>
 
-      <div className="panel">
+      {activityRequested ? <div className="panel">
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Evenimente</h2>
-            <p className="panel-subtitle">Live, cele mai recente primele. Sunt incarcate ultimele 1000 de evenimente.</p>
+            <p className="panel-subtitle">Cele mai recente primele. Sunt incarcate maximum 200 de evenimente.</p>
           </div>
           <span className="badge badge-blue">
             <Filter size={13} /> {filteredItems.length}
@@ -307,7 +312,7 @@ export default function AuditLogPage() {
             ))}
           </div>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }

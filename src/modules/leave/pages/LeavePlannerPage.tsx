@@ -17,6 +17,7 @@ import {
 import UserProfileLink from "../../../components/UserProfileLink";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
+import ProductTabs from "../../../components/product/ProductTabs";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
@@ -396,7 +397,7 @@ export default function LeavePlannerPage() {
     setCalendarData({ timesheets: [], leaveRequests: [], timesheetsLoaded: false, leaveLoaded: false });
 
     const timesheetsUnsub = onSnapshot(
-      query(collection(db, "timesheets"), where("userId", "==", expandedUserId), orderBy("startAt", "desc"), limit(500)),
+      query(collection(db, "timesheets"), where("userId", "==", expandedUserId), orderBy("startAt", "desc"), limit(180)),
       (snap) => {
         const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, timesheets: mapped, timesheetsLoaded: true }));
@@ -404,7 +405,7 @@ export default function LeavePlannerPage() {
     );
 
     const leaveUnsub = onSnapshot(
-      query(collection(db, "leaveRequests"), where("userId", "==", expandedUserId), orderBy("createdAt", "desc")),
+      query(collection(db, "leaveRequests"), where("userId", "==", expandedUserId), orderBy("createdAt", "desc"), limit(100)),
       (snap) => {
         const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, leaveRequests: mapped, leaveLoaded: true }));
@@ -418,7 +419,7 @@ export default function LeavePlannerPage() {
   }, [expandedUserId]);
 
   useEffect(() => {
-    return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(500)), (snap) => {
+    return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(200)), (snap) => {
       setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
     });
   }, []);
@@ -665,6 +666,16 @@ export default function LeavePlannerPage() {
         ]}
       />
 
+      <ProductTabs
+        activeId={(location.hash || "#leave-calendar").replace("#", "")}
+        tabs={[
+          { id: "leave-calendar", label: "Calendar", to: "/my-leave#leave-calendar", icon: CalendarDays, assistantAction: "view-leave-calendar" },
+          { id: "leave-form", label: "Cerere nouă", to: "/my-leave?assistant=leave#leave-form", icon: Send, assistantAction: "open-leave-form" },
+          { id: "my-leave-requests", label: "Cererile mele", to: "/my-leave#my-leave-requests", icon: FileSignature, assistantAction: "view-my-leave-requests" },
+          ...(role === "admin" || role === "manager" ? [{ id: "leave-approvals", label: "Aprobări", to: "/my-leave#leave-approvals", icon: BadgeCheck }] : []),
+        ]}
+      />
+
       <PageQuickActions
         actions={[
           {
@@ -907,7 +918,7 @@ export default function LeavePlannerPage() {
         )}
       </div>
 
-      <div className="panel">
+      <div id="leave-approvals" className="panel">
         <h3 className="panel-title">Cereri in asteptare (admin)</h3>
         {!isAdmin ? (
           <p className="tools-subtitle">Doar adminii pot aproba cereri.</p>

@@ -338,8 +338,9 @@ export async function saveExpenseCompanyOption(companyName: string): Promise<voi
   );
 }
 
-export async function getExpenseDocuments(): Promise<ExpenseDocumentItem[]> {
-  const snap = await getDocs(query(expensesCollection, orderBy("documentDate", "desc"), limit(1000)));
+export async function getExpenseDocuments(maxItems = 1000): Promise<ExpenseDocumentItem[]> {
+  const safeLimit = Math.max(1, Math.min(1000, Math.floor(maxItems)));
+  const snap = await getDocs(query(expensesCollection, orderBy("documentDate", "desc"), limit(safeLimit)));
   return snap.docs.map((docItem) => mapExpenseDoc(docItem.id, docItem.data()));
 }
 

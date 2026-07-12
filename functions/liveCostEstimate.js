@@ -6,7 +6,10 @@ const FIRESTORE_STANDARD_PRICES_USD_PER_100K = Object.freeze({
 const ESTIMATED_EGRESS_BYTES_PER_READ = 3.78 * 1024;
 const INTERNET_EGRESS_USD_PER_GIB = 0.12;
 
-const LIVE_RATE_WINDOW_MINUTES = 5;
+// A five-minute sample overreacts to page reloads and route-history bursts.
+// Fifteen minutes remains operationally useful, while the 60-minute total is
+// the stable hourly number shown in the Control Panel.
+const LIVE_RATE_WINDOW_MINUTES = 15;
 const LAST_HOUR_MINUTES = 60;
 
 function toFiniteNumber(value, fallback = 0) {

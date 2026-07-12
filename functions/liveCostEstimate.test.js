@@ -45,6 +45,30 @@ test("calculates EUR per minute, hourly projection and reported last-hour cost",
   assert.equal(result.estimatedEgressMiBPerMinute, 3.691);
 });
 
+test("keeps the reported hourly cost based on the full 60 minute window during a short spike", () => {
+  const readPoints = [];
+  for (let minute = 1; minute <= 60; minute += 1) {
+    const endTime = new Date(Date.UTC(2026, 6, 12, 11, minute)).toISOString();
+    readPoints.push(point(endTime, minute > 55 ? 10_000 : 1_000));
+  }
+
+  const result = buildLiveCostEstimate({
+    readPoints,
+    writePoints: [],
+    deletePoints: [],
+    usdPerEur: 1,
+    rateDate: "2026-07-10",
+    now: new Date("2026-07-12T12:04:00Z"),
+  });
+
+  const expectedHourUsd =
+    operationCostUsd({ reads: 105_000 }) + estimatedEgressCostUsd(105_000);
+  assert.equal(result.sampledWindowMinutes, 15);
+  assert.equal(result.readsLastHour, 105_000);
+  assert.equal(result.estimatedLastHourEur, Number(expectedHourUsd.toFixed(8)));
+  assert.ok(result.projectedHourlyEur > result.estimatedLastHourEur);
+});
+
 test("returns unavailable rather than a false zero when Monitoring has no points", () => {
   const result = buildLiveCostEstimate({
     readPoints: [],

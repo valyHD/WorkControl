@@ -2414,7 +2414,7 @@ exports.processExpenseScanJob = onDocumentCreated(
 
 exports.checkTimesheetReminderAlerts = onSchedule(
   {
-    schedule: '* * * * *',
+    schedule: 'every 5 minutes',
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
