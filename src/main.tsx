@@ -17,6 +17,7 @@ import "./styles/legacy-foundation.css";
 import "./app/app.css";
 import "./styles/product-system.css";
 import "./styles/experience.css";
+import "./styles/product-intelligence.css";
 import { AuthProvider } from "./providers/AuthProvider";
 import { AppErrorBoundary } from "./lib/errors/AppErrorBoundary";
 import {
@@ -24,6 +25,7 @@ import {
   reloadOnceForFreshAssets,
 } from "./lib/routing/dynamicImportRecovery";
 import { initSentry } from "./lib/monitoring/sentry";
+import { FeatureFlagProvider } from "./lib/productIntelligence";
 
 const FORCE_LIGHT_BACKGROUND =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC")';
@@ -90,7 +92,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <AppErrorBoundary>
       <AuthProvider>
-        <RouterProvider router={router} />
+        <FeatureFlagProvider>
+          <RouterProvider router={router} />
+        </FeatureFlagProvider>
       </AuthProvider>
     </AppErrorBoundary>
   </React.StrictMode>

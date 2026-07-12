@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
   Bell,
+  Inbox,
   BellRing,
   Briefcase,
   Building2,
@@ -291,6 +292,19 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     mobilePriority: 18,
     colorClass: "menu-icon-orange",
     description: "Piese solicitate pentru interventii.",
+  },
+  {
+    id: "operational-inbox",
+    label: "Inbox operational",
+    path: "/inbox",
+    icon: Inbox,
+    section: "communication",
+    aliases: ["inbox", "ce necesita atentie", "alerte importante"],
+    keywords: ["critic", "actiuni", "prioritati"],
+    quickAction: true,
+    mobilePriority: 13,
+    colorClass: "menu-icon-rose",
+    description: "Alerte prioritizate si actiuni care necesita atentie.",
   },
   {
     id: "notifications",

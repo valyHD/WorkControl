@@ -7,6 +7,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  where,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
@@ -195,6 +196,17 @@ export function logPageView(params: {
 
 export async function getAuditLogs(maxItems = 800): Promise<AuditLogItem[]> {
   const snap = await getDocs(query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems)));
+  return snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()));
+}
+
+export async function getAuditLogsForEntity(entityId: string, maxItems = 40): Promise<AuditLogItem[]> {
+  if (!entityId) return [];
+  const snap = await getDocs(query(
+    auditLogsCollection,
+    where("entityId", "==", entityId),
+    orderBy("createdAt", "desc"),
+    limit(Math.max(1, Math.min(40, maxItems)))
+  ));
   return snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()));
 }
 

@@ -111,6 +111,20 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /appFeedback/{feedbackId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerUserId == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          "ownerUserId", "category", "message", "path", "status", "createdAt", "createdAtServer"
+        ]) &&
+        request.resource.data.category in ["idea", "problem", "usability"] &&
+        request.resource.data.message is string &&
+        request.resource.data.message.size() >= 5 &&
+        request.resource.data.message.size() <= 1500 &&
+        request.resource.data.status == "new";
+      allow read, update, delete: if isAdminUser();
+    }
+
     match /notificationRules/{ruleId} {
       allow read, write: if isSignedIn();
     }
