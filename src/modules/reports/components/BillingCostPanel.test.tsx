@@ -41,6 +41,8 @@ describe("BillingCostPanel", () => {
       costPerMinuteEur: 0.00125,
       projectedHourlyEur: 0.075,
       estimatedLastHourEur: 0.061,
+      estimatedEgressMiBPerMinute: 3.69,
+      estimatedEgressMiBLastHour: 221.4,
       readsPerMinute: 1_000,
       writesPerMinute: 100,
       deletesPerMinute: 0,
@@ -113,6 +115,7 @@ describe("BillingCostPanel", () => {
     expect(screen.getByText("Ritm cost Firestore")).toBeInTheDocument();
     expect(screen.getByText(/0,00125/)).toBeInTheDocument();
     expect(screen.getByText("1.000 citiri/min")).toBeInTheDocument();
+    expect(screen.getByText(/3,69 MiB egress\/min/)).toBeInTheDocument();
     expect(screen.getAllByText(/11,81/).length).toBeGreaterThan(0);
     expect(screen.getByText("67.22 GiB")).toBeInTheDocument();
     expect(screen.getByText("Canary gateway")).toBeInTheDocument();

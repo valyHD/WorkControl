@@ -183,12 +183,14 @@ Panoul se actualizeaza la 60 secunde doar cat pagina este vizibila si afiseaza:
 - proiectia EUR/ora la ritmul curent;
 - costul estimat al operatiunilor din ultimele 60 minute;
 - citiri si scrieri pe minut;
+- egress estimat pe minut la media observata de 3,78 KiB per citire;
 - momentul ultimei metrici disponibile.
 
 Cloud Monitoring esantioneaza la 60 secunde si poate publica datele cu pana la 240
 secunde intarziere. Estimarea foloseste tarifele Standard pentru `europe-west1` si
-cursul BCE. Nu include egress, storage, Cloud Functions, quota gratuita sau discounturi;
-costul contabil final ramane cel din Cloud Billing Export.
+cursul BCE. Egress-ul foloseste tariful brut de 0,12 USD/GiB si media observata in
+baseline-ul 5-11 iulie; nu include storage, Cloud Functions, quota gratuita sau
+discounturi. Costul contabil final ramane cel din Cloud Billing Export.
 
 ## Canary production
 

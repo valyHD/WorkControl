@@ -83,6 +83,8 @@ export type LiveFirebaseCostEstimate = {
   costPerMinuteEur: number | null;
   projectedHourlyEur: number | null;
   estimatedLastHourEur: number | null;
+  estimatedEgressMiBPerMinute: number | null;
+  estimatedEgressMiBLastHour: number | null;
   readsPerMinute: number | null;
   writesPerMinute: number | null;
   deletesPerMinute: number | null;
@@ -241,6 +243,8 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
     costPerMinuteEur: finiteOrNull(data.costPerMinuteEur),
     projectedHourlyEur: finiteOrNull(data.projectedHourlyEur),
     estimatedLastHourEur: finiteOrNull(data.estimatedLastHourEur),
+    estimatedEgressMiBPerMinute: finiteOrNull(data.estimatedEgressMiBPerMinute),
+    estimatedEgressMiBLastHour: finiteOrNull(data.estimatedEgressMiBLastHour),
     readsPerMinute: finiteOrNull(data.readsPerMinute),
     writesPerMinute: finiteOrNull(data.writesPerMinute),
     deletesPerMinute: finiteOrNull(data.deletesPerMinute),

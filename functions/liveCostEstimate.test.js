@@ -2,7 +2,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   FIRESTORE_STANDARD_PRICES_USD_PER_100K,
+  ESTIMATED_EGRESS_BYTES_PER_READ,
+  INTERNET_EGRESS_USD_PER_GIB,
   buildLiveCostEstimate,
+  estimatedEgressCostUsd,
   operationCostUsd,
 } = require("./liveCostEstimate");
 
@@ -30,7 +33,8 @@ test("calculates EUR per minute, hourly projection and reported last-hour cost",
     now: new Date("2026-07-12T12:04:00Z"),
   });
 
-  const minuteCostUsd = operationCostUsd({ reads: 1_000, writes: 100, deletes: 10 });
+  const minuteCostUsd =
+    operationCostUsd({ reads: 1_000, writes: 100, deletes: 10 }) + estimatedEgressCostUsd(1_000);
   assert.equal(result.status, "current");
   assert.equal(result.readsPerMinute, 1_000);
   assert.equal(result.writesPerMinute, 100);
@@ -38,6 +42,7 @@ test("calculates EUR per minute, hourly projection and reported last-hour cost",
   assert.equal(result.projectedHourlyEur, Number(((minuteCostUsd / 1.2) * 60).toFixed(8)));
   assert.equal(result.estimatedLastHourEur, Number(((minuteCostUsd / 1.2) * 60).toFixed(8)));
   assert.equal(result.lagSeconds, 240);
+  assert.equal(result.estimatedEgressMiBPerMinute, 3.691);
 });
 
 test("returns unavailable rather than a false zero when Monitoring has no points", () => {
@@ -60,4 +65,6 @@ test("uses the documented Belgium Standard operation prices", () => {
     writes: 0.09,
     deletes: 0.01,
   });
+  assert.equal(ESTIMATED_EGRESS_BYTES_PER_READ, 3.78 * 1024);
+  assert.equal(INTERNET_EGRESS_USD_PER_GIB, 0.12);
 });

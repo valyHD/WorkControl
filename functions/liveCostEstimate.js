@@ -3,6 +3,8 @@ const FIRESTORE_STANDARD_PRICES_USD_PER_100K = Object.freeze({
   writes: 0.09,
   deletes: 0.01,
 });
+const ESTIMATED_EGRESS_BYTES_PER_READ = 3.78 * 1024;
+const INTERNET_EGRESS_USD_PER_GIB = 0.12;
 
 const LIVE_RATE_WINDOW_MINUTES = 5;
 const LAST_HOUR_MINUTES = 60;
@@ -39,6 +41,15 @@ function operationCostUsd({ reads = 0, writes = 0, deletes = 0 }) {
   );
 }
 
+function estimatedEgressCostUsd(reads = 0) {
+  const bytes = Math.max(0, toFiniteNumber(reads)) * ESTIMATED_EGRESS_BYTES_PER_READ;
+  return (bytes / 1024 ** 3) * INTERNET_EGRESS_USD_PER_GIB;
+}
+
+function estimatedTotalCostUsd(counts) {
+  return operationCostUsd(counts) + estimatedEgressCostUsd(counts.reads);
+}
+
 function round(value, digits = 8) {
   return Number(toFiniteNumber(value).toFixed(digits));
 }
@@ -70,6 +81,8 @@ function buildLiveCostEstimate({
       costPerMinuteEur: null,
       projectedHourlyEur: null,
       estimatedLastHourEur: null,
+      estimatedEgressMiBPerMinute: null,
+      estimatedEgressMiBLastHour: null,
       readsPerMinute: null,
       writesPerMinute: null,
       deletesPerMinute: null,
@@ -92,7 +105,7 @@ function buildLiveCostEstimate({
     writes: sumWindow(normalized.writes, hourStartMs, dataAsOfMs),
     deletes: sumWindow(normalized.deletes, hourStartMs, dataAsOfMs),
   };
-  const liveCostEur = operationCostUsd(liveTotals) / rate;
+  const liveCostEur = estimatedTotalCostUsd(liveTotals) / rate;
   const costPerMinuteEur = liveCostEur / LIVE_RATE_WINDOW_MINUTES;
   const lagSeconds = Math.max(0, Math.round((now.getTime() - dataAsOfMs) / 1000));
 
@@ -104,7 +117,15 @@ function buildLiveCostEstimate({
     sampledWindowMinutes: LIVE_RATE_WINDOW_MINUTES,
     costPerMinuteEur: round(costPerMinuteEur),
     projectedHourlyEur: round(costPerMinuteEur * 60),
-    estimatedLastHourEur: round(operationCostUsd(hourTotals) / rate),
+    estimatedLastHourEur: round(estimatedTotalCostUsd(hourTotals) / rate),
+    estimatedEgressMiBPerMinute: round(
+      ((liveTotals.reads / LIVE_RATE_WINDOW_MINUTES) * ESTIMATED_EGRESS_BYTES_PER_READ) / 1024 ** 2,
+      3
+    ),
+    estimatedEgressMiBLastHour: round(
+      (hourTotals.reads * ESTIMATED_EGRESS_BYTES_PER_READ) / 1024 ** 2,
+      3
+    ),
     readsPerMinute: round(liveTotals.reads / LIVE_RATE_WINDOW_MINUTES, 2),
     writesPerMinute: round(liveTotals.writes / LIVE_RATE_WINDOW_MINUTES, 2),
     deletesPerMinute: round(liveTotals.deletes / LIVE_RATE_WINDOW_MINUTES, 2),
@@ -117,8 +138,11 @@ function buildLiveCostEstimate({
 
 module.exports = {
   FIRESTORE_STANDARD_PRICES_USD_PER_100K,
+  ESTIMATED_EGRESS_BYTES_PER_READ,
+  INTERNET_EGRESS_USD_PER_GIB,
   LIVE_RATE_WINDOW_MINUTES,
   buildLiveCostEstimate,
+  estimatedEgressCostUsd,
   normalizeMonitoringPoints,
   operationCostUsd,
 };

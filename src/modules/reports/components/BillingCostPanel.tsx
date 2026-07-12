@@ -34,6 +34,13 @@ function count(value: number | null) {
   return value === null ? "Indisponibil" : new Intl.NumberFormat("ro-RO").format(value);
 }
 
+function decimal(value: number, digits = 2) {
+  return new Intl.NumberFormat("ro-RO", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 function bytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -304,13 +311,15 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
         <div className="billing-live-meter__operations">
           <span>{count(liveEstimate?.readsPerMinute ?? null)} citiri/min</span>
           <span>{count(liveEstimate?.writesPerMinute ?? null)} scrieri/min</span>
+          <span>~{decimal(liveEstimate?.estimatedEgressMiBPerMinute ?? 0)} MiB egress/min</span>
           <span>{liveLagLabel(liveEstimate)}</span>
         </div>
         {liveLoading ? <small>Actualizez estimarea...</small> : null}
         {liveError ? <small className="is-error">{liveError}</small> : null}
         <small>
           Estimare brută după operațiuni, medie pe {liveEstimate?.sampledWindowMinutes ?? 5}
-          min. Nu include egress, storage, Functions, quota gratuită sau discounturi.
+          min. Egress-ul este aproximat la 3,78 KiB/citire. Nu include storage, Functions, quota
+          gratuită sau discounturi.
         </small>
       </section>
 

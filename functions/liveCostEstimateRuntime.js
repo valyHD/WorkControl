@@ -60,7 +60,7 @@ async function getLiveFirebaseCostEstimate({ projectId, usdPerEur, rateDate, now
         location: "europe-west1",
         priceDate: "2026-07-12",
       },
-      excludes: ["network_egress", "storage", "cloud_functions", "free_quota", "discounts"],
+      excludes: ["storage", "cloud_functions", "free_quota", "discounts"],
     };
     liveEstimateCache = { value, expiresAt: now.getTime() + LIVE_ESTIMATE_CACHE_MS };
     return value;
