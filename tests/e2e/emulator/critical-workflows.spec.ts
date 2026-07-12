@@ -376,6 +376,25 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       maxDiffPixelRatio: 0.01,
     });
 
+    await page.goto("/timesheets?view=overview");
+    await expect(page.getByRole("navigation", { name: "Sectiuni management pontaje" })).toBeVisible();
+    await page.getByRole("button", { name: /Active acum/ }).click();
+    await expect(page).toHaveURL(/view=active/);
+    await expect(page.getByText("Tabel avansat pontaje")).toBeVisible();
+
+    await page.goto("/vehicles");
+    await page.getByTitle("Afisare tabel").click();
+    await expect(page.getByRole("columnheader", { name: "GPS" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Documente" })).toBeVisible();
+
+    await page.goto("/notifications");
+    await page.getByRole("button", { name: /Necitite/ }).click();
+    await expect(page.getByRole("heading", { name: "Notificări" })).toBeVisible();
+
+    await page.goto("/control-panel");
+    await expect(page.getByRole("link", { name: "Functions" })).toBeVisible();
+    await expect(page.locator(".wc-product-tabs").getByRole("link", { name: "UI Lab" })).toBeVisible();
+
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
     await expect(page).toHaveScreenshot("fleet-gps-foundation.png", {
