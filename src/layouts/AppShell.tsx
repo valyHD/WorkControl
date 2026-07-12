@@ -1,25 +1,25 @@
-import { useEffect, useMemo, useRef, useState, type ElementType } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ElementType } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { logoutUser } from "../modules/auth/services/authService";
-import { useNotificationsListener } from "../lib/notifications/useNotificationsListener";
 import { hasPushVapidKey, syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { NotificationPermissionBanner } from "../components/NotificationPermissionBanner";
 import { AppUpdateBanner } from "../components/AppUpdateBanner";
-import VoiceCommandAssistant from "../components/VoiceCommandAssistant";
 import { FloatingQuickLinks } from "../components/FloatingQuickLinks";
-import { logPageView, subscribeAuditLogs } from "../modules/audit/services/auditLogService";
+import { getAuditLogs, logPageView } from "../modules/audit/services/auditLogService";
 import type { AuditLogItem } from "../types/audit";
 import {
   LayoutDashboard, User, Users, Wrench, CarFront, Clock3, Clock4,
   Briefcase, Bell, BellRing, BarChart3, LogOut, Menu, X, ChevronRight, Building2, CalendarDays, ReceiptText, History, PackageSearch,
 } from "lucide-react";
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, query, serverTimestamp, setDoc, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
 import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
-import { runVehicleMaintenanceAlerts } from "../modules/vehicles/services/vehiclesService";
 import { clearFleetRouteSessionCache } from "../modules/vehicles/services/fleetRouteSync";
+
+const VoiceCommandAssistant = lazy(() => import("../components/VoiceCommandAssistant"));
+const GlobalCommandPalette = lazy(() => import("../components/product/GlobalCommandPalette"));
 
 const pagePrefetchers: Record<string, () => Promise<unknown>> = {
   "/dashboard": () => import("../modules/dashboard/pages/DashboardPage"),
@@ -64,55 +64,7 @@ type MenuItem = {
 
 const menuSections: { label: string; items: MenuItem[] }[] = [
   {
-    label: "Principal",
-    items: [
-      { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard, colorClass: "menu-icon-blue", section: "Principal" },
-      { label: "Profilul meu", path: "/my-profile", Icon: User, colorClass: "menu-icon-violet", section: "Principal" },
-      { label: "Concedii & Liber", path: "/my-leave", Icon: CalendarDays, colorClass: "menu-icon-orange", section: "Principal" },
-      { label: "Utilizatori", path: "/users", Icon: Users, colorClass: "menu-icon-cyan", section: "Principal" },
-    ],
-  },
-  {
-    label: "Operațional",
-    items: [
-      { label: "Scule", path: "/tools", Icon: Wrench, colorClass: "menu-icon-orange", section: "Operațional" },
-      { label: "Mașini", path: "/vehicles", Icon: CarFront, colorClass: "menu-icon-green", section: "Operațional" },
-      { label: "Mașina mea", path: "/my-vehicle", Icon: CarFront, colorClass: "menu-icon-blue", section: "Operațional" },
-      { label: "Scanare bonuri", path: "/expenses/scan", Icon: ReceiptText, colorClass: "menu-icon-rose", section: "Operational" },
-      { label: "Facturi", path: "/expenses/invoices", Icon: ReceiptText, colorClass: "menu-icon-cyan", section: "Operational" },
-      { label: "Rapoarte cheltuieli", path: "/expenses/reports", Icon: BarChart3, colorClass: "menu-icon-green", section: "Operational" },
-    ],
-  },
-  {
-    label: "Pontaje",
-    items: [
-      { label: "Dashboard Pontaje", path: "/timesheets", Icon: Clock3, colorClass: "menu-icon-blue", section: "Pontaje" },
-      { label: "Pontajul meu", path: "/my-timesheets", Icon: Clock4, colorClass: "menu-icon-violet", section: "Pontaje" },
-      { label: "Proiecte", path: "/projects", Icon: Briefcase, colorClass: "menu-icon-cyan", section: "Pontaje" },
-    ],
-  },
-  {
-    label: "Notificări",
-    items: [
-      { label: "Notificări", path: "/notifications", Icon: Bell, colorClass: "menu-icon-orange", section: "Notificări" },
-      { label: "Reguli notificări", path: "/notification-rules", Icon: BellRing, colorClass: "menu-icon-blue", section: "Notificări" },
-    ],
-  },
-  {
-    label: "Administrare",
-    items: [
-      { label: "Control Panel", path: "/control-panel", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Administrare" },
-      { label: "Istoric", path: "/history", Icon: History, colorClass: "menu-icon-orange", section: "Administrare" },
-      { label: "Mentenanță", path: "/maintenance", Icon: Building2, colorClass: "menu-icon-violet", section: "Administrare" },
-    ],
-  },
-];
-
-menuSections.splice(
-  0,
-  menuSections.length,
-  {
-    label: "Principal",
+    label: "Prezentare",
     items: [
       { label: "Dashboard", path: "/dashboard", Icon: LayoutDashboard, colorClass: "menu-icon-blue", section: "Principal" },
       { label: "Profilul meu", path: "/my-profile", Icon: User, colorClass: "menu-icon-violet", section: "Principal" },
@@ -121,7 +73,7 @@ menuSections.splice(
     ],
   },
   {
-    label: "Pontaje",
+    label: "Echipa si pontaje",
     items: [
       { label: "Dashboard Pontaje", path: "/timesheets", Icon: Clock3, colorClass: "menu-icon-blue", section: "Pontaje" },
       { label: "Pontajul meu", path: "/my-timesheets", Icon: Clock4, colorClass: "menu-icon-violet", section: "Pontaje" },
@@ -129,7 +81,7 @@ menuSections.splice(
     ],
   },
   {
-    label: "Operational",
+    label: "Active si financiar",
     items: [
       { label: "Scanare bonuri", path: "/expenses/scan", Icon: ReceiptText, colorClass: "menu-icon-rose", section: "Operational" },
       { label: "Facturi", path: "/expenses/invoices", Icon: ReceiptText, colorClass: "menu-icon-cyan", section: "Operational" },
@@ -141,14 +93,14 @@ menuSections.splice(
     ],
   },
   {
-    label: "Service Lift",
+    label: "Service lifturi",
     items: [
       { label: "Mentenanta", path: "/maintenance", Icon: Building2, colorClass: "menu-icon-violet", section: "Service Lift" },
       { label: "Comenzi piese", path: "/maintenance/orders", Icon: PackageSearch, colorClass: "menu-icon-orange", section: "Service Lift" },
     ],
   },
   {
-    label: "Notificari",
+    label: "Comunicare",
     items: [
       { label: "Notificari", path: "/notifications", Icon: Bell, colorClass: "menu-icon-orange", section: "Notificari" },
       { label: "Reguli notificari", path: "/notification-rules", Icon: BellRing, colorClass: "menu-icon-blue", section: "Notificari" },
@@ -160,8 +112,8 @@ menuSections.splice(
       { label: "Control Panel", path: "/control-panel", Icon: BarChart3, colorClass: "menu-icon-cyan", section: "Administrare" },
       { label: "Istoric", path: "/history", Icon: History, colorClass: "menu-icon-orange", section: "Administrare" },
     ],
-  }
-);
+  },
+];
 
 const allItems = menuSections.flatMap((s) => s.items);
 
@@ -503,7 +455,7 @@ function TopbarClock() {
 
 export default function AppShell() {
   const location = useLocation();
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [auditItems, setAuditItems] = useState<AuditLogItem[]>([]);
@@ -511,10 +463,6 @@ export default function AppShell() {
   const [pageReadsLoaded, setPageReadsLoaded] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   // Track uid for maintenance alert — only run when uid changes, not on displayName/email/themeKey
-  const maintenanceRanRef = useRef<string | null>(null);
-
-  useNotificationsListener(user?.uid);
-
   useEffect(() => {
     if (!user?.uid) return;
     if (!hasPushVapidKey()) return;
@@ -527,7 +475,8 @@ export default function AppShell() {
     const q = query(
       collection(db, "notifications"),
       where("userId", "==", user.uid),
-      where("read", "==", false)
+      where("read", "==", false),
+      limit(30)
     );
     return onSnapshot(q,
       (snap) => {
@@ -544,11 +493,15 @@ export default function AppShell() {
       return;
     }
 
-    return subscribeAuditLogs(
-      setAuditItems,
-      (error) => console.warn("[AppShell][pageChanges]", error),
-      500
-    );
+    let cancelled = false;
+    void getAuditLogs(20)
+      .then((items) => {
+        if (!cancelled) setAuditItems(items);
+      })
+      .catch((error) => console.warn("[AppShell][pageChanges]", error));
+    return () => {
+      cancelled = true;
+    };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -558,12 +511,13 @@ export default function AppShell() {
       return;
     }
 
+    let cancelled = false;
     setPageReadsLoaded(false);
     const readsRef = collection(db, "users", user.uid, "pageChangeReads");
 
-    return onSnapshot(
-      readsRef,
-      (snap) => {
+    void getDocs(readsRef)
+      .then((snap) => {
+        if (cancelled) return;
         if (snap.empty) {
           const readAt = Date.now();
           const initialState = buildInitialPageReadState(readAt);
@@ -587,8 +541,9 @@ export default function AppShell() {
 
         setPageReadState(nextState);
         setPageReadsLoaded(true);
-      },
-      (error) => {
+      })
+      .catch((error) => {
+        if (cancelled) return;
         console.warn("[AppShell][pageChangeReads]", error);
         const fallbackState = allItems.reduce<PageReadState>((acc, item) => {
           acc[item.path] = getLocalPageReadAt(user.uid, item.path);
@@ -596,8 +551,10 @@ export default function AppShell() {
         }, {});
         setPageReadState(fallbackState);
         setPageReadsLoaded(true);
-      }
-    );
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user?.uid]);
 
   // UI preferences — once per mount
@@ -619,58 +576,20 @@ export default function AppShell() {
     void load();
   }, []);
 
-  // Vehicle maintenance alerts — run in background after the shell settles
-  useEffect(() => {
-    if (!user?.uid) return;
-    if (role !== "admin" && role !== "manager") return;
-    const runKey = `${user.uid}:${role}`;
-    if (maintenanceRanRef.current === runKey) return;
-    maintenanceRanRef.current = runKey;
-
-    let timerId: number | undefined;
-    let idleId: number | undefined;
-    const requestIdleCallback = window.requestIdleCallback?.bind(window);
-    const cancelIdleCallback = window.cancelIdleCallback?.bind(window);
-
-    const runAlerts = () => {
-      void runVehicleMaintenanceAlerts({
-        userId: user.uid,
-        userName: user.displayName || user.email || "WorkControl",
-        userThemeKey: user.themeKey ?? null,
-      }).catch((err) => console.error("[AppShell][runVehicleMaintenanceAlerts]", err));
-    };
-
-    if (requestIdleCallback) {
-      idleId = requestIdleCallback(runAlerts, { timeout: 4_000 });
-    } else {
-      timerId = window.setTimeout(runAlerts, 2_500);
-    }
-
-    return () => {
-      if (typeof timerId === "number") {
-        window.clearTimeout(timerId);
-      }
-      if (typeof idleId === "number" && cancelIdleCallback) {
-        cancelIdleCallback(idleId);
-      }
-    };
-  }, [user?.uid, user?.displayName, user?.email, user?.themeKey, role]);
-
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
 
   useEffect(() => {
     if (!user?.uid) return;
     const item = getMenuItemForPath(location.pathname);
-    const fullPath = `${location.pathname}${location.search || ""}`;
     logPageView({
       userId: user.uid,
       userName: user.displayName || user.email || "Utilizator",
       userThemeKey: user.themeKey ?? null,
-      path: fullPath,
+      path: location.pathname,
       pageTitle: item?.label || "WorkControl",
     });
-  }, [location.pathname, location.search, user?.displayName, user?.email, user?.themeKey, user?.uid]);
+  }, [location.pathname, user?.displayName, user?.email, user?.themeKey, user?.uid]);
 
   // Close on resize
   useEffect(() => {
@@ -807,6 +726,9 @@ export default function AppShell() {
             </div>
 
             <div className="topbar-right-cluster">
+              <Suspense fallback={<span className="wc-command-trigger wc-command-trigger--loading" aria-hidden="true" />}>
+                <GlobalCommandPalette />
+              </Suspense>
               <TopbarClock />
               <div className="topbar-user">
                 <div className="topbar-user-avatar">
@@ -847,7 +769,7 @@ export default function AppShell() {
         </main>
       </div>
       <FloatingQuickLinks />
-      <VoiceCommandAssistant />
+      <Suspense fallback={null}><VoiceCommandAssistant /></Suspense>
     </div>
   );
 }

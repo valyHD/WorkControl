@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -313,9 +314,15 @@ export function subscribeLeaveRequestsForUser(
   });
 }
 
-export async function getLeaveRequestsForUser(userId: string): Promise<LeaveRequestItem[]> {
+export async function getLeaveRequestsForUser(userId: string, maxItems = 200): Promise<LeaveRequestItem[]> {
+  const safeLimit = Math.max(1, Math.min(200, Math.floor(maxItems)));
   const snap = await getDocs(
-    query(leaveRequestsCollection, where("userId", "==", userId), orderBy("createdAt", "desc"))
+    query(
+      leaveRequestsCollection,
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc"),
+      limit(safeLimit)
+    )
   );
 
   return snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));

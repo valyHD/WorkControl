@@ -4,6 +4,7 @@ import { deleteUserProfile, getAllUsers, subscribeUsers } from "../services/user
 import type { AppUserItem } from "../../../types/user";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
 import { Search, UserPlus, Users, ShieldAlert, Trash2 } from "lucide-react";
 
 function UserRowSkeleton() {
@@ -163,6 +164,12 @@ export default function UsersPage() {
 
   return (
     <section className="page-section">
+      <ProductPageHeader
+        eyebrow="Echipă și acces"
+        title="Utilizatori"
+        description={loading ? "Se încarcă echipa..." : `${users.length} conturi · ${activeCount} active · ${onlineCount} online`}
+        actions={[{ id: "new-user", label: "Adaugă utilizator", to: "/users/new", icon: UserPlus, tone: "primary", assistantAction: "create-user" }]}
+      />
       <div className="panel">
         {/* Header */}
         <div className="tools-header">
@@ -221,7 +228,7 @@ export default function UsersPage() {
 
         {/* Table */}
         {loading ? (
-          <div className="users-table-wrap">
+          <div className="users-table-wrap users-product-grid">
             <table className="users-table">
               <thead>
                 <tr>
@@ -244,7 +251,7 @@ export default function UsersPage() {
             </div>
           </div>
         ) : (
-          <div className="users-table-wrap">
+          <div className="users-table-wrap users-product-grid">
             <table className="users-table">
               <thead>
                 <tr>

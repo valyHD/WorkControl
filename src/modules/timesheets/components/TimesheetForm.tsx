@@ -379,7 +379,7 @@ export default function TimesheetForm({
 
           <div className="tool-form-actions" style={{ marginTop: 16 }}>
             <button
-              className={`primary-btn ${attentionActive ? "attention-pulse" : ""}`}
+              className={`primary-btn timesheet-main-action ${attentionActive ? "attention-pulse" : ""}`}
               type="button"
               onClick={() => void handleStart()}
               disabled={submitting}
@@ -433,7 +433,7 @@ export default function TimesheetForm({
 
           <div className="tool-form-actions" style={{ marginTop: 16 }}>
             <button
-              className={`primary-btn ${attentionActive ? "attention-pulse" : ""}`}
+              className={`primary-btn timesheet-main-action ${attentionActive ? "attention-pulse" : ""}`}
               type="button"
               onClick={() => void handleStop()}
               disabled={submitting}

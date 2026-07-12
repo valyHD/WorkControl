@@ -1,5 +1,5 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type { AppUser } from "../../../types/tool";
 import type {
   VehicleDocumentItem,
@@ -16,6 +16,8 @@ import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import VehicleChangeDriverCard from "../components/VehicleChangeDriverCard";
 import VehicleDocumentsPanel from "../components/VehicleDocumentsPanel";
 import GpsSimulatorPanel from "../components/GpsSimulatorPanel";
+import ProductTabs from "../../../components/product/ProductTabs";
+import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import { canUseGpsSimulator } from "../hooks/useGpsSimulator";
 import {
   acceptVehicleDriverChange,
@@ -156,6 +158,7 @@ export default function VehicleDetailsPage() {
   const { vehicleId = "" } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { role, user } = useAuth();
   const mountedRef = useRef(true);
 
@@ -179,6 +182,16 @@ export default function VehicleDetailsPage() {
   const [commentText, setCommentText] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
   const estimatedKmUpdateRef = useRef({ km: 0, updatedAt: 0 });
+  const requestedTab = searchParams.get("tab") || (location.hash === "#vehicle-tracker-live-section" ? "gps" : "general");
+  const activeTab = ["general", "gps", "history", "documents", "maintenance", "expenses", "timeline"].includes(requestedTab)
+    ? requestedTab
+    : "general";
+
+  function selectVehicleTab(tab: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    setSearchParams(next, { replace: true });
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -619,6 +632,21 @@ export default function VehicleDetailsPage() {
         </div>
       </div>
 
+      <ProductTabs
+        activeId={activeTab}
+        onChange={selectVehicleTab}
+        label="Detalii mașină"
+        tabs={[
+          { id: "general", label: "General", assistantAction: "vehicle-tab-general" },
+          { id: "gps", label: "GPS", assistantAction: "vehicle-tab-gps" },
+          { id: "history", label: "Istoric", badge: events.length, assistantAction: "vehicle-tab-history" },
+          { id: "documents", label: "Documente", badge: vehicle.documents.length, assistantAction: "vehicle-tab-documents" },
+          { id: "maintenance", label: "Mentenanță", badge: maintenanceAlerts.length || undefined, assistantAction: "vehicle-tab-maintenance" },
+          { id: "expenses", label: "Cheltuieli", assistantAction: "vehicle-tab-expenses" },
+          { id: "timeline", label: "Timeline", assistantAction: "vehicle-tab-timeline" },
+        ]}
+      />
+
       {undoStack.length > 0 && (
         <div className="vehicle-undo-bar">
           <span>{undoStack[undoStack.length - 1]?.label}</span>
@@ -634,6 +662,7 @@ export default function VehicleDetailsPage() {
         </div>
       )}
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "general"}>
       {needsRepair && user && (
         <div className="panel">
           <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
@@ -720,7 +749,9 @@ export default function VehicleDetailsPage() {
           {(vehicle.initialRecordedKm || 0).toLocaleString("ro-RO")} km
         </div>
       </VehicleSectionDropdown>
+      </div>
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "maintenance"}>
       <VehicleSectionDropdown title="Mentenanta">
         <div className="tool-detail-line">
           <strong>Urmator service la:</strong>{" "}
@@ -773,7 +804,9 @@ export default function VehicleDetailsPage() {
           </div>
         )}
       </VehicleSectionDropdown>
+      </div>
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "general"}>
       <VehicleSectionDropdown title="Schimba soferul curent">
         {canManageVehicle && <VehicleChangeDriverCard vehicle={vehicle} users={users} onChanged={loadMeta} />}
 
@@ -805,7 +838,9 @@ export default function VehicleDetailsPage() {
           </div>
         )}
       </VehicleSectionDropdown>
+      </div>
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "gps"}>
       <div id="vehicle-tracker-live-section">
       <VehicleSectionDropdown title="Tracker live" defaultOpen={shouldOpenTrackerSection}>
         <SectionErrorBoundary sectionName="harta GPS">
@@ -838,7 +873,9 @@ export default function VehicleDetailsPage() {
           onSimulationActiveChange={setSimulationActive}
         />
       ) : null}
+      </div>
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "documents"}>
       <VehicleSectionDropdown title="Galerie foto">
         <div>
         <div
@@ -935,7 +972,9 @@ export default function VehicleDetailsPage() {
         />
         </div>
       </VehicleSectionDropdown>
+      </div>
 
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "history"}>
       <VehicleSectionDropdown title="Istoric evenimente si comentarii">
         <div>
         <div
@@ -1006,6 +1045,34 @@ export default function VehicleDetailsPage() {
         )}
         </div>
       </VehicleSectionDropdown>
+      </div>
+
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "expenses"}>
+        <div className="panel">
+          <div className="panel-head">
+            <div><h2 className="panel-title">Cheltuieli mașină</h2><p className="panel-subtitle">Bonuri, facturi și rapoarte asociate flotei.</p></div>
+          </div>
+          <div className="tool-form-actions">
+            <Link className="primary-btn" to={`/expenses/scan?vehicleId=${encodeURIComponent(vehicle.id)}`} data-assistant-action="vehicle-add-expense">Scanează bon</Link>
+            <Link className="secondary-btn" to={`/expenses/reports?vehicleId=${encodeURIComponent(vehicle.id)}`} data-assistant-action="vehicle-view-expenses">Vezi rapoarte</Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="wc-vehicle-tab-panel" hidden={activeTab !== "timeline"}>
+        <div className="panel">
+          <div className="panel-head"><div><h2 className="panel-title">Timeline mașină</h2><p className="panel-subtitle">Evenimentele importante, în ordine cronologică.</p></div></div>
+          <UniversalTimeline
+            items={events.map((event) => ({
+              id: event.id,
+              title: event.message,
+              description: event.actorUserName || "Sistem",
+              timestamp: event.createdAt,
+              tone: event.type === "comment" ? "blue" : "muted",
+            }))}
+          />
+        </div>
+      </div>
     </section>
   );
 }

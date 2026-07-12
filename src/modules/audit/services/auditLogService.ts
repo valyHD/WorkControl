@@ -13,7 +13,7 @@ import { db } from "../../../lib/firebase/firebase";
 import type { AuditLogCategory, AuditLogInput, AuditLogItem } from "../../../types/audit";
 
 const auditLogsCollection = collection(db, "auditLogs");
-const PAGE_VIEW_THROTTLE_MS = 12_000;
+const PAGE_VIEW_THROTTLE_MS = 30 * 60_000;
 const pageViewMemory = new Map<string, number>();
 
 function toText(value: unknown, fallback = ""): string {

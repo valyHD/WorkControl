@@ -109,7 +109,7 @@ export default function AuditLogPage() {
         setError("Nu am putut incarca istoricul.");
         setLoading(false);
       },
-      1000
+      200
     );
 
     return () => {

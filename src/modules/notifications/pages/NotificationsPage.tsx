@@ -5,6 +5,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -95,7 +96,8 @@ export default function NotificationsPage() {
     const q = query(
       collection(db, "notifications"),
       where("userId", "==", user.uid),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(100)
     );
 
     const unsub = onSnapshot(q, (snap) => {

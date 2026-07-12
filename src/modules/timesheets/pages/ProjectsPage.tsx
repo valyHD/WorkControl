@@ -12,6 +12,7 @@ import {
 } from "../services/timesheetsService";
 import ProjectForm from "../components/ProjectForm";
 import UserProfileLink from "../../../components/UserProfileLink";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
 
 type TimesheetGroupMode = "day" | "week" | "month";
 
@@ -245,11 +246,16 @@ export default function ProjectsPage() {
 
   return (
     <section className="page-section">
-      <div className="panel">
-        <h2 className="panel-title">Proiecte</h2>
-        <p className="tools-subtitle">
-          Creeaza proiecte si schimba statusul lor.
-        </p>
+      <ProductPageHeader
+        eyebrow="Echipă și pontaje"
+        title="Proiecte"
+        description="Creează proiecte, urmărește orele și păstrează starea lucrărilor într-un singur loc."
+        actions={[{ id: "timesheets", label: "Vezi pontaje", to: "/timesheets", assistantAction: "open-timesheets" }]}
+      />
+
+      <div className="panel" data-assistant-section="project-create-form">
+        <h2 className="panel-title">Proiect nou</h2>
+        <p className="tools-subtitle">Completează datele esențiale și proiectul devine disponibil imediat în pontaj.</p>
 
         {error && <div className="tool-message" style={{ marginTop: 16 }}>{error}</div>}
 

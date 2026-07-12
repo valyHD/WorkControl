@@ -5,9 +5,11 @@ import type { VehicleItem } from "../../../types/vehicle";
 import { subscribeVehiclesList } from "../services/vehiclesService";
 import VehicleStatusBadge from "../components/VehicleStatusBadge";
 import { getUserThemeClass } from "../../../lib/ui/userTheme";
-import { CarFront, FileText, MapPinned, MessageSquare, Search, UserCheck } from "lucide-react";
+import { CarFront, List, MapPinned, Search } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { VehicleGpsVisibilityToggle } from "../components/VehicleGpsVisibilityGate";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
+import ProductTabs from "../../../components/product/ProductTabs";
 
 function VehicleCardSkeleton() {
   return (
@@ -123,47 +125,28 @@ export default function VehiclesPage() {
 
   return (
     <section className="page-section">
-      <div className="panel">
-        {/* Header */}
-        <div className="tools-header">
-          <div>
-            <h2 className="panel-title">Mașini</h2>
-            <p className="tools-subtitle">
-              {loading ? "Se încarcă..." : `${total} vehicule · ${activeCount} active`}
-            </p>
-          </div>
-          <div className="tools-header-actions">
-            <VehicleGpsVisibilityToggle />
-            <Link to="/vehicles/gps-map" className="secondary-btn">
-              <MapPinned size={15} /> Lista harta GPS
-            </Link>
-            <Link to="/vehicles/new" className="primary-btn">
-              <CarFront size={15} /> Adaugă mașină
-            </Link>
-          </div>
-        </div>
+      <ProductPageHeader
+        eyebrow="Flotă"
+        title="Mașini"
+        description={loading ? "Se încarcă flota..." : `${total} vehicule · ${activeCount} active`}
+        actions={[
+          { id: "gps", label: "Toate GPS-urile", to: "/vehicles/gps-map", icon: MapPinned, assistantAction: "open-fleet-gps" },
+          { id: "new", label: "Adaugă mașină", to: "/vehicles/new", icon: CarFront, tone: "primary", assistantAction: "create-vehicle" },
+        ]}
+      />
 
-        <div className="asset-help-grid" aria-label="Instructiuni masini">
-          <div className="asset-help-card asset-help-card-blue">
-            <span className="asset-help-icon"><CarFront size={18} /></span>
-            <strong>Verifica masina</strong>
-            <p>Cauta dupa numar, marca, model, responsabil sau sofer si intra pe masina pentru detalii.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-amber">
-            <span className="asset-help-icon"><UserCheck size={18} /></span>
-            <strong>Schimbi soferul cu aprobare</strong>
-            <p>Cand alegi alt sofer, acesta trebuie sa accepte solicitarea ca schimbarea sa fie finala.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-green">
-            <span className="asset-help-icon"><FileText size={18} /></span>
-            <strong>Actualizeaza mentenanta</strong>
-            <p>Adauga RCA, ITP, CASCO, rovinieta, service si km ca sa primesti alerte corecte.</p>
-          </div>
-          <div className="asset-help-card asset-help-card-violet">
-            <span className="asset-help-icon"><MessageSquare size={18} /></span>
-            <strong>Note si poze</strong>
-            <p>In pagina masinii, deschide Istoric evenimente si comentarii ca sa adaugi observatii.</p>
-          </div>
+      <ProductTabs
+        activeId="list"
+        tabs={[
+          { id: "list", label: "Listă flotă", to: "/vehicles", icon: List },
+          { id: "map", label: "Hartă GPS", to: "/vehicles/gps-map", icon: MapPinned, assistantAction: "open-fleet-gps" },
+        ]}
+      />
+
+      <div className="panel">
+        <div className="tools-header tools-header--compact">
+          <div><h2 className="panel-title">Flotă</h2><p className="tools-subtitle">Status, șofer, kilometri și documente.</p></div>
+          <VehicleGpsVisibilityToggle />
         </div>
 
         {/* Filters */}

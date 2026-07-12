@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   setDoc,
@@ -545,7 +546,11 @@ export function subscribeMaintenanceReportHistory(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(collection(db, "maintenanceClients", clientId, "rapoarte"), orderBy("createdAt", "desc")),
+    query(
+      collection(db, "maintenanceClients", clientId, "rapoarte"),
+      orderBy("createdAt", "desc"),
+      limit(100)
+    ),
     (snap) => {
       onData(snap.docs.map((docItem) => mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>)));
     },

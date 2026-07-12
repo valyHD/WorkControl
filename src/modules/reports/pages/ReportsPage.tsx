@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { Bot, CreditCard, Database, FileClock, HeartPulse, MapPinned, Rocket, Server, Settings } from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
 import BillingCostPanel from "../components/BillingCostPanel";
 import type { ControlPanelSettings } from "../services/controlPanelService";
@@ -12,6 +14,8 @@ import {
   type ProfessionalBackupView,
   saveControlPanelSettings,
 } from "../services/controlPanelService";
+import { ProductPageHeader } from "../../../components/product/ProductPage";
+import ProductTabs from "../../../components/product/ProductTabs";
 
 const BACKUP_PREVIEW_STORAGE_KEY = "workcontrol_uploaded_backup_preview";
 
@@ -67,6 +71,7 @@ function prettyBytes(value: number) {
 }
 
 export default function ControlPanelPage() {
+  const location = useLocation();
   const { role } = useAuth();
   const [settings, setSettings] = useState<ControlPanelSettings>(FALLBACK_SETTINGS);
   const [loading, setLoading] = useState(true);
@@ -341,7 +346,29 @@ export default function ControlPanelPage() {
 
   return (
     <section className="page-section">
-      <div className="panel control-panel-hero">
+      <ProductPageHeader
+        eyebrow="Administrare"
+        title="Control Panel"
+        description="Configurare, costuri, sănătate și instrumente administrative organizate pe domenii."
+        meta={<span className="badge badge-green">Sistem activ</span>}
+      />
+
+      <ProductTabs
+        activeId={(location.hash || "#general").replace("#", "")}
+        tabs={[
+          { id: "general", label: "General", to: "/control-panel#general", icon: Settings },
+          { id: "firebase", label: "Firebase", to: "/control-panel#firebase", icon: Database },
+          { id: "ai", label: "AI", to: "/control-panel#ai", icon: Bot },
+          { id: "gps", label: "GPS", to: "/vehicles/gps-map", icon: MapPinned },
+          { id: "server", label: "Server", to: "/control-panel#system", icon: Server },
+          { id: "billing", label: "Billing", to: "/control-panel#billing", icon: CreditCard },
+          { id: "deploy", label: "Deploy", to: "/control-panel#deploy", icon: Rocket },
+          { id: "health", label: "Health", to: "/control-panel#system", icon: HeartPulse },
+          { id: "logs", label: "Logs", to: "/history", icon: FileClock },
+        ]}
+      />
+
+      <div id="general" className="panel control-panel-hero">
         <h2 className="panel-title">Control Panel · Backup & Stabilitate</h2>
         <p className="tools-subtitle">
           Export complet pentru NAS/stick, retenție automată pentru istoric și setări UI centralizate.
@@ -370,9 +397,26 @@ export default function ControlPanelPage() {
         {error && <div className="tool-message">{error}</div>}
       </div>
 
-      <BillingCostPanel isAdmin={role === "admin"} />
+      <div id="billing"><BillingCostPanel isAdmin={role === "admin"} /></div>
 
-      <div className="panel">
+      <div id="ai" className="panel">
+        <h3 className="panel-subtitle">Asistent WorkControl</h3>
+        <p className="tools-subtitle">
+          Asistentul vocal și căutarea globală sunt active în bara aplicației.
+        </p>
+        <div className="quick-actions-grid">
+          <div className="quick-action-card">
+            <div className="quick-action-title">Comenzi rapide</div>
+            <div className="quick-action-subtitle">Folosește Ctrl K pentru navigare și căutare în datele accesibile rolului tău.</div>
+          </div>
+          <div className="quick-action-card">
+            <div className="quick-action-title">Comenzi vocale</div>
+            <div className="quick-action-subtitle">Butonul asistentului rămâne disponibil în partea dreaptă a aplicației.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="firebase" className="panel">
         <h3 className="panel-subtitle">Export profesional backup</h3>
         <p className="tools-subtitle">Backup JSON integral + raport text frumos pe categorii, per user și module.</p>
 
@@ -394,7 +438,7 @@ export default function ControlPanelPage() {
           })}
         </div>
 
-        <div className="tool-form-actions" style={{ marginTop: 14 }}>
+        <div id="deploy" className="tool-form-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn" type="button" onClick={() => void handleExportBackup()}>
             Exportă backup complet
           </button>
@@ -730,7 +774,7 @@ export default function ControlPanelPage() {
         {personalizationMessage && <div className="tool-message success-message" style={{ marginTop: 12 }}>{personalizationMessage}</div>}
       </div>
 
-      <div className="panel">
+      <div id="system" className="panel">
         <h3 className="panel-subtitle">Control rapid sistem</h3>
         <p className="tools-subtitle">Instrumente utile pentru administrator: verificări și resetări rapide.</p>
         <div className="quick-actions-grid">

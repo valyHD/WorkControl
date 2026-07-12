@@ -191,6 +191,10 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     });
 
     await login(page);
+    await expect(page.getByText("Ce se întâmplă azi în firmă")).toBeVisible();
+    await page.keyboard.press("Control+K");
+    await expect(page.getByRole("dialog", { name: "Căutare globală" })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await page.goto("/projects");
     await page.getByPlaceholder("Ex: Montaj lift A").fill("Proiect E2E Critic");

@@ -36,7 +36,7 @@ describe("BillingCostPanel", () => {
       source: "cloud_monitoring_firestore_operations",
       dataAsOfMs: Date.now() - 180_000,
       lagSeconds: 180,
-      sampledWindowMinutes: 5,
+      sampledWindowMinutes: 15,
       refreshSeconds: 60,
       costPerMinuteEur: 0.00125,
       projectedHourlyEur: 0.075,
@@ -112,7 +112,10 @@ describe("BillingCostPanel", () => {
     expect(await screen.findByText("Consum și costuri")).toBeInTheDocument();
     await waitFor(() => expect(mockedGetData).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mockedGetLiveEstimate).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("Ritm cost Firestore")).toBeInTheDocument();
+    expect(screen.getByText("Consum Firestore - intregul site")).toBeInTheDocument();
+    expect(screen.getByText("Cost în ultimele 60 min raportate")).toBeInTheDocument();
+    expect(screen.getByText("Citiri Firestore în ultimele 60 min")).toBeInTheDocument();
+    expect(screen.queryByText("Proiecție la ritmul actual")).not.toBeInTheDocument();
     expect(screen.getByText(/0,00125/)).toBeInTheDocument();
     expect(screen.getByText("1.000 citiri/min")).toBeInTheDocument();
     expect(screen.getByText(/3,69 MiB egress\/min/)).toBeInTheDocument();

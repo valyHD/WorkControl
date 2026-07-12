@@ -1,6 +1,7 @@
 import {
   collection,
   getDocs,
+  limit,
   orderBy,
   query,
   where,
@@ -10,6 +11,7 @@ import type { AppUserItem } from "../../../types/user";
 import type { ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem, TimesheetItem } from "../../../types/timesheet";
+import { getLocalDateKey } from "../../timesheets/utils/timesheetAnalytics";
 
 export type DashboardNotificationItem = {
   id: string;
@@ -56,6 +58,12 @@ export type DashboardData = {
   projects: ProjectItem[];
   notifications: DashboardNotificationItem[];
 };
+
+type DashboardReferenceData = Pick<DashboardData, "users" | "tools" | "vehicles" | "projects">;
+
+const DASHBOARD_REFERENCE_CACHE_MS = 15 * 60_000;
+let referenceCache: { expiresAt: number; data: DashboardReferenceData } | null = null;
+let referenceRequest: Promise<DashboardReferenceData> | null = null;
 
 function mapUserDoc(id: string, data: Record<string, any>): AppUserItem {
   return {
@@ -231,37 +239,61 @@ function mapNotificationDoc(
   };
 }
 
-export async function getDashboardData(currentUserId?: string): Promise<DashboardData> {
-  const [usersSnap, toolsSnap, vehiclesSnap, timesheetsSnap, projectsSnap] =
-    await Promise.all([
+async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
+  if (referenceCache?.expiresAt && referenceCache.expiresAt > Date.now()) {
+    return referenceCache.data;
+  }
+  if (referenceRequest) return referenceRequest;
+
+  referenceRequest = (async () => {
+    const [usersSnap, toolsSnap, vehiclesSnap, projectsSnap] = await Promise.all([
       getDocs(query(collection(db, "users"), orderBy("fullName", "asc"))),
       getDocs(query(collection(db, "tools"), orderBy("updatedAt", "desc"))),
       getDocs(query(collection(db, "vehicles"), orderBy("updatedAt", "desc"))),
-      getDocs(query(collection(db, "timesheets"), orderBy("startAt", "desc"))),
       getDocs(query(collection(db, "projects"), orderBy("name", "asc"))),
     ]);
+    const data = {
+      users: usersSnap.docs.map((d) => mapUserDoc(d.id, d.data())),
+      tools: toolsSnap.docs.map((d) => mapToolDoc(d.id, d.data())),
+      vehicles: vehiclesSnap.docs.map((d) => mapVehicleDoc(d.id, d.data())),
+      projects: projectsSnap.docs.map((d) => mapProjectDoc(d.id, d.data())),
+    };
+    referenceCache = { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS };
+    return data;
+  })();
 
-  const users = usersSnap.docs.map((d) => mapUserDoc(d.id, d.data()));
-  const tools = toolsSnap.docs.map((d) => mapToolDoc(d.id, d.data()));
-  const vehicles = vehiclesSnap.docs.map((d) => mapVehicleDoc(d.id, d.data()));
-  const timesheets = timesheetsSnap.docs.map((d) => mapTimesheetDoc(d.id, d.data()));
-  const projects = projectsSnap.docs.map((d) => mapProjectDoc(d.id, d.data()));
-
-  let notifications: DashboardNotificationItem[] = [];
-
-  if (currentUserId) {
-    const notificationsSnap = await getDocs(
-      query(
-        collection(db, "notifications"),
-        where("userId", "==", currentUserId),
-        orderBy("createdAt", "desc")
-      )
-    );
-
-    notifications = notificationsSnap.docs.map((d) =>
-      mapNotificationDoc(d.id, d.data())
-    );
+  try {
+    return await referenceRequest;
+  } finally {
+    referenceRequest = null;
   }
+}
+
+export async function getDashboardData(
+  currentUserId?: string,
+  dayKey = getLocalDateKey(Date.now())
+): Promise<DashboardData> {
+  const notificationsRequest = currentUserId
+    ? getDocs(
+        query(
+          collection(db, "notifications"),
+          where("userId", "==", currentUserId),
+          orderBy("createdAt", "desc"),
+          limit(10)
+        )
+      )
+    : Promise.resolve(null);
+  const [references, timesheetsSnap, notificationsSnap] = await Promise.all([
+    getDashboardReferenceData(),
+    getDocs(query(collection(db, "timesheets"), where("workDate", "==", dayKey))),
+    notificationsRequest,
+  ]);
+
+  const { users, tools, vehicles, projects } = references;
+  const timesheets = timesheetsSnap.docs.map((d) => mapTimesheetDoc(d.id, d.data()));
+  const notifications = notificationsSnap
+    ? notificationsSnap.docs.map((d) => mapNotificationDoc(d.id, d.data()))
+    : [];
 
   const stats: DashboardStats = {
     totalUsers: users.length,

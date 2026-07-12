@@ -5,12 +5,16 @@ import {
   AlertTriangle,
   Bell,
   Briefcase,
+  Building2,
   CalendarClock,
   CarFront,
   CheckCircle2,
   Clock3,
+  CreditCard,
+  Database,
   FolderOpen,
   RefreshCw,
+  ReceiptText,
   TimerReset,
   Users,
   Wrench,
@@ -30,6 +34,12 @@ import StatusBadge from "../../../components/StatusBadge";
 import EmptyState from "../../../components/EmptyState";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import {
+  ProductContentLayout,
+  ProductPageHeader,
+  ProductQuickActions,
+} from "../../../components/product/ProductPage";
+import UniversalTimeline from "../../../components/product/UniversalTimeline";
+import {
   getEffectiveWorkedMinutes,
   getLocalDateKey,
   getProjectLabel,
@@ -38,6 +48,7 @@ import {
   getUsersWithoutTimesheetToday,
 } from "../../timesheets/utils/timesheetAnalytics";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import { getLiveFirebaseCostEstimate, type LiveFirebaseCostEstimate } from "../../reports/services/billingMetricsService";
 
 type NotificationLite = {
   id: string;
@@ -105,9 +116,10 @@ function getUserName(userItem: AppUserItem) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const mountedRef = useRef(true);
+  const loadInProgressRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,6 +131,7 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationLite[]>([]);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [billingEstimate, setBillingEstimate] = useState<LiveFirebaseCostEstimate | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -127,7 +140,22 @@ export default function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (role !== "admin") return;
+    let active = true;
+    void getLiveFirebaseCostEstimate()
+      .then((value) => {
+        if (active) setBillingEstimate(value);
+      })
+      .catch((error) => console.warn("[Dashboard][billing]", error));
+    return () => {
+      active = false;
+    };
+  }, [role]);
+
   const load = useCallback(async (silent = false) => {
+    if (loadInProgressRef.current) return;
+    loadInProgressRef.current = true;
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
@@ -144,6 +172,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error("[DashboardPage][load]", error);
     } finally {
+      loadInProgressRef.current = false;
       if (mountedRef.current) {
         setLoading(false);
         setRefreshing(false);
@@ -153,8 +182,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     void load();
-    const interval = window.setInterval(() => void load(true), 120_000);
-    return () => window.clearInterval(interval);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    const interval = window.setInterval(refreshIfVisible, 5 * 60_000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [load]);
 
   const openMyVehicle = useCallback(async () => {
@@ -360,37 +396,25 @@ export default function DashboardPage() {
 
   return (
     <section className="page-section dashboard-modern-page">
-      <div className="today-strip">
-        <div className="today-strip-dot" />
-        <CalendarClock size={15} strokeWidth={2.1} />
-        <span>
-          {new Date().toLocaleDateString("ro-RO", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            year: "numeric",
-          })}
-        </span>
-        <span className="dashboard-refresh-note">
-          {refreshing ? <RefreshCw size={11} className="spin-icon" /> : null}
-          actualizat {lastRefreshed.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-      </div>
-
-      <div className="dashboard-action-strip">
-        <button type="button" className="primary-btn" disabled={navigatingVehicle} onClick={() => void openMyVehicle()}>
-          {navigatingVehicle ? "Se deschide..." : "Masina mea"}
-        </button>
-        <Link to="/my-timesheets" className="secondary-btn">
-          <TimerReset size={16} /> Pontajul meu
-        </Link>
-        <Link to="/timesheets" className="secondary-btn">
-          <Clock3 size={16} /> Pontaje
-        </Link>
-        <Link to="/projects" className="secondary-btn">
-          <FolderOpen size={16} /> Proiecte
-        </Link>
-      </div>
+      <ProductPageHeader
+        eyebrow="Command Center"
+        title="Ce se întâmplă azi în firmă"
+        description="Pontaje, flotă, proiecte și alerte într-o singură privire."
+        meta={(
+          <span className="today-strip">
+            <CalendarClock size={14} />
+            {new Date().toLocaleDateString("ro-RO", { weekday: "long", day: "numeric", month: "long" })}
+          </span>
+        )}
+        actions={[{
+          id: "refresh-dashboard",
+          label: refreshing ? "Se actualizează" : `Actualizat ${lastRefreshed.toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}`,
+          icon: RefreshCw,
+          onClick: () => void load(true),
+          disabled: refreshing,
+          assistantAction: "refresh-dashboard",
+        }]}
+      />
 
       <div className="wc-kpi-grid wc-kpi-grid--six">
         <KpiCard
@@ -441,8 +465,41 @@ export default function DashboardPage() {
           icon={AlertTriangle}
           to="/notifications"
         />
+        {role === "admin" ? (
+          <KpiCard
+            label="Cost Firebase live"
+            value={billingEstimate?.costPerMinuteEur != null ? `${billingEstimate.costPerMinuteEur.toLocaleString("ro-RO", { maximumFractionDigits: 5 })} € / min` : "-"}
+            helper={billingEstimate?.status === "current" ? "Cloud Monitoring" : "date în curs de actualizare"}
+            tone="blue"
+            icon={Database}
+            to="/control-panel#billing"
+          />
+        ) : null}
+        {role === "admin" ? (
+          <KpiCard
+            label="Cost estimat luna"
+            value={billingEstimate?.estimatedLastHourEur != null ? `${(billingEstimate.estimatedLastHourEur * 24 * 30).toLocaleString("ro-RO", { maximumFractionDigits: 2 })} €` : "-"}
+            helper="estimare din media ultimelor 60 min"
+            tone="purple"
+            icon={CreditCard}
+            to="/control-panel#billing"
+          />
+        ) : null}
       </div>
 
+      <ProductContentLayout
+        aside={(
+          <ProductQuickActions
+            actions={[
+              { id: "my-timesheet", label: "Pontajul meu", to: "/my-timesheets", icon: TimerReset, tone: "primary", assistantAction: "open-my-timesheet" },
+              { id: "my-vehicle", label: navigatingVehicle ? "Se deschide..." : "Mașina mea", onClick: () => void openMyVehicle(), icon: CarFront, disabled: navigatingVehicle, assistantAction: "open-my-vehicle" },
+              { id: "scan-receipt", label: "Scanează bon", to: "/expenses/scan?assistant=upload", icon: ReceiptText, assistantAction: "upload-receipt" },
+              { id: "maintenance-report", label: "Raport nou", to: "/maintenance?tab=report&assistant=report", icon: Building2, assistantAction: "maintenance-report" },
+              { id: "projects", label: "Vezi proiecte", to: "/projects", icon: FolderOpen, assistantAction: "open-projects" },
+            ]}
+          />
+        )}
+      >
       <div className="content-grid dashboard-main-grid">
         <div className="panel" data-assistant-section="dashboard-today-timesheets">
           <div className="panel-head">
@@ -508,31 +565,7 @@ export default function DashboardPage() {
             <Activity size={20} />
           </div>
           {activityItems.length ? (
-            <div className="simple-list dashboard-activity-list">
-              {activityItems.map((item) => {
-                const content = (
-                  <>
-                    <span className={`dashboard-activity-dot dashboard-activity-dot--${item.tone}`} />
-                    <div className="simple-list-text">
-                      <div className="simple-list-label">{item.title}</div>
-                      <div className="simple-list-subtitle">
-                        {item.subtitle} - {formatDateTime(item.at)}
-                      </div>
-                    </div>
-                    <StatusBadge tone={item.tone}>{formatTime(item.at)}</StatusBadge>
-                  </>
-                );
-                return item.to ? (
-                  <Link key={item.id} to={item.to} className="simple-list-item">
-                    {content}
-                  </Link>
-                ) : (
-                  <div key={item.id} className="simple-list-item">
-                    {content}
-                  </div>
-                );
-              })}
-            </div>
+            <UniversalTimeline items={activityItems.map((item) => ({ id: item.id, title: item.title, description: item.subtitle, timestamp: item.at, tone: item.tone, to: item.to }))} />
           ) : (
             <EmptyState icon={CheckCircle2} title="Nicio activitate azi" subtitle="Cand apar pontaje sau alerte, le vezi aici." />
           )}
@@ -630,6 +663,7 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      </ProductContentLayout>
     </section>
   );
 }

@@ -3,6 +3,7 @@ import type { ChangeEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
+  ArrowUpDown,
   Building2,
   CheckCircle2,
   ClipboardCheck,
@@ -103,7 +104,7 @@ type GeneratedReportShare = {
   gmailUrl: string;
 };
 
-type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "companies" | "history" | "checks";
+type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "lifts" | "companies" | "history" | "checks";
 
 const MAINTENANCE_TABS: Array<{
   id: MaintenanceTab;
@@ -115,6 +116,7 @@ const MAINTENANCE_TABS: Array<{
   { id: "report", title: "Genereaza raport", description: "Raport PDF cu poze si trimitere Gmail.", icon: FileText },
   { id: "parts", title: "Piese", description: "Comenzi piese, oferte si status montaj.", icon: PackageSearch },
   { id: "clients", title: "Clienti", description: "Adauga, cauta si gestioneaza clienti/lifturi.", icon: UsersRound },
+  { id: "lifts", title: "Lifturi", description: "Inventar, adresă, revizie și expirare.", icon: ArrowUpDown },
   { id: "companies", title: "Firme / Branding", description: "Logo si stampila pe firma de mentenanta.", icon: Building2 },
   { id: "history", title: "Istoric rapoarte", description: "Cauta rapoarte, descarca PDF-uri si vezi poze.", icon: History },
   { id: "checks", title: "Verificari lunare", description: "Revizii lipsa si lifturi expirate.", icon: ClipboardCheck },
@@ -675,6 +677,8 @@ export default function MaintenancePage() {
     [clients]
   );
 
+  const allLiftRows = useMemo(() => clients.flatMap((client) => getClientLiftRows(client)), [clients]);
+
   const liveExpiredAndNextMonthExpiringLifts = useMemo(
     () => getExpiredAndNextMonthExpiringLifts(clients),
     [clients]
@@ -767,6 +771,7 @@ export default function MaintenancePage() {
 
   function getTabBadge(tab: MaintenanceTab) {
     if (tab === "clients") return String(clients.length);
+    if (tab === "lifts") return String(liveTotalLifts);
     if (tab === "history") return String(allReportHistory.length);
     if (tab === "checks") return String(liveMonthlyMissingReviews.length + liveExpiredAndNextMonthExpiringLifts.length);
     if (tab === "companies") return String(brandingItems.length);
@@ -2085,6 +2090,28 @@ export default function MaintenancePage() {
     if (activeMaintenanceTab === "report") return renderReportSection();
     if (activeMaintenanceTab === "parts") return renderPartsSection();
     if (activeMaintenanceTab === "clients") return renderClientsSection();
+    if (activeMaintenanceTab === "lifts") {
+      return (
+        <div className="maintenance-tab-panel" data-assistant-section="maintenance-lifts">
+          <div className="panel">
+            <div className="panel-head">
+              <div><h2 className="panel-title">Lifturi</h2><p className="panel-subtitle">Toate lifturile, grupate clar după client și adresă.</p></div>
+              <span className="badge badge-blue">{allLiftRows.length}</span>
+            </div>
+            {allLiftRows.length ? (
+              <div className="maintenance-lift-grid">
+                {allLiftRows.map((row) => (
+                  <Link key={`${row.clientId}_${row.address}_${row.lift}`} to={`/maintenance/${row.clientId}?lift=${encodeURIComponent(row.lift)}`} className="maintenance-lift-card">
+                    <div><strong>{row.lift}</strong><span>{row.clientName}</span></div>
+                    <dl><div><dt>Adresă</dt><dd>{row.address || "-"}</dd></div><div><dt>Firmă</dt><dd>{row.maintenanceCompany || "-"}</dd></div></dl>
+                  </Link>
+                ))}
+              </div>
+            ) : <div className="empty-state"><div className="empty-state-title">Nu există lifturi configurate</div></div>}
+          </div>
+        </div>
+      );
+    }
     if (activeMaintenanceTab === "companies") return renderCompaniesSection();
     if (activeMaintenanceTab === "history") return renderHistorySection();
     if (activeMaintenanceTab === "checks") return renderChecksSection();
