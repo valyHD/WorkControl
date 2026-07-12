@@ -8,8 +8,8 @@ export function getDashboardRoleProfile(role: string): DashboardRoleProfile {
   if (role === "admin") {
     return {
       eyebrow: "Command Center administrare",
-      title: "Ce se intampla azi in firma",
-      description: "Pontaje, flota, mentenanta, alerte si costuri intr-o singura privire.",
+      title: "Ce se întâmplă azi în firmă",
+      description: "Pontaje, flotă, mentenanță, alerte și costuri într-o singură privire.",
     };
   }
 
