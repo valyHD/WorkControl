@@ -19,6 +19,7 @@ import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } fr
 import { db } from "../lib/firebase/firebase";
 import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
 import { runVehicleMaintenanceAlerts } from "../modules/vehicles/services/vehiclesService";
+import { clearFleetRouteSessionCache } from "../modules/vehicles/services/fleetRouteSync";
 
 const pagePrefetchers: Record<string, () => Promise<unknown>> = {
   "/dashboard": () => import("../modules/dashboard/pages/DashboardPage"),
@@ -681,7 +682,10 @@ export default function AppShell() {
   async function handleLogout() {
     if (loggingOut) return;
     setLoggingOut(true);
-    try { await logoutUser(); }
+    try {
+      clearFleetRouteSessionCache(user?.uid);
+      await logoutUser();
+    }
     catch (err) { console.error("[AppShell][logout]", err); setLoggingOut(false); }
   }
 

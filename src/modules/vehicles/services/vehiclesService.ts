@@ -2191,6 +2191,54 @@ async function getVehiclePositionsForDay(
   return normalizePositionItems([...allItems, ...archivedItems]);
 }
 
+async function getVehicleIncrementalPositionsForDay(
+  vehicleId: string,
+  dayKey: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  const allItems: VehiclePositionItem[] = [];
+  let lastDoc: QueryDocumentSnapshot<DocumentData> | null = null;
+  const pointsRef = collection(
+    db,
+    "vehicles",
+    vehicleId,
+    "positionDays",
+    dayKey,
+    "points"
+  ) as CollectionReference<DocumentData>;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const constraints: QueryConstraint[] = [
+      where("gpsTimestamp", ">=", fromTs),
+      where("gpsTimestamp", "<=", toTs),
+      orderBy("gpsTimestamp", "asc"),
+      limit(pageSize),
+    ];
+    if (lastDoc) constraints.push(startAfter(lastDoc));
+
+    const snap = await withTimeout(
+      getDocs(query(pointsRef, ...constraints)),
+      ROUTE_QUERY_TIMEOUT_MS
+    );
+    if (snap.empty) break;
+
+    allItems.push(
+      ...snap.docs.map((docItem) =>
+        mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
+      )
+    );
+    if (allItems.length >= MAX_TOTAL_ROUTE_POINTS || snap.docs.length < pageSize) break;
+
+    lastDoc = snap.docs[snap.docs.length - 1] ?? null;
+    if (!lastDoc) break;
+  }
+
+  return normalizePositionItems(allItems);
+}
+
 async function getVehicleLatestPositionsForDay(
   vehicleId: string,
   dayKey: string,
@@ -2765,6 +2813,38 @@ export async function getVehiclePositionsForSelectedDay(
     rangeItems.push(...flatItems);
   } catch (error) {
     console.warn("[getVehiclePositionsForSelectedDay][flatCollection]", error);
+  }
+
+  return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+}
+
+export async function getVehiclePositionsIncremental(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
+  maxPages = DEFAULT_ROUTE_MAX_PAGES
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const rangeItems: VehiclePositionItem[] = [];
+  for (const dayKey of enumerateDayKeys(fromTs, toTs)) {
+    try {
+      rangeItems.push(
+        ...(await getVehicleIncrementalPositionsForDay(
+          vehicleId,
+          dayKey,
+          fromTs,
+          toTs,
+          pageSize,
+          maxPages
+        ))
+      );
+    } catch (error) {
+      console.warn("[getVehiclePositionsIncremental][positionDays]", dayKey, error);
+    }
   }
 
   return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
