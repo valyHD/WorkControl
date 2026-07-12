@@ -16,7 +16,6 @@ import {
   RefreshCw,
   ReceiptText,
   TimerReset,
-  Users,
   Wrench,
 } from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -45,7 +44,6 @@ import {
   getProjectLabel,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
-  getUsersWithoutTimesheetToday,
 } from "../../timesheets/utils/timesheetAnalytics";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { getLiveFirebaseCostEstimate, type LiveFirebaseCostEstimate } from "../../reports/services/billingMetricsService";
@@ -104,11 +102,6 @@ function formatDateTime(value?: number | null) {
 function formatTime(value?: number | null) {
   if (!value) return "-";
   return new Date(value).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" });
-}
-
-function isTodayTs(value?: number | null, todayKey = getLocalDateKey()) {
-  if (!value) return false;
-  return getLocalDateKey(value) === todayKey;
 }
 
 function getUserName(userItem: AppUserItem) {
@@ -221,10 +214,6 @@ export default function DashboardPage() {
     () => todayTimesheets.filter((item) => item.status === "activ"),
     [todayTimesheets]
   );
-  const usersWithoutToday = useMemo(
-    () => getUsersWithoutTimesheetToday(activeUsers, todayTimesheets, todayKey),
-    [activeUsers, todayKey, todayTimesheets]
-  );
   const todayMinutes = useMemo(
     () => todayTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0),
     [todayTimesheets]
@@ -244,7 +233,6 @@ export default function DashboardPage() {
     [vehicles]
   );
   const importantAlertsCount =
-    usersWithoutToday.length +
     todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length +
     todayTimesheets.filter((item) => !item.projectId && !item.projectName).length +
     vehiclesWithoutDriver.length +
@@ -291,38 +279,8 @@ export default function DashboardPage() {
       }
     });
 
-    vehicles
-      .filter((vehicle) => isTodayTs(vehicle.updatedAt, todayKey) && vehicle.currentDriverUserId)
-      .slice(0, 8)
-      .forEach((vehicle) => {
-        items.push({
-          id: `vehicle-${vehicle.id}`,
-          title: `${vehicle.currentDriverUserName || "Sofer"} are masina ${vehicle.plateNumber || "-"}`,
-          subtitle: `${vehicle.brand || ""} ${vehicle.model || ""}`.trim() || "Flota",
-          at: vehicle.updatedAt || 0,
-          tone: "orange",
-          to: `/vehicles/${vehicle.id}`,
-        });
-      });
-
-    notifications.slice(0, 8).forEach((item) => {
-      items.push({
-        id: `notification-${item.id}`,
-        title: item.title || "Alerta recenta",
-        subtitle: item.message || formatDateTime(item.createdAt),
-        at: item.createdAt || 0,
-        tone: item.read ? "muted" : "red",
-        to: resolveNotificationPath({
-          module: item.module,
-          eventType: item.eventType,
-          entityId: item.entityId,
-          notificationPath: item.notificationPath,
-        }),
-      });
-    });
-
     return items.sort((a, b) => b.at - a.at).slice(0, 10);
-  }, [notifications, todayKey, todayTimesheets, vehicles]);
+  }, [todayTimesheets]);
 
   const columns = useMemo<DataTableColumn<TodayRow>[]>(
     () => [
@@ -426,14 +384,6 @@ export default function DashboardPage() {
           to="/timesheets?assistant=active"
         />
         <KpiCard
-          label="Angajati nepontati azi"
-          value={usersWithoutToday.length}
-          helper={`${activeUsers.length} angajati activi`}
-          tone={usersWithoutToday.length ? "red" : "green"}
-          icon={Users}
-          to="/timesheets?assistant=missing"
-        />
-        <KpiCard
           label="Ore lucrate azi"
           value={formatMinutes(todayMinutes)}
           helper="include pontajele active"
@@ -527,10 +477,6 @@ export default function DashboardPage() {
             <StatusBadge tone={importantAlertsCount ? "orange" : "green"}>{importantAlertsCount}</StatusBadge>
           </div>
           <div className="dashboard-alert-grid">
-            <Link to="/timesheets?assistant=missing" className="dashboard-alert-card dashboard-alert-card--red">
-              <strong>{usersWithoutToday.length}</strong>
-              <span>angajati fara pontaj azi</span>
-            </Link>
             <Link to="/timesheets?assistant=long" className="dashboard-alert-card dashboard-alert-card--orange">
               <strong>{todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length}</strong>
               <span>pontaje peste 8 ore</span>
@@ -560,14 +506,14 @@ export default function DashboardPage() {
           <div className="panel-head">
             <div>
               <h2 className="panel-title">Activitate azi</h2>
-              <p className="panel-subtitle">Ultimele porniri, opriri, preluari si alerte.</p>
+              <p className="panel-subtitle">Ultimele porniri si opriri de pontaj ale utilizatorilor.</p>
             </div>
             <Activity size={20} />
           </div>
           {activityItems.length ? (
             <UniversalTimeline items={activityItems.map((item) => ({ id: item.id, title: item.title, description: item.subtitle, timestamp: item.at, tone: item.tone, to: item.to }))} />
           ) : (
-            <EmptyState icon={CheckCircle2} title="Nicio activitate azi" subtitle="Cand apar pontaje sau alerte, le vezi aici." />
+            <EmptyState icon={CheckCircle2} title="Nicio activitate azi" subtitle="Cand utilizatorii pornesc sau opresc pontajul, activitatea apare aici." />
           )}
         </div>
 
@@ -638,30 +584,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="panel">
-          <div className="panel-head">
-            <div>
-              <h2 className="panel-title">Angajati nepontati azi</h2>
-              <p className="panel-subtitle">Lista scurta pentru manager.</p>
-            </div>
-            <Users size={20} />
-          </div>
-          {usersWithoutToday.length ? (
-            <div className="simple-list">
-              {usersWithoutToday.slice(0, 8).map((item) => (
-                <Link key={item.id} to={`/timesheets?assistantUserId=${item.uid || item.id}`} className="simple-list-item">
-                  <div className="simple-list-text">
-                    <div className="simple-list-label">{getUserName(item)}</div>
-                    <div className="simple-list-subtitle">{item.department || item.roleTitle || item.email || "-"}</div>
-                  </div>
-                  <StatusBadge tone="red">nepontat</StatusBadge>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <EmptyState icon={CheckCircle2} title="Toata echipa are pontaj azi" />
-          )}
-        </div>
       </div>
       </ProductContentLayout>
     </section>

@@ -20,6 +20,7 @@ import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { resolveNotificationPath } from "../../../lib/notifications/notificationNavigation";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { createAuditLog } from "../../audit/services/auditLogService";
+import { pruneNotificationsForUser } from "../services/notificationsService";
 import {
   activatePushNotifications,
   hasPushVapidKey,
@@ -93,11 +94,15 @@ export default function NotificationsPage() {
   useEffect(() => {
     if (!user) return;
 
+    void pruneNotificationsForUser(user.uid, 10).catch((error) => {
+      console.warn("[NotificationsPage][retention]", error);
+    });
+
     const q = query(
       collection(db, "notifications"),
       where("userId", "==", user.uid),
       orderBy("createdAt", "desc"),
-      limit(100)
+      limit(10)
     );
 
     const unsub = onSnapshot(q, (snap) => {
