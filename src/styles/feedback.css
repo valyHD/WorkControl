@@ -1,0 +1,52 @@
+/* ================================================================
+   PLACEHOLDER / EMPTY PAGE
+   ================================================================ */
+.placeholder-page {
+  background: var(--surface);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  box-shadow: var(--shadow-xs);
+}
+.placeholder-page h2 { font-size: 19px; font-weight: 800; margin: 0 0 8px; letter-spacing: -.3px; }
+.placeholder-page p  { color: var(--text-muted); font-size: 13.5px; font-weight: 500; line-height: 1.6; margin: 0; }
+
+/* ================================================================
+   AUTH PAGE
+   ================================================================ */
+.auth-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(37,99,235,.1), transparent 60%),
+    var(--bg);
+}
+.auth-card {
+  width: 100%; max-width: 460px;
+  background: var(--surface);
+  border: 1.5px solid var(--line-mid);
+  border-radius: var(--radius-xl);
+  padding: 30px;
+  box-shadow: var(--shadow-lg);
+}
+.auth-brand  { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.auth-title  { font-size: 26px; font-weight: 800; letter-spacing: -.5px; margin: 0 0 8px; }
+.auth-subtitle { color: var(--text-muted); font-size: 13.5px; font-weight: 500; margin: 0 0 22px; line-height: 1.6; }
+
+/* ================================================================
+   MAP
+   ================================================================ */
+.timesheet-map-preview {
+  width: 100%; height: 250px; margin-top: 12px;
+  border-radius: var(--radius-sm); overflow: hidden;
+  border: 1.5px solid var(--line-mid);
+  background: var(--surface-alt);
+}
+.timesheet-map-preview .leaflet-container { width: 100%; height: 100%; z-index: 1; }
+
+/* ================================================================
+   VEHICLE STATUS + TOOL STATUS badges (compat)
+   ================================================================ */
+.tool-card-top .badge,
+.simple-list-item .badge { flex-shrink: 0; }
+

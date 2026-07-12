@@ -1,0 +1,46 @@
+/* ================================================================
+   INPUTS / FORM
+   ================================================================ */
+.tool-input {
+  width: 100%;
+  border: 1.5px solid var(--line-mid);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+  font-size: 13.5px;
+  font-weight: 500;
+  outline: none;
+  color: var(--text);
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.tool-input::placeholder { color: var(--text-faint); font-weight: 400; }
+.tool-input:hover  { border-color: var(--line-strong); }
+.tool-input:focus  {
+  border-color: rgba(37,99,235,.4);
+  box-shadow: 0 0 0 4px rgba(37,99,235,.1);
+}
+
+select.tool-input {
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b7e9c' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+}
+
+.tool-textarea { min-height: 120px; resize: vertical; }
+
+.tool-form { display: flex; flex-direction: column; gap: 20px; }
+.tool-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.tool-form-block { display: flex; flex-direction: column; gap: 6px; }
+.tool-form-block-full { grid-column: 1 / -1; }
+
+.tool-form-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .05px;
+}
+
+.tool-form-actions { display: flex; gap: 10px; flex-wrap: wrap; padding:10px;}
