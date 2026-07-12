@@ -1065,6 +1065,7 @@ export default function VehicleDetailsPage() {
         <div className="panel">
           <div className="panel-head"><div><h2 className="panel-title">Timeline mașină</h2><p className="panel-subtitle">Evenimentele importante, în ordine cronologică.</p></div></div>
           <UniversalTimeline
+            entityType="vehicle"
             items={events.map((event) => ({
               id: event.id,
               title: event.message,

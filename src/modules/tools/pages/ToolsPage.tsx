@@ -14,6 +14,8 @@ export default function ToolsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("toate");
+  const [locationFilter, setLocationFilter] = useState("toate");
+  const [holderFilter, setHolderFilter] = useState("toate");
   const [error, setError] = useState("");
 
   async function loadTools() {
@@ -53,9 +55,14 @@ export default function ToolsPage() {
         tool.locationLabel.toLowerCase().includes(q);
 
       const matchesStatus = statusFilter === "toate" || tool.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesLocation =
+        locationFilter === "toate" || tool.locationType === locationFilter;
+      const matchesHolder =
+        holderFilter === "toate" ||
+        (holderFilter === "assigned" ? Boolean(tool.currentHolderUserId) : !tool.currentHolderUserId);
+      return matchesSearch && matchesStatus && matchesLocation && matchesHolder;
     });
-  }, [tools, search, statusFilter]);
+  }, [holderFilter, locationFilter, tools, search, statusFilter]);
 
   return (
     <PageLayout>
@@ -94,6 +101,24 @@ export default function ToolsPage() {
             <option value="atribuita">Atribuita</option>
             <option value="defecta">Defecta</option>
             <option value="pierduta">Pierduta</option>
+          </select>
+          <select
+            className="tool-input"
+            value={locationFilter}
+            onChange={(event) => setLocationFilter(event.target.value)}
+          >
+            <option value="toate">Toate locatiile</option>
+            <option value="depozit">Depozit</option>
+            <option value="utilizator">La utilizator</option>
+          </select>
+          <select
+            className="tool-input"
+            value={holderFilter}
+            onChange={(event) => setHolderFilter(event.target.value)}
+          >
+            <option value="toate">Orice detinator</option>
+            <option value="assigned">Atribuite</option>
+            <option value="unassigned">Neatribuite</option>
           </select>
         </div>
 

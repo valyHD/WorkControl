@@ -12,10 +12,20 @@ export type UniversalTimelineItem = {
   to?: string;
 };
 
-export default function UniversalTimeline({ items, empty = "Nu există activitate în intervalul selectat." }: { items: UniversalTimelineItem[]; empty?: ReactNode }) {
+export type UniversalTimelineEntity = "user" | "vehicle" | "tool" | "project" | "client" | "lift";
+
+export default function UniversalTimeline({
+  items,
+  empty = "Nu există activitate în intervalul selectat.",
+  entityType,
+}: {
+  items: UniversalTimelineItem[];
+  empty?: ReactNode;
+  entityType?: UniversalTimelineEntity;
+}) {
   if (!items.length) return <div className="wc-product-empty-inline">{empty}</div>;
   return (
-    <ol className="wc-universal-timeline" data-assistant-section="timeline">
+    <ol className="wc-universal-timeline" data-assistant-section="timeline" data-timeline-entity={entityType}>
       {items.map((item) => {
         const Icon = item.icon || Clock3;
         const content = (
