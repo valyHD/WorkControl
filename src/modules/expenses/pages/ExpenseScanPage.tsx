@@ -29,6 +29,12 @@ import { createAuditLog } from "../../audit/services/auditLogService";
 import { getLatestTimesheetProjectForUser } from "../../timesheets/services/timesheetsService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_EXPENSE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import {
+  getOfflineExpenseUploads,
+  flushOfflineExpenseUploads,
+  queueOfflineExpenseUpload,
+} from "../services/offlineExpenseQueue";
+import { useFeatureFlags } from "../../../lib/productIntelligence";
 
 const emptyFilters: ExpenseFilters = {
   yearMonth: new Date().toISOString().slice(0, 7),
@@ -110,6 +116,7 @@ function getCurrentAppUser(user: ReturnType<typeof useAuth>["user"]): AppUser | 
 
 export default function ExpenseScanPage() {
   const { user, role } = useAuth();
+  const { flags } = useFeatureFlags();
   const navigate = useNavigate();
   const location = useLocation();
   const currentUser = useMemo(() => getCurrentAppUser(user), [user]);
@@ -134,11 +141,43 @@ export default function ExpenseScanPage() {
   const [error, setError] = useState("");
   const [detailsSearch, setDetailsSearch] = useState("");
   const [deletingItemId, setDeletingItemId] = useState("");
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const deferredDetailsSearch = useDeferredValue(detailsSearch);
   const lastAutoProjectUserRef = useRef("");
   const previousProfileCompanyNameRef = useRef(currentUser?.primaryCompanyName || "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+  const offlineSyncInProgress = useRef(false);
+
+  async function refreshOfflineQueueCount() {
+    if (!flags.offlineReceipts || typeof indexedDB === "undefined") return;
+    try {
+      setOfflineQueueCount((await getOfflineExpenseUploads()).length);
+    } catch (queueError) {
+      console.warn("[ExpenseScanPage][offline-queue-count]", queueError);
+    }
+  }
+
+  async function syncOfflineReceipts() {
+    if (!currentUser || !navigator.onLine || offlineSyncInProgress.current || !flags.offlineReceipts) return;
+    offlineSyncInProgress.current = true;
+    try {
+      const queue = await getOfflineExpenseUploads();
+      if (!queue.length) return;
+      setStatus(`Se sincronizeaza ${queue.length} documente salvate offline...`);
+      const savedItems = await flushOfflineExpenseUploads(currentUser.id, (message) => setStatus(message));
+      for (const savedItem of savedItems) {
+        setItems((current) => current.some((item) => item.id === savedItem.id) ? current : [savedItem, ...current]);
+      }
+      setStatus("Documentele salvate offline au fost sincronizate.");
+    } catch (queueError) {
+      console.warn("[ExpenseScanPage][offline-sync]", queueError);
+      setStatus("Documentele offline asteapta o conexiune stabila.");
+    } finally {
+      offlineSyncInProgress.current = false;
+      await refreshOfflineQueueCount();
+    }
+  }
 
   useEffect(() => {
     const handleDraft = (event: Event) => {
@@ -175,6 +214,15 @@ export default function ExpenseScanPage() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (!flags.offlineReceipts || !currentUser) return;
+    void refreshOfflineQueueCount();
+    const handleOnline = () => void syncOfflineReceipts();
+    window.addEventListener("online", handleOnline);
+    if (navigator.onLine) void syncOfflineReceipts();
+    return () => window.removeEventListener("online", handleOnline);
+  }, [currentUser?.id, flags.offlineReceipts]);
 
   useEffect(() => {
     if (!assignedUserId && currentUser?.id) {
@@ -487,6 +535,27 @@ export default function ExpenseScanPage() {
       }).catch((preferenceError) => {
         console.warn("[ExpenseScanPage][save form preference before upload]", preferenceError);
       });
+
+      if (flags.offlineReceipts && !navigator.onLine) {
+        await queueOfflineExpenseUpload({
+          file: selectedFile,
+          user: currentUser,
+          assignedUserId: selectedAssignedUser?.id || currentUser.id,
+          assignedUserName,
+          projectId: selectedProject?.id || "",
+          projectCode: "",
+          projectName: selectedProject?.name || "",
+          companyName: companyName.trim(),
+          reimbursable,
+        });
+        setSelectedFile(null);
+        setReimbursable(false);
+        setStatus("Document salvat pe dispozitiv. Se va incarca automat cand revine internetul.");
+        setScanDone(true);
+        await refreshOfflineQueueCount();
+        return;
+      }
+
       const savedItem = await uploadAndAnalyzeExpenseDocument({
         file: selectedFile,
         user: currentUser,
@@ -566,6 +635,13 @@ export default function ExpenseScanPage() {
           },
         ]}
       />
+
+      {offlineQueueCount ? (
+        <div className="wc-offline-queue-status" role="status">
+          <strong>{offlineQueueCount} documente asteapta sincronizarea</strong>
+          <span>Fisierele sunt pastrate local si se incarca automat dupa reconectare.</span>
+        </div>
+      ) : null}
 
       <div className="panel" data-assistant-section="expense-scan">
 

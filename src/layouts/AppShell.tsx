@@ -30,6 +30,7 @@ import { getPageExperience } from "../config/pageExperience";
 import { ConnectivityBanner, PageBreadcrumbs } from "../components/experience";
 import ProductIntelligenceHub from "../components/product/ProductIntelligenceHub";
 import { trackWorkControlPage, useFeatureFlags } from "../lib/productIntelligence";
+import OfflineSyncCoordinator from "../components/product/OfflineSyncCoordinator";
 
 const VoiceCommandAssistant = lazy(() => import("../components/VoiceCommandAssistant"));
 const GlobalCommandPalette = lazy(() => import("../components/product/GlobalCommandPalette"));
@@ -779,6 +780,7 @@ export default function AppShell() {
         </main>
       </div>
       <FloatingQuickLinks />
+      <OfflineSyncCoordinator />
       <Suspense fallback={null}><VoiceCommandAssistant /></Suspense>
     </div>
   );
