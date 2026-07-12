@@ -11,13 +11,19 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { ArrowLeft, CarFront, MapPinned } from "lucide-react";
+import { ArrowLeft, CarFront, MapPinned, RefreshCw, RotateCcw } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
+import { useAuth } from "../../../providers/AuthProvider";
 import type { VehicleItem, VehiclePositionItem } from "../../../types/vehicle";
 import {
+  getVehiclePositionsIncremental,
   getVehiclePositionsForSelectedDay,
   subscribeVehiclesList,
 } from "../services/vehiclesService";
+import {
+  createFleetRouteSync,
+  type FleetRouteSyncController,
+} from "../services/fleetRouteSync";
 import {
   filterRouteRenderJitter,
   filterStationaryGpsJitter,
@@ -74,7 +80,7 @@ function toLocalDayRange(ts = Date.now()) {
   start.setHours(0, 0, 0, 0);
   const end = new Date(start.getTime());
   end.setHours(23, 59, 59, 999);
-  return { from: start.getTime(), to: Math.min(end.getTime(), Date.now()) };
+  return { from: start.getTime(), to: Math.min(end.getTime(), ts), dayEnd: end.getTime() };
 }
 
 function formatTime(ts?: number) {
@@ -802,7 +808,22 @@ function RememberFleetMapView({
   return null;
 }
 
-function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleItem; focused?: boolean }) {
+type FleetRefreshCommand = {
+  id: number;
+  forceFull: boolean;
+};
+
+function VehicleFleetMapCard({
+  vehicle,
+  focused = false,
+  scopeKey,
+  refreshCommand,
+}: {
+  vehicle: VehicleItem;
+  focused?: boolean;
+  scopeKey: string;
+  refreshCommand: FleetRefreshCommand;
+}) {
   const [routePositions, setRoutePositions] = useState<VehiclePositionItem[]>([]);
   const [liveRealTrail, setLiveRealTrail] = useState<VehiclePositionItem[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -810,9 +831,11 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   const [storedMapView, setStoredMapView] = useState<FleetMapView | null>(() =>
     readFleetMapView(vehicle.id)
   );
+  const routeSyncRef = useRef<FleetRouteSyncController | null>(null);
+  const handledRefreshCommandRef = useRef(0);
   const hasPersistedRoute = Boolean(vehicle.gpsSim && vehicle.gpsSim.active !== false && vehicle.gpsSim.points?.length);
   const activeRoute = hasPersistedRoute;
-  const { from, to } = useMemo(() => toLocalDayRange(now), [now]);
+  const { from, to, dayEnd } = useMemo(() => toLocalDayRange(now), [now]);
   const mapZoom = storedMapView?.zoom ?? 13;
   const realRouteRenderPointLimit = useMemo(
     () => getAdaptiveFleetRoutePointLimit(REAL_ROUTE_RENDER_POINTS, mapZoom),
@@ -824,36 +847,37 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
   );
 
   useEffect(() => {
-    let cancelled = false;
-    let timer: number | null = null;
-
-    async function loadRoute() {
-      setLoadingRoute((current) => current || routePositions.length === 0);
-      try {
-        const range = toLocalDayRange();
-        const items = await getVehiclePositionsForSelectedDay(
-          vehicle.id,
-          range.from,
-          range.to,
-          ROUTE_PAGE_SIZE,
-          ROUTE_MAX_PAGES
-        );
-        if (!cancelled) {
-          setRoutePositions(sanitizePositions(items));
-        }
-      } finally {
-        if (!cancelled) setLoadingRoute(false);
-      }
-    }
-
-    void loadRoute();
-    timer = window.setInterval(() => void loadRoute(), ROUTE_REFRESH_MS);
+    const controller = createFleetRouteSync({
+      scopeKey,
+      vehicleId: vehicle.id,
+      source: "real",
+      fromTs: from,
+      toTs: dayEnd,
+      refreshMs: ROUTE_REFRESH_MS,
+      pageSize: ROUTE_PAGE_SIZE,
+      maxPages: ROUTE_MAX_PAGES,
+      loader: ({ vehicleId, fromTs, toTs, pageSize, maxPages, mode }) =>
+        mode === "full"
+          ? getVehiclePositionsForSelectedDay(vehicleId, fromTs, toTs, pageSize, maxPages)
+          : getVehiclePositionsIncremental(vehicleId, fromTs, toTs, pageSize, maxPages),
+      onData: (items) => setRoutePositions(sanitizePositions(items)),
+      onLoading: setLoadingRoute,
+      onError: (error) => console.error("[VehicleGpsMapsPage][route-sync]", error),
+    });
+    routeSyncRef.current = controller;
+    void controller.start();
 
     return () => {
-      cancelled = true;
-      if (timer !== null) window.clearInterval(timer);
+      controller.stop();
+      if (routeSyncRef.current === controller) routeSyncRef.current = null;
     };
-  }, [vehicle.id]);
+  }, [dayEnd, from, scopeKey, vehicle.id]);
+
+  useEffect(() => {
+    if (!refreshCommand.id || handledRefreshCommandRef.current === refreshCommand.id) return;
+    handledRefreshCommandRef.current = refreshCommand.id;
+    void routeSyncRef.current?.refresh(refreshCommand.forceFull);
+  }, [refreshCommand]);
 
   useEffect(() => {
     setLiveRealTrail((current) => (current.length ? [] : current));
@@ -1125,12 +1149,18 @@ function VehicleFleetMapCard({ vehicle, focused = false }: { vehicle: VehicleIte
 }
 
 export default function VehicleGpsMapsPage() {
+  const { role, user } = useAuth();
   const location = useLocation();
   const [vehicles, setVehicles] = useState<VehicleItem[]>([]);
   const [loading, setLoading] = useState(true);
   const focusScrollKeyRef = useRef("");
   const vehicleOrderRef = useRef<Map<string, number>>(new Map());
   const nextVehicleOrderRef = useRef(0);
+  const [refreshCommand, setRefreshCommand] = useState<FleetRefreshCommand>({
+    id: 0,
+    forceFull: false,
+  });
+  const routeCacheScopeKey = user?.uid || "anonymous";
 
   function keepFleetOrderStable(items: VehicleItem[]) {
     const orderedItems = [...items].sort(compareFleetVehicles);
@@ -1210,6 +1240,36 @@ export default function VehicleGpsMapsPage() {
             </p>
           </div>
           <div className="tools-header-actions">
+            <button
+              className="secondary-btn"
+              type="button"
+              title="Încarcă numai punctele GPS apărute de la ultima actualizare"
+              data-assistant-action="refresh-gps-routes"
+              onClick={() =>
+                setRefreshCommand((current) => ({ id: current.id + 1, forceFull: false }))
+              }
+            >
+              <RefreshCw size={15} /> Actualizează
+            </button>
+            {role === "admin" ? (
+              <button
+                className="secondary-btn"
+                type="button"
+                title="Reîncarcă integral traseele doar pentru verificare tehnică"
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      "Reîncărcarea completă consumă multe citiri Firestore. Continui doar pentru diagnostic?"
+                    )
+                  ) {
+                    return;
+                  }
+                  setRefreshCommand((current) => ({ id: current.id + 1, forceFull: true }));
+                }}
+              >
+                <RotateCcw size={15} /> Reîncarcă complet
+              </button>
+            ) : null}
             <Link to="/vehicles" className="secondary-btn">
               <ArrowLeft size={15} /> Masini
             </Link>
@@ -1228,7 +1288,13 @@ export default function VehicleGpsMapsPage() {
         ) : vehicles.length ? (
           <div className="vehicle-fleet-map-grid">
             {vehicles.map((vehicle) => (
-              <VehicleFleetMapCard key={vehicle.id} vehicle={vehicle} focused={vehicle.id === focusedVehicleId} />
+              <VehicleFleetMapCard
+                key={vehicle.id}
+                vehicle={vehicle}
+                focused={vehicle.id === focusedVehicleId}
+                scopeKey={routeCacheScopeKey}
+                refreshCommand={refreshCommand}
+              />
             ))}
           </div>
         ) : (

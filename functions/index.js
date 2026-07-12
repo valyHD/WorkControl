@@ -4,6 +4,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+const { refreshBillingMetrics: refreshBillingMetricsCache } = require('./billingMetricsRuntime');
 
 admin.initializeApp();
 
@@ -1125,7 +1126,7 @@ async function assertAdminRequest(request) {
 
   const userSnap = await db.collection('users').doc(request.auth.uid).get();
   if (toSafeString(userSnap.get('role')) !== 'admin') {
-    throw new HttpsError('permission-denied', 'Doar admin poate porni arhivarea.');
+    throw new HttpsError('permission-denied', 'Doar admin poate executa aceasta operatie.');
   }
 }
 
@@ -2696,6 +2697,127 @@ exports.archiveOldVehiclePositionDays = onCall(
 
     logger.info('Arhivare trasee GPS pornita manual.', result);
     return result;
+  }
+);
+
+exports.refreshBillingMetrics = onSchedule(
+  {
+    region: 'europe-west1',
+    schedule: 'every 3 hours',
+    timeZone: 'Europe/Bucharest',
+    timeoutSeconds: 180,
+    memory: '256MiB',
+    retryCount: 1,
+  },
+  async () =>
+    refreshBillingMetricsCache({
+      db,
+      admin,
+      projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d',
+    })
+);
+
+exports.refreshBillingMetricsNow = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 180,
+    memory: '256MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    return refreshBillingMetricsCache({
+      db,
+      admin,
+      projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d',
+    });
+  }
+);
+
+exports.getBillingControlPanelData = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    const [metricsSnap, settingsSnap, canarySnap] = await Promise.all([
+      db.collection('systemMetrics').doc('billing').get(),
+      db.collection('systemCostSettings').doc('billing').get(),
+      db.collection('systemPrivateSettings').doc('gpsCostOptimization').get(),
+    ]);
+    const metrics = metricsSnap.exists ? metricsSnap.data() || {} : {};
+    const settings = settingsSnap.exists ? settingsSnap.data() || {} : {};
+    const canary = canarySnap.exists ? canarySnap.data() || {} : {};
+    const serializableMetrics = { ...metrics };
+    delete serializableMetrics.updatedAt;
+    if (serializableMetrics.exchangeRate) {
+      serializableMetrics.exchangeRate = {
+        source: toSafeString(serializableMetrics.exchangeRate.source) || 'ECB',
+        rateDate: toSafeString(serializableMetrics.exchangeRate.rateDate) || null,
+      };
+    }
+    const warningPercent = Math.max(1, Math.min(100, toSafeNumber(settings.warningPercent, 70)));
+    const criticalPercent = Math.max(
+      warningPercent + 1,
+      Math.min(200, toSafeNumber(settings.criticalPercent, 90))
+    );
+
+    return {
+      metrics: serializableMetrics,
+      settings: {
+        budgetMonthlyEur: Math.max(0, Math.min(100000, toSafeNumber(settings.budgetMonthlyEur, 50))),
+        warningPercent,
+        criticalPercent,
+      },
+      canary: {
+        enabled: canary.enabled === true,
+        canaryTrackerCount: Array.isArray(canary.canaryTrackerImeis)
+          ? canary.canaryTrackerImeis.filter(Boolean).length
+          : 0,
+        diagnosticFlushSeconds: Math.max(
+          30,
+          Math.min(60, toSafeNumber(canary.diagnosticFlushSeconds, 45))
+        ),
+        updatedAt: toSafeNumber(canary.updatedAtMs, 0) || null,
+      },
+    };
+  }
+);
+
+exports.saveBillingCostSettings = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    const budgetMonthlyEur = toSafeNumber(request.data?.budgetMonthlyEur, -1);
+    const warningPercent = toSafeNumber(request.data?.warningPercent, -1);
+    const criticalPercent = toSafeNumber(request.data?.criticalPercent, -1);
+    if (budgetMonthlyEur < 0 || budgetMonthlyEur > 100000) {
+      throw new HttpsError('invalid-argument', 'Bugetul lunar trebuie sa fie intre 0 si 100000 EUR.');
+    }
+    if (warningPercent < 1 || warningPercent > 100) {
+      throw new HttpsError('invalid-argument', 'Pragul de avertizare trebuie sa fie intre 1 si 100%.');
+    }
+    if (criticalPercent <= warningPercent || criticalPercent > 200) {
+      throw new HttpsError('invalid-argument', 'Pragul critic trebuie sa fie peste avertizare si maximum 200%.');
+    }
+
+    await db.collection('systemCostSettings').doc('billing').set(
+      {
+        budgetMonthlyEur,
+        warningPercent,
+        criticalPercent,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtMs: Date.now(),
+        updatedBy: request.auth.uid,
+      },
+      { merge: true }
+    );
+    return { status: 'ok' };
   }
 );
 

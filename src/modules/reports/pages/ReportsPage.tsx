@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../../providers/AuthProvider";
+import BillingCostPanel from "../components/BillingCostPanel";
 import type { ControlPanelSettings } from "../services/controlPanelService";
 import {
   buildProfessionalBackupView,
@@ -368,6 +369,8 @@ export default function ControlPanelPage() {
         {busyMessage && <div className="tool-message">{busyMessage}</div>}
         {error && <div className="tool-message">{error}</div>}
       </div>
+
+      <BillingCostPanel isAdmin={role === "admin"} />
 
       <div className="panel">
         <h3 className="panel-subtitle">Export profesional backup</h3>
