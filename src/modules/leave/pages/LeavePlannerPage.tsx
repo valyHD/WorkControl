@@ -440,6 +440,16 @@ export default function LeavePlannerPage() {
     () => adminRequests.filter((request) => request.userId === user?.uid),
     [adminRequests, user?.uid]
   );
+  const overlappingTeamLeave = useMemo(() => {
+    if (!formValues.periodStart || !formValues.periodEnd) return [];
+    return adminRequests.filter(
+      (request) =>
+        request.userId !== user?.uid &&
+        request.status !== "respins" &&
+        request.periodStart <= formValues.periodEnd &&
+        request.periodEnd >= formValues.periodStart
+    );
+  }, [adminRequests, formValues.periodEnd, formValues.periodStart, user?.uid]);
   const leaveFormNeedsAttention =
     !formValues.userName.trim() ||
     !formValues.userEmail.trim() ||
@@ -835,6 +845,14 @@ export default function LeavePlannerPage() {
               <span className="tool-form-label">Data sfarsit</span>
               <input className="tool-input" data-assistant-field="leave-end-date" type="date" value={formValues.periodEnd} onChange={(event) => setFormValues((prev) => ({ ...prev, periodEnd: event.target.value }))} required />
             </label>
+            {overlappingTeamLeave.length ? (
+              <div className="tool-message tool-form-block-full" role="status">
+                <strong>Posibil conflict de echipă:</strong> {overlappingTeamLeave.length} colegi au cereri suprapuse în această perioadă.
+                <div className="simple-list-subtitle">
+                  {overlappingTeamLeave.slice(0, 4).map((request) => `${request.userName}: ${request.periodStart} - ${request.periodEnd}`).join(" · ")}
+                </div>
+              </div>
+            ) : null}
 
             <label className="tool-form-block tool-form-block-full">
               <span className="tool-form-label">Motiv (optional)</span>

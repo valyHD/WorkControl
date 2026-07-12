@@ -129,6 +129,7 @@ export default function ExpenseScanPage() {
   const [status, setStatus] = useState("");
   const [projectAutoStatus, setProjectAutoStatus] = useState("");
   const [scanDone, setScanDone] = useState(false);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [error, setError] = useState("");
   const [detailsSearch, setDetailsSearch] = useState("");
   const [deletingItemId, setDeletingItemId] = useState("");
@@ -136,6 +137,7 @@ export default function ExpenseScanPage() {
   const lastAutoProjectUserRef = useRef("");
   const previousProfileCompanyNameRef = useRef(currentUser?.primaryCompanyName || "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -359,9 +361,36 @@ export default function ExpenseScanPage() {
     [companies, items]
   );
 
+  const duplicateCandidate = useMemo(() => {
+    if (!selectedFile) return null;
+    const normalizedName = selectedFile.name.trim().toLowerCase();
+    return (
+      items.find(
+        (item) =>
+          item.fileName.trim().toLowerCase() === normalizedName &&
+          Number(item.sizeBytes || 0) === selectedFile.size
+      ) ?? null
+    );
+  }, [items, selectedFile]);
+
+  const selectedFilePreviewUrl = useMemo(
+    () =>
+      selectedFile && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(selectedFile)
+        : "",
+    [selectedFile]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (selectedFilePreviewUrl) URL.revokeObjectURL(selectedFilePreviewUrl);
+    };
+  }, [selectedFilePreviewUrl]);
+
   function handleFileChange(file: File | null) {
     setSelectedFile(file);
     setScanDone(false);
+    setAllowDuplicate(false);
     setError("");
     setStatus(file ? "Poza/PDF incarcat. Acum apasa Scaneaza si salveaza." : "");
   }
@@ -369,6 +398,7 @@ export default function ExpenseScanPage() {
   function clearSelectedFile() {
     setSelectedFile(null);
     setScanDone(false);
+    setAllowDuplicate(false);
     setError("");
     setStatus("");
   }
@@ -424,6 +454,10 @@ export default function ExpenseScanPage() {
     }
     if (!selectedFile) {
       setError("Alege poza sau PDF-ul cu bonul/factura.");
+      return;
+    }
+    if (duplicateCandidate && !allowDuplicate) {
+      setError("Acest fisier pare deja incarcat. Verifica duplicatul sau confirma incarcarea repetata.");
       return;
     }
 
@@ -524,13 +558,14 @@ export default function ExpenseScanPage() {
 
       <div className="panel" data-assistant-section="expense-scan">
 
-        <form className="tool-form expense-scan-form" onSubmit={(event) => void handleSubmit(event)}>
+        <form ref={formRef} className="tool-form expense-scan-form" onSubmit={(event) => void handleSubmit(event)}>
           <WorkflowStepper
-            activeStep={scanDone ? 3 : submitting ? 1 : selectedFile ? 1 : 0}
+            activeStep={scanDone ? 4 : submitting ? 2 : selectedFile ? 1 : 0}
             steps={[
               { id: "upload", label: "Încarcă", description: "Poză sau PDF" },
               { id: "ocr", label: "OCR", description: "Citire automată" },
               { id: "verify", label: "Verifică", description: "Date extrase" },
+              { id: "allocate", label: "Alocare", description: "User, proiect, firmă" },
               { id: "save", label: "Salvează", description: "Istoric bonuri" },
             ]}
           />
@@ -573,6 +608,28 @@ export default function ExpenseScanPage() {
                   </span>
                 </div>
               )}
+              {selectedFilePreviewUrl ? (
+                <div className="expense-document-preview" aria-label="Previzualizare document selectat">
+                  {selectedFile?.type.startsWith("image/") ? (
+                    <img src={selectedFilePreviewUrl} alt="Previzualizare bon selectat" />
+                  ) : (
+                    <iframe src={selectedFilePreviewUrl} title="Previzualizare document selectat" />
+                  )}
+                </div>
+              ) : null}
+              {duplicateCandidate ? (
+                <div className="tool-message" role="alert">
+                  <strong>Posibil duplicat:</strong> {duplicateCandidate.fileName}
+                  <label className="wc-filter-check">
+                    <input
+                      type="checkbox"
+                      checked={allowDuplicate}
+                      onChange={(event) => setAllowDuplicate(event.target.checked)}
+                    />
+                    Incarca totusi acest document
+                  </label>
+                </div>
+              ) : null}
               <div className="tool-form-actions expense-actions expense-actions-under-upload">
                 <button
                   id="expense-scan-button"
@@ -580,7 +637,7 @@ export default function ExpenseScanPage() {
                   data-assistant-action="scan-receipt"
                   type="submit"
                   title="Scaneaza documentul si il salveaza in istoric"
-                  disabled={submitting || !selectedFile}
+                  disabled={submitting || !selectedFile || Boolean(duplicateCandidate && !allowDuplicate)}
                 >
                   <FileSearch size={16} />
                   {submitting ? "Se scaneaza..." : selectedFile ? "Scaneaza si salveaza" : "Alege poza intai"}
@@ -721,6 +778,16 @@ export default function ExpenseScanPage() {
         </form>
 
         {error && <div className="tool-message">{error}</div>}
+        {error && selectedFile ? (
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => formRef.current?.requestSubmit()}
+            disabled={submitting || Boolean(duplicateCandidate && !allowDuplicate)}
+          >
+            <RefreshCw size={15} /> Reincearca procesarea
+          </button>
+        ) : null}
       </div>
 
       {isAdmin && (
