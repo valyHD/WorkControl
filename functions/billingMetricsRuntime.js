@@ -4,6 +4,7 @@ const {
   addDays,
   buildBillingQuery,
   dateKeyInTimeZone,
+  isEcbRateCacheFresh,
   parseEcbRates,
   summarizeBillingRows,
 } = require("./billingMetrics");
@@ -11,6 +12,7 @@ const {
 const DATASET_ID = process.env.BILLING_DATASET_ID || "firebase_billing_export";
 const BIGQUERY_LOCATION = "EU";
 const ECB_RATES_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
+let ecbMemoryCache = null;
 
 function createBigQuery(projectId) {
   return new BigQuery({ projectId, location: BIGQUERY_LOCATION });
@@ -26,11 +28,14 @@ async function findStandardBillingTable(bigQuery, projectId) {
 }
 
 async function getEcbRates(db) {
-  const today = dateKeyInTimeZone(new Date());
+  if (isEcbRateCacheFresh(ecbMemoryCache)) return ecbMemoryCache;
   const ref = db.collection("systemMetrics").doc("exchangeRates");
   const cached = await ref.get();
   const cachedData = cached.exists ? cached.data() || {} : {};
-  if (cachedData.rateDate === today && cachedData.rates?.EUR === 1) return cachedData;
+  if (isEcbRateCacheFresh(cachedData)) {
+    ecbMemoryCache = cachedData;
+    return cachedData;
+  }
 
   try {
     const response = await fetch(ECB_RATES_URL, { signal: AbortSignal.timeout(10_000) });
@@ -45,6 +50,7 @@ async function getEcbRates(db) {
       fetchedAt: Date.now(),
     };
     await ref.set(payload, { merge: true });
+    ecbMemoryCache = payload;
     return payload;
   } catch (error) {
     if (cachedData.rates?.EUR === 1) {
@@ -52,6 +58,7 @@ async function getEcbRates(db) {
         rateDate: cachedData.rateDate || null,
         error: error instanceof Error ? error.message : String(error),
       });
+      ecbMemoryCache = cachedData;
       return cachedData;
     }
     throw error;
@@ -167,5 +174,6 @@ async function refreshBillingMetrics({ db, admin, projectId }) {
 
 module.exports = {
   findStandardBillingTable,
+  getEcbRates,
   refreshBillingMetrics,
 };

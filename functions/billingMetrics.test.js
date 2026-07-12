@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   buildBillingQuery,
   convertToEur,
+  isEcbRateCacheFresh,
   parseEcbRates,
   summarizeBillingRows,
 } = require("./billingMetrics");
@@ -15,6 +16,16 @@ test("parses ECB rates and converts source currency to EUR", () => {
   assert.equal(parsed.rateDate, "2026-07-10");
   assert.equal(parsed.rates.USD, 1.143);
   assert.equal(Number(convertToEur(13.5, "USD", parsed.rates).toFixed(2)), 11.81);
+});
+
+test("keeps a valid ECB rate cached for the whole local day, including weekends", () => {
+  const cached = {
+    rateDate: "2026-07-10",
+    fetchedAt: Date.parse("2026-07-12T06:00:00Z"),
+    rates: { EUR: 1, USD: 1.143 },
+  };
+  assert.equal(isEcbRateCacheFresh(cached, new Date("2026-07-12T18:00:00Z")), true);
+  assert.equal(isEcbRateCacheFresh(cached, new Date("2026-07-13T02:00:00Z")), false);
 });
 
 test("summarizes net billing cost, usage and projections without inventing missing values", () => {

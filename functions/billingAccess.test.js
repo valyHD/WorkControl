@@ -15,13 +15,16 @@ function callableBody(exportName, nextExportName) {
 
 test("billing read, refresh and settings callables validate admin before accessing data", () => {
   const refreshBody = callableBody("refreshBillingMetricsNow", "getBillingControlPanelData");
-  const readBody = callableBody("getBillingControlPanelData", "saveBillingCostSettings");
+  const readBody = callableBody("getBillingControlPanelData", "getLiveFirebaseCostEstimate");
+  const liveBody = callableBody("getLiveFirebaseCostEstimate", "saveBillingCostSettings");
   const saveBody = callableBody("saveBillingCostSettings", "sendPushOnNotificationCreated");
 
-  for (const body of [refreshBody, readBody, saveBody]) {
+  for (const body of [refreshBody, readBody, liveBody, saveBody]) {
     const authCheck = body.indexOf("await assertAdminRequest(request)");
     assert.ok(authCheck >= 0);
-    const firstDatabaseAccess = body.search(/db\.collection|refreshBillingMetricsCache/);
+    const firstDatabaseAccess = body.search(
+      /db\.collection|refreshBillingMetricsCache|await getEcbRates|return await getLiveFirebaseCostEstimate/
+    );
     assert.ok(firstDatabaseAccess > authCheck);
   }
 });

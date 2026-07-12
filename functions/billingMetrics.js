@@ -23,6 +23,15 @@ function dateKeyInTimeZone(date = new Date(), timeZone = BILLING_TIME_ZONE) {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
+function isEcbRateCacheFresh(cachedData, now = new Date()) {
+  const fetchedAt = Number(cachedData?.fetchedAt);
+  return (
+    cachedData?.rates?.EUR === 1 &&
+    Number.isFinite(fetchedAt) &&
+    dateKeyInTimeZone(new Date(fetchedAt)) === dateKeyInTimeZone(now)
+  );
+}
+
 function addDays(dayKey, days) {
   const [year, month, day] = String(dayKey).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -225,6 +234,7 @@ module.exports = {
   buildBillingQuery,
   convertToEur,
   dateKeyInTimeZone,
+  isEcbRateCacheFresh,
   parseEcbRates,
   summarizeBillingRows,
 };
