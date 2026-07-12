@@ -908,6 +908,50 @@ a:focus-visible {
   font-size: 12px;
 }
 
+.expense-document-preview {
+  width: min(100%, 560px);
+  max-height: 360px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.expense-document-preview img,
+.expense-document-preview iframe {
+  width: 100%;
+  height: 320px;
+  display: block;
+  border: 0;
+  object-fit: contain;
+  background: var(--surface);
+}
+
+.control-panel-operational-page {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.control-panel-operational-page > .wc-product-page-header,
+.control-panel-operational-page > .wc-product-tabs,
+.control-panel-operational-page > #general,
+.control-panel-operational-page > #billing,
+.control-panel-operational-page > #firebase {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .control-panel-operational-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .control-panel-operational-page > * {
+    grid-column: 1 !important;
+  }
+}
+
 .wc-input-with-icon {
   position: relative;
   display: block;
