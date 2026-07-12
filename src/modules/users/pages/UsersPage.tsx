@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { deleteUserProfile, getAllUsers, subscribeUsers } from "../services/usersService";
+import { deleteUserProfile, subscribeUsers } from "../services/usersService";
 import type { AppUserItem } from "../../../types/user";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
@@ -50,6 +50,9 @@ export default function UsersPage() {
   const [deletingUserId, setDeletingUserId] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [onlineTick, setOnlineTick] = useState(Date.now());
   const mountedRef = useRef(true);
@@ -64,25 +67,9 @@ export default function UsersPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
     setLoading(true);
     setError("");
-    try {
-      const data = await getAllUsers();
-      if (!mountedRef.current) return;
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("[UsersPage][load]", err);
-      if (!mountedRef.current) return;
-      setError("Nu am putut încărca utilizatorii. Verifică regulile Firebase.");
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  useEffect(() => {
     const unsubscribe = subscribeUsers(
       (data) => {
         if (!mountedRef.current) return;
@@ -130,13 +117,23 @@ export default function UsersPage() {
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return users;
     return users.filter((u) =>
-      (u.fullName || "").toLowerCase().includes(q) ||
-      (u.email || "").toLowerCase().includes(q) ||
-      (u.role || "").toLowerCase().includes(q)
+      (!q ||
+        (u.fullName || "").toLowerCase().includes(q) ||
+        (u.email || "").toLowerCase().includes(q) ||
+        (u.roleTitle || "").toLowerCase().includes(q) ||
+        (u.department || "").toLowerCase().includes(q) ||
+        (u.role || "").toLowerCase().includes(q)) &&
+      (!roleFilter || u.role === roleFilter) &&
+      (!departmentFilter || u.department === departmentFilter) &&
+      (!statusFilter || (statusFilter === "active" ? u.active !== false : u.active === false))
     );
-  }, [users, search]);
+  }, [departmentFilter, roleFilter, search, statusFilter, users]);
+
+  const departments = useMemo(
+    () => Array.from(new Set(users.map((item) => item.department).filter(Boolean))).sort(),
+    [users]
+  );
 
   const activeCount = useMemo(() => users.filter((u) => u.active !== false).length, [users]);
   const onlineCount = useMemo(() => users.filter(isUserOnline).length, [users, onlineTick]);
@@ -207,6 +204,21 @@ export default function UsersPage() {
               placeholder="Caută după nume, email sau rol"
             />
           </div>
+          <select className="tool-input" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+            <option value="">Toate rolurile</option>
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="angajat">Angajat</option>
+          </select>
+          <select className="tool-input" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)}>
+            <option value="">Toate departamentele</option>
+            {departments.map((department) => <option key={department} value={department}>{department}</option>)}
+          </select>
+          <select className="tool-input" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">Orice status</option>
+            <option value="active">Activ</option>
+            <option value="inactive">Inactiv</option>
+          </select>
         </div>
 
         {/* Error */}
@@ -218,7 +230,6 @@ export default function UsersPage() {
               style={{ marginLeft: "auto", fontWeight: 700, background: "none", border: "none", cursor: "pointer", color: "inherit" }}
               onClick={() => {
                 setReloadToken((value) => value + 1);
-                void load();
               }}
             >
               Reîncarcă
@@ -232,7 +243,7 @@ export default function UsersPage() {
             <table className="users-table">
               <thead>
                 <tr>
-                  <th>Nume</th><th>Email</th><th>Rol</th><th>Status</th><th>Last seen</th><th>Acțiuni</th>
+                  <th>Nume</th><th>Funcție / departament</th><th>Rol</th><th>Status</th><th>Last seen</th><th>Acțiuni</th>
                 </tr>
               </thead>
               <tbody>
@@ -256,7 +267,7 @@ export default function UsersPage() {
               <thead>
                 <tr>
                   <th>Nume</th>
-                  <th>Email</th>
+                  <th>Funcție / departament</th>
                   <th>Rol</th>
                   <th>Status</th>
                   <th>Last seen</th>
@@ -286,7 +297,10 @@ export default function UsersPage() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ fontSize: 13, color: "var(--text-soft)" }}>{u.email || "—"}</td>
+                      <td style={{ fontSize: 13, color: "var(--text-soft)" }}>
+                        <strong>{u.roleTitle || "Funcție necompletată"}</strong>
+                        <div className="simple-list-subtitle">{u.department || "Departament necompletat"}</div>
+                      </td>
                       <td>
                         <span className="user-accent-chip" style={{ fontSize: 11 }}>{u.role || "—"}</span>
                       </td>
