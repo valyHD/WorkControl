@@ -173,6 +173,25 @@ Sectiunea `Consum si costuri` este randata numai pentru rolul `admin` si afiseaz
 
 Valorile indisponibile sunt `null` in backend si `Indisponibil` in UI.
 
+### Estimare aproape live
+
+Callable-ul admin-only `getLiveFirebaseCostEstimate` citeste din Cloud Monitoring
+operatiunile Firestore `read_ops_count`, `write_ops_count` si `delete_ops_count`.
+Panoul se actualizeaza la 60 secunde doar cat pagina este vizibila si afiseaza:
+
+- EUR/minut, ca medie a ultimelor 5 minute raportate;
+- proiectia EUR/ora la ritmul curent;
+- costul estimat al operatiunilor din ultimele 60 minute;
+- citiri si scrieri pe minut;
+- egress estimat pe minut la media observata de 3,78 KiB per citire;
+- momentul ultimei metrici disponibile.
+
+Cloud Monitoring esantioneaza la 60 secunde si poate publica datele cu pana la 240
+secunde intarziere. Estimarea foloseste tarifele Standard pentru `europe-west1` si
+cursul BCE. Egress-ul foloseste tariful brut de 0,12 USD/GiB si media observata in
+baseline-ul 5-11 iulie; nu include storage, Cloud Functions, quota gratuita sau
+discounturi. Costul contabil final ramane cel din Cloud Billing Export.
+
 ## Canary production
 
 1. Pastreaza `enabled: false` pana cand noul gateway este instalat.

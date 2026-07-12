@@ -3931,6 +3931,118 @@ html {
   color: #9a3412;
 }
 
+.billing-live-meter {
+  padding: 16px;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #14532d;
+}
+
+.billing-live-meter--delayed {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.billing-live-meter--unavailable {
+  border-color: #dbe4f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.billing-live-meter__header,
+.billing-live-meter__operations {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.billing-live-meter__header h4 {
+  margin: 3px 0 0;
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.billing-live-meter__header > svg {
+  color: #059669;
+}
+
+.billing-live-meter__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #047857;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.billing-live-meter__eyebrow i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 4px rgb(16 185 129 / 14%);
+}
+
+.billing-live-meter__values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 14px 0 12px;
+  overflow: hidden;
+  border: 1px solid rgb(15 118 110 / 16%);
+  border-radius: 8px;
+  background: rgb(15 118 110 / 12%);
+}
+
+.billing-live-meter__values > div {
+  min-width: 0;
+  min-height: 82px;
+  padding: 12px;
+  background: rgb(255 255 255 / 82%);
+  display: grid;
+  align-content: center;
+  gap: 6px;
+}
+
+.billing-live-meter__values span {
+  color: #64748b;
+  font-size: 0.74rem;
+}
+
+.billing-live-meter__values strong {
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 1.05rem;
+}
+
+.billing-live-meter__operations {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: #475569;
+  font-size: 0.76rem;
+}
+
+.billing-live-meter__operations span + span::before {
+  content: "·";
+  margin-right: 12px;
+  color: #94a3b8;
+}
+
+.billing-live-meter > small {
+  display: block;
+  margin-top: 9px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.billing-live-meter > small.is-error {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .billing-loading {
   color: #64748b;
   font-size: 0.9rem;
@@ -4292,6 +4404,23 @@ html {
   .billing-kpi-card {
     min-height: 82px;
     padding: 11px;
+  }
+
+  .billing-live-meter {
+    padding: 12px;
+  }
+
+  .billing-live-meter__values {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-live-meter__values > div {
+    min-height: 64px;
+    padding: 10px;
+  }
+
+  .billing-live-meter__values strong {
+    font-size: 1rem;
   }
 
   .billing-daily-chart {

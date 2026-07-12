@@ -4,7 +4,11 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
-const { refreshBillingMetrics: refreshBillingMetricsCache } = require('./billingMetricsRuntime');
+const {
+  getEcbRates,
+  refreshBillingMetrics: refreshBillingMetricsCache,
+} = require('./billingMetricsRuntime');
+const { getLiveFirebaseCostEstimate } = require('./liveCostEstimateRuntime');
 
 admin.initializeApp();
 
@@ -2782,6 +2786,33 @@ exports.getBillingControlPanelData = onCall(
         updatedAt: toSafeNumber(canary.updatedAtMs, 0) || null,
       },
     };
+  }
+);
+
+exports.getLiveFirebaseCostEstimate = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    try {
+      const rates = await getEcbRates(db);
+      return await getLiveFirebaseCostEstimate({
+        projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d',
+        usdPerEur: rates.rates?.USD,
+        rateDate: rates.rateDate,
+      });
+    } catch (error) {
+      logger.error('[getLiveFirebaseCostEstimate] Nu am putut citi Cloud Monitoring.', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new HttpsError(
+        'unavailable',
+        'Estimarea aproape live nu este disponibila momentan.'
+      );
+    }
   }
 );
 

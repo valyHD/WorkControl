@@ -1,10 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BillingCostPanel from "./BillingCostPanel";
-import { getBillingControlPanelData } from "../services/billingMetricsService";
+import {
+  getBillingControlPanelData,
+  getLiveFirebaseCostEstimate,
+} from "../services/billingMetricsService";
 
 vi.mock("../services/billingMetricsService", () => ({
   getBillingControlPanelData: vi.fn(),
+  getLiveFirebaseCostEstimate: vi.fn(),
   getLocalGpsRouteCostMetrics: vi.fn(() => ({
     fullRouteRequests: 1,
     incrementalRequests: 10,
@@ -22,9 +26,32 @@ vi.mock("../services/billingMetricsService", () => ({
 }));
 
 const mockedGetData = vi.mocked(getBillingControlPanelData);
+const mockedGetLiveEstimate = vi.mocked(getLiveFirebaseCostEstimate);
 
 describe("BillingCostPanel", () => {
   beforeEach(() => {
+    mockedGetLiveEstimate.mockResolvedValue({
+      status: "current",
+      currency: "EUR",
+      source: "cloud_monitoring_firestore_operations",
+      dataAsOfMs: Date.now() - 180_000,
+      lagSeconds: 180,
+      sampledWindowMinutes: 5,
+      refreshSeconds: 60,
+      costPerMinuteEur: 0.00125,
+      projectedHourlyEur: 0.075,
+      estimatedLastHourEur: 0.061,
+      estimatedEgressMiBPerMinute: 3.69,
+      estimatedEgressMiBLastHour: 221.4,
+      readsPerMinute: 1_000,
+      writesPerMinute: 100,
+      deletesPerMinute: 0,
+      readsLastHour: 60_000,
+      writesLastHour: 6_000,
+      deletesLastHour: 0,
+      excludes: ["network_egress", "storage"],
+      exchangeRate: { source: "ECB", rateDate: "2026-07-10" },
+    });
     mockedGetData.mockResolvedValue({
       settings: {
         budgetMonthlyEur: 50,
@@ -77,12 +104,18 @@ describe("BillingCostPanel", () => {
     const { container } = render(<BillingCostPanel isAdmin={false} />);
     expect(container).toBeEmptyDOMElement();
     expect(mockedGetData).not.toHaveBeenCalled();
+    expect(mockedGetLiveEstimate).not.toHaveBeenCalled();
   });
 
   it("shows costs, usage, canary status and unavailable metrics for an admin", async () => {
     render(<BillingCostPanel isAdmin />);
     expect(await screen.findByText("Consum și costuri")).toBeInTheDocument();
     await waitFor(() => expect(mockedGetData).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockedGetLiveEstimate).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Ritm cost Firestore")).toBeInTheDocument();
+    expect(screen.getByText(/0,00125/)).toBeInTheDocument();
+    expect(screen.getByText("1.000 citiri/min")).toBeInTheDocument();
+    expect(screen.getByText(/3,69 MiB egress\/min/)).toBeInTheDocument();
     expect(screen.getAllByText(/11,81/).length).toBeGreaterThan(0);
     expect(screen.getByText("67.22 GiB")).toBeInTheDocument();
     expect(screen.getByText("Canary gateway")).toBeInTheDocument();

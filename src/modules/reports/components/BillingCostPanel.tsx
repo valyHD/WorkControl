@@ -1,13 +1,23 @@
-import { useEffect, useState } from "react";
-import { Activity, Cloud, Database, RefreshCw, WalletCards, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Activity,
+  Cloud,
+  Database,
+  RefreshCw,
+  WalletCards,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import {
   getBillingControlPanelData,
+  getLiveFirebaseCostEstimate,
   getLocalGpsRouteCostMetrics,
   refreshBillingMetricsNow,
   saveBillingCostSettings,
   type BillingCostSettings,
   type BillingMetrics,
   type GpsCostOptimizationStatus,
+  type LiveFirebaseCostEstimate,
 } from "../services/billingMetricsService";
 
 type BillingCostPanelProps = {
@@ -24,6 +34,13 @@ function count(value: number | null) {
   return value === null ? "Indisponibil" : new Intl.NumberFormat("ro-RO").format(value);
 }
 
+function decimal(value: number, digits = 2) {
+  return new Intl.NumberFormat("ro-RO", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
 function bytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -36,9 +53,26 @@ function bytes(value: number) {
   return `${current.toFixed(current >= 100 ? 0 : 1)} ${units[unit]}`;
 }
 
+function liveMoney(value: number | null, suffix = "") {
+  if (value === null) return "Indisponibil";
+  const formatted = new Intl.NumberFormat("ro-RO", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 8,
+  }).format(value);
+  return suffix ? `${formatted}/${suffix}` : formatted;
+}
+
+function liveLagLabel(live: LiveFirebaseCostEstimate | null) {
+  if (!live?.dataAsOfMs || live.lagSeconds === null) return "Aștept metricile Cloud Monitoring";
+  const minutes = Math.max(1, Math.ceil(live.lagSeconds / 60));
+  return `Date raportate acum aproximativ ${minutes} min`;
+}
+
 function freshnessLabel(metrics: BillingMetrics | null) {
   if (!metrics || metrics.freshnessStatus === "awaiting_export")
-    return "Export în curs de configurare";
+    return "Datele contabile se încarcă";
   if (!metrics.updatedAtMs) return "Momentul actualizării este indisponibil";
   const ageHours = Math.max(0, (Date.now() - metrics.updatedAtMs) / 3_600_000);
   if (ageHours < 1) return "Actualizat în ultima oră";
@@ -57,7 +91,29 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [liveEstimate, setLiveEstimate] = useState<LiveFirebaseCostEstimate | null>(null);
+  const [liveLoading, setLiveLoading] = useState(true);
+  const [liveError, setLiveError] = useState("");
   const [localRouteMetrics] = useState(() => getLocalGpsRouteCostMetrics());
+
+  const loadLiveEstimate = useCallback(
+    async (force = false) => {
+      if (!isAdmin || (typeof document !== "undefined" && document.visibilityState === "hidden")) {
+        return;
+      }
+      setLiveLoading(true);
+      setLiveError("");
+      try {
+        setLiveEstimate(await getLiveFirebaseCostEstimate({ force }));
+      } catch (loadError) {
+        console.error("[BillingCostPanel][live-cost]", loadError);
+        setLiveError("Estimarea aproape live nu este disponibilă momentan.");
+      } finally {
+        setLiveLoading(false);
+      }
+    },
+    [isAdmin]
+  );
 
   async function load() {
     setLoading(true);
@@ -79,6 +135,20 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     if (!isAdmin) return;
     queueMicrotask(() => void load());
   }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    queueMicrotask(() => void loadLiveEstimate());
+    const timer = window.setInterval(() => void loadLiveEstimate(), 60_000);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void loadLiveEstimate();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isAdmin, loadLiveEstimate]);
 
   if (!isAdmin) return null;
 
@@ -151,10 +221,11 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       const result = await refreshBillingMetricsNow();
       setMessage(
         result.status === "awaiting_export"
-          ? "Exportul Standard este activat, dar tabelul BigQuery nu este încă disponibil."
+          ? "Exportul Standard este activ; Google încă încarcă datele contabile recente."
           : "Datele de billing au fost actualizate."
       );
       await load();
+      await loadLiveEstimate(true);
     } catch (refreshError) {
       console.error("[BillingCostPanel][refresh]", refreshError);
       setError("Actualizarea manuală a datelor de billing a eșuat.");
@@ -209,6 +280,48 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           </span>
         ) : null}
       </div>
+
+      <section
+        className={`billing-live-meter billing-live-meter--${liveEstimate?.status ?? "unavailable"}`}
+        aria-label="Estimare aproape live a costului Firebase"
+      >
+        <div className="billing-live-meter__header">
+          <div>
+            <span className="billing-live-meter__eyebrow">
+              <i aria-hidden="true" /> APROAPE LIVE
+            </span>
+            <h4>Ritm cost Firestore</h4>
+          </div>
+          <Zap size={19} aria-hidden="true" />
+        </div>
+        <div className="billing-live-meter__values">
+          <div>
+            <span>Acum</span>
+            <strong>{liveMoney(liveEstimate?.costPerMinuteEur ?? null, "min")}</strong>
+          </div>
+          <div>
+            <span>Proiecție la ritmul actual</span>
+            <strong>{liveMoney(liveEstimate?.projectedHourlyEur ?? null, "oră")}</strong>
+          </div>
+          <div>
+            <span>Ultimele 60 min raportate</span>
+            <strong>{liveMoney(liveEstimate?.estimatedLastHourEur ?? null)}</strong>
+          </div>
+        </div>
+        <div className="billing-live-meter__operations">
+          <span>{count(liveEstimate?.readsPerMinute ?? null)} citiri/min</span>
+          <span>{count(liveEstimate?.writesPerMinute ?? null)} scrieri/min</span>
+          <span>~{decimal(liveEstimate?.estimatedEgressMiBPerMinute ?? 0)} MiB egress/min</span>
+          <span>{liveLagLabel(liveEstimate)}</span>
+        </div>
+        {liveLoading ? <small>Actualizez estimarea...</small> : null}
+        {liveError ? <small className="is-error">{liveError}</small> : null}
+        <small>
+          Estimare brută după operațiuni, medie pe {liveEstimate?.sampledWindowMinutes ?? 5}
+          min. Egress-ul este aproximat la 3,78 KiB/citire. Nu include storage, Functions, quota
+          gratuită sau discounturi.
+        </small>
+      </section>
 
       {loading ? <div className="billing-loading">Se încarcă valorile de billing...</div> : null}
       {error ? <div className="tool-message error-message">{error}</div> : null}
