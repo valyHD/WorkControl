@@ -27,7 +27,8 @@ export default function ProductIntelligenceHub({
   pathname: string;
 }) {
   const { flags, setFlag } = useFeatureFlags();
-  const [open, setOpen] = useState(() =>
+  const [open, setOpen] = useState(false);
+  const [onboardingPending, setOnboardingPending] = useState(() =>
     Boolean(userId && window.localStorage.getItem(onboardingKey(userId)) !== "yes")
   );
   const [tab, setTab] = useState<HubTab>("help");
@@ -39,6 +40,7 @@ export default function ProductIntelligenceHub({
 
   const completeOnboarding = () => {
     window.localStorage.setItem(onboardingKey(userId), "yes");
+    setOnboardingPending(false);
     setOpen(false);
   };
 
@@ -55,15 +57,18 @@ export default function ProductIntelligenceHub({
 
   return (
     <>
-      <button
-        className="wc-help-trigger"
-        type="button"
-        aria-label="Ajutor si noutati WorkControl"
-        title="Ajutor si noutati"
-        onClick={() => setOpen(true)}
-      >
-        <HelpCircle size={18} />
-      </button>
+      <span className="wc-help-trigger-wrap">
+        <button
+          className="wc-help-trigger"
+          type="button"
+          aria-label="Ajutor si noutati WorkControl"
+          title="Ajutor si noutati"
+          onClick={() => setOpen(true)}
+        >
+          <HelpCircle size={18} />
+        </button>
+        {onboardingPending ? <span className="wc-help-trigger-dot" title="Ghid WorkControl disponibil" /> : null}
+      </span>
       {open ? (
         <div className="wc-intelligence-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget) setOpen(false);
