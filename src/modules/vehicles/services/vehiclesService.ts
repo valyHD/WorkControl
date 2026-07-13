@@ -27,6 +27,10 @@ import {
   uploadBytes,
 } from "firebase/storage";
 import { db, functions, storage } from "../../../lib/firebase/firebase";
+import {
+  recordFirestoreQuery,
+  registerFirestoreListener,
+} from "../../../lib/firebase/firestoreQueryTelemetry";
 import type {
   VehicleCommandItem,
   VehicleCommandStatus,
@@ -1138,9 +1142,16 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
 }
 
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
-  return onSnapshot(
+  const releaseListener = registerFirestoreListener();
+  const unsubscribe = onSnapshot(
     query(vehiclesCollection, orderBy("plateNumber", "asc"), limit(250)),
     (snap) => {
+      recordFirestoreQuery({
+        module: "vehicles",
+        operation: "list-listener",
+        documents: snap.size,
+        reason: "Lista completa de vehicule",
+      });
       onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
     },
     (error) => {
@@ -1148,6 +1159,10 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
       onData([]);
     }
   );
+  return () => {
+    releaseListener();
+    unsubscribe();
+  };
 }
 
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
@@ -1196,7 +1211,8 @@ export function subscribeVehicleById(
     return () => undefined;
   }
 
-  return onSnapshot(
+  const releaseListener = registerFirestoreListener();
+  const unsubscribe = onSnapshot(
     doc(db, "vehicles", vehicleId),
     (snap) => {
       if (!snap.exists()) {
@@ -1211,6 +1227,10 @@ export function subscribeVehicleById(
       onData(null);
     }
   );
+  return () => {
+    releaseListener();
+    unsubscribe();
+  };
 }
 
 export function subscribeVehicleDailyDiagnostics(
@@ -2816,6 +2836,53 @@ export async function getVehiclePositionsForSelectedDay(
   }
 
   return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+}
+
+export async function getVehiclePositionsForFleetRangeBounded(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  maxItems = 2000
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const safeLimit = Math.max(1, Math.min(2000, Math.round(maxItems)));
+  let items: VehiclePositionItem[] = [];
+  const dayKeys = enumerateDayKeys(fromTs, toTs).sort((a, b) => b.localeCompare(a));
+
+  for (const dayKey of dayKeys) {
+    const remaining = safeLimit - items.length;
+    if (remaining <= 0) break;
+    try {
+      const dayItems = await getVehicleLatestPositionsForDay(
+        vehicleId,
+        dayKey,
+        fromTs,
+        toTs,
+        remaining
+      );
+      items = normalizePositionItems([...items, ...dayItems]).slice(-safeLimit);
+    } catch (error) {
+      console.warn("[getVehiclePositionsForFleetRangeBounded][positionDays]", dayKey, error);
+    }
+  }
+
+  if (!items.length) {
+    try {
+      items = await getVehicleLatestPositionsFromFlatCollection(
+        vehicleId,
+        fromTs,
+        toTs,
+        safeLimit
+      );
+    } catch (error) {
+      console.warn("[getVehiclePositionsForFleetRangeBounded][legacyFallback]", error);
+    }
+  }
+
+  return normalizePositionItems(items).slice(-safeLimit);
 }
 
 export async function getVehiclePositionsIncremental(

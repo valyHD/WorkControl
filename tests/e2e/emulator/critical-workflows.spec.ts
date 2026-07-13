@@ -407,5 +407,10 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       ],
       maxDiffPixelRatio: 0.02,
     });
+    const showRouteButtons = page.getByRole("button", { name: "Arată traseul" });
+    await expect(showRouteButtons).toHaveCount(1);
+    await showRouteButtons.first().click();
+    await expect(page.getByRole("button", { name: "Ascunde traseul" })).toHaveCount(1);
+    await expect(page.locator(".vehicle-fleet-map-card.is-route-selected")).toHaveCount(1);
   });
 });
