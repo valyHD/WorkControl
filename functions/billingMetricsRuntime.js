@@ -1,4 +1,5 @@
 const { BigQuery } = require("@google-cloud/bigquery");
+const { FieldValue } = require("firebase-admin/firestore");
 const { logger } = require("firebase-functions");
 const {
   addDays,
@@ -91,7 +92,7 @@ async function writeAwaitingExport(db, admin, reason) {
       freshnessStatus: "awaiting_export",
       freshnessReason: reason,
       source: "cloud_billing_bigquery_standard",
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
       updatedAtMs: Date.now(),
     },
     { merge: true }
@@ -141,7 +142,7 @@ async function refreshBillingMetrics({ db, admin, projectId }) {
     },
     source: "cloud_billing_bigquery_standard",
     freshnessStatus: rows.length ? "current" : "delayed",
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
     updatedAtMs: Date.now(),
   };
 
@@ -155,7 +156,7 @@ async function refreshBillingMetrics({ db, admin, projectId }) {
         currency: "EUR",
         netCost: daily.cost,
         source: payload.source,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );

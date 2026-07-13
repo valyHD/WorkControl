@@ -31,16 +31,24 @@ test("billing read, refresh and settings callables validate admin before accessi
 
 test("private cost documents are never exposed through a direct client rule", () => {
   const rules = fs.readFileSync(path.resolve(__dirname, "..", "firestore.rules"), "utf8");
-  assert.doesNotMatch(rules, /match \/systemMetrics\//);
-  assert.doesNotMatch(rules, /match \/systemPrivateSettings\//);
-  assert.doesNotMatch(rules, /match \/systemCostSettings\//);
+  for (const collectionName of ["systemMetrics", "systemPrivateSettings", "systemCostSettings"]) {
+    assert.match(
+      rules,
+      new RegExp(
+        `match \\/${collectionName}\\/\\{[^}]+\\} \\{\\s+allow read: if globalAdmin\\(\\);\\s+allow write: if false;\\s+\\}`
+      )
+    );
+  }
 });
 
-test("fleet overview requires authentication and cost-control writes require admin", () => {
+test("fleet overview and cost-control writes require global admin validation", () => {
   const fleetBody = callableBody("getFleetGpsOverview", "saveFirestoreCostControl");
   const saveBody = callableBody("saveFirestoreCostControl", "refreshBillingMetrics");
-  assert.ok(fleetBody.indexOf("if (!request.auth)") >= 0);
-  assert.ok(fleetBody.indexOf("return loadFleetGpsOverview()") > fleetBody.indexOf("if (!request.auth)"));
+  assert.ok(fleetBody.indexOf("await assertAdminRequest(request)") >= 0);
+  assert.ok(
+    fleetBody.indexOf("return loadFleetGpsOverview()") >
+      fleetBody.indexOf("await assertAdminRequest(request)")
+  );
   assert.ok(saveBody.indexOf("await assertAdminRequest(request)") >= 0);
   assert.ok(
     saveBody.indexOf("saveFirestoreCostControl(db") >

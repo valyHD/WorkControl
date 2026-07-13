@@ -1,9 +1,10 @@
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
+const { FieldValue } = require('firebase-admin/firestore');
 const {
   getEcbRates,
   refreshBillingMetrics: refreshBillingMetricsCache,
@@ -24,18 +25,162 @@ const {
   decodeAssistantAudioPayload,
   requestAssistantTranscription,
 } = require('./assistantTranscription');
+const { createSecurityHandlers } = require('./securityActions');
+const { buildVehicleOperationalView } = require('./vehicleOperationalView');
+const {
+  buildUserOperationalView,
+  cleanIds: getUserOperationalCompanyIds,
+  userOperationalViewId,
+} = require('./userOperationalView');
 
 admin.initializeApp();
 
 const db = admin.firestore();
 const messaging = admin.messaging();
+const securityHandlers = createSecurityHandlers({
+  db,
+  authAdmin: admin.auth(),
+  fieldValue: FieldValue,
+  HttpsError,
+  logger,
+});
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const SECURITY_CALLABLE_OPTIONS = {
+  region: 'europe-west1',
+  enforceAppCheck: process.env.WORKCONTROL_ENFORCE_APP_CHECK === 'true',
+};
 const VEHICLE_POSITION_ARCHIVE_RETENTION_DAYS = 30;
 const VEHICLE_POSITION_ARCHIVE_MAX_DAYS_PER_RUN = 80;
 const FIRESTORE_DELETE_BATCH_SIZE = 450;
 const FLEET_OVERVIEW_CACHE_MS = 20_000;
 let fleetOverviewCache = null;
 let fleetOverviewRequest = null;
+
+exports.adminCreateUser = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.adminCreateUser);
+exports.setPrimaryCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.setPrimaryCompany);
+exports.assignUsersToCompany = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.assignUsersToCompany
+);
+exports.recordAuditEvent = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.recordAuditEvent);
+exports.dispatchNotificationEvent = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.dispatchNotificationEvent
+);
+exports.startTimesheetSecure = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.startTimesheet);
+exports.stopTimesheetSecure = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.stopTimesheet);
+exports.requestVehicleTransfer = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.requestVehicleTransfer
+);
+exports.setVehicleAssignments = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.setVehicleAssignments
+);
+exports.acceptVehicleTransfer = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.acceptVehicleTransfer
+);
+exports.claimVehicle = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimVehicle);
+exports.updateVehicleMileage = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.updateVehicleMileage
+);
+exports.requestVehicleCommand = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.requestVehicleCommand
+);
+exports.requestToolTransfer = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.requestToolTransfer
+);
+exports.acceptToolTransfer = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.acceptToolTransfer
+);
+exports.claimTool = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimTool);
+
+exports.syncVehicleOperationalView = onDocumentWritten(
+  {
+    document: 'vehicles/{vehicleId}',
+    region: 'europe-west1',
+  },
+  async (event) => {
+    const vehicleId = event.params.vehicleId;
+    const after = event.data?.after;
+    const operationalRef = db.collection('vehicleOperationalViews').doc(vehicleId);
+    const trackerAdminRef = db.collection('vehicleTrackerAdmin').doc(vehicleId);
+
+    if (!after?.exists) {
+      await Promise.all([
+        operationalRef.delete().catch(() => undefined),
+        trackerAdminRef.delete().catch(() => undefined),
+      ]);
+      return;
+    }
+
+    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : {};
+    const afterData = after.data() || {};
+    const beforeOperational = buildVehicleOperationalView(vehicleId, beforeData);
+    const afterOperational = buildVehicleOperationalView(vehicleId, afterData);
+    const beforeTrackerAdmin = {
+      companyId: toSafeString(beforeData.companyId),
+      tracker: beforeData.tracker || null,
+      gpsDataUsage: beforeData.gpsDataUsage || null,
+      trackerConfig: beforeData.trackerConfig || null,
+    };
+    const afterTrackerAdmin = {
+      companyId: toSafeString(afterData.companyId),
+      tracker: afterData.tracker || null,
+      gpsDataUsage: afterData.gpsDataUsage || null,
+      trackerConfig: afterData.trackerConfig || null,
+    };
+    const writes = [];
+    if (JSON.stringify(beforeOperational) !== JSON.stringify(afterOperational)) {
+      writes.push(operationalRef.set({
+        ...afterOperational,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false }));
+    }
+    if (JSON.stringify(beforeTrackerAdmin) !== JSON.stringify(afterTrackerAdmin)) {
+      writes.push(trackerAdminRef.set({
+        ...afterTrackerAdmin,
+        updatedAt: Date.now(),
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false }));
+    }
+    await Promise.all(writes);
+  }
+);
+
+exports.syncUserOperationalViews = onDocumentWritten(
+  {
+    document: 'users/{userId}',
+    region: 'europe-west1',
+  },
+  async (event) => {
+    const userId = event.params.userId;
+    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : {};
+    const afterData = event.data?.after?.exists ? event.data.after.data() || {} : null;
+    const beforeCompanies = getUserOperationalCompanyIds(
+      beforeData.companyIds,
+      beforeData.primaryCompanyId
+    );
+    const afterCompanies = afterData
+      ? getUserOperationalCompanyIds(afterData.companyIds, afterData.primaryCompanyId)
+      : [];
+    const allCompanies = [...new Set([...beforeCompanies, ...afterCompanies])];
+    const writes = allCompanies.map((companyId) => {
+      const ref = db.collection('userOperationalViews').doc(userOperationalViewId(companyId, userId));
+      if (!afterData || !afterCompanies.includes(companyId)) return ref.delete().catch(() => undefined);
+      return ref.set({
+        ...buildUserOperationalView(userId, companyId, afterData),
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false });
+    });
+    await Promise.all(writes);
+  }
+);
 
 const VEHICLE_DOC_SCHEMA = {
   type: 'object',
@@ -649,6 +794,7 @@ function buildAuditSearchableText(input, metadata) {
 function buildAuditPayload(input) {
   const metadata = cleanAuditMetadata(input.metadata);
   return {
+    companyId: toSafeString(input.companyId),
     category: toSafeString(input.category) || 'general',
     action: toSafeString(input.action),
     title: toSafeString(input.title),
@@ -666,7 +812,7 @@ function buildAuditPayload(input) {
     metadata,
     searchableText: buildAuditSearchableText(input, metadata),
     createdAt: Date.now(),
-    createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+    createdAtServer: FieldValue.serverTimestamp(),
   };
 }
 
@@ -941,6 +1087,7 @@ async function saveExpenseDocumentFromScanJob(jobData, analysis) {
   const companyName = toSafeString(jobData.companyName) || toSafeString(analysis.buyerCompanyName) || toSafeString(analysis.companyHint);
 
   const storedPayload = {
+    companyId: toSafeString(jobData.companyId),
     ...analysis,
     documentDate,
     yearMonth,
@@ -961,8 +1108,8 @@ async function saveExpenseDocumentFromScanJob(jobData, analysis) {
     reimbursable: Boolean(jobData.reimbursable),
     createdAt: now,
     updatedAt: now,
-    createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+    createdAtServer: FieldValue.serverTimestamp(),
+    updatedAtServer: FieldValue.serverTimestamp(),
   };
 
   const docRef = await db.collection('expenseDocuments').add(storedPayload);
@@ -976,6 +1123,7 @@ async function saveExpenseDocumentFromScanJob(jobData, analysis) {
   await dispatchNotificationEvent(
     {
       module: 'expenses',
+      companyId: storedPayload.companyId,
       eventType,
       entityId: docRef.id,
       title: storedPayload.reimbursable ? 'Decontare noua' : 'Cheltuiala noua',
@@ -1141,7 +1289,7 @@ async function archivePositionDay(vehicleDoc, dayDoc, options = {}) {
         storagePath: archivePath,
         pointCount: points.length,
         archivedAt: Date.now(),
-        archivedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        archivedAtServer: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
@@ -1221,14 +1369,49 @@ async function archiveOldVehiclePositionDaysJob(options = {}) {
 }
 
 async function assertAdminRequest(request) {
+  const context = await assertActiveInternalRequest(request);
+  if (context.role !== 'admin' || context.globalAdmin !== true) {
+    throw new HttpsError('permission-denied', 'Doar administratorul global poate executa aceasta operatie.');
+  }
+  return context;
+}
+
+async function assertActiveInternalRequest(request) {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
   }
-
   const userSnap = await db.collection('users').doc(request.auth.uid).get();
-  if (toSafeString(userSnap.get('role')) !== 'admin') {
-    throw new HttpsError('permission-denied', 'Doar admin poate executa aceasta operatie.');
+  const user = userSnap.data() || {};
+  if (
+    !userSnap.exists ||
+    user.active !== true ||
+    toSafeString(user.accessStatus) !== 'active'
+  ) {
+    throw new HttpsError('permission-denied', 'Contul intern nu este activ.');
   }
+  const role = toSafeString(user.role);
+  if (!['admin', 'manager', 'angajat'].includes(role)) {
+    throw new HttpsError('permission-denied', 'Rolul intern nu este valid.');
+  }
+  const companyId = toSafeString(user.primaryCompanyId) ||
+    (Array.isArray(user.companyIds) ? toSafeString(user.companyIds[0]) : '');
+  if (!companyId) throw new HttpsError('failed-precondition', 'Contul nu are firma asociata.');
+  const companyIds = Array.isArray(user.companyIds)
+    ? [...new Set(user.companyIds.map((value) => toSafeString(value)).filter(Boolean))]
+    : [];
+  if (!companyIds.includes(companyId)) companyIds.unshift(companyId);
+  return {
+    userSnap,
+    user,
+    companyId,
+    companyIds,
+    role,
+    globalAdmin: role === 'admin' && user.globalAdmin === true,
+  };
+}
+
+function internalContextCanAccessCompany(context, companyId) {
+  return context.globalAdmin || (companyId && context.companyIds.includes(companyId));
 }
 
 function normalizeRule(doc) {
@@ -1237,6 +1420,7 @@ function normalizeRule(doc) {
 
   return {
     id: doc.id,
+    companyId: toSafeString(data.companyId),
     module: toSafeString(data.module) || 'general',
     eventType: toSafeString(data.eventType) || 'any_change',
     entityId: toSafeString(data.entityId),
@@ -1284,6 +1468,10 @@ async function getNotificationContext() {
           toSafeString(data.email) ||
           'Utilizator',
         role: toSafeString(data.role),
+        companyIds: Array.isArray(data.companyIds)
+          ? data.companyIds.map((value) => toSafeString(value)).filter(Boolean)
+          : [],
+        primaryCompanyId: toSafeString(data.primaryCompanyId),
         active: data.active !== false,
         themeKey: data.themeKey || null,
       };
@@ -1293,7 +1481,16 @@ async function getNotificationContext() {
 }
 
 async function dispatchNotificationEvent(input, context) {
+  const companyId = toSafeString(input.companyId);
+  if (!companyId) {
+    logger.warn('[dispatchNotificationEvent] Eveniment ignorat fara companyId', {
+      module: toSafeString(input.module),
+      eventType: toSafeString(input.eventType),
+    });
+    return 0;
+  }
   await createAuditLog({
+    companyId,
     category: input.module,
     action: input.eventType,
     title: input.title,
@@ -1314,10 +1511,14 @@ async function dispatchNotificationEvent(input, context) {
     },
   }).catch((error) => logger.warn('[audit][event]', error));
 
-  const rules = context.rules.filter((rule) => ruleMatches(rule, input.module, input.eventType, input.entityId));
+  const rules = context.rules.filter((rule) =>
+    rule.companyId === companyId && ruleMatches(rule, input.module, input.eventType, input.entityId)
+  );
   if (rules.length === 0) return 0;
 
-  const users = context.users;
+  const users = context.users.filter((user) =>
+    user.primaryCompanyId === companyId || user.companyIds.includes(companyId)
+  );
   const recipientsSet = new Set();
   const soundEnabled = input.soundEnabled ?? rules.some((rule) => rule.soundEnabled !== false);
 
@@ -1355,6 +1556,7 @@ async function dispatchNotificationEvent(input, context) {
       const targetUserName = targetUser?.name || userId;
 
       batch.set(notificationRef, {
+        companyId,
         userId,
       targetUserThemeKey: targetUser?.themeKey || null,
       actorUserId: input.actorUserId || '',
@@ -1369,10 +1571,11 @@ async function dispatchNotificationEvent(input, context) {
       soundEnabled,
       read: false,
       createdAt: now,
-      createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      createdAtServer: FieldValue.serverTimestamp(),
     });
 
     batch.set(db.collection('auditLogs').doc(), buildAuditPayload({
+      companyId,
       category: 'notifications',
       action: 'notification_delivered',
       title: 'Notificare primita',
@@ -1572,6 +1775,8 @@ function collectStopReminderRecipients(rules, users, timesheetUserId) {
 }
 
 async function createTimesheetReminderNotificationsOnce(params) {
+  const companyId = toSafeString(params.companyId);
+  if (!companyId) return false;
   const recipients = params.recipients.filter(Boolean);
   if (recipients.length === 0) return false;
 
@@ -1586,6 +1791,7 @@ async function createTimesheetReminderNotificationsOnce(params) {
     recipients.forEach((user) => {
       const notificationRef = db.collection('notifications').doc();
       tx.set(notificationRef, {
+        companyId,
         userId: user.id,
         targetUserThemeKey: user.themeKey || null,
         actorUserId: '',
@@ -1600,10 +1806,11 @@ async function createTimesheetReminderNotificationsOnce(params) {
         soundEnabled: params.soundEnabled !== false,
         read: false,
         createdAt: now,
-        createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        createdAtServer: FieldValue.serverTimestamp(),
       });
 
       tx.set(db.collection('auditLogs').doc(), buildAuditPayload({
+        companyId,
         category: 'notifications',
         action: 'notification_delivered',
         title: 'Notificare primita',
@@ -1630,6 +1837,7 @@ async function createTimesheetReminderNotificationsOnce(params) {
     });
 
     tx.set(markerRef, {
+      companyId,
       type: params.type,
       dateKey: params.dateKey || '',
       entityId: params.entityId || '',
@@ -1638,7 +1846,7 @@ async function createTimesheetReminderNotificationsOnce(params) {
       repeatMinutes: Number.isFinite(params.repeatMinutes) ? params.repeatMinutes : null,
       recipientCount: recipients.length,
       createdAt: now,
-      createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      createdAtServer: FieldValue.serverTimestamp(),
     });
 
     return true;
@@ -1688,6 +1896,7 @@ async function runTimesheetReminderAlertsJob() {
 
       const usersToRemind = collectStartReminderUsers([rule], notificationContext.users).filter(
         (user) =>
+          (user.primaryCompanyId === rule.companyId || user.companyIds.includes(rule.companyId)) &&
           !startedTodayUserIds.has(user.id) &&
           !activeTimesheetUserIds.has(user.id) &&
           !approvedLeaveUserIds.has(user.id)
@@ -1695,6 +1904,7 @@ async function runTimesheetReminderAlertsJob() {
 
       for (const user of usersToRemind) {
         const created = await createTimesheetReminderNotificationsOnce({
+          companyId: rule.companyId,
           markerId: `timesheet_start_${clock.dayKey}_${user.id}_${reminderSlot.markerTimeKey}_${reminderSlot.slot}`,
           type: 'timesheet_start_daily_reminder',
           dateKey: clock.dayKey,
@@ -1726,6 +1936,7 @@ async function runTimesheetReminderAlertsJob() {
       if (approvedLeaveUserIds.has(timesheetUserId)) continue;
 
       const dueRules = stopRules.filter((rule) => {
+        if (rule.companyId !== toSafeString(timesheet.companyId)) return false;
         if (!ruleAppliesToTimesheet(rule, timesheetDoc.id, timesheet)) return false;
         return true;
       });
@@ -1740,6 +1951,7 @@ async function runTimesheetReminderAlertsJob() {
         const stopTime = toSafeString(rule.stopTime) || '17:00';
 
         const created = await createTimesheetReminderNotificationsOnce({
+          companyId: rule.companyId,
           markerId: `timesheet_stop_${clock.dayKey}_${timesheetDoc.id}_${reminderSlot.markerTimeKey}_${reminderSlot.slot}`,
           type: 'timesheet_stop_after_8h_reminder',
           dateKey: clock.dayKey,
@@ -2005,11 +2217,20 @@ function buildAssistantPrompt(today, context) {
 
 async function persistAssistantInterpretationTrace(params) {
   try {
+    const ownerSnap = await db.collection('users').doc(toSafeString(params.ownerUserId)).get();
+    const owner = ownerSnap.data() || {};
+    const companyId = toSafeString(owner.primaryCompanyId) ||
+      (Array.isArray(owner.companyIds) ? toSafeString(owner.companyIds[0]) : '');
+    if (
+      !ownerSnap.exists || owner.active !== true ||
+      toSafeString(owner.accessStatus) !== 'active' || !companyId
+    ) return '';
     const trace = buildAssistantTraceDocument(params);
     const traceRef = await db.collection('aiCommandLogs').add({
       ...trace,
-      createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      companyId,
+      createdAtServer: FieldValue.serverTimestamp(),
+      updatedAtServer: FieldValue.serverTimestamp(),
     });
     return traceRef.id;
   } catch (error) {
@@ -2028,9 +2249,7 @@ exports.interpretAssistantCommand = onCall(
     secrets: [openaiApiKey],
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    await assertActiveInternalRequest(request);
 
     const startedAtMs = Date.now();
     const command = toSafeString(request.data?.command).slice(0, 600);
@@ -2305,9 +2524,7 @@ exports.recordAssistantTraceOutcome = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    await assertActiveInternalRequest(request);
 
     let payload;
     try {
@@ -2356,7 +2573,7 @@ exports.recordAssistantTraceOutcome = onCall(
           failureCategory: payload.status === 'failed' ? 'client_execution_failed' : '',
           details: payload.details,
         },
-        updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtServer: FieldValue.serverTimestamp(),
       });
     });
 
@@ -2372,9 +2589,7 @@ exports.transcribeAssistantAudio = onCall(
     secrets: [openaiApiKey],
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    await assertActiveInternalRequest(request);
 
     let audio;
     try {
@@ -2417,9 +2632,7 @@ exports.analyzeVehicleDocument = onCall(
     secrets: [openaiApiKey],
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    const actor = await assertActiveInternalRequest(request);
 
     const storagePath = toSafeString(request.data?.storagePath);
     const fileName = toSafeString(request.data?.fileName) || 'document';
@@ -2433,6 +2646,20 @@ exports.analyzeVehicleDocument = onCall(
 
     if (!storagePath || !storagePath.startsWith('vehicles/')) {
       throw new HttpsError('invalid-argument', 'Cale document invalida.');
+    }
+    const vehicleId = storagePath.split('/')[1] || '';
+    const vehicleSnap = vehicleId ? await db.collection('vehicles').doc(vehicleId).get() : null;
+    const vehicle = vehicleSnap?.data() || {};
+    const vehicleCompanyId = toSafeString(vehicle.companyId);
+    const assigned = request.auth.uid === toSafeString(vehicle.ownerUserId) ||
+      request.auth.uid === toSafeString(vehicle.currentDriverUserId);
+    const manages = ['admin', 'manager'].includes(actor.role);
+    if (
+      !vehicleSnap?.exists ||
+      !internalContextCanAccessCompany(actor, vehicleCompanyId) ||
+      (!assigned && !manages)
+    ) {
+      throw new HttpsError('permission-denied', 'Documentul vehiculului nu este permis.');
     }
 
     if (!isSupportedDocumentMime(contentType)) {
@@ -2554,9 +2781,7 @@ exports.analyzeExpenseDocument = onCall(
     secrets: [openaiApiKey],
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    await assertActiveInternalRequest(request);
 
     const storagePath = toSafeString(request.data?.storagePath);
     const fileName = toSafeString(request.data?.fileName) || 'document';
@@ -2572,6 +2797,9 @@ exports.analyzeExpenseDocument = onCall(
 
     if (!storagePath || !storagePath.startsWith('expenses/')) {
       throw new HttpsError('invalid-argument', 'Cale document invalida.');
+    }
+    if (!storagePath.startsWith(`expenses/${request.auth.uid}/`)) {
+      throw new HttpsError('permission-denied', 'Poti analiza numai documentele proprii.');
     }
 
     if (!isSupportedDocumentMime(contentType)) {
@@ -2758,13 +2986,29 @@ exports.processExpenseScanJob = onDocumentCreated(
       if (!storagePath || !storagePath.startsWith('expenses/')) {
         throw new Error('Cale document invalida.');
       }
+      const uploadedByUserId = toSafeString(jobData.uploadedByUserId);
+      const companyId = toSafeString(jobData.companyId);
+      if (!uploadedByUserId || !companyId || !storagePath.startsWith(`expenses/${uploadedByUserId}/`)) {
+        throw new Error('Job OCR fara ownership sau companyId valid.');
+      }
+      const uploaderSnap = await db.collection('users').doc(uploadedByUserId).get();
+      const uploader = uploaderSnap.data() || {};
+      const uploaderCompanyIds = Array.isArray(uploader.companyIds) ? uploader.companyIds : [];
+      if (
+        !uploaderSnap.exists ||
+        uploader.active !== true ||
+        toSafeString(uploader.accessStatus) !== 'active' ||
+        (!uploaderCompanyIds.includes(companyId) && toSafeString(uploader.primaryCompanyId) !== companyId)
+      ) {
+        throw new Error('Autorul jobului OCR nu apartine firmei declarate.');
+      }
 
       await snapshot.ref.set(
         {
           status: 'processing',
           processingStartedAt: Date.now(),
           updatedAt: Date.now(),
-          updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtServer: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
@@ -2792,7 +3036,7 @@ exports.processExpenseScanJob = onDocumentCreated(
           expenseDocumentId,
           completedAt: Date.now(),
           updatedAt: Date.now(),
-          updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtServer: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
@@ -2806,7 +3050,7 @@ exports.processExpenseScanJob = onDocumentCreated(
           errorMessage: error instanceof Error ? error.message : String(error),
           failedAt: Date.now(),
           updatedAt: Date.now(),
-          updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAtServer: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
@@ -2835,8 +3079,9 @@ async function maybeCreateVehicleAlert(params) {
   const recipientCount = await dispatchNotificationEvent(params.notification, params.notificationContext);
 
   await markerRef.set({
+    companyId: toSafeString(params.notification?.companyId),
     createdAt: Date.now(),
-    createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+    createdAtServer: FieldValue.serverTimestamp(),
     dateKey: params.todayKey,
     type: params.type,
     vehicleId: params.vehicleId,
@@ -2863,6 +3108,8 @@ exports.checkVehicleMaintenanceAlerts = onSchedule(
     for (const vehicleDoc of vehiclesSnap.docs) {
       const vehicle = vehicleDoc.data() || {};
       const vehicleId = vehicleDoc.id;
+      const companyId = toSafeString(vehicle.companyId);
+      if (!companyId) continue;
       const plateNumber = toSafeString(vehicle.plateNumber) || 'fara numar';
       const ownerUserId = toSafeString(vehicle.ownerUserId);
       const directUserId = toSafeString(vehicle.currentDriverUserId) || ownerUserId;
@@ -2898,6 +3145,7 @@ exports.checkVehicleMaintenanceAlerts = onSchedule(
           vehicleId,
           notificationContext,
           notification: {
+            companyId,
             module: 'vehicles',
             eventType: serviceInfo.eventType,
             entityId: vehicleId,
@@ -2942,6 +3190,7 @@ exports.checkVehicleMaintenanceAlerts = onSchedule(
           vehicleId,
           notificationContext,
           notification: {
+            companyId,
             module: 'vehicles',
             eventType: docInfo.eventType,
             entityId: vehicleId,
@@ -3002,11 +3251,13 @@ exports.checkMaintenancePartOrderReminders = onSchedule(
           }
 
           const order = freshOrderDoc.data() || {};
+          const companyId = toSafeString(order.companyId);
           const notifyUserId = toSafeString(order.notifyUserId);
           const nextReminderAt = Number(order.nextReminderAt || 0);
           const status = toSafeString(order.status);
 
           if (
+            !companyId ||
             !notifyUserId ||
             Number(order.notificationSeenAt || 0) > 0 ||
             status === 'installed' ||
@@ -3020,6 +3271,11 @@ exports.checkMaintenancePartOrderReminders = onSchedule(
 
           const userDoc = await tx.get(db.collection('users').doc(notifyUserId));
           const user = userDoc.exists ? userDoc.data() || {} : {};
+          const userCompanyIds = Array.isArray(user.companyIds) ? user.companyIds : [];
+          if (!userDoc.exists || (!userCompanyIds.includes(companyId) && toSafeString(user.primaryCompanyId) !== companyId)) {
+            skippedCount += 1;
+            return;
+          }
           const intervalMinutes = Math.max(5, Math.min(1440, Number(order.reminderIntervalMinutes || 30)));
           const title = 'Comanda piese asteapta confirmare';
           const label = getPartOrderLabel(order, orderId);
@@ -3027,6 +3283,7 @@ exports.checkMaintenancePartOrderReminders = onSchedule(
           const notificationRef = db.collection('notifications').doc();
 
           tx.set(notificationRef, {
+            companyId,
             userId: notifyUserId,
             targetUserThemeKey: user.themeKey || null,
             actorUserId: toSafeString(order.requestedByUserId),
@@ -3041,14 +3298,14 @@ exports.checkMaintenancePartOrderReminders = onSchedule(
             soundEnabled: true,
             read: false,
             createdAt: now,
-            createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+            createdAtServer: FieldValue.serverTimestamp(),
           });
 
           tx.update(orderDoc.ref, {
             lastReminderAt: now,
             nextReminderAt: now + intervalMinutes * 60 * 1000,
             updatedAt: now,
-            updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAtServer: FieldValue.serverTimestamp(),
           });
 
           createdCount += 1;
@@ -3171,9 +3428,7 @@ exports.getFleetGpsOverview = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
-    }
+    await assertAdminRequest(request);
     return loadFleetGpsOverview();
   }
 );
@@ -3287,10 +3542,22 @@ exports.getLiveFirebaseCostEstimate = onCall(
   },
   async (request) => {
     await assertAdminRequest(request);
+    const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d';
+    if (projectId.startsWith('demo-')) {
+      return {
+        status: 'unavailable',
+        currency: 'EUR',
+        source: 'firebase_emulator',
+        sampledWindowMinutes: 5,
+        refreshSeconds: 900,
+        excludes: ['emulator'],
+        exchangeRate: { source: 'ECB', rateDate: null },
+      };
+    }
     try {
       const rates = await getEcbRates(db);
       return await getLiveFirebaseCostEstimate({
-        projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d',
+        projectId,
         usdPerEur: rates.rates?.USD,
         rateDate: rates.rateDate,
         force: request.data?.force === true,
@@ -3333,7 +3600,7 @@ exports.saveBillingCostSettings = onCall(
         budgetMonthlyEur,
         warningPercent,
         criticalPercent,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: Date.now(),
         updatedBy: request.auth.uid,
       },
@@ -3388,7 +3655,7 @@ exports.sendPushOnNotificationCreated = onDocumentCreated(
       await snapshot.ref.set(
         {
           pushDispatchStatus: 'missing_user',
-          pushDispatchAt: admin.firestore.FieldValue.serverTimestamp(),
+          pushDispatchAt: FieldValue.serverTimestamp(),
           pushDispatchedAt: Date.now(),
         },
         { merge: true }
@@ -3422,7 +3689,7 @@ exports.sendPushOnNotificationCreated = onDocumentCreated(
         {
           pushDispatchStatus: 'sending',
           pushDispatchClaimedAt: Date.now(),
-          pushDispatchClaimedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+          pushDispatchClaimedAtServer: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
@@ -3448,7 +3715,7 @@ exports.sendPushOnNotificationCreated = onDocumentCreated(
           pushDispatchStatus: 'no_tokens',
           pushDispatchSuccessCount: 0,
           pushDispatchFailureCount: 0,
-          pushDispatchAt: admin.firestore.FieldValue.serverTimestamp(),
+          pushDispatchAt: FieldValue.serverTimestamp(),
           pushDispatchedAt: Date.now(),
         },
         { merge: true }
@@ -3510,7 +3777,7 @@ const response = await messaging.sendEachForMulticast({
         pushDispatchStatus: response.failureCount > 0 && response.successCount === 0 ? 'failed' : 'sent',
         pushDispatchSuccessCount: response.successCount,
         pushDispatchFailureCount: response.failureCount,
-        pushDispatchAt: admin.firestore.FieldValue.serverTimestamp(),
+        pushDispatchAt: FieldValue.serverTimestamp(),
         pushDispatchedAt: Date.now(),
       },
       { merge: true }
