@@ -51,10 +51,8 @@ export type FleetRouteSyncOptions = {
   fromTs: number;
   toTs: number;
   refreshMs: number;
-  refreshMode?: FleetRouteRequestMode;
   pageSize: number;
   maxPages: number;
-  maxPoints?: number;
   overlapMs?: number;
   cacheTtlMs?: number;
   loader: FleetRouteLoader;
@@ -115,7 +113,6 @@ function buildCacheKey(options: FleetRouteSyncOptions) {
     options.source ?? "real",
     options.fromTs,
     options.toTs,
-    options.maxPoints ?? "all",
   ].join(":");
 }
 
@@ -207,13 +204,11 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
   const visibilityDocument =
     options.visibilityDocument ?? (typeof document !== "undefined" ? document : undefined);
   const now = options.now ?? Date.now;
-  const refreshMode = options.refreshMode ?? "incremental";
   let stopped = false;
   let started = false;
   let timer: number | null = null;
   let currentPoints: VehiclePositionItem[] = [];
   let lastTimestamp = options.fromTs;
-  let lastLoadedAt = 0;
   let requestGeneration = 0;
 
   const clearTimer = () => {
@@ -223,25 +218,19 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
 
   const isHidden = () => visibilityDocument?.visibilityState === "hidden";
 
-  const schedule = (delayMs = options.refreshMs) => {
+  const schedule = () => {
     clearTimer();
     if (stopped || typeof window === "undefined") return;
-    timer = window.setTimeout(
-      () => {
-        void runRefresh();
-      },
-      Math.max(1_000, delayMs)
-    );
+    timer = window.setTimeout(() => {
+      void runIncremental();
+    }, options.refreshMs);
   };
 
   const applyIncoming = (incoming: VehiclePositionItem[], generation: number) => {
     if (stopped || generation !== requestGeneration) return;
     const beforeCount = currentPoints.length;
-    const merged = mergeFleetRoutePoints(currentPoints, incoming);
-    const maxPoints = Math.max(1, Math.round(options.maxPoints ?? Number.MAX_SAFE_INTEGER));
-    currentPoints = merged.slice(-maxPoints);
+    currentPoints = mergeFleetRoutePoints(currentPoints, incoming);
     lastTimestamp = currentPoints[currentPoints.length - 1]?.gpsTimestamp ?? lastTimestamp;
-    lastLoadedAt = now();
     metrics.newPointsReceived += Math.max(0, currentPoints.length - beforeCount);
     setCachedRoute(cacheKey, currentPoints, now(), cacheTtlMs);
     options.onData(currentPoints);
@@ -321,28 +310,13 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     }
   };
 
-  async function runRefresh() {
-    if (refreshMode === "full") {
-      clearTimer();
-      await runFull();
-      if (!stopped && !isHidden()) schedule();
-      return;
-    }
-    await runIncremental();
-  }
-
   const handleVisibilityChange = () => {
     if (stopped) return;
     if (isHidden()) {
       clearTimer();
       return;
     }
-    const elapsed = Math.max(0, now() - lastLoadedAt);
-    if (!lastLoadedAt || elapsed >= options.refreshMs) {
-      void runRefresh();
-      return;
-    }
-    schedule(options.refreshMs - elapsed);
+    void runIncremental();
   };
 
   return {
@@ -356,9 +330,8 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
         metrics.cacheHits += 1;
         currentPoints = cached.points;
         lastTimestamp = cached.lastTimestamp || options.fromTs;
-        lastLoadedAt = cached.loadedAt;
         options.onData(currentPoints);
-        await runRefresh();
+        await runIncremental();
         return;
       }
 
@@ -369,10 +342,10 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     async refresh(forceFull = false) {
       if (stopped) return;
       clearTimer();
-      if (forceFull || refreshMode === "full") {
+      if (forceFull) {
         routeCache.delete(cacheKey);
         await runFull();
-        if (!stopped && !isHidden()) schedule();
+        schedule();
         return;
       }
       await runIncremental();
