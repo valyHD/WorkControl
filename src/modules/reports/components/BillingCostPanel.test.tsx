@@ -68,9 +68,12 @@ describe("BillingCostPanel", () => {
       firestoreCostControl: {
         emergencyMode: true,
         fleetRoutesOnDemandOnly: true,
+        fleetRoutesCompactAll: true,
         disableBackgroundRouteSync: true,
         maxFleetSnapshotRefreshSeconds: 60,
         maxRoutePointsPerRequest: 2000,
+        fleetRouteRefreshMinutes: 30,
+        fleetRoutePointsPerVehicle: 50,
         disableHiddenPageListeners: true,
         billingRefreshMinutes: 30,
       },

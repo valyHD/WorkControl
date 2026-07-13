@@ -377,7 +377,9 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     });
 
     await page.goto("/timesheets?view=overview");
-    await expect(page.getByRole("navigation", { name: "Sectiuni management pontaje" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Sectiuni management pontaje" })
+    ).toBeVisible();
     await page.getByRole("button", { name: /Active acum/ }).click();
     await expect(page).toHaveURL(/view=active/);
     await expect(page.getByText("Tabel avansat pontaje")).toBeVisible();
@@ -393,7 +395,9 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
 
     await page.goto("/control-panel");
     await expect(page.getByRole("link", { name: "Functions" })).toBeVisible();
-    await expect(page.locator(".wc-product-tabs").getByRole("link", { name: "UI Lab" })).toBeVisible();
+    await expect(
+      page.locator(".wc-product-tabs").getByRole("link", { name: "UI Lab" })
+    ).toBeVisible();
 
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
@@ -408,9 +412,10 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       maxDiffPixelRatio: 0.02,
     });
     const showRouteButtons = page.getByRole("button", { name: "Arată traseul" });
-    await expect(showRouteButtons).toHaveCount(1);
-    await showRouteButtons.first().click();
-    await expect(page.getByRole("button", { name: "Ascunde traseul" })).toHaveCount(1);
-    await expect(page.locator(".vehicle-fleet-map-card.is-route-selected")).toHaveCount(1);
+    await expect(showRouteButtons).toHaveCount(0);
+    await expect(page.getByText(/trasee la 30 min/i)).toBeVisible();
+    await expect(page.locator(".vehicle-fleet-map-card")).toHaveCount(1);
+    await expect(page.locator(".vehicle-fleet-map-card.is-route-selected")).toHaveCount(0);
+    await expect(page.getByText(/Traseu compact · GPS:/)).toBeVisible();
   });
 });

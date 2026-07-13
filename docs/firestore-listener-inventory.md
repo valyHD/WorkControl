@@ -42,8 +42,9 @@ de scriere documentate, nu pe o atribuire inventata.
 | Listener/query | Pagina | Colectie | Documente maxime | Frecventa | Unsubscribe | Cost estimat / observatie |
 | --- | --- | --- | ---: | --- | --- | --- |
 | Fleet overview callable | Toate GPS-urile | `vehicles` (projection) | 11 curent, max 250 | 60 sec, numai visible | poller stop | 660 reads/ora la 11 masini |
-| Selected vehicle | Toate GPS-urile | `vehicles/{id}` | 1 | live, numai selectie | da | maximum un listener |
-| Selected route | Toate GPS-urile | `positionDays/.../points` | 2.000 hard | 60 sec incremental | controller stop | maximum un controller |
+| Fleet compact routes | Toate GPS-urile | `positionDays/.../points` | 50 / vehicul | intrare, refresh, 30 min visible | controller stop | maximum 550 reads initial la 11 masini |
+| Selected vehicle | Toate GPS-urile, fallback | `vehicles/{id}` | 1 | live, numai selectie | da | activ daca traseele compacte sunt oprite |
+| Selected route | Toate GPS-urile, fallback | `positionDays/.../points` | 2.000 hard | 60 sec incremental | controller stop | maximum un controller |
 | Vehicle list legacy | Toate GPS-urile, rollback | `vehicles` | 250 | live | da | activ numai daca flag-ul este oprit |
 | Vehicle detail | Masina | `vehicles/{id}` | 1 | live | da | justificat cat ruta este montata |
 | Vehicle diagnostics | Detalii live | `diagnosticDays` | 1 + istoric limitat | live | da | numai pagina dedicata |
@@ -72,8 +73,10 @@ autentificat si badge-ul unread.
 ## Schimbari aplicate
 
 - Flota foloseste un callable cu field projection; `gpsSimHistory` nu este transferat.
-- Niciun traseu nu este citit pana la selectarea explicita a vehiculului.
-- Un singur document complet de vehicul si un singur controller de traseu pot fi active.
+- Toate traseele compacte sunt incarcate la intrare, la refresh si apoi la 30 minute.
+- Fiecare traseu compact pastreaza maximum 50 puncte, iar markerul live ramane separat.
+- Controller-ele sunt esalonate si nu citesc cat pagina este ascunsa.
+- Modul cu un singur traseu selectat ramane disponibil prin feature flag pentru rollback.
 - Interval implicit: ultimele 2 ore; optiuni pana la 24 ore; hard cap 2.000 puncte.
 - Tab ascuns: pollerul de overview si controllerul de traseu nu citesc.
 - Control Panel foloseste agregari `count()` in locul descarcarii colectiilor.

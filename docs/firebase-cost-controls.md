@@ -263,3 +263,31 @@ Rollback:
    `backup/all-gps-before-emergency-v2-20260713-0615`.
 
 Inventarul complet si baseline-ul se afla in `docs/firestore-listener-inventory.md`.
+
+## Trasee compacte pentru toata flota - 13 iulie 2026
+
+Flagurile private raman in `systemPrivateSettings/firestoreCostControl` si au acum valori
+implicite aditive, compatibile cu documentele deja existente:
+
+- `fleetRoutesCompactAll=true`;
+- `fleetRouteRefreshMinutes=30`;
+- `fleetRoutePointsPerVehicle=50`.
+
+Pagina `Toate GPS-urile` pastreaza sumarul de pozitie pentru toate masinile la intervalul
+`maxFleetSnapshotRefreshSeconds` (60 secunde implicit), dar traseele sunt independente:
+
+- se incarca la intrarea in pagina;
+- se actualizeaza la apasarea `Actualizeaza`;
+- se actualizeaza automat o data la 30 minute cat pagina este vizibila;
+- nu fac request cand tabul este ascuns si nu recitesc la reveniri mai scurte de interval;
+- pastreaza numai cele mai noi 50 puncte pentru fiecare masina;
+- cererile masinilor sunt esalonate pentru a evita un varf simultan de citiri.
+
+Pentru 11 masini si o singura sesiune vizibila, bugetul steady-state este maximum aproximativ
+1.760 citiri/ora: 660 pentru sumarul live si 1.100 pentru doua actualizari compacte. Prima
+incarcare poate adauga cel mult 550 citiri. Valoarea reala trebuie confirmata in Cloud
+Monitoring deoarece alte pagini si sesiuni contribuie la aceeasi metrica globala.
+
+Rollback rapid: debifeaza `Trasee compacte toate` in Control Panel. Cu modul economie activ,
+pagina revine la un singur traseu incarcat la cerere. Dezactivarea completa a modului economie
+restaureaza comportamentul legacy.

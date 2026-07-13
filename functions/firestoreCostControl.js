@@ -1,9 +1,12 @@
 const DEFAULT_FIRESTORE_COST_CONTROL = Object.freeze({
   emergencyMode: true,
   fleetRoutesOnDemandOnly: true,
+  fleetRoutesCompactAll: true,
   disableBackgroundRouteSync: true,
   maxFleetSnapshotRefreshSeconds: 60,
   maxRoutePointsPerRequest: 2000,
+  fleetRouteRefreshMinutes: 30,
+  fleetRoutePointsPerVehicle: 50,
   disableHiddenPageListeners: true,
   billingRefreshMinutes: 30,
 });
@@ -19,10 +22,11 @@ function clampInteger(value, fallback, minimum, maximum) {
 }
 
 function normalizeFirestoreCostControl(value) {
-  const data = value && typeof value === 'object' ? value : {};
+  const data = value && typeof value === "object" ? value : {};
   return {
     emergencyMode: data.emergencyMode !== false,
     fleetRoutesOnDemandOnly: data.fleetRoutesOnDemandOnly !== false,
+    fleetRoutesCompactAll: data.fleetRoutesCompactAll !== false,
     disableBackgroundRouteSync: data.disableBackgroundRouteSync !== false,
     maxFleetSnapshotRefreshSeconds: clampInteger(
       data.maxFleetSnapshotRefreshSeconds,
@@ -35,6 +39,18 @@ function normalizeFirestoreCostControl(value) {
       DEFAULT_FIRESTORE_COST_CONTROL.maxRoutePointsPerRequest,
       200,
       2000
+    ),
+    fleetRouteRefreshMinutes: clampInteger(
+      data.fleetRouteRefreshMinutes,
+      DEFAULT_FIRESTORE_COST_CONTROL.fleetRouteRefreshMinutes,
+      15,
+      180
+    ),
+    fleetRoutePointsPerVehicle: clampInteger(
+      data.fleetRoutePointsPerVehicle,
+      DEFAULT_FIRESTORE_COST_CONTROL.fleetRoutePointsPerVehicle,
+      20,
+      100
     ),
     disableHiddenPageListeners: data.disableHiddenPageListeners !== false,
     billingRefreshMinutes: clampInteger(
@@ -52,7 +68,7 @@ async function getFirestoreCostControl(db, options = {}) {
   if (!options.force && configRequest) return configRequest;
 
   configRequest = (async () => {
-    const snap = await db.collection('systemPrivateSettings').doc('firestoreCostControl').get();
+    const snap = await db.collection("systemPrivateSettings").doc("firestoreCostControl").get();
     const value = normalizeFirestoreCostControl(snap.exists ? snap.data() : null);
     cachedConfig = { value, expiresAt: Date.now() + CONFIG_CACHE_MS };
     return value;
@@ -67,15 +83,18 @@ async function getFirestoreCostControl(db, options = {}) {
 
 async function saveFirestoreCostControl(db, admin, input, userId) {
   const value = normalizeFirestoreCostControl(input);
-  await db.collection('systemPrivateSettings').doc('firestoreCostControl').set(
-    {
-      ...value,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAtMs: Date.now(),
-      updatedBy: userId,
-    },
-    { merge: true }
-  );
+  await db
+    .collection("systemPrivateSettings")
+    .doc("firestoreCostControl")
+    .set(
+      {
+        ...value,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtMs: Date.now(),
+        updatedBy: userId,
+      },
+      { merge: true }
+    );
   cachedConfig = { value, expiresAt: Date.now() + CONFIG_CACHE_MS };
   return value;
 }

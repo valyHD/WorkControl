@@ -1,33 +1,37 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+const test = require("node:test");
+const assert = require("node:assert/strict");
 const {
   DEFAULT_FIRESTORE_COST_CONTROL,
   getFirestoreCostControl,
   normalizeFirestoreCostControl,
   resetFirestoreCostControlCacheForTests,
-} = require('./firestoreCostControl');
+} = require("./firestoreCostControl");
 
-test('defaults to the reversible emergency configuration', () => {
+test("defaults to the reversible emergency configuration", () => {
   assert.deepEqual(normalizeFirestoreCostControl(null), DEFAULT_FIRESTORE_COST_CONTROL);
 });
 
-test('clamps unsafe limits', () => {
+test("clamps unsafe limits", () => {
   assert.deepEqual(
     normalizeFirestoreCostControl({
       maxFleetSnapshotRefreshSeconds: 1,
       maxRoutePointsPerRequest: 50_000,
+      fleetRouteRefreshMinutes: 2,
+      fleetRoutePointsPerVehicle: 5_000,
       billingRefreshMinutes: 2,
     }),
     {
       ...DEFAULT_FIRESTORE_COST_CONTROL,
       maxFleetSnapshotRefreshSeconds: 30,
       maxRoutePointsPerRequest: 2000,
+      fleetRouteRefreshMinutes: 15,
+      fleetRoutePointsPerVehicle: 100,
       billingRefreshMinutes: 15,
     }
   );
 });
 
-test('reads the private configuration once while the cache is fresh', async () => {
+test("reads the private configuration once while the cache is fresh", async () => {
   resetFirestoreCostControlCacheForTests();
   let reads = 0;
   const db = {
