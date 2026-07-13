@@ -32,6 +32,16 @@ test.describe("Product Experience public shell", () => {
     expect(blocking).toEqual([]);
   });
 
+  test("login exposes authentication only and no public internal signup", async ({ page }) => {
+    await page.goto("/login");
+
+    await expect(
+      page.getByText("Accesul este disponibil numai conturilor create de administrator.")
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /creeaza cont/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /creeaza cont/i })).toHaveCount(0);
+  });
+
   test("login visual baseline is stable on mobile and desktop", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/login");
