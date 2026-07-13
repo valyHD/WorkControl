@@ -29,6 +29,7 @@ import type {
 } from "../../../types/vehicle";
 import {
   getVehiclePositionsForSelectedDay,
+  getVehiclePositionsForSelectedDayChunked,
   getVehicleTrackerEvents,
 } from "../services/vehiclesService";
 import {
@@ -50,6 +51,7 @@ import {
   appendLiveTrailPoint,
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
+import { loadSelectedDayRouteWithRecovery } from "../utils/vehicleRouteRecovery";
 import VehicleGpsStatsCard from "./VehicleGpsStatsCard";
 import VehicleTripTimeline from "./VehicleTripTimeline";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -1505,6 +1507,7 @@ export default function VehicleLiveRouteCard({
   const activeRangeKeyRef = useRef("");
   const routeLoadSeqRef = useRef(0);
   const routePositionsRef = useRef<VehiclePositionItem[]>([]);
+  const latestSnapshotTimestampRef = useRef(vehicle.gpsSnapshot?.gpsTimestamp ?? 0);
   const lastRealLoadedTsRef = useRef(0);
   const lastAnalysisCommitAtRef = useRef(0);
   const monotonicKmVehicleRef = useRef(`${vehicle.id}:real`);
@@ -1568,6 +1571,10 @@ export default function VehicleLiveRouteCard({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    latestSnapshotTimestampRef.current = vehicle.gpsSnapshot?.gpsTimestamp ?? 0;
+  }, [vehicle.gpsSnapshot?.gpsTimestamp]);
 
   useEffect(() => {
     const updateOnlineState = () => {
@@ -1681,13 +1688,27 @@ export default function VehicleLiveRouteCard({
 
       try {
         const effectiveToTs = selectedDayValue === toDateInputValue() ? Date.now() : toTs;
-        const route = await getVehiclePositionsForSelectedDay(
-          vehicle.id,
+        const route = await loadSelectedDayRouteWithRecovery({
           fromTs,
-          effectiveToTs,
-          routePageSize,
-          routeMaxPages
-        );
+          toTs: effectiveToTs,
+          snapshotTimestamp: latestSnapshotTimestampRef.current,
+          loadPrimary: () =>
+            getVehiclePositionsForSelectedDay(
+              vehicle.id,
+              fromTs,
+              effectiveToTs,
+              routePageSize,
+              routeMaxPages
+            ),
+          loadRecovery: () =>
+            getVehiclePositionsForSelectedDayChunked(
+              vehicle.id,
+              fromTs,
+              effectiveToTs,
+              Math.min(routePageSize, 300),
+              Math.min(routeMaxPages, 12)
+            ),
+        });
         applyRoute(route, { forceAnalysis: true });
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadSelectedDayRoute]", error);

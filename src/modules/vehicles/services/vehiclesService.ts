@@ -2469,7 +2469,8 @@ async function getVehiclePositionsForDayInChunks(
   fromTs: number,
   toTs: number,
   pageSize = DEFAULT_ROUTE_PAGE_SIZE,
-  maxPages = DEFAULT_ROUTE_MAX_PAGES
+  maxPages = DEFAULT_ROUTE_MAX_PAGES,
+  chunkMs = PROGRESSIVE_ROUTE_CHUNK_MS
 ): Promise<VehiclePositionItem[]> {
   const dayStart = getDayStartTs(dayKey);
   const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
@@ -2479,7 +2480,7 @@ async function getVehiclePositionsForDayInChunks(
 
   const items: VehiclePositionItem[] = [];
 
-  for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs)) {
+  for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs, chunkMs)) {
     try {
       items.push(
         ...(await getVehiclePositionsForDay(
@@ -2862,6 +2863,36 @@ export async function getVehiclePositionsForSelectedDay(
     rangeItems.push(...flatItems);
   } catch (error) {
     console.warn("[getVehiclePositionsForSelectedDay][flatCollection]", error);
+  }
+
+  return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+}
+
+export async function getVehiclePositionsForSelectedDayChunked(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = 300,
+  maxPages = 12,
+  chunkMs = 2 * 60 * 60 * 1000
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const rangeItems: VehiclePositionItem[] = [];
+  for (const dayKey of enumerateDayKeys(fromTs, toTs)) {
+    rangeItems.push(
+      ...(await getVehiclePositionsForDayInChunks(
+        vehicleId,
+        dayKey,
+        fromTs,
+        toTs,
+        pageSize,
+        maxPages,
+        chunkMs
+      ))
+    );
   }
 
   return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
