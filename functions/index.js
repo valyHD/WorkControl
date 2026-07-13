@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2/options');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
@@ -32,6 +33,9 @@ const {
   cleanIds: getUserOperationalCompanyIds,
   userOperationalViewId,
 } = require('./userOperationalView');
+const { GLOBAL_RUNTIME_OPTIONS } = require('./runtimeOptions');
+
+setGlobalOptions(GLOBAL_RUNTIME_OPTIONS);
 
 admin.initializeApp();
 
