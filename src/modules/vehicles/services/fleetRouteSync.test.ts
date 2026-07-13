@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VehiclePositionItem } from "../../../types/vehicle";
 import {
   createFleetRouteSync,
+  FLEET_ROUTE_REFRESH_INTERVAL_MS,
   getFleetRouteSyncMetrics,
   resetFleetRouteSyncForTests,
   type FleetRouteRequestMode,
@@ -89,7 +90,7 @@ describe("fleetRouteSync", () => {
     controllers.forEach((controller) => controller.stop());
   });
 
-  it("does not fetch while hidden and recovers only the missing gap when visible", async () => {
+  it("does not fetch while hidden and resumes the ten-minute schedule when visible", async () => {
     const visibility = new VisibilityDocument();
     let currentTime = 100;
     const modes: FleetRouteRequestMode[] = [];
@@ -98,7 +99,7 @@ describe("fleetRouteSync", () => {
       vehicleId: "vehicle-hidden",
       fromTs: 0,
       toTs: 10_000,
-      refreshMs: 10_000,
+      refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
       pageSize: 100,
       maxPages: 2,
       visibilityDocument: visibility as unknown as Document,
@@ -117,8 +118,56 @@ describe("fleetRouteSync", () => {
     expect(modes).toEqual(["full"]);
 
     visibility.setVisibility("visible");
+    expect(modes).toEqual(["full"]);
+    await vi.advanceTimersByTimeAsync(FLEET_ROUTE_REFRESH_INTERVAL_MS - 1);
+    expect(modes).toEqual(["full"]);
+    currentTime = 510;
+    await vi.advanceTimersByTimeAsync(1);
     await vi.waitFor(() => expect(modes).toEqual(["full", "incremental"]));
     expect(getFleetRouteSyncMetrics().hiddenPageFetchesAvoided).toBe(1);
+    controller.stop();
+  });
+
+  it("updates automatically every ten minutes and resets the interval after manual refresh", async () => {
+    let currentTime = 1_000;
+    const modes: FleetRouteRequestMode[] = [];
+    const controller = createFleetRouteSync({
+      scopeKey: "test-user",
+      vehicleId: "vehicle-ten-minutes",
+      fromTs: 0,
+      toTs: 10_000_000,
+      refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
+      pageSize: 100,
+      maxPages: 2,
+      now: () => currentTime,
+      loader: async ({ mode, toTs }) => {
+        modes.push(mode);
+        return [point("vehicle-ten-minutes", toTs)];
+      },
+      onData: () => undefined,
+    });
+
+    await controller.start();
+    currentTime += FLEET_ROUTE_REFRESH_INTERVAL_MS - 1;
+    await vi.advanceTimersByTimeAsync(FLEET_ROUTE_REFRESH_INTERVAL_MS - 1);
+    expect(modes).toEqual(["full"]);
+
+    currentTime += 1;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(modes).toEqual(["full", "incremental"]);
+
+    currentTime += FLEET_ROUTE_REFRESH_INTERVAL_MS / 2;
+    await vi.advanceTimersByTimeAsync(FLEET_ROUTE_REFRESH_INTERVAL_MS / 2);
+    await controller.refresh();
+    expect(modes).toEqual(["full", "incremental", "incremental"]);
+
+    currentTime += FLEET_ROUTE_REFRESH_INTERVAL_MS - 1;
+    await vi.advanceTimersByTimeAsync(FLEET_ROUTE_REFRESH_INTERVAL_MS - 1);
+    expect(modes).toHaveLength(3);
+
+    currentTime += 1;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(modes).toHaveLength(4);
     controller.stop();
   });
 

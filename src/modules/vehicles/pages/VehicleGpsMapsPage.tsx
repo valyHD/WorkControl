@@ -25,6 +25,7 @@ import {
 } from "../services/vehiclesService";
 import {
   createFleetRouteSync,
+  FLEET_ROUTE_REFRESH_INTERVAL_MS,
   type FleetRouteSyncController,
 } from "../services/fleetRouteSync";
 import {
@@ -39,7 +40,6 @@ import {
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
 
-const ROUTE_REFRESH_MS = 60_000;
 const ACTIVE_ROUTE_REFRESH_MS = 3_000;
 const ROUTE_PAGE_SIZE = 1800;
 const ROUTE_MAX_PAGES = 18;
@@ -856,7 +856,7 @@ function VehicleFleetMapCard({
       source: "real",
       fromTs: from,
       toTs: dayEnd,
-      refreshMs: ROUTE_REFRESH_MS,
+      refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
       pageSize: ROUTE_PAGE_SIZE,
       maxPages: ROUTE_MAX_PAGES,
       loader: ({ vehicleId, fromTs, toTs, pageSize, maxPages, mode }) =>
@@ -887,7 +887,10 @@ function VehicleFleetMapCard({
   }, [from, vehicle.id]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), activeRoute ? ACTIVE_ROUTE_REFRESH_MS : ROUTE_REFRESH_MS);
+    const timer = window.setInterval(
+      () => setNow(Date.now()),
+      activeRoute ? ACTIVE_ROUTE_REFRESH_MS : FLEET_ROUTE_REFRESH_INTERVAL_MS
+    );
     return () => window.clearInterval(timer);
   }, [activeRoute]);
 

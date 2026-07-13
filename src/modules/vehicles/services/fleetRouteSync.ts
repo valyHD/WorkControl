@@ -67,7 +67,8 @@ export type FleetRouteSyncOptions = {
 };
 
 const DEFAULT_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const DEFAULT_OVERLAP_MS = 12_000;
+const DEFAULT_OVERLAP_MS = 60_000;
+export const FLEET_ROUTE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 30;
 const MAX_CACHED_POINTS = 180_000;
 const routeCache = new Map<string, FleetRouteCacheEntry>();
@@ -316,7 +317,7 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
       clearTimer();
       return;
     }
-    void runIncremental();
+    schedule();
   };
 
   return {
