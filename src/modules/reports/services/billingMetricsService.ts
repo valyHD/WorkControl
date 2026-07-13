@@ -48,6 +48,10 @@ export type BillingMetrics = {
   skuBreakdown: BillingBreakdownItem[];
   periodStart: string | null;
   periodEnd: string | null;
+  exportFromDay: string | null;
+  exportThroughDay: string | null;
+  exportLagDays: number | null;
+  costAttributionStatus: "available" | "unavailable";
   updatedAtMs: number | null;
   freshnessStatus: "current" | "delayed" | "awaiting_export" | "error";
   freshnessReason?: string;
@@ -100,6 +104,19 @@ export type LiveFirebaseCostEstimate = {
   snapshotListeners: number | null;
   activeConnections: number | null;
   functionRequestsLastHour: number | null;
+  estimatedCostTodayEur: number | null;
+  estimatedCost7DaysEur: number | null;
+  projectedMonthEur: number | null;
+  estimatedEgressMiB7Days: number | null;
+  readsToday: number | null;
+  writesToday: number | null;
+  deletesToday: number | null;
+  reads7Days: number | null;
+  writes7Days: number | null;
+  deletes7Days: number | null;
+  functionsInvocations7Days: number | null;
+  dailyUsage: Array<{ day: string; reads: number; writes: number; deletes: number }>;
+  dailyEstimatedCosts: Array<{ day: string; cost: number | null }>;
   excludes: string[];
   exchangeRate: {
     source: string;
@@ -132,6 +149,10 @@ const EMPTY_METRICS: BillingMetrics = {
   skuBreakdown: [],
   periodStart: null,
   periodEnd: null,
+  exportFromDay: null,
+  exportThroughDay: null,
+  exportLagDays: null,
+  costAttributionStatus: "unavailable",
   updatedAtMs: null,
   freshnessStatus: "awaiting_export",
   source: "cloud_billing_bigquery_standard",
@@ -139,6 +160,8 @@ const EMPTY_METRICS: BillingMetrics = {
 
 let liveEstimateCache: { value: LiveFirebaseCostEstimate; expiresAt: number } | null = null;
 let liveEstimateRequest: Promise<LiveFirebaseCostEstimate> | null = null;
+let billingControlCache: { value: BillingControlPanelData; expiresAt: number } | null = null;
+let billingControlRequest: Promise<BillingControlPanelData> | null = null;
 
 function finiteOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
@@ -205,6 +228,10 @@ function mapBillingMetrics(value: unknown): BillingMetrics {
     dailyUsage: mapDailyUsage(data.dailyUsage),
     serviceBreakdown: mapBreakdown(data.serviceBreakdown),
     skuBreakdown: mapBreakdown(data.skuBreakdown),
+    exportFromDay: data.exportFromDay ? String(data.exportFromDay) : null,
+    exportThroughDay: data.exportThroughDay ? String(data.exportThroughDay) : null,
+    exportLagDays: finiteOrNull(data.exportLagDays),
+    costAttributionStatus: data.costAttributionStatus === "available" ? "available" : "unavailable",
     updatedAtMs: finiteOrNull(data.updatedAtMs),
   } as BillingMetrics;
 }
@@ -240,6 +267,26 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
       : {};
   const status =
     data.status === "current" || data.status === "delayed" ? data.status : "unavailable";
+  const dailyUsage = Array.isArray(data.dailyUsage)
+    ? data.dailyUsage
+        .map((item) => ({
+          day: String(item?.day || ""),
+          reads: Math.max(0, finiteOr(item?.reads, 0)),
+          writes: Math.max(0, finiteOr(item?.writes, 0)),
+          deletes: Math.max(0, finiteOr(item?.deletes, 0)),
+        }))
+        .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.day))
+        .slice(-14)
+    : [];
+  const dailyEstimatedCosts = Array.isArray(data.dailyEstimatedCosts)
+    ? data.dailyEstimatedCosts
+        .map((item) => ({
+          day: String(item?.day || ""),
+          cost: finiteOrNull(item?.cost),
+        }))
+        .filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item.day))
+        .slice(-14)
+    : [];
 
   return {
     status,
@@ -263,6 +310,19 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
     snapshotListeners: finiteOrNull(data.snapshotListeners),
     activeConnections: finiteOrNull(data.activeConnections),
     functionRequestsLastHour: finiteOrNull(data.functionRequestsLastHour),
+    estimatedCostTodayEur: finiteOrNull(data.estimatedCostTodayEur),
+    estimatedCost7DaysEur: finiteOrNull(data.estimatedCost7DaysEur),
+    projectedMonthEur: finiteOrNull(data.projectedMonthEur),
+    estimatedEgressMiB7Days: finiteOrNull(data.estimatedEgressMiB7Days),
+    readsToday: finiteOrNull(data.readsToday),
+    writesToday: finiteOrNull(data.writesToday),
+    deletesToday: finiteOrNull(data.deletesToday),
+    reads7Days: finiteOrNull(data.reads7Days),
+    writes7Days: finiteOrNull(data.writes7Days),
+    deletes7Days: finiteOrNull(data.deletes7Days),
+    functionsInvocations7Days: finiteOrNull(data.functionsInvocations7Days),
+    dailyUsage,
+    dailyEstimatedCosts,
     excludes: Array.isArray(data.excludes)
       ? data.excludes.map((item) => String(item)).slice(0, 10)
       : [],
@@ -273,28 +333,48 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
   };
 }
 
-export async function getBillingControlPanelData(): Promise<BillingControlPanelData> {
-  const callable = httpsCallable<
-    Record<string, never>,
-    { metrics?: unknown; settings?: unknown; canary?: unknown; firestoreCostControl?: unknown }
-  >(functions, "getBillingControlPanelData");
-  const result = await callable({});
-  return {
-    metrics: mapBillingMetrics(result.data.metrics),
-    settings: mapBillingSettings(result.data.settings),
-    canary: mapCanaryStatus(result.data.canary),
-    firestoreCostControl: normalizeFirestoreCostControl(result.data.firestoreCostControl),
-  };
+export async function getBillingControlPanelData(
+  options: { force?: boolean } = {}
+): Promise<BillingControlPanelData> {
+  const now = Date.now();
+  if (!options.force && billingControlCache?.expiresAt && billingControlCache.expiresAt > now) {
+    return billingControlCache.value;
+  }
+  if (billingControlRequest) return billingControlRequest;
+
+  billingControlRequest = (async () => {
+    const callable = httpsCallable<
+      Record<string, never>,
+      { metrics?: unknown; settings?: unknown; canary?: unknown; firestoreCostControl?: unknown }
+    >(functions, "getBillingControlPanelData");
+    const result = await callable({});
+    const value = {
+      metrics: mapBillingMetrics(result.data.metrics),
+      settings: mapBillingSettings(result.data.settings),
+      canary: mapCanaryStatus(result.data.canary),
+      firestoreCostControl: normalizeFirestoreCostControl(result.data.firestoreCostControl),
+    };
+    billingControlCache = { value, expiresAt: Date.now() + 5 * 60_000 };
+    return value;
+  })();
+
+  try {
+    return await billingControlRequest;
+  } finally {
+    billingControlRequest = null;
+  }
 }
 
 export async function saveFirestoreCostControl(config: FirestoreCostControlConfig) {
   const normalized = normalizeFirestoreCostControl(config);
-  const callable = httpsCallable<
-    FirestoreCostControlConfig,
-    { status: string; config?: unknown }
-  >(functions, "saveFirestoreCostControl");
+  const callable = httpsCallable<FirestoreCostControlConfig, { status: string; config?: unknown }>(
+    functions,
+    "saveFirestoreCostControl"
+  );
   const result = await callable(normalized);
-  return normalizeFirestoreCostControl(result.data.config);
+  const saved = normalizeFirestoreCostControl(result.data.config);
+  billingControlCache = null;
+  return saved;
 }
 
 export async function saveBillingCostSettings(settings: BillingCostSettings) {
@@ -316,6 +396,7 @@ export async function saveBillingCostSettings(settings: BillingCostSettings) {
     "saveBillingCostSettings"
   );
   await callable({ budgetMonthlyEur, warningPercent, criticalPercent });
+  billingControlCache = null;
 }
 
 export async function refreshBillingMetricsNow() {
@@ -324,6 +405,7 @@ export async function refreshBillingMetricsNow() {
     "refreshBillingMetricsNow"
   );
   const result = await callable({});
+  billingControlCache = null;
   return result.data;
 }
 

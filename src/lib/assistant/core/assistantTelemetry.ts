@@ -7,7 +7,12 @@ export function createAssistantTelemetry(params: { userId: string; userName: str
       userId: params.userId,
       userName: params.userName,
       transcript: record.command,
-      parsedIntent: { toolId: record.toolId, module: record.module, risk: record.risk },
+      parsedIntent: {
+        traceId: record.traceId,
+        toolId: record.toolId,
+        module: record.module,
+        risk: record.risk,
+      },
       fieldsToUpdate: record.input,
       beforeData: record.output?.beforeData,
       afterData: record.output?.afterData,

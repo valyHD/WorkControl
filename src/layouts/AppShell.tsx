@@ -180,7 +180,10 @@ export default function AppShell() {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const getFocusable = () => Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector));
-    getFocusable()[0]?.focus();
+    const activeItem = drawer.querySelector<HTMLElement>(".nav-item-active");
+    const initialFocusTarget = activeItem || getFocusable()[0];
+    initialFocusTarget?.focus({ preventScroll: true });
+    activeItem?.scrollIntoView({ block: "center", inline: "nearest" });
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -292,7 +295,7 @@ export default function AppShell() {
                   <span className="page-title-icon-box">
                     <PageIcon size={17} strokeWidth={2.2} />
                   </span>
-                  {pageTitle}
+                  <span className="topbar-title__text">{pageTitle}</span>
                 </h1>
                 <PageBreadcrumbs items={breadcrumbs} />
               </div>
@@ -302,9 +305,11 @@ export default function AppShell() {
               {flags.contextualHelp && user?.uid ? (
                 <ProductIntelligenceHub userId={user.uid} role={role || "angajat"} pathname={location.pathname} />
               ) : null}
-              <Suspense fallback={<span className="wc-command-trigger wc-command-trigger--loading" aria-hidden="true" />}>
-                <GlobalCommandPalette />
-              </Suspense>
+              <span className="topbar-global-search">
+                <Suspense fallback={<span className="wc-command-trigger wc-command-trigger--loading" aria-hidden="true" />}>
+                  <GlobalCommandPalette />
+                </Suspense>
+              </span>
               <TopbarClock />
               <div className="topbar-user">
                 <div className="topbar-user-avatar">

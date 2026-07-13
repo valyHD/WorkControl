@@ -10,6 +10,7 @@ describe("Assistant V3 contract", () => {
   it("accepts and sanitizes the strict version 3 fields", () => {
     const result = validateAssistantV3Contract({
       version: "3",
+      traceId: "trace-server-123",
       commandType: "navigation",
       intent: "open_page",
       toolCalls: [{ id: "navigation.open", input: { path: "/vehicles", query: "" } }],
@@ -21,7 +22,10 @@ describe("Assistant V3 contract", () => {
       response: "Deschid vehiculele.",
     });
 
-    expect(result).toMatchObject({ ok: true, value: { version: "3", targetPage: "/vehicles" } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { version: "3", traceId: "trace-server-123", targetPage: "/vehicles" },
+    });
   });
 
   it("rejects malformed tool calls and out-of-range confidence", () => {

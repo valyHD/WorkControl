@@ -361,19 +361,50 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: "Cauta in WorkControl" })).toBeHidden();
+    await page.goto("/maintenance?tab=dashboard");
     const menuButton = page.getByRole("button", { name: "Deschide meniul" });
     await menuButton.click();
     await expect(page.locator(".mobile-drawer")).toHaveAttribute("aria-hidden", "false");
+    const activeMobileNavigation = page.locator(".mobile-drawer .nav-item-active");
+    await expect(activeMobileNavigation).toHaveAttribute("href", "/maintenance");
+    await expect(activeMobileNavigation).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(menuButton).toBeFocused();
 
+    await page.goto("/vehicles/vehicle-e2e?tab=gps");
+    await page.locator("#vehicle-tracker-live-section summary").click();
+    const routeCard = page.locator(".vehicle-live-route-card");
+    await expect(routeCard).toBeVisible();
+    const routeCardWidth = await routeCard.evaluate(
+      (element) => element.getBoundingClientRect().width
+    );
+    expect(routeCardWidth).toBeGreaterThanOrEqual(370);
+
     await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/control-panel#billing");
+    await expect(page.getByRole("heading", { name: "Consum și costuri" })).toBeVisible();
+    await page.getByRole("link", { name: "Economie GPS" }).click();
+    await expect(page).toHaveURL(/\/control-panel#gps$/);
+    await expect(page.getByRole("heading", { name: "Economie GPS și Firestore" })).toBeVisible();
+    await page.getByRole("link", { name: "Backup", exact: true }).click();
+    await expect(page).toHaveURL(/\/control-panel#backup$/);
+    await expect(page.getByRole("heading", { name: "Export profesional backup" })).toBeVisible();
+    await page
+      .getByLabel("Secțiuni pagină")
+      .getByRole("link", { name: "UI Lab", exact: true })
+      .click();
+    await expect(
+      page.locator("#ui-lab").getByRole("heading", { name: "UI Lab", exact: true }),
+    ).toBeVisible();
+
     await page.keyboard.press("Control+K");
     const commandDialog = page.getByRole("dialog", { name: "Cautare globala" });
     await expect(commandDialog).toBeVisible();
     await page.getByRole("textbox", { name: "Cauta" }).fill("ui lab");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/control-panel\/ui-lab$/);
+    await expect(page.locator(".wc-ui-lab")).toBeVisible();
     await expect(page.getByRole("heading", { name: "UI Lab" }).first()).toBeVisible();
     await page.waitForTimeout(100);
 
@@ -442,6 +473,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
 
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
+    await expect(page.getByText("Filtre hartă")).toHaveCount(0);
     await expect(page).toHaveScreenshot("fleet-gps-foundation.png", {
       animations: "disabled",
       fullPage: true,

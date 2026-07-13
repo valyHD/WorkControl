@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -18,8 +19,8 @@ import { useAuth } from "../../providers/AuthProvider";
 import { normalizeAssistantText } from "../../lib/assistant/runtime/assistantFuzzy";
 import {
   ASSISTANT_ACTION_IDS,
-  getAssistantNavigationActions,
 } from "../../lib/assistant/assistantActionCatalog";
+import { getAssistantGlobalNavigationActions } from "../../lib/assistant/assistantGlobalActionRegistry";
 import {
   searchWorkControlEntities,
   type GlobalSearchResult,
@@ -167,7 +168,7 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
   }, [open, query, role]);
 
   const navigationActions = useMemo(
-    () => getAssistantNavigationActions(role || "angajat"),
+    () => getAssistantGlobalNavigationActions(role || "angajat"),
     [role]
   );
 
@@ -243,7 +244,7 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
         <kbd>Ctrl K</kbd>
       </button>
 
-      {open ? (
+      {open ? createPortal(
         <div
           className="wc-command-overlay"
           role="presentation"
@@ -331,7 +332,8 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
               <span><kbd>Esc</kbd> inchide</span>
             </footer>
           </section>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

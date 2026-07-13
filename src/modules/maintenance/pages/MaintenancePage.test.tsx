@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { dispatchAssistantFormDraft } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import MaintenancePage from "./MaintenancePage";
 
 const maintenanceMocks = vi.hoisted(() => ({
@@ -93,17 +94,13 @@ describe("MaintenancePage client form", () => {
       </MemoryRouter>
     );
 
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent(ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT, {
-          detail: {
-            name: "Client Test",
-            email: "client@example.test",
-            address: "Strada Test 10",
-            liftNumbers: ["LIFT-210869"],
-          },
-        })
-      );
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT, {
+        name: "Client Test",
+        email: "client@example.test",
+        address: "Strada Test 10",
+        liftNumbers: ["LIFT-210869"],
+      });
     });
 
     expect(await screen.findByDisplayValue("Client Test")).toBeInTheDocument();

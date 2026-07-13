@@ -44,6 +44,7 @@ export type AssistantToolExecutionResult = {
 };
 
 export type AssistantToolAuditRecord = {
+  traceId?: string;
   command: string;
   toolId: string;
   module: AssistantToolModule;
@@ -226,6 +227,7 @@ export async function auditAssistantTool(
   context: AssistantToolExecutionContext
 ) {
   await context.runtime.audit?.({
+    traceId: context.contract.traceId,
     command: context.command,
     toolId: definition.id,
     module: definition.module,

@@ -40,8 +40,9 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgb(15 23 42 / 38%);
-  backdrop-filter: blur(4px);
+  overflow-y: auto;
+  background: rgb(15 23 42 / 22%);
+  overscroll-behavior: contain;
 }
 
 .wc-intelligence-hub {
@@ -352,14 +353,14 @@
 
 @media (max-width: 700px) {
   .wc-intelligence-backdrop {
-    place-items: end center;
-    padding: 0;
+    place-items: center;
+    padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
   }
 
   .wc-intelligence-hub {
     width: 100%;
-    max-height: calc(100dvh - 16px);
-    border-radius: 18px 18px 0 0;
+    max-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom)));
+    border-radius: 14px;
   }
 
   .wc-intelligence-hub__body,

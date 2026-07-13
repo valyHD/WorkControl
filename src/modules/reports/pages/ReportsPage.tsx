@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Bot, CreditCard, Database, FileClock, HeartPulse, MapPinned, Rocket, Server, Settings } from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
 import BillingCostPanel from "../components/BillingCostPanel";
+import GpsOptimizationPanel from "../components/GpsOptimizationPanel";
 import AssistantObservabilityPanel from "../components/AssistantObservabilityPanel";
 import type { ControlPanelSettings } from "../services/controlPanelService";
 import {
@@ -132,6 +133,15 @@ export default function ControlPanelPage() {
       setError("Nu am putut încărca datele din Control Panel.");
     });
   }, []);
+
+  useEffect(() => {
+    const sectionId = location.hash.replace("#", "");
+    if (!sectionId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash]);
 
   function clampNumber(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
@@ -358,16 +368,16 @@ export default function ControlPanelPage() {
       <ProductTabs
         activeId={(location.hash || "#general").replace("#", "")}
         tabs={[
-          { id: "general", label: "Health", to: "/control-panel#general", icon: HeartPulse },
-          { id: "firebase", label: "Firebase", to: "/control-panel#firebase", icon: Database },
-          { id: "billing", label: "Billing", to: "/control-panel#billing", icon: CreditCard },
-          { id: "gps", label: "GPS", to: "/vehicles/gps-map", icon: MapPinned },
+          { id: "general", label: "Prezentare", to: "/control-panel#general", icon: HeartPulse },
+          { id: "firebase", label: "Date Firebase", to: "/control-panel#firebase", icon: Database },
+          { id: "billing", label: "Costuri", to: "/control-panel#billing", icon: CreditCard },
+          { id: "gps", label: "Economie GPS", to: "/control-panel#gps", icon: MapPinned },
           { id: "system", label: "Functions", to: "/control-panel#system", icon: Server },
-          { id: "notifications", label: "Notificări", to: "/notification-rules", icon: Settings },
+          { id: "notifications", label: "Notificări", to: "/control-panel#notifications", icon: Settings },
           { id: "ai", label: "AI", to: "/control-panel#ai", icon: Bot },
-          { id: "backup", label: "Backup", to: "/control-panel/backup-preview", icon: Rocket },
-          { id: "ui-lab", label: "UI Lab", to: "/control-panel/ui-lab", icon: Settings },
-          { id: "logs", label: "Logs", to: "/history", icon: FileClock },
+          { id: "backup", label: "Backup", to: "/control-panel#backup", icon: Rocket },
+          { id: "ui-lab", label: "UI Lab", to: "/control-panel#ui-lab", icon: Settings },
+          { id: "logs", label: "Logs", to: "/control-panel#logs", icon: FileClock },
         ]}
       />
 
@@ -404,6 +414,8 @@ export default function ControlPanelPage() {
 
       <div id="billing"><BillingCostPanel isAdmin={role === "admin"} /></div>
 
+      <div id="gps"><GpsOptimizationPanel isAdmin={role === "admin"} /></div>
+
       <div id="ai" className="panel">
         <h3 className="panel-subtitle">Asistent WorkControl</h3>
         <p className="tools-subtitle">
@@ -422,27 +434,36 @@ export default function ControlPanelPage() {
         <AssistantObservabilityPanel isAdmin={role === "admin"} />
       </div>
 
-      <div id="firebase" className="panel">
+      <div id="firebase" className="panel control-panel-tool-guide">
+        <div className="tools-header">
+          <div>
+            <h3 className="panel-subtitle">Date Firebase</h3>
+            <p className="tools-subtitle">
+              Inventar agregat al colecțiilor WorkControl. Numărătorile nu descarcă documentele.
+            </p>
+          </div>
+          <a className="secondary-btn" href="#backup"><Rocket size={16} /> Deschide backup</a>
+        </div>
+        <div className="collection-grid">
+          {Object.entries(counters).map(([name, count]) => (
+            <div key={name} className="collection-card">
+              <div className="collection-header"><strong>{name}</strong><span>{count}</span></div>
+              <small>Documente raportate de agregarea Firestore</small>
+            </div>
+          ))}
+        </div>
+        <div className="control-panel-info-card">
+          <Database size={19} />
+          <div>
+            <strong>{totalRecords} documente în colecțiile urmărite</strong>
+            <span>Costurile sunt în tabul Costuri; exportul și retenția sunt în Backup.</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="backup" className="panel">
         <h3 className="panel-subtitle">Export profesional backup</h3>
         <p className="tools-subtitle">Backup JSON integral + raport text frumos pe categorii, per user și module.</p>
-
-        <div className="collection-grid">
-          {Object.entries(counters).map(([name, count]) => {
-            const percentage = totalRecords > 0 ? Math.round((count / totalRecords) * 100) : 0;
-            return (
-              <div key={name} className="collection-card">
-                <div className="collection-header">
-                  <strong>{name}</strong>
-                  <span>{count}</span>
-                </div>
-                <div className="collection-progress-track">
-                  <div className="collection-progress-fill" style={{ width: `${percentage}%` }} />
-                </div>
-                <small>{percentage}% din total</small>
-              </div>
-            );
-          })}
-        </div>
 
         <div id="deploy" className="tool-form-actions" style={{ marginTop: 14 }}>
           <button className="primary-btn" type="button" onClick={() => void handleExportBackup()}>
@@ -699,6 +720,15 @@ export default function ControlPanelPage() {
         {cleanupMessage && <div className="tool-message success-message" style={{ marginTop: 12 }}>{cleanupMessage}</div>}
       </div>
 
+      <div id="ui-lab" className="panel control-panel-tool-guide">
+        <h3 className="panel-subtitle">UI Lab</h3>
+        <p className="tools-subtitle">
+          Catalog intern pentru verificarea butoanelor, formularelor, stărilor de loading și eroare,
+          drawer-elor și comportamentului mobil. Exemplele sunt izolate și nu modifică date reale.
+        </p>
+        <Link className="primary-btn" to="/control-panel/ui-lab">Deschide catalogul UI Lab</Link>
+      </div>
+
       <div className="panel">
         <h3 className="panel-subtitle">UI Personalizare rapidă</h3>
         <p className="tools-subtitle">Font size, densitate carduri și paleta principală pentru citire mai ușoară.</p>
@@ -778,6 +808,23 @@ export default function ControlPanelPage() {
           </button>
         </div>
         {personalizationMessage && <div className="tool-message success-message" style={{ marginTop: 12 }}>{personalizationMessage}</div>}
+      </div>
+
+      <div id="notifications" className="panel control-panel-tool-guide">
+        <h3 className="panel-subtitle">Notificări</h3>
+        <p className="tools-subtitle">
+          Configurează regulile și evenimentele permise. Inbox-ul utilizatorilor rămâne separat de
+          administrarea sistemului.
+        </p>
+        <Link className="primary-btn" to="/notification-rules">Deschide regulile de notificare</Link>
+      </div>
+
+      <div id="logs" className="panel control-panel-tool-guide">
+        <h3 className="panel-subtitle">Logs și activitate</h3>
+        <p className="tools-subtitle">
+          Istoricul este încărcat numai când îl deschizi, pentru a evita citiri Firestore inutile.
+        </p>
+        <Link className="primary-btn" to="/history">Deschide istoricul activității</Link>
       </div>
 
       <div id="system" className="panel">

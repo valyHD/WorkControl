@@ -44,6 +44,7 @@ import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { PageLayout, PermissionState } from "../../../components/experience";
 import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
 import { getMaintenanceModule } from "../maintenanceModules";
 import "../pages/maintenance.css";
@@ -597,8 +598,7 @@ export default function MaintenanceWorkspace() {
   }, [assistantClientFormOpen, assistantParams, location.search]);
 
   useEffect(() => {
-    const handleAssistantClientFill = (event: Event) => {
-      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleAssistantClientFill = (detail: Readonly<Record<string, unknown>>) => {
       const liftNumbers = assistantLiftNumbers(detail);
       const clientName = assistantClientName(detail);
       const expiryDate = assistantTextField(detail, ["expiryDate", "inspectionExpiryDate", "expira"]);
@@ -646,10 +646,10 @@ export default function MaintenanceWorkspace() {
       }, 220);
     };
 
-    window.addEventListener(ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT, handleAssistantClientFill);
-    return () => {
-      window.removeEventListener(ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT, handleAssistantClientFill);
-    };
+    return registerAssistantFormDraftAdapter(
+      ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT,
+      handleAssistantClientFill
+    );
   }, [assistantParams, location.pathname, navigate]);
 
   const filteredClients = useMemo(() => {

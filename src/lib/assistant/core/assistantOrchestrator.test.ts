@@ -34,7 +34,10 @@ function contract(overrides: Partial<AssistantV3Contract> = {}): AssistantV3Cont
   };
 }
 
-function setupTool(options: { permission?: boolean } = {}) {
+function setupTool(options: {
+  permission?: boolean;
+  validation?: AssistantToolDefinition<unknown, Record<string, unknown>>["validate"];
+} = {}) {
   const execute = vi.fn(async () => ({ message: "Executat." }));
   const resolve = vi.fn((input: unknown) => input as Record<string, unknown>);
   const audit = vi.fn();
@@ -54,7 +57,7 @@ function setupTool(options: { permission?: boolean } = {}) {
     permission: () =>
       options.permission === false ? { ok: false, reason: "Interzis." } : { ok: true },
     resolve,
-    validate: () => ({ ok: true }),
+    validate: options.validation || (() => ({ ok: true })),
     preview: () => "Actualizez valoarea.",
     execute,
     audit,
@@ -108,6 +111,86 @@ describe("Assistant V3 orchestrator", () => {
 
     expect(result.status).toBe("needs_clarification");
     expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("returns entity choices instead of guessing an ambiguous match", async () => {
+    const tool = setupTool({
+      validation: () => ({
+        ok: false,
+        reason: "Am gasit doua masini.",
+        missingInformation: ["vehicle"],
+        choices: [
+          { id: "v1", label: "Dacia Logan B33LGR" },
+          { id: "v2", label: "Dacia Logan B44ABC" },
+        ],
+      }),
+    });
+    const orchestrator = new AssistantV3Orchestrator(async () => contract(), tool.registry);
+
+    const result = await orchestrator.run({ command: "schimba Loganul", pageContext, actor, runtime });
+
+    expect(result).toMatchObject({
+      status: "needs_clarification",
+      choices: [
+        { id: "v1", label: "Dacia Logan B33LGR" },
+        { id: "v2", label: "Dacia Logan B44ABC" },
+      ],
+    });
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("validates a multi-step plan before executing it in order", async () => {
+    const executionOrder: string[] = [];
+    const first = setupTool();
+    const secondExecute = vi.fn(async () => {
+      executionOrder.push("second");
+      return { message: "Pasul doi." };
+    });
+    const firstDefinition = first.registry.get("test.write")!;
+    const registry = new AssistantToolRegistry()
+      .register({
+        ...firstDefinition,
+        id: "test.first",
+        aliases: [],
+        execute: async () => {
+          executionOrder.push("first");
+          return { message: "Pasul unu." };
+        },
+      })
+      .register({
+        ...firstDefinition,
+        id: "test.second",
+        aliases: [],
+        execute: secondExecute,
+      });
+    const multiStepContract = contract({
+      toolCalls: [
+        { id: "test.first", input: { value: "unu" } },
+        { id: "test.second", input: { value: "doi" } },
+      ],
+    });
+    const orchestrator = new AssistantV3Orchestrator(async () => multiStepContract, registry);
+
+    const beforeConfirmation = await orchestrator.run({
+      command: "executa ambii pasi",
+      pageContext,
+      actor,
+      runtime,
+    });
+    expect(beforeConfirmation.status).toBe("confirmation_required");
+    expect(executionOrder).toEqual([]);
+
+    const result = await orchestrator.run({
+      command: "executa ambii pasi",
+      pageContext,
+      actor,
+      runtime,
+      confirmedToolCallIds: ["test.first", "test.second"],
+    });
+
+    expect(result.status).toBe("executed");
+    expect(executionOrder).toEqual(["first", "second"]);
+    expect(secondExecute).toHaveBeenCalledTimes(1);
   });
 
   it("executes and audits after the matching tool call is confirmed", async () => {

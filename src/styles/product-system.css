@@ -587,19 +587,20 @@ a:focus-visible {
   inset: 0;
   display: grid;
   place-items: start center;
-  padding: min(14vh, 110px) 16px 24px;
-  background: rgba(15, 23, 42, 0.32);
-  backdrop-filter: blur(5px);
+  padding: clamp(78px, 12vh, 118px) 24px 32px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.2);
+  overscroll-behavior: contain;
 }
 
 .wc-command-palette {
   width: min(100%, 680px);
-  max-height: min(72vh, 680px);
+  max-height: min(680px, calc(100dvh - 110px));
   overflow: hidden;
   border: 1px solid var(--wc-v2-border-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   background: #fff;
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+  box-shadow: 0 26px 72px rgba(15, 23, 42, 0.2);
 }
 
 .wc-command-search {
@@ -1136,33 +1137,30 @@ a:focus-visible {
     flex: 0 0 180px;
   }
 
-  .wc-command-trigger {
-    width: 40px;
-    padding: 8px;
-    justify-content: center;
-  }
-
-  .wc-command-trigger span,
-  .wc-command-trigger kbd {
-    display: none;
-  }
-
+  .topbar-global-search,
   .wc-command-overlay {
-    align-items: end;
-    padding: 0;
+    display: none !important;
   }
 
-  .wc-command-palette {
-    max-height: 82dvh;
-    border-radius: 12px 12px 0 0;
+  .vehicle-details-page {
+    width: calc(100% + 16px) !important;
+    margin-inline: -8px;
   }
 
-  .wc-command-footer {
-    display: none;
+  .vehicle-details-page .vehicle-section-dropdown {
+    padding: 0 !important;
   }
 
-  .wc-command-result__type {
-    display: none;
+  .vehicle-details-page .vehicle-section-dropdown__summary {
+    padding: 10px 8px;
+  }
+
+  .vehicle-details-page .vehicle-section-dropdown__body {
+    padding: 0 2px 2px;
+  }
+
+  .vehicle-details-page .vehicle-live-route-card {
+    padding: 2px !important;
   }
 
   .wc-product-quick-actions__list {
@@ -1207,5 +1205,208 @@ a:focus-visible {
   .wc-product-action,
   .wc-command-result {
     transition: none !important;
+  }
+}
+
+/* Control Panel operational sections */
+.control-panel-operational-page > [tabindex="-1"]:focus {
+  outline: none;
+}
+
+.control-panel-operational-page [id] {
+  scroll-margin-top: 118px;
+}
+
+.control-panel-info-card,
+.gps-cost-summary,
+.gps-cost-empty-diagnostic {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.control-panel-info-card {
+  margin-top: 16px;
+}
+
+.control-panel-info-card > div,
+.gps-cost-summary > div {
+  display: grid;
+  gap: 3px;
+}
+
+.control-panel-info-card span,
+.gps-cost-summary span,
+.gps-cost-kpis small,
+.gps-cost-diagnostics p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.control-panel-tool-guide .primary-btn {
+  width: fit-content;
+  margin-top: 16px;
+}
+
+.billing-kpi-card small {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.billing-detail-grid--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.billing-attribution-card {
+  border-style: dashed;
+  background: var(--surface-alt);
+}
+
+.gps-cost-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.gps-cost-summary.is-active {
+  border-color: var(--success-line);
+  background: var(--success-soft);
+}
+
+.gps-cost-summary.is-active > svg {
+  color: var(--success);
+}
+
+.gps-cost-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.gps-cost-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.gps-cost-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--primary);
+}
+
+.gps-cost-toggle span {
+  display: grid;
+  gap: 4px;
+}
+
+.gps-cost-toggle small {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.gps-cost-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gps-cost-kpis article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 9px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.gps-cost-kpis svg {
+  grid-row: 1 / 4;
+  color: var(--primary);
+}
+
+.gps-cost-kpis strong {
+  font-size: 18px;
+}
+
+.gps-cost-diagnostics {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  overflow: hidden;
+}
+
+.gps-cost-diagnostics > summary {
+  min-height: 44px;
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.gps-cost-diagnostics > :not(summary) {
+  margin-inline: 14px;
+}
+
+.gps-cost-diagnostics > :last-child {
+  margin-bottom: 14px;
+}
+
+.gps-cost-diagnostics__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--line);
+}
+
+.gps-cost-diagnostics__grid > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+
+.gps-cost-diagnostics__grid span {
+  color: var(--text-muted);
+}
+
+.gps-cost-empty-diagnostic {
+  margin-block: 12px;
+}
+
+@media (max-width: 900px) {
+  .gps-cost-controls,
+  .gps-cost-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .gps-cost-controls .primary-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  .gps-cost-diagnostics__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .control-panel-tool-guide .primary-btn {
+    width: 100%;
   }
 }

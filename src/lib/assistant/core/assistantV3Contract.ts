@@ -189,6 +189,7 @@ export function validateAssistantV3Contract(input: unknown): ContractValidation 
     ok: true,
     value: {
       version: ASSISTANT_V3_VERSION,
+      traceId: safeString(input.traceId, 128) || undefined,
       commandType: input.commandType as AssistantV3CommandType,
       intent: input.intent as AssistantCommandIntent,
       toolCalls: toolCalls!,
@@ -247,6 +248,7 @@ export function normalizeLegacyAssistantInterpretation(
   const missingInformation = input.missingInformation || input.missingFields || [];
   return {
     version: ASSISTANT_V3_VERSION,
+    traceId: safeString(input.traceId, 128) || undefined,
     commandType: COMMAND_TYPES.has(input.commandType as AssistantV3CommandType)
       ? (input.commandType as AssistantV3CommandType)
       : "unknown",

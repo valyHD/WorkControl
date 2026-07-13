@@ -245,10 +245,16 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 
-.topbar-heading { min-width: 0; }
+.topbar-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
 
 .topbar-title {
   margin: 0;
@@ -257,6 +263,17 @@
   letter-spacing: -.5px;
   line-height: 1.1;
   color: var(--text);
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.topbar-title__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-subtitle {

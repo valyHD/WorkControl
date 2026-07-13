@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { dispatchAssistantFormDraft } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import LeavePlannerPage from "./LeavePlannerPage";
 
 const leaveServiceMocks = vi.hoisted(() => ({
@@ -66,15 +67,11 @@ describe("LeavePlannerPage form", () => {
       </MemoryRouter>
     );
 
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent(ASSISTANT_FILL_LEAVE_EVENT, {
-          detail: {
-            command: "programeaza concediu ultima saptamana din august 2026",
-            reason: "Odihna",
-          },
-        })
-      );
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_LEAVE_EVENT, {
+        command: "programeaza concediu ultima saptamana din august 2026",
+        reason: "Odihna",
+      });
     });
 
     expect(await screen.findByDisplayValue("2026-08-24")).toBeInTheDocument();

@@ -75,4 +75,17 @@ describe("GlobalCommandPalette", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });
+
+  it("closes when the desktop backdrop is clicked", async () => {
+    const user = userEvent.setup();
+    renderPalette();
+    await user.click(screen.getByRole("button", { name: "Cauta in WorkControl" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Cautare globala" });
+    const backdrop = dialog.parentElement;
+    expect(backdrop).toHaveClass("wc-command-overlay");
+    await user.click(backdrop!);
+
+    expect(screen.queryByRole("dialog", { name: "Cautare globala" })).not.toBeInTheDocument();
+  });
 });
