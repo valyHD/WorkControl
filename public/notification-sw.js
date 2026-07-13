@@ -51,7 +51,7 @@ try {
 const APP_SHELL_CACHE_NAME = 'workcontrol-app-shell-v7';
 const APP_SHELL_URLS = ['/', '/manifest.webmanifest'];
 const IMAGE_CACHE_NAME = 'workcontrol-image-cache-v1';
-const STATIC_CACHE_NAME = 'workcontrol-static-v2';
+const STATIC_CACHE_NAME = 'workcontrol-static-v1';
 const RECENT_NOTIFICATION_TTL_MS = 2 * 60 * 1000;
 const recentNotificationTags = new Map();
 const IMAGE_CACHEABLE_HOSTS = [
@@ -169,26 +169,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || request.destination !== 'image') {
     if (
       request.method === 'GET' &&
-      ['script', 'style', 'worker'].includes(request.destination) &&
-      new URL(request.url).origin === self.location.origin
-    ) {
-      event.respondWith((async () => {
-        const cache = await caches.open(STATIC_CACHE_NAME);
-        try {
-          // Rolldown can preserve an entry chunk name while its lazy-import map changes.
-          // Revalidate executable assets so a deploy cannot mix old and new chunks.
-          const networkResponse = await fetch(request, { cache: 'no-cache' });
-          if (networkResponse?.ok) await cache.put(request, networkResponse.clone());
-          return networkResponse;
-        } catch {
-          const cachedResponse = await cache.match(request);
-          if (cachedResponse) return cachedResponse;
-          return Response.error();
-        }
-      })());
-    } else if (
-      request.method === 'GET' &&
-      request.destination === 'font' &&
+      ['script', 'style', 'font', 'worker'].includes(request.destination) &&
       new URL(request.url).origin === self.location.origin
     ) {
       event.respondWith((async () => {
