@@ -27,6 +27,7 @@ import {
   FLEET_ROUTE_REFRESH_INTERVAL_MS,
   type FleetRouteSyncController,
 } from "../services/fleetRouteSync";
+import { fleetRoutePersistentCache } from "../services/fleetRoutePersistentCache";
 import {
   filterRouteRenderJitter,
   filterTrackableRoutePositions,
@@ -821,6 +822,7 @@ function VehicleFleetMapCard({
       refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
       pageSize: ROUTE_PAGE_SIZE,
       maxPages: ROUTE_MAX_PAGES,
+      persistentCache: fleetRoutePersistentCache,
       loader: ({ vehicleId, fromTs, toTs, pageSize, maxPages, mode }) =>
         mode === "full"
           ? getVehiclePositionsForSelectedDay(vehicleId, fromTs, toTs, pageSize, maxPages)
