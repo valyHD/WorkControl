@@ -361,11 +361,23 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     }
 
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: "Cauta in WorkControl" })).toBeHidden();
+    await page.goto("/maintenance?tab=dashboard");
     const menuButton = page.getByRole("button", { name: "Deschide meniul" });
     await menuButton.click();
     await expect(page.locator(".mobile-drawer")).toHaveAttribute("aria-hidden", "false");
+    const activeMobileNavigation = page.locator(".mobile-drawer .nav-item-active");
+    await expect(activeMobileNavigation).toHaveAttribute("href", "/maintenance");
+    await expect(activeMobileNavigation).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(menuButton).toBeFocused();
+
+    await page.goto("/vehicles/vehicle-e2e?tab=gps");
+    await page.locator("#vehicle-tracker-live-section summary").click();
+    const routeCard = page.locator(".vehicle-live-route-card");
+    await expect(routeCard).toBeVisible();
+    const routeCardWidth = await routeCard.evaluate((element) => element.getBoundingClientRect().width);
+    expect(routeCardWidth).toBeGreaterThanOrEqual(370);
 
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.keyboard.press("Control+K");
@@ -442,6 +454,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
 
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
+    await expect(page.getByText("Filtre hartă")).toHaveCount(0);
     await expect(page).toHaveScreenshot("fleet-gps-foundation.png", {
       animations: "disabled",
       fullPage: true,

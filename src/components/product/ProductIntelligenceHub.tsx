@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { BookOpen, CheckCircle2, Flag, HelpCircle, Lightbulb, MessageSquare, Rocket, X } from "lucide-react";
 import {
   getContextualHelp,
@@ -27,6 +28,8 @@ export default function ProductIntelligenceHub({
   pathname: string;
 }) {
   const { flags, setFlag } = useFeatureFlags();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [onboardingPending, setOnboardingPending] = useState(() =>
     Boolean(userId && window.localStorage.getItem(onboardingKey(userId)) !== "yes")
@@ -38,10 +41,54 @@ export default function ProductIntelligenceHub({
   const [analyticsConsent, setAnalyticsConsentState] = useState(hasUsageAnalyticsConsent);
   const helpItems = useMemo(() => getContextualHelp(pathname), [pathname]);
 
+  const closeHub = useCallback(() => {
+    setOpen(false);
+    window.setTimeout(() => triggerRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeHub();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const frame = window.requestAnimationFrame(() => {
+      dialog.querySelector<HTMLElement>('button[aria-label="Inchide"]')?.focus({ preventScroll: true });
+    });
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [closeHub, open]);
+
   const completeOnboarding = () => {
     window.localStorage.setItem(onboardingKey(userId), "yes");
     setOnboardingPending(false);
-    setOpen(false);
+    closeHub();
   };
 
   const submit = async () => {
@@ -59,6 +106,7 @@ export default function ProductIntelligenceHub({
     <>
       <span className="wc-help-trigger-wrap">
         <button
+          ref={triggerRef}
           className="wc-help-trigger"
           type="button"
           aria-label="Ajutor si noutati WorkControl"
@@ -69,17 +117,17 @@ export default function ProductIntelligenceHub({
         </button>
         {onboardingPending ? <span className="wc-help-trigger-dot" title="Ghid WorkControl disponibil" /> : null}
       </span>
-      {open ? (
+      {open ? createPortal(
         <div className="wc-intelligence-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setOpen(false);
+          if (event.target === event.currentTarget) closeHub();
         }}>
-          <section className="wc-intelligence-hub" role="dialog" aria-modal="true" aria-label="Centru ajutor WorkControl">
+          <section ref={dialogRef} className="wc-intelligence-hub" role="dialog" aria-modal="true" aria-label="Centru ajutor WorkControl">
             <header>
               <div>
                 <span className="wc-product-eyebrow">WorkControl</span>
                 <h2>Ajutor, noutati si preferinte</h2>
               </div>
-              <button type="button" onClick={() => setOpen(false)} aria-label="Inchide"><X size={18} /></button>
+              <button type="button" onClick={closeHub} aria-label="Inchide"><X size={18} /></button>
             </header>
             <nav aria-label="Sectiuni ajutor">
               {([
@@ -133,7 +181,8 @@ export default function ProductIntelligenceHub({
               ) : null}
             </div>
           </section>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

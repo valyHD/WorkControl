@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -243,7 +244,7 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
         <kbd>Ctrl K</kbd>
       </button>
 
-      {open ? (
+      {open ? createPortal(
         <div
           className="wc-command-overlay"
           role="presentation"
@@ -331,7 +332,8 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
               <span><kbd>Esc</kbd> inchide</span>
             </footer>
           </section>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </>
   );

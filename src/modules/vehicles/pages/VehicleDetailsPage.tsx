@@ -86,7 +86,7 @@ function MaintenanceAlert({ label, date }: { label: string; date?: string }) {
 
 function VehicleDetailSkeleton() {
   return (
-    <section className="page-section">
+    <section className="page-section vehicle-details-page">
       <div className="panel">
         <div className="tool-details-header" style={{ gap: 16, padding: "4px 0" }}>
           <div
@@ -531,7 +531,7 @@ export default function VehicleDetailsPage() {
   }
 
   return (
-    <section className="page-section">
+    <section className="page-section vehicle-details-page">
       <div className="panel">
         {maintenanceAlerts.map((a) => (
           <MaintenanceAlert key={a.label} label={a.label} date={a.date} />
