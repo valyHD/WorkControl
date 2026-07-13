@@ -8,6 +8,7 @@ import {
   buildCompanyScopeConstraints,
   getCurrentCompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
+import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import type { TimesheetItem } from "../../../types/timesheet";
 import type { AppUserItem } from "../../../types/user";
 import type { LeaveRequestFormValues, LeaveRequestItem } from "../../../types/leave";
@@ -368,7 +369,7 @@ export default function LeavePlannerPage() {
     void getCurrentCompanyAccessContext().then((context) => {
       if (cancelled) return;
       const managementScope = role === "admin" || role === "manager";
-      const userViews = collection(db, "userOperationalViews");
+      const userViews = collection(db, getUserDirectoryCollectionName());
       const companyScope = buildCompanyScopeConstraints(context);
       const usersQuery = managementScope
         ? query(userViews, ...companyScope, orderBy("fullName", "asc"), limit(100))

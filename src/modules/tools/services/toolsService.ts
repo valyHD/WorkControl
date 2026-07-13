@@ -26,6 +26,7 @@ import {
   getCurrentCompanyAccessContext,
   requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
+import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import type {
   AppUser,
   ToolEventItem,
@@ -38,6 +39,7 @@ import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from
 
 const toolsCollection = collection(db, "tools");
 const userOperationalViewsCollection = collection(db, "userOperationalViews");
+const usersCollection = collection(db, "users");
 const toolEventsCollection = collection(db, "toolEvents");
 
 const toolAuditFields: AuditFieldDescriptor<ToolFormValues>[] = [
@@ -156,8 +158,11 @@ currentHolderThemeKey: data.currentHolderThemeKey ?? null,
 
 export async function getUsersList(): Promise<AppUser[]> {
   const context = await getCurrentCompanyAccessContext();
+  const source = getUserDirectoryCollectionName() === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
   const snap = await getDocs(query(
-    userOperationalViewsCollection,
+    source,
     ...buildUserDirectoryConstraints(context),
     orderBy("fullName", "asc")
   ));

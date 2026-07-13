@@ -1,5 +1,6 @@
 import { doc, getDoc, where, type QueryConstraint } from "firebase/firestore";
 import { auth, db } from "./firebase";
+import { areCompanyIsolationReadsEnabled } from "./companyIsolationRollout";
 
 export type CompanyAccessContext = {
   uid: string;
@@ -77,6 +78,7 @@ export function buildCompanyScopeConstraints(
   context: CompanyAccessContext,
   fieldPath = "companyId"
 ): QueryConstraint[] {
+  if (!areCompanyIsolationReadsEnabled()) return [];
   const companyIds = requireCompanyScope(context);
   if (companyIds.length === 0) return [];
   if (companyIds.length === 1) return [where(fieldPath, "==", companyIds[0])];
@@ -86,6 +88,7 @@ export function buildCompanyScopeConstraints(
 export function buildUserDirectoryConstraints(
   context: CompanyAccessContext
 ): QueryConstraint[] {
+  if (!areCompanyIsolationReadsEnabled()) return [];
   const constraints = buildCompanyScopeConstraints(context);
   if (context.role === "angajat") constraints.push(where("uid", "==", context.uid));
   return constraints;

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildCompanyScopeConstraints,
   canAccessCompany,
   requireCompanyScope,
   requirePrimaryCompanyId,
@@ -15,6 +16,10 @@ const scopedContext: CompanyAccessContext = {
 };
 
 describe("companyAccess", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("foloseste firma principala pentru scrieri", () => {
     expect(requirePrimaryCompanyId(scopedContext)).toBe("company-a");
   });
@@ -40,5 +45,12 @@ describe("companyAccess", () => {
       requireCompanyScope({ ...scopedContext, primaryCompanyId: "", companyIds: [] })
     ).toThrow(/nicio firma/i);
     expect(requireCompanyScope({ ...scopedContext, globalAdmin: true })).toEqual([]);
+  });
+
+  it("nu aplica filtre company-aware inainte de activarea explicita a rollout-ului", () => {
+    expect(buildCompanyScopeConstraints(scopedContext)).toEqual([]);
+
+    vi.stubEnv("VITE_COMPANY_ISOLATION_READS", "true");
+    expect(buildCompanyScopeConstraints(scopedContext)).toHaveLength(1);
   });
 });

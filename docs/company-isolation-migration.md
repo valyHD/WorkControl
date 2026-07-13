@@ -143,3 +143,16 @@ deja activate, publica temporar Rules anterioare inainte de rollback-ul datelor.
 
 Nu inversa pasii 2-4. Hosting-ul nou depinde de proiectrile generate, iar Rules noi
 resping intentionat documentele legacy fara firma.
+# Frontend rollout flag
+
+Citirile company-scoped si colectiile operationale se activeaza numai dupa backfill si
+deploy-ul regulilor restrictive, prin build cu:
+
+```text
+VITE_COMPANY_ISOLATION_READS=true
+```
+
+Valoarea implicita este `false`. In aceasta stare frontend-ul foloseste colectiile legacy,
+iar Functions pot crea in siguranta proiectiile in fundal fara sa intrerupa listele existente.
+Nu activa flag-ul cat timp raportul dry-run contine documente nerezolvate sau regulile live nu
+permit citirea `userOperationalViews` si `vehicleOperationalViews`.

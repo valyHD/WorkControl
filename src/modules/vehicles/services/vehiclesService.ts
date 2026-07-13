@@ -33,6 +33,10 @@ import {
   getCurrentCompanyAccessContext,
   requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
+import {
+  getUserDirectoryCollectionName,
+  getVehicleDirectoryCollectionName,
+} from "../../../lib/firebase/companyIsolationRollout";
 import type {
   VehicleCommandItem,
   VehicleCommandStatus,
@@ -67,6 +71,7 @@ const vehiclesCollection = collection(db, "vehicles");
 const vehicleOperationalViewsCollection = collection(db, "vehicleOperationalViews");
 const vehicleEventsCollection = collection(db, "vehicleEvents");
 const userOperationalViewsCollection = collection(db, "userOperationalViews");
+const usersCollection = collection(db, "users");
 const vehicleGpsVisibilityRef = doc(db, "systemSettings", "vehicleGpsVisibility");
 
 export const VEHICLE_GPS_VISIBILITY_OWNER_EMAIL = "ionut.matura23@gmail.com";
@@ -1128,8 +1133,11 @@ async function resizeImage(
 
 export async function getVehicleUsers(): Promise<AppUser[]> {
   const context = await getCurrentCompanyAccessContext();
+  const source = getUserDirectoryCollectionName() === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
   const usersQuery = query(
-    userOperationalViewsCollection,
+    source,
     ...buildUserDirectoryConstraints(context),
     orderBy("fullName", "asc"),
     limit(250)
@@ -1154,7 +1162,9 @@ export async function getVehicleUsers(): Promise<AppUser[]> {
 
 export async function getVehiclesList(): Promise<VehicleItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const source = vehicleOperationalViewsCollection;
+  const source = getVehicleDirectoryCollectionName() === "vehicleOperationalViews"
+    ? vehicleOperationalViewsCollection
+    : vehiclesCollection;
   if (context.role !== "angajat") {
     const snap = await getDocs(query(
       source,
@@ -1184,7 +1194,9 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
   void getCurrentCompanyAccessContext()
     .then((context) => {
       if (cancelled) return;
-      const source = vehicleOperationalViewsCollection;
+      const source = getVehicleDirectoryCollectionName() === "vehicleOperationalViews"
+        ? vehicleOperationalViewsCollection
+        : vehiclesCollection;
       if (context.role !== "angajat") {
         unsubscribe = onSnapshot(
           query(

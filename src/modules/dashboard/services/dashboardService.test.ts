@@ -58,9 +58,9 @@ describe("dashboardService cost bounds", () => {
     expect(notificationQuery?.at(-1)).toMatchObject({ kind: "limit", value: 10 });
 
     await getDashboardData("user-1", "2026-07-12");
-    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "userOperationalViews")).toHaveLength(1);
+    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "users")).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "tools")).toHaveLength(1);
-    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "vehicleOperationalViews")).toHaveLength(1);
+    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "vehicles")).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "projects")).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "timesheets")).toHaveLength(
       2

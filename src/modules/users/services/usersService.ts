@@ -23,11 +23,13 @@ import {
   buildUserDirectoryConstraints,
   getCurrentCompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
+import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import { buildAuditChanges, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 import type { AppUserItem, UserRole } from "../../../types/user";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 
 const userOperationalViewsCollection = collection(db, "userOperationalViews");
+const usersCollection = collection(db, "users");
 const userAuditFields: AuditFieldDescriptor<Pick<AppUserItem, "fullName" | "role" | "roleTitle" | "department" | "active">>[] = [
   { key: "fullName", label: "Nume" },
   { key: "role", label: "Rol" },
@@ -130,8 +132,11 @@ function mapUserDoc(id: string, data: Record<string, unknown>): AppUserItem {
 
 export async function getAllUsers(): Promise<AppUserItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const source = getUserDirectoryCollectionName() === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
   const snap = await getDocs(query(
-    userOperationalViewsCollection,
+    source,
     ...buildUserDirectoryConstraints(context),
     orderBy("fullName", "asc"),
     limit(250)
@@ -153,9 +158,12 @@ export function subscribeUsers(
   void getCurrentCompanyAccessContext()
     .then((context) => {
       if (cancelled) return;
+      const source = getUserDirectoryCollectionName() === "userOperationalViews"
+        ? userOperationalViewsCollection
+        : usersCollection;
       unsubscribe = onSnapshot(
         query(
-          userOperationalViewsCollection,
+          source,
           ...buildUserDirectoryConstraints(context),
           orderBy("fullName", "asc"),
           limit(250)

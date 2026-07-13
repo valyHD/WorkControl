@@ -22,6 +22,7 @@ import {
   getCurrentCompanyAccessContext,
   requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
+import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type { AppUser } from "../../../types/tool";
 import type {
@@ -41,6 +42,7 @@ import { getActiveProjectsList } from "../../timesheets/services/timesheetsServi
 const expensesCollection = collection(db, "expenseDocuments");
 const expenseScanJobsCollection = collection(db, "expenseScanJobs");
 const userOperationalViewsCollection = collection(db, "userOperationalViews");
+const usersCollection = collection(db, "users");
 const maintenanceCompaniesCollection = collection(db, "firmeMentenanta");
 
 export type ExpenseScanProgressStep = "prepare" | "upload" | "analyze" | "save" | "done";
@@ -230,8 +232,11 @@ function mapExpenseDoc(id: string, data: Record<string, any>): ExpenseDocumentIt
 
 export async function getExpenseUsers(): Promise<AppUser[]> {
   const context = await getCurrentCompanyAccessContext();
+  const source = getUserDirectoryCollectionName() === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
   const snap = await getDocs(query(
-    userOperationalViewsCollection,
+    source,
     ...buildUserDirectoryConstraints(context),
     orderBy("fullName", "asc")
   ));

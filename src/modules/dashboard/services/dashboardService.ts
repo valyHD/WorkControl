@@ -11,6 +11,10 @@ import {
   getCurrentCompanyAccessContext,
   type CompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
+import {
+  getUserDirectoryCollectionName,
+  getVehicleDirectoryCollectionName,
+} from "../../../lib/firebase/companyIsolationRollout";
 
 export type DashboardNotificationItem = {
   id: string;
@@ -273,7 +277,7 @@ async function getDashboardReferenceData(context: CompanyAccessContext): Promise
     const [usersSnap, toolsSnap, vehiclesSnap, projectsSnap] = await Promise.all([
       getDocs(
         query(
-          collection(db, "userOperationalViews"),
+          collection(db, getUserDirectoryCollectionName()),
           ...scope,
           orderBy("fullName", "asc"),
           limit(DASHBOARD_LIMITS.users)
@@ -284,7 +288,7 @@ async function getDashboardReferenceData(context: CompanyAccessContext): Promise
       ),
       getDocs(
         query(
-          collection(db, "vehicleOperationalViews"),
+          collection(db, getVehicleDirectoryCollectionName()),
           ...scope,
           orderBy("updatedAt", "desc"),
           limit(DASHBOARD_LIMITS.vehicles)
