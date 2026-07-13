@@ -17,6 +17,9 @@ export type FleetRouteSyncMetrics = {
   incrementalRequests: number;
   cacheHits: number;
   cacheMisses: number;
+  persistentCacheHits: number;
+  persistentCacheMisses: number;
+  persistentCacheWrites: number;
   sharedRequests: number;
   hiddenPageFetchesAvoided: number;
   newPointsReceived: number;
@@ -44,6 +47,12 @@ export type FleetRouteSyncController = {
   stop: () => void;
 };
 
+export type FleetRoutePersistentCache = {
+  read: (key: string) => Promise<VehiclePositionItem[] | null>;
+  write: (key: string, points: VehiclePositionItem[]) => Promise<void>;
+  remove: (key: string) => Promise<void>;
+};
+
 export type FleetRouteSyncOptions = {
   scopeKey: string;
   vehicleId: string;
@@ -56,6 +65,7 @@ export type FleetRouteSyncOptions = {
   overlapMs?: number;
   cacheTtlMs?: number;
   loader: FleetRouteLoader;
+  persistentCache?: FleetRoutePersistentCache;
   onData: (points: VehiclePositionItem[]) => void;
   onLoading?: (loading: boolean) => void;
   onError?: (error: unknown) => void;
@@ -80,6 +90,9 @@ const metrics: FleetRouteSyncMetrics = {
   incrementalRequests: 0,
   cacheHits: 0,
   cacheMisses: 0,
+  persistentCacheHits: 0,
+  persistentCacheMisses: 0,
+  persistentCacheWrites: 0,
   sharedRequests: 0,
   hiddenPageFetchesAvoided: 0,
   newPointsReceived: 0,
@@ -234,6 +247,14 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     lastTimestamp = currentPoints[currentPoints.length - 1]?.gpsTimestamp ?? lastTimestamp;
     metrics.newPointsReceived += Math.max(0, currentPoints.length - beforeCount);
     setCachedRoute(cacheKey, currentPoints, now(), cacheTtlMs);
+    if (currentPoints.length && options.persistentCache) {
+      void options.persistentCache
+        .write(cacheKey, currentPoints)
+        .then(() => {
+          metrics.persistentCacheWrites += 1;
+        })
+        .catch(() => undefined);
+    }
     options.onData(currentPoints);
   };
 
@@ -336,6 +357,25 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
         return;
       }
 
+      if (options.persistentCache) {
+        try {
+          const persisted = await options.persistentCache.read(cacheKey);
+          if (stopped) return;
+          if (persisted?.length) {
+            metrics.persistentCacheHits += 1;
+            currentPoints = mergeFleetRoutePoints([], persisted);
+            lastTimestamp = currentPoints[currentPoints.length - 1]?.gpsTimestamp ?? options.fromTs;
+            setCachedRoute(cacheKey, currentPoints, now(), cacheTtlMs);
+            options.onData(currentPoints);
+            await runIncremental();
+            return;
+          }
+          metrics.persistentCacheMisses += 1;
+        } catch {
+          metrics.persistentCacheMisses += 1;
+        }
+      }
+
       metrics.cacheMisses += 1;
       await runFull();
       schedule();
@@ -345,6 +385,9 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
       clearTimer();
       if (forceFull) {
         routeCache.delete(cacheKey);
+        if (options.persistentCache) {
+          await options.persistentCache.remove(cacheKey).catch(() => undefined);
+        }
         await runFull();
         schedule();
         return;

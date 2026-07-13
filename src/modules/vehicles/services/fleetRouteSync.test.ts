@@ -251,4 +251,77 @@ describe("fleetRouteSync", () => {
     expect(getFleetRouteSyncMetrics().fullRouteRequests).toBe(1);
     remounted.stop();
   });
+
+  it("hydrates from persistent cache and requests only incremental points", async () => {
+    const modes: FleetRouteRequestMode[] = [];
+    const persisted = Array.from({ length: 100 }, (_, index) =>
+      point("persisted-vehicle", index + 1)
+    );
+    const writes: VehiclePositionItem[][] = [];
+    const controller = createFleetRouteSync({
+      scopeKey: "persisted-user",
+      vehicleId: "persisted-vehicle",
+      fromTs: 0,
+      toTs: 10_000,
+      refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
+      pageSize: 100,
+      maxPages: 2,
+      now: () => 200,
+      persistentCache: {
+        read: async () => persisted,
+        write: async (_key, points) => {
+          writes.push(points);
+        },
+        remove: async () => undefined,
+      },
+      loader: async ({ mode, toTs }) => {
+        modes.push(mode);
+        return [point("persisted-vehicle", toTs)];
+      },
+      onData: () => undefined,
+    });
+
+    await controller.start();
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+
+    expect(modes).toEqual(["incremental"]);
+    expect(getFleetRouteSyncMetrics().fullRouteRequests).toBe(0);
+    expect(getFleetRouteSyncMetrics().persistentCacheHits).toBe(1);
+    controller.stop();
+  });
+
+  it("does not publish persisted data after the map is unmounted", async () => {
+    let resolveRead: ((points: VehiclePositionItem[]) => void) | null = null;
+    const onData = vi.fn();
+    const loader = vi.fn(async () => [] as VehiclePositionItem[]);
+    const controller = createFleetRouteSync({
+      scopeKey: "stopped-user",
+      vehicleId: "stopped-vehicle",
+      fromTs: 0,
+      toTs: 10_000,
+      refreshMs: FLEET_ROUTE_REFRESH_INTERVAL_MS,
+      pageSize: 100,
+      maxPages: 2,
+      persistentCache: {
+        read: () =>
+          new Promise<VehiclePositionItem[]>((resolve) => {
+            resolveRead = resolve;
+          }),
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+      loader,
+      onData,
+    });
+
+    const started = controller.start();
+    await vi.waitFor(() => expect(resolveRead).not.toBeNull());
+    controller.stop();
+    const finishRead = resolveRead as ((points: VehiclePositionItem[]) => void) | null;
+    finishRead?.([point("stopped-vehicle", 100)]);
+    await started;
+
+    expect(onData).not.toHaveBeenCalled();
+    expect(loader).not.toHaveBeenCalled();
+  });
 });
