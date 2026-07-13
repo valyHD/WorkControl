@@ -51,6 +51,7 @@ export type FleetRouteSyncOptions = {
   fromTs: number;
   toTs: number;
   refreshMs: number;
+  refreshMode?: FleetRouteRequestMode;
   pageSize: number;
   maxPages: number;
   maxPoints?: number;
@@ -206,6 +207,7 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
   const visibilityDocument =
     options.visibilityDocument ?? (typeof document !== "undefined" ? document : undefined);
   const now = options.now ?? Date.now;
+  const refreshMode = options.refreshMode ?? "incremental";
   let stopped = false;
   let started = false;
   let timer: number | null = null;
@@ -226,7 +228,7 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     if (stopped || typeof window === "undefined") return;
     timer = window.setTimeout(
       () => {
-        void runIncremental();
+        void runRefresh();
       },
       Math.max(1_000, delayMs)
     );
@@ -319,6 +321,16 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     }
   };
 
+  async function runRefresh() {
+    if (refreshMode === "full") {
+      clearTimer();
+      await runFull();
+      if (!stopped && !isHidden()) schedule();
+      return;
+    }
+    await runIncremental();
+  }
+
   const handleVisibilityChange = () => {
     if (stopped) return;
     if (isHidden()) {
@@ -327,7 +339,7 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     }
     const elapsed = Math.max(0, now() - lastLoadedAt);
     if (!lastLoadedAt || elapsed >= options.refreshMs) {
-      void runIncremental();
+      void runRefresh();
       return;
     }
     schedule(options.refreshMs - elapsed);
@@ -346,7 +358,7 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
         lastTimestamp = cached.lastTimestamp || options.fromTs;
         lastLoadedAt = cached.loadedAt;
         options.onData(currentPoints);
-        await runIncremental();
+        await runRefresh();
         return;
       }
 
@@ -357,10 +369,10 @@ export function createFleetRouteSync(options: FleetRouteSyncOptions): FleetRoute
     async refresh(forceFull = false) {
       if (stopped) return;
       clearTimer();
-      if (forceFull) {
+      if (forceFull || refreshMode === "full") {
         routeCache.delete(cacheKey);
         await runFull();
-        schedule();
+        if (!stopped && !isHidden()) schedule();
         return;
       }
       await runIncremental();

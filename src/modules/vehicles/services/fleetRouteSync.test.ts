@@ -227,6 +227,39 @@ describe("fleetRouteSync", () => {
     controller.stop();
   });
 
+  it("rebuilds compact sampled routes in full instead of dropping older day segments", async () => {
+    let loadCount = 0;
+    const modes: FleetRouteRequestMode[] = [];
+    const received: VehiclePositionItem[][] = [];
+    const controller = createFleetRouteSync({
+      scopeKey: "sampled-user",
+      vehicleId: "sampled-vehicle",
+      fromTs: 0,
+      toTs: 10_000,
+      refreshMs: 30 * 60_000,
+      refreshMode: "full",
+      pageSize: 50,
+      maxPages: 1,
+      maxPoints: 50,
+      now: () => 10_000,
+      loader: async ({ mode }) => {
+        modes.push(mode);
+        loadCount += 1;
+        return loadCount === 1
+          ? [point("sampled-vehicle", 100), point("sampled-vehicle", 9_000)]
+          : [point("sampled-vehicle", 200), point("sampled-vehicle", 9_500)];
+      },
+      onData: (items) => received.push(items),
+    });
+
+    await controller.start();
+    await controller.refresh();
+
+    expect(modes).toEqual(["full", "full"]);
+    expect(received.at(-1)?.map((item) => item.gpsTimestamp)).toEqual([200, 9_500]);
+    controller.stop();
+  });
+
   it("does not refresh early when a visible tab returns before the interval", async () => {
     const visibility = new VisibilityDocument();
     let currentTime = 1_000;

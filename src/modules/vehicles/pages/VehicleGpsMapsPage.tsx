@@ -894,6 +894,7 @@ function VehicleFleetMapCard({
       fromTs: from,
       toTs: dayEnd,
       refreshMs: routeRefreshMs,
+      refreshMode: compactRoute ? "full" : "incremental",
       pageSize: boundedRoute ? Math.min(2000, maxRoutePoints) : ROUTE_PAGE_SIZE,
       maxPages: boundedRoute ? EMERGENCY_ROUTE_MAX_PAGES : ROUTE_MAX_PAGES,
       maxPoints: boundedRoute ? maxRoutePoints : undefined,
