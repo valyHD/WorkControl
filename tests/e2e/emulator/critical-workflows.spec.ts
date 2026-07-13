@@ -376,16 +376,35 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await page.locator("#vehicle-tracker-live-section summary").click();
     const routeCard = page.locator(".vehicle-live-route-card");
     await expect(routeCard).toBeVisible();
-    const routeCardWidth = await routeCard.evaluate((element) => element.getBoundingClientRect().width);
+    const routeCardWidth = await routeCard.evaluate(
+      (element) => element.getBoundingClientRect().width
+    );
     expect(routeCardWidth).toBeGreaterThanOrEqual(370);
 
     await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/control-panel#billing");
+    await expect(page.getByRole("heading", { name: "Consum și costuri" })).toBeVisible();
+    await page.getByRole("link", { name: "Economie GPS" }).click();
+    await expect(page).toHaveURL(/\/control-panel#gps$/);
+    await expect(page.getByRole("heading", { name: "Economie GPS și Firestore" })).toBeVisible();
+    await page.getByRole("link", { name: "Backup", exact: true }).click();
+    await expect(page).toHaveURL(/\/control-panel#backup$/);
+    await expect(page.getByRole("heading", { name: "Export profesional backup" })).toBeVisible();
+    await page
+      .getByLabel("Secțiuni pagină")
+      .getByRole("link", { name: "UI Lab", exact: true })
+      .click();
+    await expect(
+      page.locator("#ui-lab").getByRole("heading", { name: "UI Lab", exact: true }),
+    ).toBeVisible();
+
     await page.keyboard.press("Control+K");
     const commandDialog = page.getByRole("dialog", { name: "Cautare globala" });
     await expect(commandDialog).toBeVisible();
     await page.getByRole("textbox", { name: "Cauta" }).fill("ui lab");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/control-panel\/ui-lab$/);
+    await expect(page.locator(".wc-ui-lab")).toBeVisible();
     await expect(page.getByRole("heading", { name: "UI Lab" }).first()).toBeVisible();
     await page.waitForTimeout(100);
 

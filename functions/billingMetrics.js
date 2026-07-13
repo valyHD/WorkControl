@@ -1,5 +1,4 @@
 const BILLING_TIME_ZONE = "Europe/Bucharest";
-const GPS_FIRESTORE_COST_SHARE = 0.98;
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(value?.value ?? value);
@@ -43,6 +42,14 @@ function enumerateDayKeys(fromDay, toDay) {
   const result = [];
   for (let day = fromDay; day <= toDay; day = addDays(day, 1)) result.push(day);
   return result;
+}
+
+function daysBetween(fromDay, toDay) {
+  if (!fromDay || !toDay) return null;
+  const from = Date.parse(`${fromDay}T00:00:00Z`);
+  const to = Date.parse(`${toDay}T00:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
 }
 
 function parseEcbRates(xml) {
@@ -135,75 +142,87 @@ function summarizeBillingRows(rawRows, options = {}) {
   const thirtyDayStart = addDays(today, -29);
   const monthPrefix = today.slice(0, 7);
   const rows = rawRows.map((row) => normalizeBillingRow(row, rates)).filter(Boolean);
+  const exportedDays = [...new Set(rows.map((row) => row.day).filter(Boolean))].sort();
+  const exportFromDay = exportedDays[0] || null;
+  const exportThroughDay = exportedDays.at(-1) || null;
+  const exportLagDays = daysBetween(exportThroughDay, today);
+  const exportedWindowStart = exportThroughDay ? addDays(exportThroughDay, -29) : null;
+  const exportedWindowRows = exportedWindowStart
+    ? rows.filter((row) => row.day >= exportedWindowStart && row.day <= exportThroughDay)
+    : [];
   const todayRows = rows.filter((row) => row.day === today);
   const sevenDayRows = rows.filter((row) => row.day >= sevenDayStart && row.day <= today);
-  const thirtyDayRows = rows.filter((row) => row.day >= thirtyDayStart && row.day <= today);
   const monthRows = rows.filter((row) => row.day.startsWith(monthPrefix));
   const sourceCurrencies = [...new Set(rows.map((row) => row.sourceCurrency))];
 
-  const actualCostToday = sum(todayRows, (row) => row.netCost);
-  const actualCost7Days = sum(sevenDayRows, (row) => row.netCost);
-  const actualCostMonth = sum(monthRows, (row) => row.cost);
-  const creditsMonth = Math.abs(sum(monthRows, (row) => row.credits));
-  const netCostMonth = sum(monthRows, (row) => row.netCost);
-  const dayOfMonth = Number(today.slice(8, 10));
+  const actualCostToday = todayRows.length ? sum(todayRows, (row) => row.netCost) : null;
+  const actualCost7Days = sevenDayRows.length ? sum(sevenDayRows, (row) => row.netCost) : null;
+  const actualCostMonth = monthRows.length ? sum(monthRows, (row) => row.cost) : null;
+  const creditsMonth = monthRows.length ? Math.abs(sum(monthRows, (row) => row.credits)) : null;
+  const netCostMonth = monthRows.length ? sum(monthRows, (row) => row.netCost) : null;
+  const latestMonthDay = exportThroughDay?.startsWith(monthPrefix)
+    ? Number(exportThroughDay.slice(8, 10))
+    : 0;
   const [year, month] = monthPrefix.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const projectedMonthCost = dayOfMonth > 0 ? (netCostMonth / dayOfMonth) * daysInMonth : 0;
-  const firestoreGpsRows = sevenDayRows.filter((row) => {
-    const service = row.service.toLowerCase();
-    const sku = row.sku.toLowerCase();
-    return (
-      service.includes("firestore") &&
-      (sku.includes("read ops") || sku.includes("data transfer") || sku.includes("egress"))
-    );
-  });
-  const gpsEstimatedCost7Days =
-    sum(firestoreGpsRows, (row) => row.netCost) * GPS_FIRESTORE_COST_SHARE;
-  const dailyCosts = enumerateDayKeys(thirtyDayStart, today).map((day) => ({
-    day,
-    cost: roundMoney(
-      sum(
-        rows.filter((row) => row.day === day),
-        (row) => row.netCost
-      )
-    ),
-  }));
-  const dailyUsage = enumerateDayKeys(thirtyDayStart, today).map((day) => {
-    const dayRows = rows.filter((row) => row.day === day);
-    return {
-      day,
-      reads: usageForSku(dayRows, ["read ops", "document read"]),
-      writes: usageForSku(dayRows, ["entity writes", "document write"]),
-    };
-  });
+  const projectedMonthCost =
+    latestMonthDay > 0 && netCostMonth !== null
+      ? (netCostMonth / latestMonthDay) * daysInMonth
+      : null;
+  const dailyCosts = exportThroughDay
+    ? enumerateDayKeys(exportedWindowStart, exportThroughDay).map((day) => ({
+        day,
+        cost: roundMoney(
+          sum(
+            rows.filter((row) => row.day === day),
+            (row) => row.netCost
+          )
+        ),
+      }))
+    : [];
+  const dailyUsage = exportThroughDay
+    ? enumerateDayKeys(exportedWindowStart, exportThroughDay).map((day) => {
+        const dayRows = rows.filter((row) => row.day === day);
+        return {
+          day,
+          reads: usageForSku(dayRows, ["read ops", "document read"]),
+          writes: usageForSku(dayRows, ["entity writes", "document write"]),
+        };
+      })
+    : [];
 
   return {
     currency: "EUR",
     sourceCurrency: sourceCurrencies.length === 1 ? sourceCurrencies[0] : "MIXED",
-    actualCostToday: roundMoney(actualCostToday),
-    actualCost7Days: roundMoney(actualCost7Days),
-    actualCostMonth: roundMoney(actualCostMonth),
-    projectedMonthCost: roundMoney(projectedMonthCost),
-    creditsMonth: roundMoney(creditsMonth),
-    netCostMonth: roundMoney(netCostMonth),
+    actualCostToday: actualCostToday === null ? null : roundMoney(actualCostToday),
+    actualCost7Days: actualCost7Days === null ? null : roundMoney(actualCost7Days),
+    actualCostMonth: actualCostMonth === null ? null : roundMoney(actualCostMonth),
+    projectedMonthCost: projectedMonthCost === null ? null : roundMoney(projectedMonthCost),
+    creditsMonth: creditsMonth === null ? null : roundMoney(creditsMonth),
+    netCostMonth: netCostMonth === null ? null : roundMoney(netCostMonth),
     readsToday: usageForSku(todayRows, ["read ops", "document read"]),
     reads7Days: usageForSku(sevenDayRows, ["read ops", "document read"]),
     writesToday: usageForSku(todayRows, ["entity writes", "document write"]),
     writes7Days: usageForSku(sevenDayRows, ["entity writes", "document write"]),
     egressGiB7Days: egressGiB(sevenDayRows),
     functionsInvocations7Days: usageForSku(sevenDayRows, ["invocation"]),
-    gpsEstimatedCost7Days: roundMoney(gpsEstimatedCost7Days),
-    nonGpsEstimatedCost7Days: roundMoney(Math.max(0, actualCost7Days - gpsEstimatedCost7Days)),
+    gpsEstimatedCost7Days: null,
+    nonGpsEstimatedCost7Days: null,
     budgetMonthlyEur,
     budgetUsedPercent:
-      budgetMonthlyEur > 0 ? Number(((netCostMonth / budgetMonthlyEur) * 100).toFixed(1)) : null,
+      budgetMonthlyEur > 0 && netCostMonth !== null
+        ? Number(((netCostMonth / budgetMonthlyEur) * 100).toFixed(1))
+        : null,
     dailyCosts,
     dailyUsage,
-    serviceBreakdown: aggregateBreakdown(monthRows, "service"),
-    skuBreakdown: aggregateBreakdown(monthRows, "sku"),
-    periodStart: thirtyDayStart,
-    periodEnd: today,
+    serviceBreakdown: aggregateBreakdown(exportedWindowRows, "service"),
+    skuBreakdown: aggregateBreakdown(exportedWindowRows, "sku"),
+    periodStart: exportedWindowStart || exportFromDay,
+    periodEnd: exportThroughDay,
+    exportFromDay,
+    exportThroughDay,
+    exportLagDays,
+    costAttributionStatus: "unavailable",
   };
 }
 

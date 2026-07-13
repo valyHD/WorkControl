@@ -11,19 +11,12 @@ import {
 import {
   getBillingControlPanelData,
   getLiveFirebaseCostEstimate,
-  getLocalGpsRouteCostMetrics,
   refreshBillingMetricsNow,
   saveBillingCostSettings,
-  saveFirestoreCostControl,
   type BillingCostSettings,
   type BillingMetrics,
-  type GpsCostOptimizationStatus,
   type LiveFirebaseCostEstimate,
 } from "../services/billingMetricsService";
-import {
-  DEFAULT_FIRESTORE_COST_CONTROL,
-  type FirestoreCostControlConfig,
-} from "../../../config/firestoreCostControl";
 
 type BillingCostPanelProps = {
   isAdmin: boolean;
@@ -46,18 +39,6 @@ function decimal(value: number, digits = 2) {
   }).format(value);
 }
 
-function bytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let current = value;
-  let unit = 0;
-  while (current >= 1024 && unit < units.length - 1) {
-    current /= 1024;
-    unit += 1;
-  }
-  return `${current.toFixed(current >= 100 ? 0 : 1)} ${units[unit]}`;
-}
-
 function liveMoney(value: number | null, suffix = "") {
   if (value === null) return "Indisponibil";
   const formatted = new Intl.NumberFormat("ro-RO", {
@@ -78,10 +59,23 @@ function liveLagLabel(live: LiveFirebaseCostEstimate | null) {
 function freshnessLabel(metrics: BillingMetrics | null) {
   if (!metrics || metrics.freshnessStatus === "awaiting_export")
     return "Datele contabile se încarcă";
+  if ((metrics.exportLagDays ?? 0) > 1) {
+    return `Billing Export recuperează datele (${metrics.exportLagDays} zile întârziere)`;
+  }
   if (!metrics.updatedAtMs) return "Momentul actualizării este indisponibil";
   const ageHours = Math.max(0, (Date.now() - metrics.updatedAtMs) / 3_600_000);
   if (ageHours < 1) return "Actualizat în ultima oră";
   return `Actualizat acum ${Math.floor(ageHours)} ore`;
+}
+
+function dateLabel(value: string | null | undefined) {
+  if (!value) return "indisponibilă";
+  return new Intl.DateTimeFormat("ro-RO", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00Z`));
 }
 
 export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
@@ -91,10 +85,6 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     warningPercent: 70,
     criticalPercent: 90,
   });
-  const [canary, setCanary] = useState<GpsCostOptimizationStatus | null>(null);
-  const [firestoreCostControl, setFirestoreCostControl] = useState<FirestoreCostControlConfig>(
-    DEFAULT_FIRESTORE_COST_CONTROL
-  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -102,14 +92,6 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
   const [liveEstimate, setLiveEstimate] = useState<LiveFirebaseCostEstimate | null>(null);
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState("");
-  const [localRouteMetrics] = useState(() => getLocalGpsRouteCostMetrics());
-  const queryTelemetry = localRouteMetrics.queryTelemetry ?? {
-    activeListeners: 0,
-    queries: 0,
-    documents: 0,
-    averageDocumentsPerQuery: 0,
-    topConsumers: [],
-  };
 
   const loadLiveEstimate = useCallback(
     async (force = false) => {
@@ -137,8 +119,6 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       const data = await getBillingControlPanelData();
       setMetrics(data.metrics);
       setSettings(data.settings);
-      setCanary(data.canary);
-      setFirestoreCostControl(data.firestoreCostControl);
     } catch (loadError) {
       console.error("[BillingCostPanel][load]", loadError);
       setError("Nu am putut încărca datele de consum și cost.");
@@ -155,10 +135,7 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
   useEffect(() => {
     if (!isAdmin) return;
     queueMicrotask(() => void loadLiveEstimate());
-    const timer = window.setInterval(
-      () => void loadLiveEstimate(),
-      firestoreCostControl.billingRefreshMinutes * 60_000
-    );
+    const timer = window.setInterval(() => void loadLiveEstimate(), 30 * 60_000);
     const handleVisibility = () => {
       if (document.visibilityState === "visible") void loadLiveEstimate();
     };
@@ -167,7 +144,7 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [firestoreCostControl.billingRefreshMinutes, isAdmin, loadLiveEstimate]);
+  }, [isAdmin, loadLiveEstimate]);
 
   if (!isAdmin) return null;
 
@@ -180,55 +157,97 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
         : budgetPercent >= settings.warningPercent
           ? "warning"
           : "success";
-  const maxDailyCost = Math.max(0.01, ...(metrics?.dailyCosts.map((item) => item.cost) ?? [0.01]));
+  const monitoringDailyCosts = (liveEstimate?.dailyEstimatedCosts ?? [])
+    .filter((item): item is { day: string; cost: number } => item.cost !== null)
+    .slice(-14);
+  const displayedDailyCosts =
+    metrics?.exportLagDays !== null && (metrics?.exportLagDays ?? 0) <= 1
+      ? (metrics?.dailyCosts ?? [])
+      : monitoringDailyCosts;
+  const maxDailyCost = Math.max(0.01, ...displayedDailyCosts.map((item) => item.cost));
   const maxServiceCost = Math.max(
     0.01,
     ...(metrics?.serviceBreakdown.map((item) => item.cost) ?? [0.01])
   );
-  const recentDailyUsage = metrics?.dailyUsage.slice(-14) ?? [];
+  const recentDailyUsage = liveEstimate?.dailyUsage.length
+    ? liveEstimate.dailyUsage.slice(-14)
+    : (metrics?.dailyUsage.slice(-14) ?? []);
   const maxDailyUsage = Math.max(
     1,
     ...recentDailyUsage.flatMap((item) => [item.reads ?? 0, item.writes ?? 0])
   );
-  const splitTotal =
-    (metrics?.gpsEstimatedCost7Days ?? 0) + (metrics?.nonGpsEstimatedCost7Days ?? 0);
-  const gpsSplitPercent =
-    splitTotal > 0 ? ((metrics?.gpsEstimatedCost7Days ?? 0) / splitTotal) * 100 : 0;
-  const kpis: Array<{ label: string; value: string; Icon: LucideIcon }> = [
-    { label: "Cost astăzi", value: money(metrics?.actualCostToday ?? null), Icon: WalletCards },
-    { label: "Ultimele 7 zile", value: money(metrics?.actualCost7Days ?? null), Icon: Activity },
-    { label: "Luna curentă", value: money(metrics?.netCostMonth ?? null), Icon: WalletCards },
+  const kpis: Array<{ label: string; value: string; helper: string; Icon: LucideIcon }> = [
+    {
+      label: "Cost astăzi",
+      value: money(metrics?.actualCostToday ?? liveEstimate?.estimatedCostTodayEur ?? null),
+      helper: metrics?.actualCostToday != null ? "Cost contabil" : "Estimare Firestore",
+      Icon: WalletCards,
+    },
+    {
+      label: "Ultimele 7 zile",
+      value: money(metrics?.actualCost7Days ?? liveEstimate?.estimatedCost7DaysEur ?? null),
+      helper: metrics?.actualCost7Days != null ? "Cost contabil" : "Estimare Firestore",
+      Icon: Activity,
+    },
+    {
+      label: "Luna curentă",
+      value: money(metrics?.netCostMonth ?? null),
+      helper:
+        metrics?.netCostMonth != null
+          ? "Cost contabil"
+          : `Export disponibil până la ${dateLabel(metrics?.exportThroughDay)}`,
+      Icon: WalletCards,
+    },
     {
       label: "Estimare final lună",
-      value: money(metrics?.projectedMonthCost ?? null),
+      value: money(metrics?.projectedMonthCost ?? liveEstimate?.projectedMonthEur ?? null),
+      helper:
+        metrics?.projectedMonthCost != null ? "Pe baza facturării" : "Pe baza ultimelor 7 zile",
       Icon: Cloud,
     },
-    { label: "Citiri astăzi", value: count(metrics?.readsToday ?? null), Icon: Database },
-    { label: "Citiri 7 zile", value: count(metrics?.reads7Days ?? null), Icon: Database },
-    { label: "Scrieri astăzi", value: count(metrics?.writesToday ?? null), Icon: Database },
-    { label: "Scrieri 7 zile", value: count(metrics?.writes7Days ?? null), Icon: Database },
+    {
+      label: "Citiri astăzi",
+      value: count(metrics?.readsToday ?? liveEstimate?.readsToday ?? null),
+      helper: metrics?.readsToday != null ? "Billing Export" : "Cloud Monitoring",
+      Icon: Database,
+    },
+    {
+      label: "Citiri 7 zile",
+      value: count(metrics?.reads7Days ?? liveEstimate?.reads7Days ?? null),
+      helper: metrics?.reads7Days != null ? "Billing Export" : "Cloud Monitoring",
+      Icon: Database,
+    },
+    {
+      label: "Scrieri astăzi",
+      value: count(metrics?.writesToday ?? liveEstimate?.writesToday ?? null),
+      helper: metrics?.writesToday != null ? "Billing Export" : "Cloud Monitoring",
+      Icon: Database,
+    },
+    {
+      label: "Scrieri 7 zile",
+      value: count(metrics?.writes7Days ?? liveEstimate?.writes7Days ?? null),
+      helper: metrics?.writes7Days != null ? "Billing Export" : "Cloud Monitoring",
+      Icon: Database,
+    },
     {
       label: "Egress 7 zile",
       value:
         metrics?.egressGiB7Days === null || metrics?.egressGiB7Days === undefined
-          ? "Indisponibil"
+          ? liveEstimate?.estimatedEgressMiB7Days === null ||
+            liveEstimate?.estimatedEgressMiB7Days === undefined
+            ? "Indisponibil"
+            : `${decimal(liveEstimate.estimatedEgressMiB7Days, 1)} MiB`
           : `${metrics.egressGiB7Days.toFixed(2)} GiB`,
+      helper: metrics?.egressGiB7Days != null ? "Billing Export" : "Estimare din citiri",
       Icon: Cloud,
     },
     {
       label: "Functions 7 zile",
-      value: count(metrics?.functionsInvocations7Days ?? null),
+      value: count(
+        metrics?.functionsInvocations7Days ?? liveEstimate?.functionsInvocations7Days ?? null
+      ),
+      helper: metrics?.functionsInvocations7Days != null ? "Billing Export" : "Cloud Monitoring",
       Icon: Activity,
-    },
-    {
-      label: "GPS estimat 7 zile",
-      value: money(metrics?.gpsEstimatedCost7Days ?? null),
-      Icon: Activity,
-    },
-    {
-      label: "Rest aplicație",
-      value: money(metrics?.nonGpsEstimatedCost7Days ?? null),
-      Icon: Database,
     },
   ];
 
@@ -267,33 +286,14 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     }
   }
 
-  async function handleSaveEmergencyMode() {
-    setBusy(true);
-    setMessage("");
-    setError("");
-    try {
-      const saved = await saveFirestoreCostControl(firestoreCostControl);
-      setFirestoreCostControl(saved);
-      setMessage(
-        saved.emergencyMode
-          ? "Modul de economisire Firestore este activ."
-          : "Modul de economisire a fost dezactivat; hărțile flotei revin la comportamentul anterior."
-      );
-    } catch (saveError) {
-      console.error("[BillingCostPanel][firestore-cost-control]", saveError);
-      setError("Configurația de urgență nu a putut fi salvată.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <section className="panel billing-cost-panel" data-assistant-section="firebase-costs">
       <div className="tools-header">
         <div>
           <h3 className="panel-subtitle">Consum și costuri</h3>
           <p className="tools-subtitle">
-            Cost net din Cloud Billing Export, convertit server-side în EUR și păstrat în cache.
+            Estimări operaționale din Cloud Monitoring și cost contabil din Billing Export, afișate
+            separat ca să nu confunde întârzierile Google cu un cost zero.
           </p>
         </div>
         <button
@@ -311,7 +311,12 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       <div
         className={`billing-freshness billing-freshness--${metrics?.freshnessStatus ?? "delayed"}`}
       >
-        <span>{freshnessLabel(metrics)}</span>
+        <span>
+          {freshnessLabel(metrics)}
+          {metrics?.exportThroughDay
+            ? ` · export contabil disponibil până la ${dateLabel(metrics.exportThroughDay)}`
+            : ""}
+        </span>
         {metrics?.sourceCurrency && metrics.sourceCurrency !== "EUR" ? (
           <span>
             Conversie estimată {metrics.sourceCurrency} → EUR · BCE{" "}
@@ -361,9 +366,9 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
         {liveLoading ? <small>Actualizez estimarea...</small> : null}
         {liveError ? <small className="is-error">{liveError}</small> : null}
         <small>
-          Include toate operațiunile Firestore ale proiectului WorkControl, nu doar GPS-ul. Costul
-          pe 60 minute este o fereastră mobilă completă. Egress-ul este aproximat la 3,78
-          KiB/citire; Storage, Functions, quota gratuită și discounturile nu sunt incluse.
+          Include toate operațiunile Firestore ale proiectului WorkControl, nu doar GPS-ul. Valorile
+          estimate nu sunt factura finală: egress-ul este aproximat la 3,78 KiB/citire, iar Storage,
+          costul Functions, quota gratuită și discounturile nu sunt incluse.
         </small>
       </section>
 
@@ -372,21 +377,27 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       {message ? <div className="tool-message success-message">{message}</div> : null}
 
       <div className="billing-kpi-grid">
-        {kpis.map(({ label, value, Icon }) => (
+        {kpis.map(({ label, value, helper, Icon }) => (
           <article className="billing-kpi-card" key={label}>
             <Icon size={17} />
             <span>{label}</span>
             <strong>{value}</strong>
+            <small>{helper}</small>
           </article>
         ))}
       </div>
 
       <div className="billing-chart-grid">
         <article className="billing-chart-card">
-          <h4>Cost zilnic · 30 zile</h4>
-          {metrics?.dailyCosts.length ? (
+          <h4>Cost zilnic · {displayedDailyCosts.length} zile</h4>
+          <p className="tools-subtitle">
+            {metrics?.exportLagDays !== null && (metrics?.exportLagDays ?? 0) <= 1
+              ? "Cost contabil din Billing Export."
+              : "Estimare Firestore din Cloud Monitoring până când exportul contabil ajunge la zi."}
+          </p>
+          {displayedDailyCosts.length ? (
             <div className="billing-daily-chart" aria-label="Grafic cost zilnic">
-              {metrics.dailyCosts.map((item) => (
+              {displayedDailyCosts.map((item) => (
                 <div
                   className="billing-daily-chart__item"
                   key={item.day}
@@ -403,7 +414,11 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
         </article>
 
         <article className="billing-chart-card">
-          <h4>Cost pe serviciu · luna curentă</h4>
+          <h4>Cost pe serviciu · ultima perioadă exportată</h4>
+          <p className="tools-subtitle">
+            Date contabile până la {dateLabel(metrics?.exportThroughDay)}. Arată serviciile Google
+            care au produs cost.
+          </p>
           {metrics?.serviceBreakdown.length ? (
             <div className="billing-service-list">
               {metrics.serviceBreakdown.slice(0, 8).map((item) => (
@@ -419,12 +434,19 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
               ))}
             </div>
           ) : (
-            <p className="tools-subtitle">Breakdown-ul pe servicii va apărea după primul export.</p>
+            <p className="tools-subtitle">
+              Billing Export nu a furnizat încă un breakdown pe servicii.
+            </p>
           )}
         </article>
 
         <article className="billing-chart-card">
           <h4>Citiri și scrieri · 14 zile</h4>
+          <p className="tools-subtitle">
+            {liveEstimate?.dailyUsage.length
+              ? "Cloud Monitoring, actualizat automat fără citiri suplimentare din Firestore."
+              : `Billing Export până la ${dateLabel(metrics?.exportThroughDay)}.`}
+          </p>
           {recentDailyUsage.length ? (
             <div className="billing-usage-chart" aria-label="Grafic citiri și scrieri">
               {recentDailyUsage.map((item) => (
@@ -456,30 +478,17 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           </div>
         </article>
 
-        <article className="billing-chart-card">
-          <h4>GPS estimat vs rest aplicație · 7 zile</h4>
-          {splitTotal > 0 ? (
-            <>
-              <div className="billing-cost-split" aria-label="Proporție cost GPS estimat">
-                <span className="is-gps" style={{ width: `${gpsSplitPercent}%` }} />
-                <span className="is-rest" style={{ width: `${100 - gpsSplitPercent}%` }} />
-              </div>
-              <div className="billing-cost-split__labels">
-                <span>
-                  GPS estimat <strong>{money(metrics?.gpsEstimatedCost7Days ?? null)}</strong>
-                </span>
-                <span>
-                  Rest <strong>{money(metrics?.nonGpsEstimatedCost7Days ?? null)}</strong>
-                </span>
-              </div>
-            </>
-          ) : (
-            <p className="tools-subtitle">Separarea va apărea după primul export complet.</p>
-          )}
+        <article className="billing-chart-card billing-attribution-card">
+          <h4>GPS vs restul aplicației</h4>
+          <p className="tools-subtitle">
+            Firestore nu etichetează automat citirile după pagină sau modul. Nu mai afișăm o
+            împărțire procentuală inventată. Diagnosticarea GPS se face separat din tabul GPS, iar
+            costul global rămâne verificabil aici.
+          </p>
         </article>
       </div>
 
-      <div className="billing-detail-grid">
+      <div className="billing-detail-grid billing-detail-grid--single">
         <article className={`billing-budget-card billing-budget-card--${budgetTone}`}>
           <div>
             <h4>Buget lunar</h4>
@@ -549,148 +558,15 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
             Salvează bugetul
           </button>
         </article>
-
-        <article className="billing-technical-card">
-          <h4>Optimizare GPS</h4>
-          <div className="billing-emergency-control">
-            <label>
-              <input
-                type="checkbox"
-                checked={firestoreCostControl.emergencyMode}
-                onChange={(event) =>
-                  setFirestoreCostControl((current) => ({
-                    ...current,
-                    emergencyMode: event.target.checked,
-                    fleetRoutesOnDemandOnly: event.target.checked,
-                    disableBackgroundRouteSync: event.target.checked,
-                    disableHiddenPageListeners: event.target.checked,
-                  }))
-                }
-              />
-              Mod economie Firestore
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={firestoreCostControl.fleetRoutesCompactAll}
-                onChange={(event) =>
-                  setFirestoreCostControl((current) => ({
-                    ...current,
-                    fleetRoutesCompactAll: event.target.checked,
-                  }))
-                }
-              />
-              Trasee compacte toate
-            </label>
-            <button
-              className="secondary-btn"
-              type="button"
-              disabled={busy}
-              onClick={() => void handleSaveEmergencyMode()}
-            >
-              Salvează modul
-            </button>
-          </div>
-          <dl>
-            <div>
-              <dt>Trasee flotă</dt>
-              <dd>
-                {!firestoreCostControl.emergencyMode
-                  ? "Legacy toate"
-                  : firestoreCostControl.fleetRoutesCompactAll
-                    ? "Compact toate"
-                    : firestoreCostControl.fleetRoutesOnDemandOnly
-                      ? "La cerere"
-                      : "Toate"}
-              </dd>
-            </div>
-            <div>
-              <dt>Refresh snapshot</dt>
-              <dd>{firestoreCostControl.maxFleetSnapshotRefreshSeconds} sec</dd>
-            </div>
-            <div>
-              <dt>Limită traseu</dt>
-              <dd>{count(firestoreCostControl.maxRoutePointsPerRequest)}</dd>
-            </div>
-            <div>
-              <dt>Refresh trasee compacte</dt>
-              <dd>{firestoreCostControl.fleetRouteRefreshMinutes} min</dd>
-            </div>
-            <div>
-              <dt>Puncte / mașină</dt>
-              <dd>{count(firestoreCostControl.fleetRoutePointsPerVehicle)}</dd>
-            </div>
-            <div>
-              <dt>Listener-e active local</dt>
-              <dd>{queryTelemetry.activeListeners}</dd>
-            </div>
-            <div>
-              <dt>Query-uri locale</dt>
-              <dd>{queryTelemetry.queries}</dd>
-            </div>
-            <div>
-              <dt>Documente/query</dt>
-              <dd>{decimal(queryTelemetry.averageDocumentsPerQuery, 1)}</dd>
-            </div>
-            <div>
-              <dt>Canary gateway</dt>
-              <dd>{canary?.enabled ? "Activ" : "Oprit"}</dd>
-            </div>
-            <div>
-              <dt>Trackere canary</dt>
-              <dd>{canary?.canaryTrackerCount ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Flush diagnostic</dt>
-              <dd>{canary?.diagnosticFlushSeconds ?? 45} sec</dd>
-            </div>
-            <div>
-              <dt>Full-route sesiune</dt>
-              <dd>{localRouteMetrics.fullRouteRequests}</dd>
-            </div>
-            <div>
-              <dt>Incremental sesiune</dt>
-              <dd>{localRouteMetrics.incrementalRequests}</dd>
-            </div>
-            <div>
-              <dt>Cache hits</dt>
-              <dd>{localRouteMetrics.cacheHits}</dd>
-            </div>
-            <div>
-              <dt>Requesturi partajate</dt>
-              <dd>{localRouteMetrics.sharedRequests}</dd>
-            </div>
-            <div>
-              <dt>Fetch-uri ascunse evitate</dt>
-              <dd>{localRouteMetrics.hiddenPageFetchesAvoided}</dd>
-            </div>
-            <div>
-              <dt>Reads estimate evitate</dt>
-              <dd>{count(localRouteMetrics.estimatedReadsAvoided)}</dd>
-            </div>
-            <div>
-              <dt>Transfer estimat evitat</dt>
-              <dd>{bytes(localRouteMetrics.estimatedBytesAvoided)}</dd>
-            </div>
-          </dl>
-          <small>
-            Metricile de traseu sunt agregate pentru sesiunea curentă; billing-ul este global.
-          </small>
-          {queryTelemetry.topConsumers.length ? (
-            <div className="billing-query-consumers">
-              <strong>Consumatori locali principali</strong>
-              {queryTelemetry.topConsumers.map((item) => (
-                <span key={`${item.module}:${item.operation}`}>
-                  {item.module} · {item.operation}: {count(item.documents)} doc.
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </article>
       </div>
 
       <article className="billing-sku-card">
-        <h4>Top SKU · luna curentă</h4>
+        <h4>Ce taxează Google · SKU</h4>
+        <p className="tools-subtitle">
+          SKU este denumirea exactă a tarifului Google. Lista te ajută să vezi dacă plătești mai
+          ales pentru transfer Firestore, Functions, Scheduler sau alt serviciu. Perioada
+          disponibilă se încheie la {dateLabel(metrics?.exportThroughDay)}.
+        </p>
         {metrics?.skuBreakdown.length ? (
           <div className="billing-sku-list">
             {metrics.skuBreakdown.slice(0, 10).map((item) => (
@@ -701,7 +577,9 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
             ))}
           </div>
         ) : (
-          <p className="tools-subtitle">SKU-urile vor apărea după popularea exportului Standard.</p>
+          <p className="tools-subtitle">
+            Exportul contabil încă nu conține suficiente date pentru această listă.
+          </p>
         )}
       </article>
     </section>

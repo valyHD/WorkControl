@@ -5,6 +5,7 @@ const {
   ESTIMATED_EGRESS_BYTES_PER_READ,
   INTERNET_EGRESS_USD_PER_GIB,
   buildLiveCostEstimate,
+  buildHistoricalCostEstimate,
   estimatedEgressCostUsd,
   operationCostUsd,
 } = require("./liveCostEstimate");
@@ -61,8 +62,7 @@ test("keeps the reported hourly cost based on the full 60 minute window during a
     now: new Date("2026-07-12T12:04:00Z"),
   });
 
-  const expectedHourUsd =
-    operationCostUsd({ reads: 105_000 }) + estimatedEgressCostUsd(105_000);
+  const expectedHourUsd = operationCostUsd({ reads: 105_000 }) + estimatedEgressCostUsd(105_000);
   assert.equal(result.sampledWindowMinutes, 15);
   assert.equal(result.readsLastHour, 105_000);
   assert.equal(result.estimatedLastHourEur, Number(expectedHourUsd.toFixed(8)));
@@ -91,4 +91,27 @@ test("uses the documented Belgium Standard operation prices", () => {
   });
   assert.equal(ESTIMATED_EGRESS_BYTES_PER_READ, 3.78 * 1024);
   assert.equal(INTERNET_EGRESS_USD_PER_GIB, 0.12);
+});
+
+test("aggregates today and seven-day Monitoring usage in Europe/Bucharest", () => {
+  const readPoints = [point("2026-07-07T10:00:00Z", 700), point("2026-07-13T08:00:00Z", 1_300)];
+  const writePoints = [point("2026-07-07T10:00:00Z", 70), point("2026-07-13T08:00:00Z", 130)];
+  const result = buildHistoricalCostEstimate({
+    readPoints,
+    writePoints,
+    deletePoints: [],
+    functionRequestPoints: [point("2026-07-13T08:00:00Z", 25)],
+    usdPerEur: 1.2,
+    now: new Date("2026-07-13T12:00:00Z"),
+  });
+
+  assert.equal(result.readsToday, 1_300);
+  assert.equal(result.writesToday, 130);
+  assert.equal(result.reads7Days, 2_000);
+  assert.equal(result.writes7Days, 200);
+  assert.equal(result.functionsInvocations7Days, 25);
+  assert.equal(result.dailyUsage.length, 14);
+  assert.ok(result.estimatedCostTodayEur > 0);
+  assert.ok(result.estimatedCost7DaysEur > result.estimatedCostTodayEur);
+  assert.ok(result.projectedMonthEur > result.estimatedCost7DaysEur);
 });

@@ -1,5 +1,5 @@
 const { GoogleAuth } = require("google-auth-library");
-const { buildLiveCostEstimate } = require("./liveCostEstimate");
+const { buildHistoricalCostEstimate, buildLiveCostEstimate } = require("./liveCostEstimate");
 
 const MONITORING_SCOPE = "https://www.googleapis.com/auth/monitoring.read";
 const METRIC_TYPES = Object.freeze({
@@ -11,6 +11,7 @@ const METRIC_TYPES = Object.freeze({
   functionRequests: "run.googleapis.com/request_count",
 });
 const QUERY_LOOKBACK_MINUTES = 70;
+const HISTORY_LOOKBACK_DAYS = 14;
 const LIVE_ESTIMATE_CACHE_MS = 15 * 60_000;
 const monitoringAuth = new GoogleAuth({ scopes: [MONITORING_SCOPE] });
 let liveEstimateCache = null;
@@ -23,13 +24,14 @@ async function queryMetricPoints(
   startTime,
   endTime,
   aligner = "ALIGN_SUM",
-  reducer = "REDUCE_SUM"
+  reducer = "REDUCE_SUM",
+  alignmentPeriod = "60s"
 ) {
   const params = new URLSearchParams({
     filter: `metric.type="${metricType}"`,
     "interval.startTime": startTime.toISOString(),
     "interval.endTime": endTime.toISOString(),
-    "aggregation.alignmentPeriod": "60s",
+    "aggregation.alignmentPeriod": alignmentPeriod,
     "aggregation.perSeriesAligner": aligner,
     "aggregation.crossSeriesReducer": reducer,
     view: "FULL",
@@ -75,6 +77,7 @@ async function getLiveFirebaseCostEstimate({
   liveEstimateRequest = (async () => {
     const client = await monitoringAuth.getClient();
     const startTime = new Date(now.getTime() - QUERY_LOOKBACK_MINUTES * 60_000);
+    const historyStartTime = new Date(now.getTime() - HISTORY_LOOKBACK_DAYS * 86_400_000);
     const [
       readPoints,
       writePoints,
@@ -82,6 +85,10 @@ async function getLiveFirebaseCostEstimate({
       snapshotListenerPoints,
       activeConnectionPoints,
       functionRequestPoints,
+      historicalReadPoints,
+      historicalWritePoints,
+      historicalDeletePoints,
+      historicalFunctionRequestPoints,
     ] = await Promise.all([
       queryMetricPoints(client, projectId, METRIC_TYPES.reads, startTime, now),
       queryMetricPoints(client, projectId, METRIC_TYPES.writes, startTime, now),
@@ -105,7 +112,56 @@ async function getLiveFirebaseCostEstimate({
         "REDUCE_SUM"
       ),
       queryMetricPoints(client, projectId, METRIC_TYPES.functionRequests, startTime, now),
+      queryMetricPoints(
+        client,
+        projectId,
+        METRIC_TYPES.reads,
+        historyStartTime,
+        now,
+        "ALIGN_SUM",
+        "REDUCE_SUM",
+        "3600s"
+      ),
+      queryMetricPoints(
+        client,
+        projectId,
+        METRIC_TYPES.writes,
+        historyStartTime,
+        now,
+        "ALIGN_SUM",
+        "REDUCE_SUM",
+        "3600s"
+      ),
+      queryMetricPoints(
+        client,
+        projectId,
+        METRIC_TYPES.deletes,
+        historyStartTime,
+        now,
+        "ALIGN_SUM",
+        "REDUCE_SUM",
+        "3600s"
+      ),
+      queryMetricPoints(
+        client,
+        projectId,
+        METRIC_TYPES.functionRequests,
+        historyStartTime,
+        now,
+        "ALIGN_SUM",
+        "REDUCE_SUM",
+        "3600s"
+      ),
     ]);
+    const historicalEstimate = buildHistoricalCostEstimate({
+      readPoints: historicalReadPoints,
+      writePoints: historicalWritePoints,
+      deletePoints: historicalDeletePoints,
+      functionRequestPoints: historicalFunctionRequestPoints,
+      usdPerEur,
+      now,
+      historyDays: HISTORY_LOOKBACK_DAYS,
+    });
     const value = {
       ...buildLiveCostEstimate({
         readPoints,
@@ -115,6 +171,7 @@ async function getLiveFirebaseCostEstimate({
         rateDate,
         now,
       }),
+      ...historicalEstimate,
       source: "cloud_monitoring_firestore_operations",
       refreshSeconds: 15 * 60,
       snapshotListeners: averageMetric(snapshotListenerPoints),
@@ -125,7 +182,7 @@ async function getLiveFirebaseCostEstimate({
         location: "europe-west1",
         priceDate: "2026-07-12",
       },
-      excludes: ["storage", "cloud_functions", "free_quota", "discounts"],
+      excludes: ["storage_cost", "functions_cost", "free_quota", "discounts"],
     };
     liveEstimateCache = { value, expiresAt: now.getTime() + LIVE_ESTIMATE_CACHE_MS };
     return value;

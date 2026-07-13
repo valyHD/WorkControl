@@ -141,7 +141,16 @@ async function refreshBillingMetrics({ db, admin, projectId }) {
       rates: rates.rates || {},
     },
     source: "cloud_billing_bigquery_standard",
-    freshnessStatus: rows.length ? "current" : "delayed",
+    freshnessStatus:
+      summary.exportLagDays === null
+        ? "delayed"
+        : summary.exportLagDays <= 1
+          ? "current"
+          : "delayed",
+    freshnessReason:
+      summary.exportLagDays && summary.exportLagDays > 1
+        ? `billing_export_lag_${summary.exportLagDays}_days`
+        : null,
     updatedAt: FieldValue.serverTimestamp(),
     updatedAtMs: Date.now(),
   };

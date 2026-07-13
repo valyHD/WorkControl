@@ -61,6 +61,19 @@ describe("BillingCostPanel", () => {
       snapshotListeners: 4,
       activeConnections: 3,
       functionRequestsLastHour: 12,
+      estimatedCostTodayEur: 0.42,
+      estimatedCost7DaysEur: 2.8,
+      projectedMonthEur: 12.4,
+      estimatedEgressMiB7Days: 1550,
+      readsToday: 2_000_000,
+      writesToday: 80_000,
+      deletesToday: 10,
+      reads7Days: 19_103_161,
+      writes7Days: 581_245,
+      deletes7Days: 40,
+      functionsInvocations7Days: 1200,
+      dailyUsage: [{ day: "2026-07-11", reads: 2_000_000, writes: 80_000, deletes: 10 }],
+      dailyEstimatedCosts: [{ day: "2026-07-11", cost: 0.42 }],
       excludes: ["network_egress", "storage"],
       exchangeRate: { source: "ECB", rateDate: "2026-07-10" },
     });
@@ -113,6 +126,10 @@ describe("BillingCostPanel", () => {
         skuBreakdown: [{ name: "Read Ops", cost: 5.4 }],
         periodStart: "2026-06-12",
         periodEnd: "2026-07-11",
+        exportFromDay: "2026-06-12",
+        exportThroughDay: "2026-07-11",
+        exportLagDays: 1,
+        costAttributionStatus: "unavailable",
         updatedAtMs: Date.now(),
         freshnessStatus: "current",
         source: "cloud_billing_bigquery_standard",
@@ -131,7 +148,7 @@ describe("BillingCostPanel", () => {
     expect(mockedGetLiveEstimate).not.toHaveBeenCalled();
   });
 
-  it("shows costs, usage, canary status and unavailable metrics for an admin", async () => {
+  it("shows accounting costs and monitoring usage without GPS diagnostics", async () => {
     render(<BillingCostPanel isAdmin />);
     expect(await screen.findByText("Consum și costuri")).toBeInTheDocument();
     await waitFor(() => expect(mockedGetData).toHaveBeenCalledTimes(1));
@@ -145,7 +162,34 @@ describe("BillingCostPanel", () => {
     expect(screen.getByText(/3,69 MiB egress\/min/)).toBeInTheDocument();
     expect(screen.getAllByText(/11,81/).length).toBeGreaterThan(0);
     expect(screen.getByText("67.22 GiB")).toBeInTheDocument();
-    expect(screen.getByText("Canary gateway")).toBeInTheDocument();
-    expect(screen.getAllByText("Indisponibil").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ce taxează Google · SKU")).toBeInTheDocument();
+    expect(screen.queryByText("Canary gateway")).not.toBeInTheDocument();
+  });
+
+  it("uses Monitoring estimates instead of presenting delayed accounting data as zero", async () => {
+    const data = await mockedGetData();
+    mockedGetData.mockResolvedValueOnce({
+      ...data,
+      metrics: {
+        ...data.metrics,
+        actualCostToday: null,
+        actualCost7Days: null,
+        netCostMonth: null,
+        projectedMonthCost: null,
+        readsToday: null,
+        reads7Days: null,
+        writesToday: null,
+        writes7Days: null,
+        exportThroughDay: "2026-06-27",
+        exportLagDays: 16,
+        freshnessStatus: "delayed",
+      },
+    });
+
+    render(<BillingCostPanel isAdmin />);
+    expect(await screen.findByText(/Billing Export recuperează datele/)).toBeInTheDocument();
+    expect(screen.getAllByText("Estimare Firestore").length).toBeGreaterThan(0);
+    expect(screen.getByText(/2,80/)).toBeInTheDocument();
+    expect(screen.getByText("19.103.161")).toBeInTheDocument();
   });
 });

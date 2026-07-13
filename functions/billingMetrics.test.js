@@ -64,11 +64,45 @@ test("summarizes net billing cost, usage and projections without inventing missi
   assert.equal(summary.writes7Days, null);
   assert.equal(summary.egressGiB7Days, 67.22);
   assert.ok(summary.actualCost7Days > 11);
-  assert.ok(summary.gpsEstimatedCost7Days < summary.actualCost7Days);
+  assert.equal(summary.gpsEstimatedCost7Days, null);
+  assert.equal(summary.costAttributionStatus, "unavailable");
   assert.equal(summary.dailyCosts.length, 30);
   assert.equal(summary.dailyUsage.length, 30);
   assert.equal(summary.dailyUsage.at(-1).reads, 19_103_161);
   assert.ok(summary.budgetUsedPercent > 0);
+  assert.equal(summary.exportThroughDay, "2026-07-11");
+  assert.equal(summary.exportLagDays, 0);
+});
+
+test("marks a backfilling export as delayed instead of returning false current-period zeros", () => {
+  const summary = summarizeBillingRows(
+    [
+      {
+        day: "2026-06-27",
+        currency: "EUR",
+        service: "App Engine",
+        sku: "Cloud Firestore Read Ops Belgium",
+        cost: 0.4,
+        credits: 0,
+        netCost: 0.4,
+        usageAmount: 700_000,
+        usageUnit: "count",
+      },
+    ],
+    {
+      now: new Date("2026-07-13T12:00:00Z"),
+      rates: { EUR: 1 },
+      budgetMonthlyEur: 50,
+    }
+  );
+
+  assert.equal(summary.exportThroughDay, "2026-06-27");
+  assert.equal(summary.exportLagDays, 16);
+  assert.equal(summary.actualCostToday, null);
+  assert.equal(summary.actualCost7Days, null);
+  assert.equal(summary.netCostMonth, null);
+  assert.equal(summary.projectedMonthCost, null);
+  assert.equal(summary.serviceBreakdown[0].name, "App Engine");
 });
 
 test("builds a bounded, parameterized and partition-filtered BigQuery query", () => {
