@@ -19,6 +19,7 @@ import {
   uploadBytes,
 } from "firebase/storage";
 import { auth, db, storage } from "../../../lib/firebase/firebase";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import {
   buildUserDirectoryConstraints,
   getCurrentCompanyAccessContext,
@@ -130,8 +131,9 @@ function mapUserDoc(id: string, data: Record<string, unknown>): AppUserItem {
   };
 }
 
-export async function getAllUsers(): Promise<AppUserItem[]> {
+export async function getAllUsers(maxItems = 250): Promise<AppUserItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const resultLimit = clampQueryLimit(maxItems, 250, 250);
   const source = getUserDirectoryCollectionName() === "userOperationalViews"
     ? userOperationalViewsCollection
     : usersCollection;
@@ -139,7 +141,7 @@ export async function getAllUsers(): Promise<AppUserItem[]> {
     source,
     ...buildUserDirectoryConstraints(context),
     orderBy("fullName", "asc"),
-    limit(250)
+    limit(resultLimit)
   ));
   const users = new Map<string, AppUserItem>();
   snap.docs.forEach((docItem) => {

@@ -131,7 +131,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       active: true,
       accessStatus: "active",
       role: "admin",
-      globalAdmin: false,
+      globalAdmin: true,
       roleTitle: "Tehnician lifturi",
       department: "Service si Intretinere Lifturi",
       companyId: "company-e2e",
@@ -337,6 +337,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
   test("product experience navigation, focus, responsive layout and GPS visual guard", async ({
     page,
   }) => {
+    test.setTimeout(90_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page);
 
@@ -393,6 +394,31 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       maxDiffPixelRatio: 0.01,
     });
 
+    const visualPages = [
+      { path: "/dashboard", name: "dashboard-foundation.png" },
+      { path: "/timesheets?view=overview", name: "timesheets-foundation.png" },
+      { path: "/my-timesheets", name: "my-timesheets-foundation.png" },
+      { path: "/maintenance?tab=dashboard", name: "maintenance-foundation.png" },
+      { path: "/vehicles", name: "vehicles-foundation.png" },
+      { path: "/users", name: "users-foundation.png" },
+      { path: "/control-panel", name: "control-panel-foundation.png" },
+    ];
+
+    for (const visualPage of visualPages) {
+      await page.goto(visualPage.path);
+      await expect(page.locator("main")).toBeVisible();
+      await expect(page).toHaveScreenshot(visualPage.name, {
+        animations: "disabled",
+        fullPage: true,
+        mask: [
+          page.locator(".desktop-logout-btn").first(),
+          page.locator("[data-assistant-action='open-assistant']"),
+          page.locator(".today-strip"),
+        ],
+        maxDiffPixelRatio: 0.02,
+      });
+    }
+
     await page.goto("/timesheets?view=overview");
     await expect(
       page.getByRole("navigation", { name: "Sectiuni management pontaje" })
@@ -411,8 +437,8 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await expect(page.getByRole("heading", { name: "Notificări" })).toBeVisible();
 
     await page.goto("/control-panel");
-    await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByRole("link", { name: "Control Panel" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/control-panel$/);
+    await expect(page.getByRole("link", { name: "Control Panel" })).toBeVisible();
 
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();

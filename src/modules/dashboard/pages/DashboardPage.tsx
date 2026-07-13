@@ -35,7 +35,7 @@ import StatusBadge from "../../../components/StatusBadge";
 import EmptyState from "../../../components/EmptyState";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import { ProductContentLayout, ProductQuickActions } from "../../../components/product/ProductPage";
-import { PageHeader, PageLayout } from "../../../components/experience";
+import { LoadingState, PageHeader, PageLayout } from "../../../components/experience";
 import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
   getEffectiveWorkedMinutes,
@@ -80,22 +80,6 @@ type ActivityItem = {
   tone: "green" | "orange" | "red" | "blue" | "muted";
   to?: string;
 };
-
-function DashboardSkeleton() {
-  return (
-    <section className="page-section dashboard-modern-page">
-      <div className="wc-kpi-grid wc-kpi-grid--six">
-        {[...Array(6)].map((_, index) => (
-          <div key={index} className="wc-kpi-card">
-            <div className="skeleton" style={{ height: 12, width: "60%", marginBottom: 16 }} />
-            <div className="skeleton" style={{ height: 34, width: "42%", marginBottom: 12 }} />
-            <div className="skeleton" style={{ height: 10, width: "80%" }} />
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function formatDateTime(value?: number | null) {
   if (!value) return "-";
@@ -394,7 +378,13 @@ export default function DashboardPage() {
     []
   );
 
-  if (loading) return <DashboardSkeleton />;
+  if (loading) {
+    return (
+      <PageLayout className="dashboard-modern-page">
+        <LoadingState title="Se incarca centrul operational" description="Pregatim indicatorii relevanti pentru rolul tau." />
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout className="dashboard-modern-page">

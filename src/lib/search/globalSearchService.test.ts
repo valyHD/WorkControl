@@ -24,6 +24,19 @@ describe("globalSearchService", () => {
     mocks.getMaintenanceClients.mockResolvedValue([]);
   });
 
+  it("loads bounded datasets for command palette searches", async () => {
+    mocks.getAllUsers.mockResolvedValue([]);
+    const { searchWorkControlEntities } = await import("./globalSearchService");
+
+    await searchWorkControlEntities("log", "admin");
+
+    expect(mocks.getVehiclesList).toHaveBeenCalledWith(24);
+    expect(mocks.getToolsList).toHaveBeenCalledWith(24);
+    expect(mocks.getProjectsList).toHaveBeenCalledWith(24);
+    expect(mocks.getAllUsers).toHaveBeenCalledWith(24);
+    expect(mocks.getMaintenanceClients).toHaveBeenCalledWith(24);
+  });
+
   it("does not reuse a privileged pending search for a non-privileged role", async () => {
     let resolveUsers: (value: Array<{ id: string; uid: string; fullName: string; email: string }>) => void = () => undefined;
     mocks.getAllUsers.mockReturnValue(new Promise((resolve) => {

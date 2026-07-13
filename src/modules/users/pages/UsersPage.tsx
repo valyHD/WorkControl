@@ -4,7 +4,7 @@ import { deleteUserProfile, subscribeUsers } from "../services/usersService";
 import type { AppUserItem } from "../../../types/user";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
-import { PageHeader, PageLayout } from "../../../components/experience";
+import { ErrorState, PageHeader, PageLayout } from "../../../components/experience";
 import { Search, UserPlus, Users, ShieldAlert, Trash2 } from "lucide-react";
 
 function UserRowSkeleton() {
@@ -222,20 +222,13 @@ export default function UsersPage() {
         </div>
 
         {/* Error */}
-        {error && (
-          <div className="vc-feedback vc-feedback--error" style={{ margin: "0 0 16px" }}>
-            {error}
-            <button
-              type="button"
-              style={{ marginLeft: "auto", fontWeight: 700, background: "none", border: "none", cursor: "pointer", color: "inherit" }}
-              onClick={() => {
-                setReloadToken((value) => value + 1);
-              }}
-            >
-              Reîncarcă
-            </button>
-          </div>
-        )}
+        {error ? (
+          <ErrorState
+            title="Echipa nu a putut fi incarcata"
+            description={error}
+            retry={() => setReloadToken((value) => value + 1)}
+          />
+        ) : null}
 
         {/* Table */}
         {loading ? (

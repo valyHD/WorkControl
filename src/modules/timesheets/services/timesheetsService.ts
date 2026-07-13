@@ -135,12 +135,18 @@ function getProjectDisplayName(projectName?: string, projectCode?: string): stri
   return name || code || "Fara proiect";
 }
 
-export async function getProjectsList(): Promise<ProjectItem[]> {
+export async function getProjectsList(maxItems?: number): Promise<ProjectItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const constraints = [
+    ...buildCompanyScopeConstraints(context),
+    orderBy("name", "asc"),
+  ];
+  if (Number.isFinite(maxItems)) {
+    constraints.push(limit(Math.min(250, Math.max(1, Math.floor(maxItems as number)))));
+  }
   const snap = await getDocs(query(
     projectsCollection,
-    ...buildCompanyScopeConstraints(context),
-    orderBy("name", "asc")
+    ...constraints
   ));
   return snap.docs.map((docItem) => mapProjectDoc(docItem.id, docItem.data()));
 }

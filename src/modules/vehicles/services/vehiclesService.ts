@@ -27,6 +27,7 @@ import {
   uploadBytes,
 } from "firebase/storage";
 import { auth, db, functions, storage } from "../../../lib/firebase/firebase";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import {
   buildCompanyScopeConstraints,
   buildUserDirectoryConstraints,
@@ -1160,8 +1161,9 @@ export async function getVehicleUsers(): Promise<AppUser[]> {
   return [...users.values()];
 }
 
-export async function getVehiclesList(): Promise<VehicleItem[]> {
+export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const resultLimit = clampQueryLimit(maxItems, 250, 250);
   const source = getVehicleDirectoryCollectionName() === "vehicleOperationalViews"
     ? vehicleOperationalViewsCollection
     : vehiclesCollection;
@@ -1170,7 +1172,7 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
       source,
       ...buildCompanyScopeConstraints(context),
       orderBy("plateNumber", "asc"),
-      limit(250)
+      limit(resultLimit)
     ));
     return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
   }
@@ -1179,7 +1181,7 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
     source,
     ...buildCompanyScopeConstraints(context),
     where(field, "==", context.uid),
-    limit(250)
+    limit(resultLimit)
   ))));
   const unique = new Map<string, VehicleItem>();
   snapshots.forEach((snap) => snap.docs.forEach((docItem) => {

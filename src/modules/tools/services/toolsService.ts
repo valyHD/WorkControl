@@ -20,6 +20,7 @@ import {
 } from "firebase/storage";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions, storage } from "../../../lib/firebase/firebase";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import {
   buildCompanyScopeConstraints,
   buildUserDirectoryConstraints,
@@ -191,14 +192,15 @@ export async function getUsersList(): Promise<AppUser[]> {
   return [...users.values()];
 }
 
-export async function getToolsList(): Promise<ToolItem[]> {
+export async function getToolsList(maxItems = 500): Promise<ToolItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const resultLimit = clampQueryLimit(maxItems, 500, 500);
   if (context.role !== "angajat") {
     const snap = await getDocs(query(
       toolsCollection,
       ...buildCompanyScopeConstraints(context),
       orderBy("updatedAt", "desc"),
-      limit(500)
+      limit(resultLimit)
     ));
     return snap.docs.map((docItem) => mapToolDoc(docItem.id, docItem.data()));
   }
@@ -207,7 +209,7 @@ export async function getToolsList(): Promise<ToolItem[]> {
     toolsCollection,
     ...buildCompanyScopeConstraints(context),
     where(field, "==", context.uid),
-    limit(500)
+    limit(resultLimit)
   ))));
   const unique = new Map<string, ToolItem>();
   snapshots.forEach((snap) => snap.docs.forEach((docItem) => {

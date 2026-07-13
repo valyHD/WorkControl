@@ -444,3 +444,21 @@ export function getNavigationItemForPath(pathname: string) {
     .sort((left, right) => cleanNavigationPath(right.path).length - cleanNavigationPath(left.path).length)
     .find((item) => navigationPathMatches(pathname, item.path)) || null;
 }
+
+export function isNavigationItemActive({
+  pathname,
+  search,
+  itemPath,
+  routerIsActive,
+}: {
+  pathname: string;
+  search: string;
+  itemPath: string;
+  routerIsActive: boolean;
+}) {
+  const fromMyVehicleView = new URLSearchParams(search).get("view") === "my-vehicle";
+  if (itemPath === "/my-vehicle" && fromMyVehicleView) return true;
+  if (itemPath === "/vehicles" && fromMyVehicleView) return false;
+  if (itemPath === "/maintenance" && pathname.startsWith("/maintenance/orders")) return false;
+  return routerIsActive;
+}

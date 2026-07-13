@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "../../../lib/firebase/firebase";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import {
   buildCompanyScopeConstraints,
   canAccessCompany,
@@ -176,14 +177,15 @@ function mapReportHistory(id: string, data: Record<string, unknown>): Maintenanc
   };
 }
 
-export async function getMaintenanceClients(): Promise<MaintenanceClient[]> {
+export async function getMaintenanceClients(maxItems = 200): Promise<MaintenanceClient[]> {
   const context = await getCurrentCompanyAccessContext();
+  const resultLimit = clampQueryLimit(maxItems, 200, 200);
   const snap = await getDocs(
     query(
       maintenanceClientsCollection,
       ...buildCompanyScopeConstraints(context),
       orderBy("updatedAt", "desc"),
-      limit(200)
+      limit(resultLimit)
     )
   );
   return snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>));

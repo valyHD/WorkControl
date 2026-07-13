@@ -29,7 +29,7 @@ import type { NotificationRuleItem } from "../../../types/notification-rule";
 import type { LeaveRequestItem } from "../../../types/leave";
 import { getLeaveRequestsForUser } from "../../leave/services/leaveRequestsService";
 import KpiCard from "../../../components/KpiCard";
-import { PageHeader, PageLayout } from "../../../components/experience";
+import { LoadingState, PageHeader, PageLayout } from "../../../components/experience";
 import TimesheetStatusCard from "../../../components/TimesheetStatusCard";
 import TimesheetChartCard from "../../../components/TimesheetChartCard";
 import StatusBadge from "../../../components/StatusBadge";
@@ -546,10 +546,9 @@ export default function MyTimesheetsPage() {
 
   if (loading) {
     return (
-      <div className="placeholder-page">
-        <h2>Se incarca pontajul meu...</h2>
-        <p>Preluam datele personale din Firebase.</p>
-      </div>
+      <PageLayout className="my-timesheets-modern-page">
+        <LoadingState title="Se incarca pontajul tau" description="Verificam statusul curent si ultimele inregistrari." />
+      </PageLayout>
     );
   }
 

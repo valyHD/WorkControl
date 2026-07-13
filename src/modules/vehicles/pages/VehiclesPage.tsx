@@ -8,7 +8,7 @@ import { getUserThemeClass } from "../../../lib/ui/userTheme";
 import { CarFront, Grid3X3, List, MapPinned, Search, Table2 } from "lucide-react";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { VehicleGpsVisibilityToggle } from "../components/VehicleGpsVisibilityGate";
-import { PageHeader, PageLayout } from "../../../components/experience";
+import { ErrorState, PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import StatusBadge from "../../../components/StatusBadge";
@@ -427,13 +427,11 @@ export default function VehiclesPage() {
 
         {/* States */}
         {error ? (
-          <div className="placeholder-page">
-            <h2>Eroare</h2>
-            <p>{error}</p>
-            <button className="secondary-btn" onClick={() => window.location.reload()}>
-              Re?ncarc?
-            </button>
-          </div>
+          <ErrorState
+            title="Flota nu a putut fi incarcata"
+            description={error}
+            retry={() => window.location.reload()}
+          />
         ) : loading ? (
           <div className="tools-grid">
             {[1, 2, 3, 4, 5, 6].map((i) => (

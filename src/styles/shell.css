@@ -1,7 +1,47 @@
 /* ================================================================
-   LAYOUT SHELL
+   APPLICATION SHELL AND SHARED LAYOUT
    ================================================================ */
 .shell { display: flex; min-height: 100vh; }
+
+.topbar-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.2;
+}
+
+.topbar-clock > span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.topbar-clock > small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.sidebar-logout-button {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.sidebar-logout-button:disabled { cursor: wait; }
+
+.sidebar-logout-button__icon {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.mobile-drawer-brand {
+  margin-bottom: 0;
+  padding: 0;
+  border: 0;
+}
 
 /* ================================================================
    SIDEBAR

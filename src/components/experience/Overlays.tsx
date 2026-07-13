@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 function useDialogFocus(open: boolean, onClose: () => void) {
@@ -48,13 +48,14 @@ type OverlayProps = {
 
 export function DetailsDrawer({ open, title, description, children, onClose }: OverlayProps) {
   const ref = useDialogFocus(open, onClose);
+  const titleId = useId();
   if (!open) return null;
   return (
     <div className="wc-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={ref} className="wc-details-drawer" role="dialog" aria-modal="true" aria-labelledby="wc-details-drawer-title">
+      <div ref={ref} className="wc-details-drawer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header>
           <div>
-            <h2 id="wc-details-drawer-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {description ? <p>{description}</p> : null}
           </div>
           <button type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button>
@@ -67,19 +68,40 @@ export function DetailsDrawer({ open, title, description, children, onClose }: O
 
 export function MobileActionSheet({ open, title, description, children, onClose }: OverlayProps) {
   const ref = useDialogFocus(open, onClose);
+  const titleId = useId();
   if (!open) return null;
   return (
     <div className="wc-overlay wc-overlay--bottom" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={ref} className="wc-mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="wc-action-sheet-title">
+      <div ref={ref} className="wc-mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="wc-mobile-action-sheet__handle" aria-hidden="true" />
         <header>
           <div>
-            <h2 id="wc-action-sheet-title">{title}</h2>
+            <h2 id={titleId}>{title}</h2>
             {description ? <p>{description}</p> : null}
           </div>
           <button type="button" onClick={onClose} aria-label="Inchide"><X size={18} /></button>
         </header>
         <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export function FilterDrawer({ open, title = "Filtre", description, children, onClose }: OverlayProps) {
+  const ref = useDialogFocus(open, onClose);
+  const titleId = useId();
+  if (!open) return null;
+  return (
+    <div className="wc-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div ref={ref} className="wc-details-drawer wc-filter-drawer-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <header>
+          <div>
+            <h2 id={titleId}>{title}</h2>
+            {description ? <p>{description}</p> : null}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Inchide filtrele"><X size={18} /></button>
+        </header>
+        <div className="wc-details-drawer__content">{children}</div>
       </div>
     </div>
   );
