@@ -76,6 +76,21 @@ async function listDocuments(request: APIRequestContext, collection: string) {
   return payload.documents || [];
 }
 
+async function deleteCollectionDocuments(request: APIRequestContext, collection: string) {
+  const documents = await listDocuments(request, collection);
+  await Promise.all(
+    documents.map(async (document) => {
+      const documentId = document.name.split("/").at(-1);
+      if (!documentId) return;
+      const response = await request.delete(
+        `${firestoreBaseUrl}/${collection}/${encodeURIComponent(documentId)}`,
+        { headers: { Authorization: "Bearer owner" } }
+      );
+      expect(response.ok(), await response.text()).toBe(true);
+    })
+  );
+}
+
 function fieldString(document: { fields?: Record<string, FirestoreValue> }, key: string) {
   const value = document.fields?.[key];
   if (!value) return "";
@@ -332,14 +347,31 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
         return fieldString(document, "currentKm");
       })
       .toBe("6616");
+
+    // Server-side notification dispatch is asynchronous. Wait for the four workflow
+    // notifications so the following serial visual test captures deterministic data.
+    await expect.poll(async () => (await listDocuments(request, "notifications")).length).toBe(4);
   });
 
   test("product experience navigation, focus, responsive layout and GPS visual guard", async ({
     page,
+    request,
   }) => {
     test.setTimeout(90_000);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await login(page);
+
+    await deleteCollectionDocuments(request, "notifications");
+    await putDocument(request, "notifications", "notification-visual-e2e", {
+      userId: testUserId,
+      companyId: "company-e2e",
+      title: "Actualizare WorkControl",
+      message: "Notificare stabila pentru verificarea vizuala.",
+      module: "general",
+      eventType: "test",
+      read: false,
+      createdAt: 1_783_897_200_000,
+    });
 
     const viewports = [
       { width: 360, height: 800 },
