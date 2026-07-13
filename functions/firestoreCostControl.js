@@ -1,3 +1,5 @@
+const { FieldValue } = require("firebase-admin/firestore");
+
 const DEFAULT_FIRESTORE_COST_CONTROL = Object.freeze({
   emergencyMode: true,
   fleetRoutesOnDemandOnly: true,
@@ -89,7 +91,7 @@ async function saveFirestoreCostControl(db, admin, input, userId) {
     .set(
       {
         ...value,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
         updatedAtMs: Date.now(),
         updatedBy: userId,
       },

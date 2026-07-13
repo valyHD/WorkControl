@@ -1,5 +1,44 @@
 import type { ReactNode } from "react";
-import { AlertTriangle, CloudOff, RefreshCw, ShieldAlert, WifiOff } from "lucide-react";
+import { AlertCircle, AlertTriangle, CloudOff, LoaderCircle, RefreshCw, ShieldAlert, WifiOff } from "lucide-react";
+
+export function LoadingState({
+  title = "Se incarca datele",
+  description = "Te rugam sa astepti cateva momente.",
+}: {
+  title?: string;
+  description?: ReactNode;
+}) {
+  return (
+    <div className="wc-page-state wc-page-state--loading" role="status" aria-label={title} aria-live="polite">
+      <LoaderCircle className="wc-state-spinner" size={26} aria-hidden="true" />
+      <strong>{title}</strong>
+      {description ? <p>{description}</p> : null}
+    </div>
+  );
+}
+
+export function ErrorState({
+  title = "Datele nu au putut fi incarcate",
+  description,
+  retry,
+}: {
+  title?: string;
+  description?: ReactNode;
+  retry?: () => void;
+}) {
+  return (
+    <div className="wc-page-state wc-page-state--error" role="alert">
+      <AlertCircle size={26} aria-hidden="true" />
+      <strong>{title}</strong>
+      {description ? <p>{description}</p> : null}
+      {retry ? (
+        <button type="button" className="secondary-btn" onClick={retry}>
+          <RefreshCw size={16} aria-hidden="true" /> Reincearca
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 export function Skeleton({ lines = 3, label = "Se incarca" }: { lines?: number; label?: string }) {
   return (

@@ -18,6 +18,7 @@ export type AuditLogCategory =
 
 export interface AuditLogItem {
   id: string;
+  companyId?: string;
   category: AuditLogCategory;
   action: string;
   title: string;

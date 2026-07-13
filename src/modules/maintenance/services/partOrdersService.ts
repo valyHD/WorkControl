@@ -12,6 +12,11 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type { AppUser } from "../../../types/tool";
 import type {
@@ -86,6 +91,7 @@ function mapOrder(id: string, data: Record<string, unknown>): MaintenancePartOrd
 
   return {
     id,
+    companyId: toText(data.companyId),
     title: toText(data.title),
     status: normalizeStatus(data.status),
     priority: normalizePriority(data.priority),
@@ -153,47 +159,45 @@ function buildFieldsText(order: MaintenancePartOrder) {
   ];
 }
 
-async function createDirectPartOrderNotification(order: MaintenancePartOrder, actor: AppUser | null, title: string, message: string) {
-  if (!order.notifyUserId || order.notificationSeenAt || order.status === "installed" || order.status === "cancelled") return;
-
-  await addDoc(collection(db, "notifications"), {
-    userId: order.notifyUserId,
-    targetUserThemeKey: null,
-    actorUserId: actor?.id || actor?.uid || order.requestedByUserId || "",
-    actorUserName: actorName(actor),
-    actorUserThemeKey: actor?.themeKey ?? null,
-    title,
-    message,
-    module: "maintenance",
-    eventType: "maintenance_part_order_created",
-    entityId: order.id,
-    notificationPath: ORDERS_PATH,
-    soundEnabled: true,
-    read: false,
-    createdAt: Date.now(),
-    createdAtServer: serverTimestamp(),
-  });
-}
-
 export function subscribeMaintenancePartOrders(
   onData: (orders: MaintenancePartOrder[]) => void,
   onError?: (error: Error) => void
 ): () => void {
-  return onSnapshot(
-    query(partOrdersCollection, orderBy("updatedAt", "desc"), limit(200)),
-    (snap) => onData(snap.docs.map((docItem) => mapOrder(docItem.id, docItem.data() as Record<string, unknown>))),
-    (error) => onError?.(error)
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        partOrdersCollection,
+        ...buildCompanyScopeConstraints(context),
+        orderBy("updatedAt", "desc"),
+        limit(200)
+      ),
+      (snap) => onData(snap.docs.map((docItem) => mapOrder(
+        docItem.id,
+        docItem.data() as Record<string, unknown>
+      ))),
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error as Error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function createMaintenancePartOrder(
   input: Omit<MaintenancePartOrder, "id" | "createdAt" | "updatedAt" | "totalEstimated">,
   actor: AppUser | null
 ): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = input.companyId || requirePrimaryCompanyId(context);
   const now = Date.now();
   const lines = input.lines.map((line, index) => normalizeLine(line, index)).filter((line) => line.name);
   const payload = {
     ...input,
+    companyId,
     title: input.title.trim() || "Comanda piese lift",
     lines,
     totalEstimated: calculateTotal(lines),
@@ -211,13 +215,6 @@ export async function createMaintenancePartOrder(
 
   const docRef = await addDoc(partOrdersCollection, payload);
   const savedOrder = mapOrder(docRef.id, payload);
-  await createDirectPartOrderNotification(
-    savedOrder,
-    actor,
-    "Comanda piese noua",
-    `${actorName(actor)} a creat comanda ${orderLabel(savedOrder)}. Bifeaza Am vazut dupa ce o verifici.`
-  );
-
   await dispatchNotificationEvent({
     module: "maintenance",
     eventType: "maintenance_part_order_created",
@@ -283,8 +280,6 @@ export async function updateMaintenancePartOrder(
 }
 
 export async function deleteMaintenancePartOrder(order: MaintenancePartOrder, actor: AppUser | null): Promise<void> {
-  await deleteDoc(doc(partOrdersCollection, order.id));
-
   await dispatchNotificationEvent({
     module: "maintenance",
     eventType: "maintenance_part_order_deleted",
@@ -300,6 +295,7 @@ export async function deleteMaintenancePartOrder(order: MaintenancePartOrder, ac
       fieldsText: buildFieldsText(order),
     },
   });
+  await deleteDoc(doc(partOrdersCollection, order.id));
 }
 
 export async function markMaintenancePartOrderSeen(order: MaintenancePartOrder, actor: AppUser | null): Promise<void> {

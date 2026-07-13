@@ -8,6 +8,41 @@
 :root {
   color-scheme: only light;
 
+  /* Product foundations */
+  --wc-font-sans: "DM Sans", "Inter", system-ui, -apple-system, sans-serif;
+  --wc-font-mono: "DM Mono", ui-monospace, SFMono-Regular, monospace;
+  --wc-font-size-xs: 0.75rem;
+  --wc-font-size-sm: 0.875rem;
+  --wc-font-size-md: 1rem;
+  --wc-font-size-lg: 1.125rem;
+  --wc-line-height-tight: 1.25;
+  --wc-line-height-body: 1.55;
+
+  --wc-space-1: 0.25rem;
+  --wc-space-2: 0.5rem;
+  --wc-space-3: 0.75rem;
+  --wc-space-4: 1rem;
+  --wc-space-5: 1.25rem;
+  --wc-space-6: 1.5rem;
+  --wc-space-8: 2rem;
+  --wc-space-10: 2.5rem;
+
+  --wc-control-height-sm: 36px;
+  --wc-control-height: 44px;
+  --wc-control-height-lg: 52px;
+  --wc-control-focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.18);
+
+  --wc-z-base: 0;
+  --wc-z-sticky: 20;
+  --wc-z-header: 40;
+  --wc-z-overlay: 80;
+  --wc-z-dialog: 100;
+  --wc-z-toast: 120;
+
+  --wc-motion-fast: 140ms ease;
+  --wc-motion-standard: 220ms ease;
+  --wc-motion-slow: 340ms cubic-bezier(.22, .68, 0, 1);
+
   /* Canvas */
   --bg:            #f0f4f9;
   --bg-soft:       #eaf0f8;
@@ -69,9 +104,9 @@
   --radius-xl: 28px;
 
   /* Transitions */
-  --transition-fast: 0.14s ease;
-  --transition:      0.22s ease;
-  --transition-slow: 0.34s cubic-bezier(.22,.68,0,1.2);
+  --transition-fast: var(--wc-motion-fast);
+  --transition:      var(--wc-motion-standard);
+  --transition-slow: var(--wc-motion-slow);
 
 
   /* Scroll */

@@ -1,8 +1,165 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(userId) {
+      return firestore.get(/databases/(default)/documents/users/$(userId));
+    }
+
+    function userExists(userId) {
+      return firestore.exists(/databases/(default)/documents/users/$(userId));
+    }
+
+    function currentUser() {
+      return userDoc(request.auth.uid).data;
+    }
+
+    function activeUser() {
+      return signedIn() && userExists(request.auth.uid) &&
+        currentUser().get('active', false) == true &&
+        currentUser().get('accessStatus', '') == 'active';
+    }
+
+    function globalAdmin() {
+      return activeUser() && currentUser().get('role', '') == 'admin' &&
+        currentUser().get('globalAdmin', false) == true;
+    }
+
+    function companyIds() {
+      return activeUser() ? currentUser().get('companyIds', []) : [];
+    }
+
+    function sameCompany(companyId) {
+      return activeUser() && companyId is string && companyId.size() > 0 &&
+        (globalAdmin() || companyId == currentUser().get('primaryCompanyId', '') || companyId in companyIds());
+    }
+
+    function managerFor(companyId) {
+      return sameCompany(companyId) && currentUser().get('role', '') in ['admin', 'manager'];
+    }
+
+    function userCompanyAllowed(userId) {
+      return userExists(userId) &&
+        userDoc(userId).data.get('companyIds', []).hasAny(companyIds());
+    }
+
+    function vehicleDoc(vehicleId) {
+      return firestore.get(/databases/(default)/documents/vehicles/$(vehicleId));
+    }
+
+    function vehicleExists(vehicleId) {
+      return firestore.exists(/databases/(default)/documents/vehicles/$(vehicleId));
+    }
+
+    function canReadVehicle(vehicleId) {
+      return vehicleExists(vehicleId) && sameCompany(vehicleDoc(vehicleId).data.get('companyId', '')) &&
+        (
+          managerFor(vehicleDoc(vehicleId).data.get('companyId', '')) ||
+          request.auth.uid in [
+            vehicleDoc(vehicleId).data.get('ownerUserId', ''),
+            vehicleDoc(vehicleId).data.get('currentDriverUserId', ''),
+            vehicleDoc(vehicleId).data.get('pendingDriverUserId', '')
+          ]
+        );
+    }
+
+    function toolDoc(toolId) {
+      return firestore.get(/databases/(default)/documents/tools/$(toolId));
+    }
+
+    function toolExists(toolId) {
+      return firestore.exists(/databases/(default)/documents/tools/$(toolId));
+    }
+
+    function canUseTool(toolId) {
+      return toolExists(toolId) && sameCompany(toolDoc(toolId).data.get('companyId', '')) &&
+        (
+          managerFor(toolDoc(toolId).data.get('companyId', '')) ||
+          request.auth.uid in [
+            toolDoc(toolId).data.get('ownerUserId', ''),
+            toolDoc(toolId).data.get('currentHolderUserId', ''),
+            toolDoc(toolId).data.get('pendingHolderUserId', '')
+          ]
+        );
+    }
+
+    function maintenanceClient(clientId) {
+      return firestore.get(/databases/(default)/documents/maintenanceClients/$(clientId));
+    }
+
+    function maintenanceClientExists(clientId) {
+      return firestore.exists(/databases/(default)/documents/maintenanceClients/$(clientId));
+    }
+
+    function safeImageWrite(maxBytes) {
+      return request.resource != null && request.resource.size <= maxBytes &&
+        request.resource.contentType.matches('image/(jpeg|png|webp)');
+    }
+
+    function safeDocumentWrite(maxBytes) {
+      return request.resource != null && request.resource.size <= maxBytes &&
+        request.resource.contentType.matches('(application/pdf|image/(jpeg|png|webp))');
+    }
+
+    match /users/{userId}/{fileName} {
+      allow read: if activeUser() && (request.auth.uid == userId || userCompanyAllowed(userId));
+      allow create, update: if activeUser() && request.auth.uid == userId && safeImageWrite(5 * 1024 * 1024);
+      allow delete: if activeUser() && request.auth.uid == userId;
+    }
+
+    match /expenses/{userId}/{fileName} {
+      allow read: if activeUser() && (request.auth.uid == userId ||
+        (userCompanyAllowed(userId) && currentUser().get('role', '') in ['admin', 'manager']));
+      allow create, update: if activeUser() && request.auth.uid == userId && safeDocumentWrite(15 * 1024 * 1024);
+      allow delete: if activeUser() && (request.auth.uid == userId ||
+        (userCompanyAllowed(userId) && currentUser().get('role', '') in ['admin', 'manager']));
+    }
+
+    match /vehicles/{vehicleId}/images/{fileName} {
+      allow read: if canReadVehicle(vehicleId);
+      allow create, update: if canReadVehicle(vehicleId) && safeImageWrite(8 * 1024 * 1024);
+      allow delete: if canReadVehicle(vehicleId);
+    }
+
+    match /vehicles/{vehicleId}/documents/{category}/{fileName} {
+      allow read: if canReadVehicle(vehicleId);
+      allow create, update: if vehicleExists(vehicleId) &&
+        managerFor(vehicleDoc(vehicleId).data.get('companyId', '')) && safeDocumentWrite(20 * 1024 * 1024);
+      allow delete: if vehicleExists(vehicleId) && managerFor(vehicleDoc(vehicleId).data.get('companyId', ''));
+    }
+
+    match /tools/{toolId}/images/{fileName} {
+      allow read: if canUseTool(toolId);
+      allow create, update: if canUseTool(toolId) && safeImageWrite(8 * 1024 * 1024);
+      allow delete: if canUseTool(toolId);
+    }
+
+    match /maintenance-branding/{companyId}/{fileName} {
+      allow read: if sameCompany(companyId);
+      allow create, update: if managerFor(companyId) && safeImageWrite(8 * 1024 * 1024);
+      allow delete: if managerFor(companyId);
+    }
+
+    match /maintenance-reports/{clientId}/{allPaths=**} {
+      allow read: if maintenanceClientExists(clientId) &&
+        sameCompany(maintenanceClient(clientId).data.get('companyId', ''));
+      allow create, update: if maintenanceClientExists(clientId) &&
+        managerFor(maintenanceClient(clientId).data.get('companyId', '')) &&
+        safeDocumentWrite(25 * 1024 * 1024);
+      allow delete: if maintenanceClientExists(clientId) &&
+        managerFor(maintenanceClient(clientId).data.get('companyId', ''));
+    }
+
+    match /vehicle-position-archives/{vehicleId}/{fileName} {
+      allow read: if canReadVehicle(vehicleId);
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }

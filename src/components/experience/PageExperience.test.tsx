@@ -4,7 +4,10 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import {
   DetailsDrawer,
+  ErrorState,
+  FilterDrawer,
   InlineError,
+  LoadingState,
   PageBreadcrumbs,
   PageTabs,
   PermissionState,
@@ -50,10 +53,23 @@ describe("product experience primitives", () => {
     render(
       <>
         <InlineError message="Nu s-au incarcat datele" />
+        <ErrorState title="Eroare pagina" />
+        <LoadingState title="Incarcare pagina" />
         <PermissionState />
       </>
     );
-    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(screen.getAllByRole("alert")).toHaveLength(3);
+    expect(screen.getByRole("status", { name: "Incarcare pagina" })).toBeInTheDocument();
     expect(screen.getByText("Acces restrictionat")).toBeInTheDocument();
+  });
+
+  it("gives filter drawers an accessible dialog name", () => {
+    render(
+      <FilterDrawer open title="Filtre masini" onClose={() => undefined}>
+        <button type="button">Aplica</button>
+      </FilterDrawer>
+    );
+
+    expect(screen.getByRole("dialog", { name: "Filtre masini" })).toBeInTheDocument();
   });
 });

@@ -1,0 +1,662 @@
+/* ================================================================
+   WorkControl visual polish system
+   Global visual layer only. No application logic depends on this.
+   ================================================================ */
+:root {
+  --wc-bg-main: #f5f7fb;
+  --wc-bg-soft: #eef3f8;
+  --wc-surface: #ffffff;
+  --wc-surface-raised: #fbfdff;
+  --wc-border: rgba(127, 145, 173, 0.24);
+  --wc-border-strong: rgba(92, 112, 142, 0.36);
+  --wc-text-primary: #0e1726;
+  --wc-text-muted: #66758f;
+  --wc-blue-action: #2563eb;
+  --wc-blue-action-deep: #1d4ed8;
+  --wc-green-success: #16a34a;
+  --wc-orange-warning: #d97706;
+  --wc-red-danger: #dc2626;
+  --wc-radius: 20px;
+  --wc-radius-sm: 14px;
+  --wc-radius-lg: 24px;
+  --wc-shadow-soft: 0 16px 42px rgba(15, 23, 42, 0.08), 0 2px 8px rgba(15, 23, 42, 0.04);
+  --wc-shadow-hover: 0 22px 54px rgba(15, 23, 42, 0.12), 0 4px 14px rgba(15, 23, 42, 0.05);
+  --wc-space: 18px;
+
+  --bg: var(--wc-bg-main);
+  --bg-soft: var(--wc-bg-soft);
+  --surface: var(--wc-surface);
+  --surface-card: var(--wc-surface);
+  --panel: var(--wc-surface);
+  --line: var(--wc-border);
+  --line-mid: var(--wc-border);
+  --line-strong: var(--wc-border-strong);
+  --text: var(--wc-text-primary);
+  --text-muted: var(--wc-text-muted);
+  --primary: var(--wc-blue-action);
+  --primary-deep: var(--wc-blue-action-deep);
+  --success: var(--wc-green-success);
+  --warning: var(--wc-orange-warning);
+  --danger: var(--wc-red-danger);
+  --radius-sm: var(--wc-radius-sm);
+  --radius-md: var(--wc-radius);
+  --radius-lg: var(--wc-radius-lg);
+  --shadow-xs: 0 8px 22px rgba(15, 23, 42, 0.055);
+  --shadow-sm: var(--wc-shadow-soft);
+  --shadow-md: var(--wc-shadow-hover);
+}
+
+html,
+body {
+  min-height: 100%;
+  background:
+    linear-gradient(180deg, #f8fafc 0%, var(--wc-bg-main) 34%, #eef3f8 100%);
+  color: var(--wc-text-primary);
+}
+
+body {
+  font-family: "DM Sans", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.app-main,
+.page-section,
+.wc-page {
+  gap: clamp(16px, 2vw, 24px);
+}
+
+.wc-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.wc-page-header,
+.wc-page-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: clamp(18px, 2.2vw, 26px);
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius-lg);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: var(--wc-shadow-soft);
+}
+
+.wc-page-header h1,
+.wc-page-hero h1 {
+  margin: 0;
+  color: var(--wc-text-primary);
+  font-size: clamp(24px, 3vw, 34px);
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.12;
+}
+
+.wc-page-header p,
+.wc-page-hero p,
+.panel-subtitle,
+.tools-subtitle,
+.action-bar__subtitle {
+  color: var(--wc-text-muted);
+  line-height: 1.5;
+}
+
+.panel,
+.wc-card,
+.wc-table-card,
+.wc-chart-card,
+.wc-timesheet-status-card,
+.wc-user-summary-card,
+.wc-kpi-card,
+.wc-action-card,
+.kpi-card,
+.maintenance-page .maintenance-nav-item,
+.maintenance-page .maintenance-action-card,
+.maintenance-page .maintenance-client-card,
+.maintenance-page .maintenance-branding-card,
+.expense-upload-dropzone,
+.expense-scan-step,
+.vehicle-gps-stat-card,
+.vehicle-info-item,
+.vehicle-live-route-card,
+.gps-sim-panel,
+.leave-help-card,
+.leave-user-item {
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius-lg);
+  background: var(--wc-surface);
+  box-shadow: var(--wc-shadow-soft);
+}
+
+.panel,
+.wc-card,
+.wc-table-card,
+.wc-chart-card,
+.wc-timesheet-status-card,
+.wc-kpi-card,
+.wc-action-card,
+.kpi-card {
+  overflow: hidden;
+}
+
+.panel:hover,
+.wc-card:hover,
+.wc-kpi-card--link:hover,
+.kpi-card:hover,
+.maintenance-page .maintenance-nav-item:hover,
+.maintenance-page .maintenance-action-card:hover {
+  border-color: var(--wc-border-strong);
+  box-shadow: var(--wc-shadow-hover);
+}
+
+.panel-head,
+.action-bar,
+.wc-card__header,
+.wc-table-card__header {
+  padding: clamp(16px, 2vw, 22px);
+  border-bottom: 1px solid rgba(127, 145, 173, 0.18);
+}
+
+h2.panel-title,
+h3.panel-title,
+.panel-title,
+.wc-section-title,
+.action-bar__title {
+  color: var(--wc-text-primary);
+  font-size: clamp(15px, 1.4vw, 18px);
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.panel-title::before {
+  border-radius: 999px;
+}
+
+.wc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.panel-body,
+.panel > .tool-form,
+.panel > .tools-header,
+.panel > p.tools-subtitle,
+.panel > .simple-list,
+.wc-card__body,
+.wc-table-card__body {
+  padding-inline: clamp(16px, 2vw, 22px);
+}
+
+.simple-list-item {
+  padding: 15px clamp(16px, 2vw, 22px);
+  border-color: rgba(127, 145, 173, 0.16);
+}
+
+.simple-list-item:hover {
+  background: #f8fbff;
+}
+
+.simple-list-label {
+  color: var(--wc-text-primary);
+  font-weight: 800;
+}
+
+.simple-list-subtitle {
+  color: var(--wc-text-muted);
+}
+
+.primary-btn,
+.secondary-btn,
+.danger-btn,
+.success-btn,
+.page-quick-actions__item {
+  min-height: 42px;
+  border-radius: var(--wc-radius-sm);
+  padding: 10px 16px;
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-decoration: none;
+}
+
+.primary-btn {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: linear-gradient(135deg, #2f6df2, #1d4ed8);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+}
+
+.primary-btn:hover {
+  background: linear-gradient(135deg, #255fdf, #1b45bd);
+  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.26);
+}
+
+.secondary-btn,
+.page-quick-actions__item {
+  border-color: var(--wc-border);
+  color: var(--wc-text-primary);
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045);
+}
+
+.secondary-btn:hover,
+.page-quick-actions__item:hover {
+  border-color: rgba(37, 99, 235, 0.32);
+  color: var(--wc-blue-action-deep);
+  background: #f5f8ff;
+}
+
+.danger-btn {
+  border-color: rgba(220, 38, 38, 0.22);
+  color: #b91c1c;
+  background: #fff5f5;
+}
+
+.danger-btn:hover {
+  background: #fee2e2;
+}
+
+.success-btn {
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.success-btn:hover {
+  background: #dcfce7;
+}
+
+.tool-form,
+.expense-scan-form,
+.gps-sim-form {
+  gap: 22px;
+}
+
+.tool-form-grid,
+.expense-filter-grid,
+.vehicle-info-grid,
+.vehicle-gps-stats-grid {
+  gap: clamp(14px, 1.8vw, 20px);
+}
+
+.tool-form-block {
+  gap: 8px;
+}
+
+.tool-form-label,
+.wc-filter-bar label,
+.gps-sim-label {
+  color: #46556d;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.tool-input,
+select.tool-input,
+textarea.tool-input,
+.gps-sim-input,
+.voice-assistant__manual input {
+  min-height: 44px;
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius-sm);
+  color: var(--wc-text-primary);
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+}
+
+textarea.tool-input {
+  min-height: 116px;
+}
+
+.tool-input:hover,
+.gps-sim-input:hover,
+.voice-assistant__manual input:hover {
+  border-color: var(--wc-border-strong);
+}
+
+.tool-input:focus,
+.gps-sim-input:focus,
+.voice-assistant__manual input:focus {
+  border-color: rgba(37, 99, 235, 0.48);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.tool-message,
+.status-error,
+.status-ok,
+.success-message {
+  border-radius: var(--wc-radius-sm);
+  padding: 11px 13px;
+}
+
+.kpi-grid,
+.wc-kpi-grid,
+.dashboard-kpi-grid,
+.expense-kpi-grid,
+.vehicle-gps-stats-grid {
+  gap: clamp(12px, 1.6vw, 18px);
+}
+
+.kpi-card,
+.wc-kpi-card {
+  padding: clamp(16px, 1.9vw, 22px);
+}
+
+.kpi-card::before {
+  height: 4px;
+  opacity: 0.9;
+}
+
+.kpi-label,
+.wc-kpi-card__head {
+  color: var(--wc-text-muted);
+  letter-spacing: 0.04em;
+}
+
+.kpi-value,
+.wc-kpi-card__value {
+  color: var(--wc-text-primary);
+  letter-spacing: 0;
+}
+
+.wc-filter-bar,
+.audit-filters,
+.expense-filter-grid,
+.vehicle-range-toolbar,
+.maintenance-check-filters {
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius);
+  background: #ffffff;
+  box-shadow: var(--wc-shadow-soft);
+}
+
+.users-table-wrap,
+.expense-table-wrap,
+.vehicle-live-table-wrap,
+.wc-data-table-wrap,
+.companies-mini-table,
+.timesheet-report-table {
+  border: 1px solid var(--wc-border);
+  border-radius: var(--wc-radius);
+  background: #ffffff;
+  box-shadow: var(--wc-shadow-soft);
+  overflow: auto;
+}
+
+.users-table,
+.expense-table,
+.vehicle-live-table,
+.wc-data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.users-table th,
+.expense-table th,
+.vehicle-live-table th,
+.wc-data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  color: #516078;
+  background: #f6f9fd;
+  border-bottom: 1px solid rgba(127, 145, 173, 0.2);
+  font-weight: 850;
+  letter-spacing: 0.04em;
+}
+
+.users-table td,
+.expense-table td,
+.vehicle-live-table td,
+.wc-data-table td {
+  border-bottom: 1px solid rgba(127, 145, 173, 0.14);
+}
+
+.users-table tbody tr:hover,
+.expense-table tbody tr:hover,
+.vehicle-live-table tbody tr:hover,
+.wc-data-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.badge,
+.wc-status-badge {
+  min-height: 24px;
+  border-radius: 999px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.maintenance-page .maintenance-nav {
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+.maintenance-page .maintenance-nav-item {
+  min-width: 228px;
+  padding: 13px;
+}
+
+.maintenance-page .maintenance-nav-item.active {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: linear-gradient(180deg, #f5f8ff, #ffffff);
+}
+
+.maintenance-page .maintenance-nav-item__icon,
+.wc-kpi-card__icon,
+.wc-empty-state__icon,
+.panel-title-icon {
+  border-radius: var(--wc-radius-sm);
+}
+
+.maintenance-page .maintenance-report-steps,
+.maintenance-page .maintenance-dashboard-grid,
+.maintenance-page .maintenance-client-grid,
+.maintenance-page .maintenance-branding-grid {
+  gap: clamp(14px, 1.8vw, 20px);
+}
+
+.maintenance-page .maintenance-action-card {
+  padding: 14px;
+}
+
+.leave-page .leave-help-card,
+.leave-page .leave-user-trigger,
+.leave-page .leave-user-dropdown,
+.timesheet-day-cell,
+.wc-timesheet-mobile-card,
+.dashboard-alert-card {
+  border-radius: var(--wc-radius);
+}
+
+.leave-calendar-grid,
+.leave-calendar-grid-compact {
+  gap: 8px;
+}
+
+.leave-cell {
+  border-radius: 14px;
+  border-color: rgba(127, 145, 173, 0.18);
+}
+
+.vehicle-live-route-card__mapWrap,
+.vehicle-live-route-card__empty,
+.vehicle-gps-map-card .leaflet-container,
+.vehicle-gps-map-page .leaflet-container {
+  border-radius: var(--wc-radius);
+}
+
+.voice-assistant__fab,
+.floating-quick-links__button {
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.2);
+}
+
+.voice-assistant__fab {
+  background: linear-gradient(135deg, #2563eb, #0f766e);
+}
+
+.voice-assistant__panel {
+  width: min(400px, calc(100vw - 96px));
+  border: 1px solid rgba(127, 145, 173, 0.28);
+  border-radius: var(--wc-radius-lg);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.voice-assistant__header,
+.voice-assistant__body,
+.voice-assistant__manual {
+  background: transparent;
+}
+
+.voice-assistant__header {
+  padding: 15px 16px 13px;
+}
+
+.voice-assistant__body {
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.voice-assistant__transcript,
+.voice-assistant__intent-card,
+.voice-assistant__confirmation-card,
+.voice-assistant__choices,
+.voice-assistant__history-item {
+  border-radius: var(--wc-radius-sm);
+}
+
+.voice-assistant__confirmation-card,
+.voice-assistant__choices {
+  background: #f8fbff;
+}
+
+.voice-assistant__choices button {
+  min-height: 44px;
+  border-radius: var(--wc-radius-sm);
+}
+
+.voice-assistant__actions {
+  padding: 0 16px 14px;
+}
+
+.voice-assistant__actions .primary-btn,
+.voice-assistant__actions .secondary-btn {
+  min-height: 42px;
+}
+
+.voice-assistant__manual {
+  grid-template-columns: 1fr 42px;
+  padding: 14px 16px 16px;
+}
+
+.voice-assistant__manual button {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--wc-radius-sm);
+}
+
+@media (max-width: 980px) {
+  .content-grid,
+  .content-grid-halves,
+  .maintenance-dashboard-split,
+  .maintenance-report-steps,
+  .maintenance-client-grid,
+  .maintenance-branding-grid,
+  .expense-split-grid,
+  .expense-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi-grid,
+  .dashboard-kpi-grid,
+  .expense-kpi-grid,
+  .vehicle-gps-stats-grid,
+  .vehicle-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .page-section,
+  .wc-page {
+    gap: 14px;
+  }
+
+  .wc-page-header,
+  .wc-page-hero,
+  .panel,
+  .wc-card,
+  .wc-table-card,
+  .kpi-card,
+  .wc-kpi-card {
+    border-radius: 18px;
+  }
+
+  .panel-head,
+  .action-bar,
+  .wc-page-header,
+  .wc-page-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .kpi-grid,
+  .wc-kpi-grid,
+  .dashboard-kpi-grid,
+  .expense-kpi-grid,
+  .vehicle-gps-stats-grid,
+  .vehicle-info-grid,
+  .tool-form-grid,
+  .expense-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .primary-btn,
+  .secondary-btn,
+  .danger-btn,
+  .success-btn,
+  .page-quick-actions__item {
+    width: 100%;
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  .tool-form-actions,
+  .tools-header-actions,
+  .wc-page-hero__actions,
+  .dashboard-action-strip,
+  .expense-page-actions,
+  .vehicle-live-route-card__actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .users-table-wrap,
+  .expense-table-wrap,
+  .vehicle-live-table-wrap,
+  .wc-data-table-wrap {
+    margin-inline: -2px;
+  }
+
+  .vehicle-live-route-card__mapWrap,
+  .vehicle-gps-map-page .leaflet-container {
+    min-height: 320px;
+  }
+
+  .voice-assistant {
+    right: 10px;
+  }
+
+  .voice-assistant__panel,
+  .voice-assistant--open .voice-assistant__panel {
+    right: 58px;
+    width: min(350px, calc(100vw - 78px));
+    max-width: none;
+    border-radius: 18px;
+  }
+}

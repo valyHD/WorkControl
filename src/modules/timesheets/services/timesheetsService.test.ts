@@ -20,9 +20,30 @@ const firestoreMocks = vi.hoisted(() => ({
 const notificationMocks = vi.hoisted(() => ({
   dispatchNotificationEvent: vi.fn(),
 }));
+const callableMocks = vi.hoisted(() => ({
+  startTimesheetSecure: vi.fn(),
+  stopTimesheetSecure: vi.fn(),
+}));
 
 vi.mock("firebase/firestore", () => firestoreMocks);
-vi.mock("../../../lib/firebase/firebase", () => ({ db: { project: "test" } }));
+vi.mock("firebase/functions", () => ({
+  httpsCallable: (_functions: unknown, name: keyof typeof callableMocks) => callableMocks[name],
+}));
+vi.mock("../../../lib/firebase/firebase", () => ({
+  db: { project: "test" },
+  functions: { project: "test" },
+}));
+vi.mock("../../../lib/firebase/companyAccess", () => ({
+  buildCompanyScopeConstraints: () => [{ where: ["companyId", "==", "company-test"] }],
+  getCurrentCompanyAccessContext: vi.fn().mockResolvedValue({
+    uid: "user-test",
+    role: "angajat",
+    primaryCompanyId: "company-test",
+    companyIds: ["company-test"],
+    globalAdmin: false,
+  }),
+  requirePrimaryCompanyId: () => "company-test",
+}));
 vi.mock("../../notifications/services/notificationsService", () => notificationMocks);
 
 import {
@@ -78,27 +99,21 @@ describe("timesheetsService critical rules", () => {
     expect(stats.avgMinutesPerWorkedDayMonth).toBe(120);
   });
 
-  it("does not start a second timesheet while one is active", async () => {
-    firestoreMocks.getDocs.mockResolvedValue({
-      empty: false,
-      docs: [
-        {
-          id: "active-timesheet",
-          data: () => timesheet({ status: "activ", stopAt: null, workedMinutes: 0 }),
-        },
-      ],
+  it("returns the existing active timesheet when the server reports a duplicate start", async () => {
+    callableMocks.startTimesheetSecure.mockResolvedValue({
+      data: { timesheetId: "active-timesheet", duplicate: true },
     });
+    notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
-    await expect(
-      startTimesheet({
+    await expect(startTimesheet({
         userId: "user-test",
         userName: "Utilizator Test",
         projectId: "project-test",
         projectCode: "P-TEST",
         projectName: "Proiect Test",
         startLocation: { lat: null, lng: null, label: "Test" },
-      })
-    ).rejects.toThrow(/pontaj activ/i);
+      })).resolves.toBe("active-timesheet");
+    expect(callableMocks.startTimesheetSecure).toHaveBeenCalledTimes(1);
     expect(firestoreMocks.addDoc).not.toHaveBeenCalled();
   });
 
@@ -112,7 +127,9 @@ describe("timesheetsService critical rules", () => {
         startAt: Date.parse("2026-07-10T08:00:00.000Z"),
       }),
     });
-    firestoreMocks.updateDoc.mockResolvedValue(undefined);
+    callableMocks.stopTimesheetSecure.mockResolvedValue({
+      data: { duplicate: false, workedMinutes: 95, status: "inchis" },
+    });
     notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
     await stopTimesheet({
@@ -121,17 +138,23 @@ describe("timesheetsService critical rules", () => {
       stopLocation: { lat: null, lng: null, label: "Test" },
     });
 
-    expect(firestoreMocks.updateDoc).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ workedMinutes: 95, stopAt: Date.parse("2026-07-10T09:35:00.000Z") })
-    );
+    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
+      timesheetId: "timesheet-1",
+      occurredAt: undefined,
+      stopExplanation: "Test oprire",
+    }));
+    expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
   });
 
   it("preserves valid offline start and stop timestamps", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-10T10:00:00.000Z"));
-    firestoreMocks.getDocs.mockResolvedValue({ empty: true, docs: [] });
-    firestoreMocks.addDoc.mockResolvedValue({ id: "offline-timesheet" });
+    callableMocks.startTimesheetSecure.mockResolvedValue({
+      data: { timesheetId: "offline-timesheet", duplicate: false },
+    });
+    callableMocks.stopTimesheetSecure.mockResolvedValue({
+      data: { duplicate: false, workedMinutes: 90, status: "inchis" },
+    });
     notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
     const startedAt = Date.parse("2026-07-10T08:15:00.000Z");
@@ -144,10 +167,9 @@ describe("timesheetsService critical rules", () => {
       startLocation: { lat: null, lng: null, label: "Offline" },
       occurredAt: startedAt,
     });
-    expect(firestoreMocks.addDoc).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ startAt: startedAt, createdAt: startedAt })
-    );
+    expect(callableMocks.startTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
+      occurredAt: startedAt,
+    }));
 
     firestoreMocks.getDoc.mockResolvedValue({
       exists: () => true,
@@ -160,10 +182,9 @@ describe("timesheetsService critical rules", () => {
       stopLocation: { lat: null, lng: null, label: "Offline" },
       occurredAt: stoppedAt,
     });
-    expect(firestoreMocks.updateDoc).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ stopAt: stoppedAt, workedMinutes: 90 })
-    );
+    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
+      occurredAt: stoppedAt,
+    }));
   });
 
   it("bounds the manager list query", async () => {
@@ -174,6 +195,7 @@ describe("timesheetsService critical rules", () => {
     expect(firestoreMocks.limit).toHaveBeenCalledWith(1500);
     expect(firestoreMocks.query).toHaveBeenCalledWith(
       expect.anything(),
+      expect.objectContaining({ where: ["companyId", "==", "company-test"] }),
       expect.objectContaining({ orderBy: ["startAt", "desc"] }),
       expect.objectContaining({ limit: 1500 })
     );

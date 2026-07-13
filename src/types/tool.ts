@@ -30,6 +30,7 @@ export interface ToolImageItem {
 
 export interface ToolItem {
   id: string;
+  companyId?: string;
   name: string;
   internalCode: string;
   qrCodeValue: string;
@@ -84,6 +85,7 @@ export interface ToolEventItem {
 }
 
 export interface ToolFormValues {
+  companyId?: string;
   name: string;
   internalCode: string;
   qrCodeValue: string;

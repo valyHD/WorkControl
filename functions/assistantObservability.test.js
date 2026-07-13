@@ -129,7 +129,7 @@ test("integration keeps Firestore writes server-owned and OpenAI bodies out of l
   );
   assert.match(
     rules,
-    /match \/aiCommandLogs\/\{traceId\}[\s\S]*allow read: if isAdminUser\(\);[\s\S]*allow write: if false;/
+    /match \/aiCommandLogs\/\{traceId\}[\s\S]*allow read: if sameCompanyData\(resource\.data\)[\s\S]*managerFor\(resource\.data\.get\('companyId', ''\)\)[\s\S]*ownerUserId[\s\S]*allow write: if false;/
   );
   assert.match(
     indexes,

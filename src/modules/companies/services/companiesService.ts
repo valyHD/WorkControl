@@ -1,6 +1,5 @@
 import {
   arrayRemove,
-  arrayUnion,
   collectionGroup,
   collection,
   deleteDoc,
@@ -14,7 +13,12 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "../../../lib/firebase/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
 import type {
   CompanyFormValues,
   CompanyItem,
@@ -95,7 +99,12 @@ function mapCompanyDoc(id: string, data: Record<string, unknown>): CompanyItem {
 }
 
 export async function getCompaniesList(): Promise<CompanyItem[]> {
-  const snap = await getDocs(query(companiesCollection, orderBy("companyName", "asc")));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    companiesCollection,
+    ...buildCompanyScopeConstraints(context),
+    orderBy("companyName", "asc")
+  ));
   return snap.docs
     .map((docItem) => mapCompanyDoc(docItem.id, docItem.data() as Record<string, unknown>))
     .filter((item) => item.companyName);
@@ -113,6 +122,7 @@ export async function saveCompany(values: CompanyFormValues, users: AppUser[]): 
     .filter(Boolean) as AppUser[];
   const now = Date.now();
   const payload = {
+    companyId: companyKey,
     companyName,
     companyKey,
     legalName: values.legalName.trim(),
@@ -141,24 +151,13 @@ export async function saveCompany(values: CompanyFormValues, users: AppUser[]): 
     { merge: true }
   );
 
-  await Promise.all(
-    assignedUsers.map((user) =>
-      setDoc(
-        doc(db, "users", user.id),
-        {
-          companyIds: arrayUnion(companyKey),
-          companyNames: arrayUnion(companyName),
-          primaryCompanyId: companyKey,
-          primaryCompanyName: companyName,
-          updatedAt: now,
-          updatedAtServer: serverTimestamp(),
-        },
-        { merge: true }
-      ).catch((error) => {
-        console.warn("[saveCompany][mirror user]", error);
-      })
-    )
-  );
+  if (assignedUsers.length > 0) {
+    const assignUsers = httpsCallable<
+      { companyId: string; userIds: string[] },
+      { companyId: string; assignedCount: number }
+    >(functions, "assignUsersToCompany");
+    await assignUsers({ companyId: companyKey, userIds: assignedUsers.map((user) => user.id) });
+  }
 
   return {
     id: companyKey,
@@ -172,33 +171,35 @@ export async function setUserPrimaryCompany(params: {
   company: Pick<CompanyItem, "companyKey" | "companyName"> | null;
 }): Promise<void> {
   if (!params.userId) return;
-  const now = Date.now();
-  if (!params.company) {
-    await setDoc(
-      doc(usersCollection, params.userId),
-      {
-        primaryCompanyId: deleteField(),
-        primaryCompanyName: deleteField(),
-        updatedAt: now,
-        updatedAtServer: serverTimestamp(),
-      },
-      { merge: true }
-    );
-    return;
-  }
+  if (!params.company) throw new Error("Selecteaza o firma asignata contului.");
+  const setPrimary = httpsCallable<
+    { companyId: string },
+    { companyId: string; companyName: string }
+  >(functions, "setPrimaryCompany");
+  await setPrimary({ companyId: params.company.companyKey });
+}
 
-  await setDoc(
-    doc(usersCollection, params.userId),
-    {
-      companyIds: arrayUnion(params.company.companyKey),
-      companyNames: arrayUnion(params.company.companyName),
-      primaryCompanyId: params.company.companyKey,
-      primaryCompanyName: params.company.companyName,
-      updatedAt: now,
-      updatedAtServer: serverTimestamp(),
-    },
-    { merge: true }
+export type CompanyChoice = {
+  companyId: string;
+  companyName: string;
+};
+
+export async function getAvailableCompanyChoices(): Promise<CompanyChoice[]> {
+  const loadChoices = httpsCallable<void, { companies: CompanyChoice[] }>(
+    functions,
+    "listCompanyChoices"
   );
+  const result = await loadChoices();
+  return Array.isArray(result.data.companies) ? result.data.companies : [];
+}
+
+export async function claimInitialCompany(companyId: string): Promise<CompanyChoice> {
+  const claimCompany = httpsCallable<{ companyId: string }, CompanyChoice>(
+    functions,
+    "claimInitialCompany"
+  );
+  const result = await claimCompany({ companyId });
+  return result.data;
 }
 
 async function commitBatchItems(
@@ -212,6 +213,8 @@ async function commitBatchItems(
 }
 
 export async function deleteCompanyEverywhere(company: CompanyItem): Promise<void> {
+  const context = await getCurrentCompanyAccessContext();
+  if (!context.globalAdmin) throw new Error("Numai administratorul global poate sterge o firma.");
   const companyKey = company.companyKey || company.id;
   const companyName = company.companyName.trim();
   if (!companyKey || !companyName) {
@@ -297,6 +300,8 @@ export async function getCompanyDirectoryData(): Promise<{
   leaveRequests: LeaveRequestItem[];
   maintenanceReports: CompanyMaintenanceReportLite[];
 }> {
+  const context = await getCurrentCompanyAccessContext();
+  const scope = buildCompanyScopeConstraints(context);
   const companies = await getCompaniesList();
   const [
     users,
@@ -310,12 +315,24 @@ export async function getCompanyDirectoryData(): Promise<{
   ] = await Promise.all([
     optionalLoad("users", getExpenseUsers, []),
     optionalLoad("expenses", getExpenseDocuments, []),
-    optionalLoad("maintenance clients", () => getDocs(query(maintenanceClientsCollection, orderBy("name", "asc"))), null),
+    optionalLoad("maintenance clients", () => getDocs(query(
+      maintenanceClientsCollection,
+      ...scope,
+      orderBy("name", "asc")
+    )), null),
     optionalLoad("tools", getToolsList, []),
     optionalLoad("vehicles", getVehiclesList, []),
     optionalLoad("timesheets", getTimesheetsList, []),
-    optionalLoad("leave requests", () => getDocs(query(leaveRequestsCollection, orderBy("createdAt", "desc"))), null),
-    optionalLoad("maintenance reports", () => getDocs(query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"))), null),
+    optionalLoad("leave requests", () => getDocs(query(
+      leaveRequestsCollection,
+      ...scope,
+      orderBy("createdAt", "desc")
+    )), null),
+    optionalLoad("maintenance reports", () => getDocs(query(
+      collectionGroup(db, "rapoarte"),
+      ...scope,
+      orderBy("createdAt", "desc")
+    )), null),
   ]);
 
   return {
@@ -326,6 +343,7 @@ export async function getCompanyDirectoryData(): Promise<{
       const data = docItem.data() as Record<string, unknown>;
       return {
         id: docItem.id,
+        companyId: toText(data.companyId),
         name: toText(data.name),
         maintenanceCompany: toText(data.maintenanceCompany),
       };

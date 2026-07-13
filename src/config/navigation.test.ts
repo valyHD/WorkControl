@@ -3,6 +3,7 @@ import {
   NAVIGATION_ITEMS,
   getNavigationItemForPath,
   getNavigationItemsForRole,
+  isNavigationItemActive,
 } from "./navigation";
 import { getPageExperience } from "./pageExperience";
 
@@ -40,5 +41,20 @@ describe("navigation registry", () => {
     expect(getPageExperience("/vehicles/vehicle-1/edit")?.id).toBe("vehicles-edit");
     expect(getPageExperience("/users/user-1")?.id).toBe("users-details");
     expect(getPageExperience("/control-panel/ui-lab")?.requiredRole).toBe("admin");
+  });
+
+  it("keeps special active-state rules inside the navigation registry", () => {
+    expect(isNavigationItemActive({
+      pathname: "/vehicles/vehicle-1",
+      search: "?view=my-vehicle",
+      itemPath: "/my-vehicle",
+      routerIsActive: false,
+    })).toBe(true);
+    expect(isNavigationItemActive({
+      pathname: "/maintenance/orders",
+      search: "",
+      itemPath: "/maintenance",
+      routerIsActive: true,
+    })).toBe(false);
   });
 });

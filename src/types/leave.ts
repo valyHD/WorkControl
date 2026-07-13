@@ -4,6 +4,7 @@ export type LeaveRequestStatus = "in_asteptare" | "aprobat" | "respins";
 
 export interface LeaveRequestItem {
   id: string;
+  companyId?: string;
   userId: string;
   userName: string;
   userEmail: string;

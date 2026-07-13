@@ -26,7 +26,7 @@ import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
-import { DetailsDrawer, PageHeader, PageLayout } from "../../../components/experience";
+import { DetailsDrawer, LoadingState, PageHeader, PageLayout, PermissionState } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
@@ -599,19 +599,17 @@ export default function TimesheetsPage() {
 
   if (role !== "admin" && role !== "manager") {
     return (
-      <div className="placeholder-page">
-        <h2>Acces restrictionat</h2>
-        <p>Dashboard-ul global de pontaje este disponibil doar pentru admin sau manager.</p>
-      </div>
+      <PageLayout className="timesheets-management-page">
+        <PermissionState message="Dashboard-ul global de pontaje este disponibil doar pentru admin sau manager." />
+      </PageLayout>
     );
   }
 
   if (loading) {
     return (
-      <div className="placeholder-page">
-        <h2>Se incarca pontajele...</h2>
-        <p>Preluam datele reale din Firebase.</p>
-      </div>
+      <PageLayout className="timesheets-management-page">
+        <LoadingState title="Se incarca pontajele" description="Pregatim situatia echipei si proiectelor." />
+      </PageLayout>
     );
   }
 

@@ -34,6 +34,10 @@ import { getVehiclesList } from "../../vehicles/services/vehiclesService";
 import { getUserById } from "../services/usersService";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
 
 type ProfileData = {
   user: AppUserItem;
@@ -257,7 +261,13 @@ async function getMaintenanceReportsForUser(user: AppUserItem) {
   const emailName = normalizeText((user.email || "").split("@")[0] || "");
 
   try {
-    const snap = await getDocs(query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(100)));
+    const context = await getCurrentCompanyAccessContext();
+    const snap = await getDocs(query(
+      collectionGroup(db, "rapoarte"),
+      ...buildCompanyScopeConstraints(context),
+      orderBy("createdAt", "desc"),
+      limit(100)
+    ));
     return snap.docs
       .map((docItem) => mapMaintenanceReport(docItem.id, docItem.data() as Record<string, unknown>))
       .filter((report) => {

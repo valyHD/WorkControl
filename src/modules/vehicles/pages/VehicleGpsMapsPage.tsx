@@ -30,11 +30,14 @@ import {
 } from "../services/fleetRouteSync";
 import {
   filterRouteRenderJitter,
-  filterStationaryGpsJitter,
   filterTrackableRoutePositions,
   samplePositions,
   sanitizePositions,
 } from "../utils/vehicleGps";
+import {
+  splitVisibleRealGpsSegments,
+  type HiddenGpsInterval,
+} from "../utils/vehicleRouteVisibility";
 import {
   appendLiveTrailPoint,
   getRenderableLiveTrail,
@@ -331,14 +334,14 @@ function mapSavedRouteSegments(vehicle: VehicleItem, fromTs: number, toTs: numbe
 }
 
 function getHiddenIntervals(vehicle: VehicleItem, now: number) {
-  const intervals: Array<{ from: number; to: number }> = [];
+  const intervals: HiddenGpsInterval[] = [];
 
   for (const route of vehicle.gpsSimHistory ?? []) {
     const points = route.points ?? [];
     const firstTs = route.startedAt || points[0]?.ts || 0;
     const lastTs = route.stoppedAt || points[points.length - 1]?.ts || 0;
     if (firstTs > 0 && lastTs > firstTs) {
-      intervals.push({ from: firstTs, to: lastTs });
+      intervals.push({ startTs: firstTs, endTs: lastTs });
     }
   }
 
@@ -350,33 +353,11 @@ function getHiddenIntervals(vehicle: VehicleItem, now: number) {
       startTs + Math.max(totalMs, 24 * 60 * 60 * 1000)
     );
     if (startTs > 0 && endTs > startTs) {
-      intervals.push({ from: startTs, to: endTs });
+      intervals.push({ startTs, endTs });
     }
   }
 
   return intervals;
-}
-
-function filterHiddenRealPositions(
-  positions: VehiclePositionItem[],
-  intervals: Array<{ from: number; to: number }>
-) {
-  if (!positions.length || !intervals.length) return positions;
-
-  return positions.filter(
-    (point) =>
-      !intervals.some(
-        (interval) => point.gpsTimestamp >= interval.from && point.gpsTimestamp <= interval.to
-      )
-  );
-}
-
-function crossesHiddenInterval(
-  prevTs: number,
-  nextTs: number,
-  intervals: Array<{ from: number; to: number }>
-) {
-  return intervals.some((interval) => prevTs < interval.from && nextTs > interval.to);
 }
 
 function routePointDistanceKm(a: VehiclePositionItem, b: VehiclePositionItem) {
@@ -462,7 +443,7 @@ function shouldPreferFallbackRealRouteSegment(
 
 function isRouteSegmentNearHiddenBoundary(
   segment: VehiclePositionItem[],
-  intervals: Array<{ from: number; to: number }>
+  intervals: HiddenGpsInterval[]
 ) {
   const first = segment[0];
   const last = segment[segment.length - 1];
@@ -470,14 +451,14 @@ function isRouteSegmentNearHiddenBoundary(
 
   return intervals.some(
     (interval) =>
-      Math.abs(last.gpsTimestamp - interval.from) <= REAL_ROUTE_BOUNDARY_CLEANUP_MS ||
-      Math.abs(first.gpsTimestamp - interval.to) <= REAL_ROUTE_BOUNDARY_CLEANUP_MS
+      Math.abs(last.gpsTimestamp - interval.startTs) <= REAL_ROUTE_BOUNDARY_CLEANUP_MS ||
+      Math.abs(first.gpsTimestamp - interval.endTs) <= REAL_ROUTE_BOUNDARY_CLEANUP_MS
   );
 }
 
 function filterBoundaryRealRouteSegments(
   segments: VehiclePositionItem[][],
-  intervals: Array<{ from: number; to: number }>
+  intervals: HiddenGpsInterval[]
 ) {
   if (!segments.length || !intervals.length) return segments;
 
@@ -501,30 +482,12 @@ function filterBoundaryRealRouteSegments(
 
 function splitVisibleRealRouteSegments(
   positions: VehiclePositionItem[],
-  intervals: Array<{ from: number; to: number }>
+  intervals: HiddenGpsInterval[]
 ) {
-  const visible = filterStationaryGpsJitter(filterHiddenRealPositions(positions, intervals));
-  if (!visible.length) return [];
-
-  const segments: VehiclePositionItem[][] = [];
-  let current: VehiclePositionItem[] = [];
-
-  for (const point of visible) {
-    const previous = current[current.length - 1];
-    if (
-      previous &&
-      crossesHiddenInterval(previous.gpsTimestamp, point.gpsTimestamp, intervals)
-    ) {
-      if (current.length) segments.push(current);
-      current = [point];
-      continue;
-    }
-
-    current.push(point);
-  }
-
-  if (current.length) segments.push(current);
-  return filterBoundaryRealRouteSegments(segments, intervals);
+  return filterBoundaryRealRouteSegments(
+    splitVisibleRealGpsSegments(positions, intervals),
+    intervals
+  );
 }
 
 function getRoutePointSpeedKmh(point: VehiclePositionItem) {

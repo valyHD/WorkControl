@@ -26,7 +26,18 @@ import {
   ref,
   uploadBytes,
 } from "firebase/storage";
-import { db, functions, storage } from "../../../lib/firebase/firebase";
+import { auth, db, functions, storage } from "../../../lib/firebase/firebase";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
+import {
+  buildCompanyScopeConstraints,
+  buildUserDirectoryConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
+import {
+  getUserDirectoryCollectionName,
+  getVehicleDirectoryCollectionName,
+} from "../../../lib/firebase/companyIsolationRollout";
 import type {
   VehicleCommandItem,
   VehicleCommandStatus,
@@ -58,7 +69,9 @@ import { dispatchNotificationEvent } from "../../notifications/services/notifica
 import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 
 const vehiclesCollection = collection(db, "vehicles");
+const vehicleOperationalViewsCollection = collection(db, "vehicleOperationalViews");
 const vehicleEventsCollection = collection(db, "vehicleEvents");
+const userOperationalViewsCollection = collection(db, "userOperationalViews");
 const usersCollection = collection(db, "users");
 const vehicleGpsVisibilityRef = doc(db, "systemSettings", "vehicleGpsVisibility");
 
@@ -425,6 +438,7 @@ function mapVehicleDailyDiagnosticsSummary(
 
   return {
     id,
+    companyId: toSafeString(data.companyId),
     vehicleId: toSafeString(data.vehicleId),
     dayKey: toSafeString(data.dayKey, id),
     imei: toSafeString(data.imei),
@@ -1119,35 +1133,121 @@ async function resizeImage(
 }
 
 export async function getVehicleUsers(): Promise<AppUser[]> {
-  const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc")));
+  const context = await getCurrentCompanyAccessContext();
+  const source = getUserDirectoryCollectionName() === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
+  const usersQuery = query(
+    source,
+    ...buildUserDirectoryConstraints(context),
+    orderBy("fullName", "asc"),
+    limit(250)
+  );
+  const snap = await getDocs(usersQuery);
 
-  return snap.docs.map((docItem) => ({
-    id: docItem.id,
-    uid: toSafeString(docItem.data().uid),
-    themeKey: docItem.data().themeKey ?? null,
-    fullName: toSafeString(docItem.data().fullName, "Utilizator fara nume"),
-    email: toSafeString(docItem.data().email),
-    active: docItem.data().active ?? true,
-    role: toSafeString(docItem.data().role),
-  }));
+  const users = new Map<string, AppUser>();
+  snap.docs.forEach((docItem) => {
+    const uid = toSafeString(docItem.data().uid, docItem.id);
+    users.set(uid, {
+      id: uid,
+      uid,
+      themeKey: docItem.data().themeKey ?? null,
+      fullName: toSafeString(docItem.data().fullName, "Utilizator fara nume"),
+      email: toSafeString(docItem.data().email),
+      active: docItem.data().active ?? true,
+      role: toSafeString(docItem.data().role),
+    });
+  });
+  return [...users.values()];
 }
 
-export async function getVehiclesList(): Promise<VehicleItem[]> {
-  const snap = await getDocs(query(vehiclesCollection, orderBy("plateNumber", "asc")));
-  return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
+export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
+  const context = await getCurrentCompanyAccessContext();
+  const resultLimit = clampQueryLimit(maxItems, 250, 250);
+  const source = getVehicleDirectoryCollectionName() === "vehicleOperationalViews"
+    ? vehicleOperationalViewsCollection
+    : vehiclesCollection;
+  if (context.role !== "angajat") {
+    const snap = await getDocs(query(
+      source,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("plateNumber", "asc"),
+      limit(resultLimit)
+    ));
+    return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
+  }
+  const assignmentFields = ["ownerUserId", "currentDriverUserId", "pendingDriverUserId"] as const;
+  const snapshots = await Promise.all(assignmentFields.map((field) => getDocs(query(
+    source,
+    ...buildCompanyScopeConstraints(context),
+    where(field, "==", context.uid),
+    limit(resultLimit)
+  ))));
+  const unique = new Map<string, VehicleItem>();
+  snapshots.forEach((snap) => snap.docs.forEach((docItem) => {
+    unique.set(docItem.id, mapVehicleDoc(docItem.id, docItem.data()));
+  }));
+  return [...unique.values()].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber));
 }
 
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
-  return onSnapshot(
-    query(vehiclesCollection, orderBy("plateNumber", "asc"), limit(250)),
-    (snap) => {
-      onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
-    },
-    (error) => {
-      console.error("[subscribeVehiclesList]", error);
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext()
+    .then((context) => {
+      if (cancelled) return;
+      const source = getVehicleDirectoryCollectionName() === "vehicleOperationalViews"
+        ? vehicleOperationalViewsCollection
+        : vehiclesCollection;
+      if (context.role !== "angajat") {
+        unsubscribe = onSnapshot(
+          query(
+            source,
+            ...buildCompanyScopeConstraints(context),
+            orderBy("plateNumber", "asc"),
+            limit(250)
+          ),
+          (snap) => onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()))),
+          (error) => {
+            console.error("[subscribeVehiclesList]", error);
+            onData([]);
+          }
+        );
+        return;
+      }
+      const assignmentFields = ["ownerUserId", "currentDriverUserId", "pendingDriverUserId"] as const;
+      const resultSets = assignmentFields.map(() => new Map<string, VehicleItem>());
+      const emit = () => {
+        const unique = new Map<string, VehicleItem>();
+        resultSets.forEach((items) => items.forEach((item, id) => unique.set(id, item)));
+        onData([...unique.values()].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber)));
+      };
+      const subscriptions = assignmentFields.map((field, index) => onSnapshot(
+        query(
+          source,
+          ...buildCompanyScopeConstraints(context),
+          where(field, "==", context.uid),
+          limit(250)
+        ),
+        (snap) => {
+          resultSets[index] = new Map(snap.docs.map((docItem) => [
+            docItem.id,
+            mapVehicleDoc(docItem.id, docItem.data()),
+          ]));
+          emit();
+        },
+        (error) => console.error(`[subscribeVehiclesList][${field}]`, error)
+      ));
+      unsubscribe = () => subscriptions.forEach((stop) => stop());
+    })
+    .catch((error) => {
+      console.error("[subscribeVehiclesList][company]", error);
       onData([]);
-    }
-  );
+    });
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
@@ -1162,10 +1262,14 @@ export async function getVehicleById(vehicleId: string): Promise<VehicleItem | n
 export async function getMyVehicleForUser(userId: string): Promise<VehicleItem | null> {
   if (!userId) return null;
 
+  const context = await getCurrentCompanyAccessContext();
+  const scope = buildCompanyScopeConstraints(context);
+
   const [driverSnap, ownerSnap] = await Promise.all([
     getDocs(
       query(
         vehiclesCollection,
+        ...scope,
         where("currentDriverUserId", "==", userId),
         orderBy("updatedAt", "desc"),
         limit(1)
@@ -1174,6 +1278,7 @@ export async function getMyVehicleForUser(userId: string): Promise<VehicleItem |
     getDocs(
       query(
         vehiclesCollection,
+        ...scope,
         where("ownerUserId", "==", userId),
         orderBy("updatedAt", "desc"),
         limit(1)
@@ -1277,8 +1382,15 @@ export async function isPlateNumberUsed(
   const clean = normalizePlateNumber(plateNumber);
   if (!clean) return false;
 
+  const context = await getCurrentCompanyAccessContext();
+
   const snap = await getDocs(
-    query(vehiclesCollection, where("plateNumber", "==", clean), limit(10))
+    query(
+      vehiclesCollection,
+      ...buildCompanyScopeConstraints(context),
+      where("plateNumber", "==", clean),
+      limit(10)
+    )
   );
 
   if (snap.empty) return false;
@@ -1294,9 +1406,12 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
     plateNumber: normalizePlateNumber(values.plateNumber),
     initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
   };
+  const companyId =
+    values.companyId || requirePrimaryCompanyId(await getCurrentCompanyAccessContext());
 
   const refDoc = await addDoc(vehiclesCollection, {
     ...savedValues,
+    companyId,
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -1351,11 +1466,48 @@ export async function updateVehicle(
     vehicleAuditFields
   );
 
+  const protectedAssignmentsChanged =
+    toSafeString(existingData?.ownerUserId) !== savedValues.ownerUserId ||
+    toSafeString(existingData?.currentDriverUserId) !== savedValues.currentDriverUserId;
+  const protectedMileageChanged =
+    toSafeNumber(existingData?.currentKm, 0) !== savedValues.currentKm ||
+    toSafeNumber(existingData?.initialRecordedKm, 0) !== savedValues.initialRecordedKm;
+  const directValues: Record<string, unknown> = { ...savedValues };
+  [
+    "currentKm",
+    "initialRecordedKm",
+    "ownerUserId",
+    "ownerUserName",
+    "ownerThemeKey",
+    "currentDriverUserId",
+    "currentDriverUserName",
+    "currentDriverThemeKey",
+    "pendingDriverUserId",
+    "pendingDriverUserName",
+    "pendingDriverThemeKey",
+    "pendingDriverRequestedAt",
+  ].forEach((field) => delete directValues[field]);
+
   await updateDoc(doc(db, "vehicles", vehicleId), {
-    ...savedValues,
+    ...directValues,
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
+
+  if (protectedAssignmentsChanged) {
+    const setAssignments = httpsCallable<
+      { vehicleId: string; ownerUserId: string; currentDriverUserId: string },
+      { vehicleId: string }
+    >(functions, "setVehicleAssignments");
+    await setAssignments({
+      vehicleId,
+      ownerUserId: savedValues.ownerUserId,
+      currentDriverUserId: savedValues.currentDriverUserId,
+    });
+  }
+  if (protectedMileageChanged) {
+    await updateVehicleMileage(vehicleId, savedValues.currentKm, savedValues.initialRecordedKm);
+  }
 
   await addVehicleEvent(
     vehicleId,
@@ -1405,11 +1557,6 @@ export async function updateVehicle(
     });
   }
 
-  await runVehicleMaintenanceAlerts({
-    userId: values.ownerUserId,
-    userName: values.ownerUserName || "Responsabil",
-    userThemeKey: values.ownerThemeKey ?? null,
-  }).catch((error) => console.error("[updateVehicle][maintenanceAlerts]", error));
 }
 
 export async function addVehicleEvent(
@@ -1422,11 +1569,12 @@ export async function addVehicleEvent(
     actorUserThemeKey?: string | null;
   }
 ): Promise<void> {
+  const actorUserId = actor?.actorUserId || auth.currentUser?.uid || "";
   await addDoc(vehicleEventsCollection, {
     vehicleId,
     type,
     message,
-    actorUserId: actor?.actorUserId ?? "",
+    actorUserId,
     actorUserName: actor?.actorUserName ?? "",
     actorUserThemeKey: actor?.actorUserThemeKey ?? null,
     createdAt: Date.now(),
@@ -1746,7 +1894,6 @@ export async function saveVehicleDocuments(
     ownerUserId: toSafeString(data?.ownerUserId),
   });
 
-  await runVehicleMaintenanceAlerts().catch((error) => console.error("[saveVehicleDocuments][maintenanceAlerts]", error));
 }
 
 export async function removeVehicleDocument(
@@ -1897,117 +2044,28 @@ export async function changeVehicleDriver(
   nextDriverUserName: string,
   nextDriverThemeKey: string | null
 ): Promise<void> {
-  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
-  if (!vehicleSnap.exists()) return;
-
-  const vehicleData = vehicleSnap.data();
-  const plateNumber = toSafeString(vehicleData.plateNumber, "Masina");
-  const previousDriverUserId = toSafeString(vehicleData.currentDriverUserId);
-
-  if (nextDriverUserId) {
-    await updateDoc(doc(db, "vehicles", vehicleId), {
-      pendingDriverUserId: nextDriverUserId,
-      pendingDriverUserName: nextDriverUserName || "",
-      pendingDriverThemeKey: nextDriverThemeKey ?? null,
-      pendingDriverRequestedAt: Date.now(),
-      updatedAt: Date.now(),
-      updatedAtServer: serverTimestamp(),
-    });
-
-    await addVehicleEvent(
-      vehicleId,
-      "driver_changed",
-      `A fost trimisa o solicitare catre ${nextDriverUserName} pentru preluarea masinii.`
-    );
-
-    await dispatchNotificationEvent({
-      module: "vehicles",
-      eventType: "vehicle_driver_changed",
-      entityId: vehicleId,
-      title: "Solicitare preluare masina",
-      message: `Masina ${plateNumber} ti-a fost asignata. Accepta solicitarea pentru a deveni sofer curent.`,
-      directUserId: nextDriverUserId,
-      ownerUserId: toSafeString(vehicleData.ownerUserId),
-      actorUserId: toSafeString(vehicleData.ownerUserId),
-      actorUserName: toSafeString(vehicleData.ownerUserName, "Responsabil"),
-      actorUserThemeKey: vehicleData.ownerThemeKey ?? null,
-    });
-    return;
-  }
-
-  await updateDoc(doc(db, "vehicles", vehicleId), {
-    currentDriverUserId: "",
-    currentDriverUserName: "",
-    currentDriverThemeKey: null,
-    pendingDriverUserId: "",
-    pendingDriverUserName: "",
-    pendingDriverThemeKey: null,
-    pendingDriverRequestedAt: 0,
-    updatedAt: Date.now(),
-    updatedAtServer: serverTimestamp(),
-  });
-
-  await addVehicleEvent(vehicleId, "driver_changed", "Masina nu mai are sofer curent alocat.");
-
-  await dispatchNotificationEvent({
-    module: "vehicles",
-    eventType: "vehicle_driver_changed",
-    entityId: vehicleId,
-    title: "Sofer masina schimbat",
-    message: `Masina ${plateNumber} nu mai are sofer curent alocat.`,
-    directUserId: previousDriverUserId || "",
-    ownerUserId: toSafeString(vehicleData.ownerUserId),
-    actorUserId: toSafeString(vehicleData.ownerUserId),
-    actorUserName: toSafeString(vehicleData.ownerUserName, "Responsabil"),
-    actorUserThemeKey: vehicleData.ownerThemeKey ?? null,
-  });
+  void nextDriverUserName;
+  void nextDriverThemeKey;
+  const callable = httpsCallable<
+    { vehicleId: string; nextDriverUserId: string },
+    { vehicleId: string; pendingDriverUserId: string }
+  >(functions, "requestVehicleTransfer");
+  await callable({ vehicleId, nextDriverUserId });
 }
 
 export async function acceptVehicleDriverChange(
   vehicleId: string,
   accepterUserId: string
 ): Promise<void> {
-  const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
-  if (!vehicleSnap.exists()) return;
-
-  const vehicleData = vehicleSnap.data();
-  const pendingDriverUserId = toSafeString(vehicleData.pendingDriverUserId);
-  if (!pendingDriverUserId || pendingDriverUserId !== accepterUserId) return;
-
-  const pendingDriverUserName = toSafeString(vehicleData.pendingDriverUserName);
-  const pendingDriverThemeKey = vehicleData.pendingDriverThemeKey ?? null;
-  const plateNumber = toSafeString(vehicleData.plateNumber, "Masina");
-
-  await updateDoc(doc(db, "vehicles", vehicleId), {
-    currentDriverUserId: pendingDriverUserId,
-    currentDriverUserName: pendingDriverUserName,
-    currentDriverThemeKey: pendingDriverThemeKey,
-    pendingDriverUserId: "",
-    pendingDriverUserName: "",
-    pendingDriverThemeKey: null,
-    pendingDriverRequestedAt: 0,
-    updatedAt: Date.now(),
-    updatedAtServer: serverTimestamp(),
-  });
-
-  await addVehicleEvent(
-    vehicleId,
-    "driver_changed",
-    `Solicitarea a fost acceptata. Masina este acum la ${pendingDriverUserName || "utilizator"}.`
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== accepterUserId) {
+    throw new Error("Solicitarea poate fi acceptata numai de destinatar.");
+  }
+  const callable = httpsCallable<{ vehicleId: string }, { vehicleId: string }>(
+    functions,
+    "acceptVehicleTransfer"
   );
-
-  await dispatchNotificationEvent({
-    module: "vehicles",
-    eventType: "vehicle_driver_changed",
-    entityId: vehicleId,
-    title: "Solicitare masina acceptata",
-    message: `Masina ${plateNumber} a fost acceptata de ${pendingDriverUserName || "utilizator"}.`,
-    directUserId: toSafeString(vehicleData.ownerUserId),
-    ownerUserId: toSafeString(vehicleData.ownerUserId),
-    actorUserId: pendingDriverUserId,
-    actorUserName: pendingDriverUserName || "Utilizator",
-    actorUserThemeKey: pendingDriverThemeKey ?? null,
-  });
+  await callable({ vehicleId });
 }
 
 export async function claimVehicleForCurrentUser(
@@ -2016,42 +2074,34 @@ export async function claimVehicleForCurrentUser(
   userName: string,
   userThemeKey: string | null
 ): Promise<void> {
-  await updateDoc(doc(db, "vehicles", vehicleId), {
-    ownerUserId: userId,
-    ownerUserName: userName,
-    ownerThemeKey: userThemeKey ?? null,
-    currentDriverUserId: userId,
-    currentDriverUserName: userName,
-    currentDriverThemeKey: userThemeKey ?? null,
-    updatedAt: Date.now(),
-    updatedAtServer: serverTimestamp(),
-  });
-
-  await addVehicleEvent(
-    vehicleId,
-    "claimed",
-    `Masina a fost preluata in responsabilitate de ${userName}.`
+  void userName;
+  void userThemeKey;
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== userId) throw new Error("Poti prelua vehiculul numai pentru tine.");
+  const callable = httpsCallable<{ vehicleId: string }, { vehicleId: string }>(
+    functions,
+    "claimVehicle"
   );
+  await callable({ vehicleId });
+}
 
-  await dispatchNotificationEvent({
-    module: "vehicles",
-    eventType: "vehicle_claimed",
-    entityId: vehicleId,
-    title: "Masina preluata",
-    message: `Masina a fost preluata de ${userName}.`,
-    directUserId: userId,
-    ownerUserId: userId,
-    actorUserId: userId,
-    actorUserName: userName,
-    actorUserThemeKey: userThemeKey,
-  });
+export async function updateVehicleMileage(
+  vehicleId: string,
+  currentKm: number,
+  initialRecordedKm?: number
+): Promise<void> {
+  assertValidVehicleKm(currentKm, "Km curenti");
+  if (initialRecordedKm !== undefined) assertValidVehicleKm(initialRecordedKm, "Km initiali");
+  const callable = httpsCallable<
+    { vehicleId: string; currentKm: number; initialRecordedKm?: number },
+    { vehicleId: string; currentKm: number }
+  >(functions, "updateVehicleMileage");
+  await callable({ vehicleId, currentKm, initialRecordedKm });
 }
 
 export async function deleteVehicle(vehicleId: string): Promise<void> {
   const snap = await getDoc(doc(db, "vehicles", vehicleId));
   const data = snap.exists() ? snap.data() : null;
-
-  await deleteDoc(doc(db, "vehicles", vehicleId));
 
   await dispatchNotificationEvent({
     module: "vehicles",
@@ -2061,6 +2111,7 @@ export async function deleteVehicle(vehicleId: string): Promise<void> {
     message: `Masina ${data?.plateNumber ?? vehicleId} a fost stearsa din sistem.`,
     ownerUserId: data?.ownerUserId ?? "",
   });
+  await deleteDoc(doc(db, "vehicles", vehicleId));
 }
 
 function mapVehiclePositionDoc(id: string, data: Record<string, any>): VehiclePositionItem {
@@ -2420,7 +2471,8 @@ async function getVehiclePositionsForDayInChunks(
   fromTs: number,
   toTs: number,
   pageSize = DEFAULT_ROUTE_PAGE_SIZE,
-  maxPages = DEFAULT_ROUTE_MAX_PAGES
+  maxPages = DEFAULT_ROUTE_MAX_PAGES,
+  chunkMs = PROGRESSIVE_ROUTE_CHUNK_MS
 ): Promise<VehiclePositionItem[]> {
   const dayStart = getDayStartTs(dayKey);
   const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
@@ -2430,7 +2482,7 @@ async function getVehiclePositionsForDayInChunks(
 
   const items: VehiclePositionItem[] = [];
 
-  for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs)) {
+  for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs, chunkMs)) {
     try {
       items.push(
         ...(await getVehiclePositionsForDay(
@@ -2813,6 +2865,36 @@ export async function getVehiclePositionsForSelectedDay(
     rangeItems.push(...flatItems);
   } catch (error) {
     console.warn("[getVehiclePositionsForSelectedDay][flatCollection]", error);
+  }
+
+  return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+}
+
+export async function getVehiclePositionsForSelectedDayChunked(
+  vehicleId: string,
+  fromTs: number,
+  toTs: number,
+  pageSize = 300,
+  maxPages = 12,
+  chunkMs = 2 * 60 * 60 * 1000
+): Promise<VehiclePositionItem[]> {
+  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
+    return [];
+  }
+
+  const rangeItems: VehiclePositionItem[] = [];
+  for (const dayKey of enumerateDayKeys(fromTs, toTs)) {
+    rangeItems.push(
+      ...(await getVehiclePositionsForDayInChunks(
+        vehicleId,
+        dayKey,
+        fromTs,
+        toTs,
+        pageSize,
+        maxPages,
+        chunkMs
+      ))
+    );
   }
 
   return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
@@ -3203,16 +3285,23 @@ export async function requestVehicleCommand(
     throw new Error("vehicleId lipsa");
   }
 
-  const created = await addDoc(collection(db, "vehicles", vehicleId, "commands"), {
+  const requestId = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+  const callable = httpsCallable<
+    {
+      vehicleId: string;
+      type: VehicleCommandType;
+      durationSec?: number | null;
+      requestId: string;
+    },
+    { commandId: string; duplicate: boolean; status: VehicleCommandStatus }
+  >(functions, "requestVehicleCommand");
+  const response = await callable({
+    vehicleId,
     type: payload.type,
-    status: "requested",
-    requestedBy: payload.requestedBy,
-    requestedAt: Date.now(),
-    completedAt: null,
-    providerMessage: "",
-    result: "queued",
     durationSec: payload.durationSec ?? null,
-    createdAtServer: serverTimestamp(),
+    requestId,
   });
 
   await dispatchNotificationEvent({
@@ -3239,122 +3328,6 @@ export async function requestVehicleCommand(
     actorUserName: payload.requestedBy,
   });
 
-  return created.id;
-}
-
-function parseDateToStartTs(dateString?: string): number | null {
-  if (!dateString) return null;
-  const ts = new Date(`${dateString}T00:00:00`).getTime();
-  return Number.isFinite(ts) ? ts : null;
-}
-
-function diffDaysFromToday(targetTs: number): number {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  return Math.ceil((targetTs - todayStart) / 86_400_000);
-}
-
-export async function runVehicleMaintenanceAlerts(
-  actor?: { userId?: string; userName?: string; userThemeKey?: string | null }
-): Promise<void> {
-  const vehicles = await getVehiclesList();
-  const todayKey = new Date().toISOString().slice(0, 10);
-
-  for (const vehicle of vehicles) {
-    const ownerUserId = vehicle.ownerUserId || "";
-    const directUserId = vehicle.currentDriverUserId || ownerUserId;
-
-    const effectiveKm = Math.max(vehicle.currentKm || 0, vehicle.gpsSnapshot?.odometerKm || 0);
-    const serviceTargets = [
-      { key: "service", label: "Revizie", value: vehicle.nextServiceKm, eventType: "vehicle_service_due_soon" as const },
-      { key: "oil", label: "Revizie ulei", value: vehicle.nextOilServiceKm, eventType: "vehicle_oil_service_due_soon" as const },
-    ];
-
-    for (const serviceInfo of serviceTargets) {
-      if (serviceInfo.value <= 0) continue;
-      const remainingKm = serviceInfo.value - effectiveKm;
-      if (remainingKm <= 500) {
-        const markerId = `${vehicle.id}_${serviceInfo.key}_${todayKey}`;
-        const markerRef = doc(db, "vehicleMaintenanceAlerts", markerId);
-        const marker = await getDoc(markerRef);
-
-        if (!marker.exists()) {
-          await dispatchNotificationEvent({
-            module: "vehicles",
-            eventType: serviceInfo.eventType,
-            entityId: vehicle.id,
-            title: `${serviceInfo.label} aproape scadenta`,
-            message: `Masina ${vehicle.plateNumber} se apropie de ${serviceInfo.label.toLowerCase()} (mai sunt ${Math.max(
-              remainingKm,
-              0
-            )} km).`,
-            directUserId,
-            ownerUserId,
-            actorUserId: actor?.userId ?? "",
-            actorUserName: actor?.userName ?? "WorkControl",
-            actorUserThemeKey: actor?.userThemeKey ?? null,
-          });
-          await setDoc(markerRef, {
-            createdAt: Date.now(),
-            type: serviceInfo.key,
-            vehicleId: vehicle.id,
-          });
-        }
-      }
-    }
-
-    const expiringDocs: Array<{
-      label: "ITP" | "RCA" | "CASCO" | "Rovinieta";
-      value: string;
-      key: string;
-    }> = [
-      { label: "ITP", value: vehicle.nextItpDate, key: "itp" },
-      { label: "RCA", value: vehicle.nextRcaDate, key: "rca" },
-      { label: "CASCO", value: vehicle.nextCascoDate, key: "casco" },
-      { label: "Rovinieta", value: vehicle.nextRovinietaDate, key: "rovinieta" },
-    ];
-
-    for (const docInfo of expiringDocs) {
-      const expiryTs = parseDateToStartTs(docInfo.value);
-      if (!expiryTs) continue;
-
-      const daysLeft = diffDaysFromToday(expiryTs);
-      if (daysLeft > 10) continue;
-
-      const markerId = `${vehicle.id}_${docInfo.key}_${todayKey}`;
-      const markerRef = doc(db, "vehicleMaintenanceAlerts", markerId);
-      const marker = await getDoc(markerRef);
-
-      if (marker.exists()) continue;
-
-      await dispatchNotificationEvent({
-        module: "vehicles",
-        eventType:
-          docInfo.key === "itp"
-            ? "vehicle_document_itp_due_soon"
-            : docInfo.key === "rca"
-              ? "vehicle_document_rca_due_soon"
-              : docInfo.key === "casco"
-                 ? "vehicle_document_casco_due_soon"
-                : "vehicle_document_rovinieta_due_soon",
-        entityId: vehicle.id,
-        title: `${docInfo.label} aproape de expirare`,
-        message: `Masina ${vehicle.plateNumber}: ${docInfo.label} expira in ${Math.max(
-          daysLeft,
-          0
-        )} zile (${docInfo.value}).`,
-        directUserId,
-        ownerUserId,
-        actorUserId: actor?.userId ?? "",
-        actorUserName: actor?.userName ?? "WorkControl",
-        actorUserThemeKey: actor?.userThemeKey ?? null,
-      });
-
-      await setDoc(markerRef, {
-        createdAt: Date.now(),
-        type: docInfo.key,
-        vehicleId: vehicle.id,
-      });
-    }
-  }
+  if (!response.data.commandId) throw new Error("Comanda nu a returnat un identificator valid.");
+  return response.data.commandId;
 }

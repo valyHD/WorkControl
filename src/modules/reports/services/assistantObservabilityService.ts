@@ -1,5 +1,9 @@
 import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
 
 export type AssistantObservabilityTrace = {
   id: string;
@@ -86,9 +90,15 @@ function parseTrace(id: string, raw: unknown): AssistantObservabilityTrace {
 }
 
 export async function getAssistantObservabilityTraces(maxItems = 100) {
+  const context = await getCurrentCompanyAccessContext();
   const boundedLimit = Math.max(1, Math.min(100, Math.floor(maxItems)));
   const snapshot = await getDocs(
-    query(collection(db, "aiCommandLogs"), orderBy("createdAtServer", "desc"), limit(boundedLimit))
+    query(
+      collection(db, "aiCommandLogs"),
+      ...buildCompanyScopeConstraints(context),
+      orderBy("createdAtServer", "desc"),
+      limit(boundedLimit)
+    )
   );
   return snapshot.docs.map((item) => parseTrace(item.id, item.data()));
 }

@@ -106,6 +106,7 @@ export interface NotificationRuleRecipients {
 
 export interface NotificationRuleItem {
   id: string;
+  companyId?: string;
   name: string;
   module: NotificationRuleModule;
   eventType: NotificationRuleEventType;

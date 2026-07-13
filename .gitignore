@@ -17,6 +17,7 @@ test-results
 .env.*
 !.env.example
 .firebase/
+migration-reports/
 *.local
 
 # Editor directories and files

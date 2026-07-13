@@ -8,7 +8,13 @@ import {
 } from "react";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
-import { observeAuth, startUserPresence, type AppAuthUser } from "../modules/auth/services/authService";
+import {
+  logoutUser,
+  observeAuth,
+  startUserPresence,
+  type AppAuthUser,
+} from "../modules/auth/services/authService";
+import { evaluateInternalAccessProfile } from "../modules/auth/services/internalAccessPolicy";
 
 type AuthContextValue = {
   user: AppAuthUser | null;
@@ -43,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const data = snap.data();
 
           setUser({
+            ...nextUser,
             uid: nextUser.uid,
             email: nextUser.email,
             displayName:
@@ -59,6 +66,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
             primaryCompanyId: data.primaryCompanyId || "",
             primaryCompanyName: data.primaryCompanyName || "",
+            role: data.role,
+            active: data.active === true,
+            globalAdmin: data.role === "admin" && data.globalAdmin === true,
           });
 
           setRole(data.role ?? "");
@@ -87,8 +97,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user?.uid) return undefined;
 
     return onSnapshot(doc(db, "users", user.uid), (snap) => {
-      if (!snap.exists()) return;
+      if (!snap.exists()) {
+        void logoutUser();
+        return;
+      }
       const data = snap.data();
+      if (!evaluateInternalAccessProfile(data).allowed) {
+        void logoutUser();
+        return;
+      }
 
       setUser((prev) => {
         if (!prev || prev.uid !== user.uid) return prev;
@@ -104,6 +121,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
           primaryCompanyId: data.primaryCompanyId || "",
           primaryCompanyName: data.primaryCompanyName || "",
+          role: data.role,
+          active: data.active === true,
+          globalAdmin: data.role === "admin" && data.globalAdmin === true,
         };
 
         if (
@@ -115,6 +135,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           nextUser.department === prev.department &&
           nextUser.primaryCompanyId === prev.primaryCompanyId &&
           nextUser.primaryCompanyName === prev.primaryCompanyName &&
+          nextUser.role === prev.role &&
+          nextUser.active === prev.active &&
+          nextUser.globalAdmin === prev.globalAdmin &&
           JSON.stringify(nextUser.companyIds || []) === JSON.stringify(prev.companyIds || []) &&
           JSON.stringify(nextUser.companyNames || []) === JSON.stringify(prev.companyNames || [])
         ) {

@@ -473,6 +473,31 @@
   color: var(--warning);
 }
 
+.wc-page-state--error svg { color: var(--danger); }
+.wc-page-state--loading svg { color: var(--primary); }
+
+.wc-state-spinner {
+  animation: wc-state-spin 900ms linear infinite;
+}
+
+@keyframes wc-state-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wc-filter-drawer-panel .wc-details-drawer__content {
+  display: grid;
+  align-content: start;
+  gap: var(--wc-space-4);
+}
+
+.wc-filter-drawer-panel label {
+  display: grid;
+  gap: var(--wc-space-2);
+  color: var(--text-soft);
+  font-size: var(--wc-font-size-sm);
+  font-weight: 700;
+}
+
 .wc-route-loader {
   width: min(100%, var(--wc-content-max));
   margin-inline: auto;

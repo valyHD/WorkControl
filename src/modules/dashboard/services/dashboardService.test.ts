@@ -15,7 +15,17 @@ const firestoreMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("firebase/firestore", () => firestoreMocks);
-vi.mock("../../../lib/firebase/firebase", () => ({ db: {} }));
+vi.mock("../../../lib/firebase/firebase", () => ({ db: {}, auth: { currentUser: { uid: "user-1" } } }));
+vi.mock("../../../lib/firebase/companyAccess", () => ({
+  buildCompanyScopeConstraints: () => [{ kind: "where", field: "companyId", operator: "==", value: "company-test" }],
+  getCurrentCompanyAccessContext: vi.fn().mockResolvedValue({
+    uid: "user-1",
+    role: "admin",
+    primaryCompanyId: "company-test",
+    companyIds: ["company-test"],
+    globalAdmin: false,
+  }),
+}));
 
 describe("dashboardService cost bounds", () => {
   beforeEach(() => {
@@ -40,7 +50,11 @@ describe("dashboardService cost bounds", () => {
       ([base]) => base === "notifications"
     );
 
-    expect(timesheetQuery?.[1]).toMatchObject({ kind: "where", field: "workDate" });
+    expect(timesheetQuery?.some((constraint) => (
+      constraint as { kind?: string; field?: string }
+    )?.kind === "where" && (
+      constraint as { field?: string }
+    ).field === "workDate")).toBe(true);
     expect(notificationQuery?.at(-1)).toMatchObject({ kind: "limit", value: 10 });
 
     await getDashboardData("user-1", "2026-07-12");
@@ -70,11 +84,10 @@ describe("dashboardService cost bounds", () => {
 
     const timesheetQuery = firestoreMocks.query.mock.calls.find(([base]) => base === "timesheets");
     expect(timesheetQuery).toBeDefined();
-    expect(timesheetQuery?.[1]).toMatchObject({
-      kind: "where",
-      field: "userId",
-      value: "employee-1",
-    });
+    expect(timesheetQuery?.some((constraint) => {
+      const item = constraint as { kind?: string; field?: string; value?: unknown };
+      return item?.kind === "where" && item.field === "userId" && item.value === "employee-1";
+    })).toBe(true);
     expect(timesheetQuery?.at(-1)).toMatchObject({ kind: "limit", value: 20 });
   });
 });

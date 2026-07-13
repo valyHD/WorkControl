@@ -29,6 +29,7 @@ import type {
 } from "../../../types/vehicle";
 import {
   getVehiclePositionsForSelectedDay,
+  getVehiclePositionsForSelectedDayChunked,
   getVehicleTrackerEvents,
 } from "../services/vehiclesService";
 import {
@@ -50,6 +51,11 @@ import {
   appendLiveTrailPoint,
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
+import {
+  filterHiddenRealGpsPositions,
+  splitVisibleRealGpsSegments,
+} from "../utils/vehicleRouteVisibility";
+import { loadSelectedDayRouteWithRecovery } from "../utils/vehicleRouteRecovery";
 import VehicleGpsStatsCard from "./VehicleGpsStatsCard";
 import VehicleTripTimeline from "./VehicleTripTimeline";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -460,55 +466,6 @@ function buildHiddenRealGpsIntervals(vehicle: VehicleItem, activeFallbackEndTs: 
       previous.endTs = Math.max(previous.endTs, item.endTs);
       return merged;
     }, []);
-}
-
-function filterHiddenRealGpsPositions(
-  positions: VehiclePositionItem[],
-  intervals: Array<{ startTs: number; endTs: number }>
-) {
-  if (!positions.length || !intervals.length) return positions;
-
-  return positions.filter((point) => {
-    const timestamp = point.gpsTimestamp;
-    return !intervals.some((interval) => timestamp >= interval.startTs && timestamp <= interval.endTs);
-  });
-}
-
-function crossesHiddenRealGpsInterval(
-  prevTs: number,
-  nextTs: number,
-  intervals: Array<{ startTs: number; endTs: number }>
-) {
-  return intervals.some((interval) => prevTs < interval.startTs && nextTs > interval.endTs);
-}
-
-function splitVisibleRealGpsSegments(
-  positions: VehiclePositionItem[],
-  intervals: Array<{ startTs: number; endTs: number }>
-) {
-  const visible = filterStationaryGpsJitter(filterHiddenRealGpsPositions(positions, intervals));
-  if (!visible.length) return [];
-  if (!intervals.length) return [visible];
-
-  const segments: VehiclePositionItem[][] = [];
-  let current: VehiclePositionItem[] = [];
-
-  for (const point of visible) {
-    const previous = current[current.length - 1];
-    if (
-      previous &&
-      crossesHiddenRealGpsInterval(previous.gpsTimestamp, point.gpsTimestamp, intervals)
-    ) {
-      if (current.length) segments.push(current);
-      current = [point];
-      continue;
-    }
-
-    current.push(point);
-  }
-
-  if (current.length) segments.push(current);
-  return segments;
 }
 
 function getLastRoutePoint(segments: VehiclePositionItem[][]) {
@@ -1505,6 +1462,7 @@ export default function VehicleLiveRouteCard({
   const activeRangeKeyRef = useRef("");
   const routeLoadSeqRef = useRef(0);
   const routePositionsRef = useRef<VehiclePositionItem[]>([]);
+  const latestSnapshotTimestampRef = useRef(vehicle.gpsSnapshot?.gpsTimestamp ?? 0);
   const lastRealLoadedTsRef = useRef(0);
   const lastAnalysisCommitAtRef = useRef(0);
   const monotonicKmVehicleRef = useRef(`${vehicle.id}:real`);
@@ -1568,6 +1526,10 @@ export default function VehicleLiveRouteCard({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    latestSnapshotTimestampRef.current = vehicle.gpsSnapshot?.gpsTimestamp ?? 0;
+  }, [vehicle.gpsSnapshot?.gpsTimestamp]);
 
   useEffect(() => {
     const updateOnlineState = () => {
@@ -1681,13 +1643,33 @@ export default function VehicleLiveRouteCard({
 
       try {
         const effectiveToTs = selectedDayValue === toDateInputValue() ? Date.now() : toTs;
-        const route = await getVehiclePositionsForSelectedDay(
-          vehicle.id,
+        const hasCompletedSimulationInRange = (vehicle.gpsSimHistory ?? []).some((item) => {
+          const startTs = getRouteItemStartTs(item);
+          const endTs = getRouteItemEndTs(item);
+          return startTs <= effectiveToTs && endTs >= fromTs;
+        });
+        const route = await loadSelectedDayRouteWithRecovery({
           fromTs,
-          effectiveToTs,
-          routePageSize,
-          routeMaxPages
-        );
+          toTs: effectiveToTs,
+          snapshotTimestamp: latestSnapshotTimestampRef.current,
+          preferRecovery: hasCompletedSimulationInRange,
+          loadPrimary: () =>
+            getVehiclePositionsForSelectedDay(
+              vehicle.id,
+              fromTs,
+              effectiveToTs,
+              routePageSize,
+              routeMaxPages
+            ),
+          loadRecovery: () =>
+            getVehiclePositionsForSelectedDayChunked(
+              vehicle.id,
+              fromTs,
+              effectiveToTs,
+              Math.min(routePageSize, 300),
+              Math.min(routeMaxPages, 12)
+            ),
+        });
         applyRoute(route, { forceAnalysis: true });
       } catch (error) {
         console.error("[VehicleLiveRouteCard][loadSelectedDayRoute]", error);
@@ -1999,8 +1981,11 @@ export default function VehicleLiveRouteCard({
     [analysisRoutePositions, hiddenRealGpsIntervals, positions]
   );
   const realDisplaySegments = useMemo(
-    () => getVisibleRealGpsSegments(positions, hiddenRealGpsIntervals),
-    [hiddenRealGpsIntervals, positions]
+    () => {
+      const source = analysisRoutePositions.length ? analysisRoutePositions : positions;
+      return getVisibleRealGpsSegments(source, hiddenRealGpsIntervals);
+    },
+    [analysisRoutePositions, hiddenRealGpsIntervals, positions]
   );
   const realDisplayPositions = useMemo(
     () => safeRoutePoints(realDisplaySegments.flat()),

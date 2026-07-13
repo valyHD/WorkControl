@@ -6,6 +6,15 @@ import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem, TimesheetItem } from "../../../types/timesheet";
 import { getLocalDateKey } from "../../timesheets/utils/timesheetAnalytics";
 import { recordFirestoreQuery } from "../../../lib/firebase/firestoreQueryTelemetry";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+  type CompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
+import {
+  getUserDirectoryCollectionName,
+  getVehicleDirectoryCollectionName,
+} from "../../../lib/firebase/companyIsolationRollout";
 
 export type DashboardNotificationItem = {
   id: string;
@@ -74,10 +83,14 @@ const DASHBOARD_LIMITS = {
   timesheets: 100,
   maintenanceClients: 50,
 } as const;
-let referenceCache: { expiresAt: number; data: DashboardReferenceData } | null = null;
-let referenceRequest: Promise<DashboardReferenceData> | null = null;
-let maintenanceCache: { expiresAt: number; data: DashboardMaintenanceSummary } | null = null;
-let maintenanceRequest: Promise<DashboardMaintenanceSummary> | null = null;
+const referenceCache = new Map<string, { expiresAt: number; data: DashboardReferenceData }>();
+const referenceRequests = new Map<string, Promise<DashboardReferenceData>>();
+const maintenanceCache = new Map<string, { expiresAt: number; data: DashboardMaintenanceSummary }>();
+const maintenanceRequests = new Map<string, Promise<DashboardMaintenanceSummary>>();
+
+function getScopeCacheKey(context: CompanyAccessContext): string {
+  return context.globalAdmin ? "global" : [...context.companyIds].sort().join("|");
+}
 
 function mapUserDoc(id: string, data: Record<string, any>): AppUserItem {
   return {
@@ -250,33 +263,46 @@ function mapNotificationDoc(id: string, data: Record<string, any>): DashboardNot
   };
 }
 
-async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
-  if (referenceCache?.expiresAt && referenceCache.expiresAt > Date.now()) {
-    return referenceCache.data;
+async function getDashboardReferenceData(context: CompanyAccessContext): Promise<DashboardReferenceData> {
+  const cacheKey = getScopeCacheKey(context);
+  const cached = referenceCache.get(cacheKey);
+  if (cached?.expiresAt && cached.expiresAt > Date.now()) {
+    return cached.data;
   }
-  if (referenceRequest) return referenceRequest;
+  const pending = referenceRequests.get(cacheKey);
+  if (pending) return pending;
 
-  referenceRequest = (async () => {
+  const request = (async () => {
+    const scope = buildCompanyScopeConstraints(context);
     const [usersSnap, toolsSnap, vehiclesSnap, projectsSnap] = await Promise.all([
       getDocs(
-        query(collection(db, "users"), orderBy("fullName", "asc"), limit(DASHBOARD_LIMITS.users))
+        query(
+          collection(db, getUserDirectoryCollectionName()),
+          ...scope,
+          orderBy("fullName", "asc"),
+          limit(DASHBOARD_LIMITS.users)
+        )
       ),
       getDocs(
-        query(collection(db, "tools"), orderBy("updatedAt", "desc"), limit(DASHBOARD_LIMITS.tools))
+        query(collection(db, "tools"), ...scope, orderBy("updatedAt", "desc"), limit(DASHBOARD_LIMITS.tools))
       ),
       getDocs(
         query(
-          collection(db, "vehicles"),
+          collection(db, getVehicleDirectoryCollectionName()),
+          ...scope,
           orderBy("updatedAt", "desc"),
           limit(DASHBOARD_LIMITS.vehicles)
         )
       ),
       getDocs(
-        query(collection(db, "projects"), orderBy("name", "asc"), limit(DASHBOARD_LIMITS.projects))
+        query(collection(db, "projects"), ...scope, orderBy("name", "asc"), limit(DASHBOARD_LIMITS.projects))
       ),
     ]);
     const data = {
-      users: usersSnap.docs.map((d) => mapUserDoc(d.id, d.data())),
+      users: [...new Map(usersSnap.docs.map((d) => {
+        const item = mapUserDoc(String(d.data().uid || d.id), d.data());
+        return [item.uid || item.id, item];
+      })).values()],
       tools: toolsSnap.docs.map((d) => mapToolDoc(d.id, d.data())),
       vehicles: vehiclesSnap.docs.map((d) => mapVehicleDoc(d.id, d.data())),
       projects: projectsSnap.docs.map((d) => mapProjectDoc(d.id, d.data())),
@@ -291,14 +317,15 @@ async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
         (projectsSnap.size ?? projectsSnap.docs.length),
       reason: "Date operaționale limitate și cache-uite pentru dashboard",
     });
-    referenceCache = { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS };
+    referenceCache.set(cacheKey, { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS });
     return data;
   })();
+  referenceRequests.set(cacheKey, request);
 
   try {
-    return await referenceRequest;
+    return await request;
   } finally {
-    referenceRequest = null;
+    referenceRequests.delete(cacheKey);
   }
 }
 
@@ -310,16 +337,20 @@ function parseDateOnly(value: unknown): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-async function getDashboardMaintenanceSummary(): Promise<DashboardMaintenanceSummary> {
-  if (maintenanceCache?.expiresAt && maintenanceCache.expiresAt > Date.now()) {
-    return maintenanceCache.data;
+async function getDashboardMaintenanceSummary(context: CompanyAccessContext): Promise<DashboardMaintenanceSummary> {
+  const cacheKey = getScopeCacheKey(context);
+  const cached = maintenanceCache.get(cacheKey);
+  if (cached?.expiresAt && cached.expiresAt > Date.now()) {
+    return cached.data;
   }
-  if (maintenanceRequest) return maintenanceRequest;
+  const pending = maintenanceRequests.get(cacheKey);
+  if (pending) return pending;
 
-  maintenanceRequest = (async () => {
+  const request = (async () => {
   const snap = await getDocs(
     query(
       collection(db, "maintenanceClients"),
+      ...buildCompanyScopeConstraints(context),
       orderBy("updatedAt", "desc"),
       limit(DASHBOARD_LIMITS.maintenanceClients)
     )
@@ -385,14 +416,15 @@ async function getDashboardMaintenanceSummary(): Promise<DashboardMaintenanceSum
     documents: snap.size ?? snap.docs.length,
     reason: "Sumar mentenanță limitat și cache-uit",
   });
-  maintenanceCache = { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS };
+  maintenanceCache.set(cacheKey, { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS });
   return data;
   })();
+  maintenanceRequests.set(cacheKey, request);
 
   try {
-    return await maintenanceRequest;
+    return await request;
   } finally {
-    maintenanceRequest = null;
+    maintenanceRequests.delete(cacheKey);
   }
 }
 
@@ -401,6 +433,8 @@ export async function getDashboardData(
   dayKey = getLocalDateKey(Date.now()),
   currentRole = "admin"
 ): Promise<DashboardData> {
+  const companyContext = await getCurrentCompanyAccessContext();
+  const companyScope = buildCompanyScopeConstraints(companyContext);
   const managementScope = currentRole === "admin" || currentRole === "manager";
   const notificationsRequest = currentUserId
     ? getDocs(
@@ -416,6 +450,7 @@ export async function getDashboardData(
     ? getDocs(
         query(
           collection(db, "timesheets"),
+          ...companyScope,
           where("workDate", "==", dayKey),
           limit(DASHBOARD_LIMITS.timesheets)
         )
@@ -424,6 +459,7 @@ export async function getDashboardData(
       ? getDocs(
           query(
             collection(db, "timesheets"),
+            ...companyScope,
             where("userId", "==", currentUserId),
             orderBy("startAt", "desc"),
             limit(20)
@@ -432,12 +468,12 @@ export async function getDashboardData(
       : Promise.resolve(null);
   const [references, timesheetsSnap, notificationsSnap, maintenance] = await Promise.all([
     managementScope
-      ? getDashboardReferenceData()
+      ? getDashboardReferenceData(companyContext)
       : Promise.resolve({ users: [], tools: [], vehicles: [], projects: [] }),
     timesheetsRequest,
     notificationsRequest,
     managementScope
-      ? getDashboardMaintenanceSummary()
+      ? getDashboardMaintenanceSummary(companyContext)
       : Promise.resolve({
           clients: 0,
           lifts: 0,

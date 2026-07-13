@@ -23,17 +23,18 @@ type SearchDataset = {
 };
 
 const SEARCH_CACHE_MS = 60_000;
+const SEARCH_DATASET_LIMIT = 24;
 let cached: { at: number; role: string; value: SearchDataset } | null = null;
 let pending: { role: string; promise: Promise<SearchDataset> } | null = null;
 
 async function loadSearchDataset(role: string): Promise<SearchDataset> {
   const privileged = role === "admin" || role === "manager";
   const [vehicles, tools, projects, users, clients] = await Promise.all([
-    getVehiclesList().catch(() => []),
-    getToolsList().catch(() => []),
-    getProjectsList().catch(() => []),
-    privileged ? getAllUsers().catch(() => []) : Promise.resolve([]),
-    privileged ? getMaintenanceClients().catch(() => []) : Promise.resolve([]),
+    getVehiclesList(SEARCH_DATASET_LIMIT).catch(() => []),
+    getToolsList(SEARCH_DATASET_LIMIT).catch(() => []),
+    getProjectsList(SEARCH_DATASET_LIMIT).catch(() => []),
+    privileged ? getAllUsers(SEARCH_DATASET_LIMIT).catch(() => []) : Promise.resolve([]),
+    privileged ? getMaintenanceClients(SEARCH_DATASET_LIMIT).catch(() => []) : Promise.resolve([]),
   ]);
   return { vehicles, tools, projects, users, clients };
 }

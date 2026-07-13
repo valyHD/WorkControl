@@ -179,6 +179,7 @@ export interface VehicleDailyDiagnosticSample {
 
 export interface VehicleDailyDiagnosticsSummary {
   id: string;
+  companyId?: string;
   vehicleId: string;
   dayKey: string;
   imei?: string;
@@ -310,6 +311,7 @@ export interface VehicleCommandItem {
 
 export interface VehicleItem {
   id: string;
+  companyId?: string;
   plateNumber: string;
   brand: string;
   model: string;
@@ -361,6 +363,7 @@ export interface VehicleItem {
 }
 
 export interface VehicleFormValues {
+  companyId?: string;
   plateNumber: string;
   brand: string;
   model: string;

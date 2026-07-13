@@ -2,23 +2,21 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  type User,
-  createUserWithEmailAndPassword,
-  updateProfile,
 } from "firebase/auth";
 import {
-  collection,
   doc,
   getDoc,
-  getDocs,
   runTransaction,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
 import { auth, db } from "../../../lib/firebase/firebase";
-import { pickNextAvailableThemeKey } from "../../../lib/ui/userTheme";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import {
+  evaluateInternalAccessProfile,
+  InternalAccessError,
+} from "./internalAccessPolicy";
 
 export type AppAuthUser = {
   uid: string;
@@ -33,35 +31,24 @@ export type AppAuthUser = {
   companyNames?: string[];
   primaryCompanyId?: string;
   primaryCompanyName?: string;
+  role?: "admin" | "manager" | "angajat";
+  active?: boolean;
+  globalAdmin?: boolean;
 };
 
 const USER_PRESENCE_HEARTBEAT_MS = 30_000;
 const USER_SITE_ENTER_NOTIFICATION_COOLDOWN_MS = 2 * 60 * 1000;
 
-async function getNextUserThemeKey() {
-  const snapshot = await getDocs(collection(db, "users"));
-  const usedThemeKeys = snapshot.docs.map((docItem) => docItem.data()?.themeKey);
-  return pickNextAvailableThemeKey(usedThemeKeys);
-}
-
 export async function loginWithEmail(email: string, password: string) {
-  return signInWithEmailAndPassword(auth, email, password);
-}
-
-export async function registerWithEmail(
-  fullName: string,
-  email: string,
-  password: string
-) {
-  const result = await createUserWithEmailAndPassword(auth, email, password);
-
-  if (auth.currentUser) {
-    await updateProfile(auth.currentUser, {
-      displayName: fullName,
-    });
+  const result = await signInWithEmailAndPassword(auth, email, password);
+  const profileSnap = await getDoc(doc(db, "users", result.user.uid));
+  const decision = evaluateInternalAccessProfile(
+    profileSnap.exists() ? profileSnap.data() : null
+  );
+  if (!decision.allowed) {
+    await signOut(auth);
+    throw new InternalAccessError(decision);
   }
-
-  await ensureUserDocument(result.user, fullName);
   return result;
 }
 
@@ -93,91 +80,43 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       return;
     }
 
-    await ensureUserDocument(firebaseUser);
+    const profileSnap = await getDoc(doc(db, "users", firebaseUser.uid));
+    const profile = profileSnap.exists() ? profileSnap.data() : null;
+    const decision = evaluateInternalAccessProfile(profile);
+    if (!decision.allowed || !profile) {
+      await signOut(auth).catch(() => undefined);
+      callback(null);
+      return;
+    }
 
-callback({
-  uid: firebaseUser.uid,
-  email: firebaseUser.email ?? "",
-  displayName:
-    firebaseUser.displayName ||
-    firebaseUser.email ||
-    "Utilizator",
-  avatarUrl: firebaseUser.photoURL || "",
-  avatarThumbUrl: firebaseUser.photoURL || "",
-  themeKey: null,
-});
-  });
-}
-
-export async function ensureUserDocument(
-  firebaseUser: User,
-  overrideName?: string
-) {
-  const userRef = doc(db, "users", firebaseUser.uid);
-  const snap = await getDoc(userRef);
-
-  if (!snap.exists()) {
-    const themeKey = await getNextUserThemeKey();
-
-    await setDoc(userRef, {
+    callback({
       uid: firebaseUser.uid,
-      fullName:
-        overrideName ||
+      email: firebaseUser.email ?? String(profile.email ?? ""),
+      displayName:
+        String(profile.fullName ?? "") ||
         firebaseUser.displayName ||
         firebaseUser.email ||
         "Utilizator",
-      email: firebaseUser.email ?? "",
-      avatarUrl: firebaseUser.photoURL || "",
-      avatarThumbUrl: firebaseUser.photoURL || "",
+      avatarUrl: String(profile.avatarUrl ?? firebaseUser.photoURL ?? ""),
+      avatarThumbUrl: String(
+        profile.avatarThumbUrl ?? profile.avatarUrl ?? firebaseUser.photoURL ?? ""
+      ),
+      themeKey: typeof profile.themeKey === "string" ? profile.themeKey : null,
+      roleTitle: String(profile.roleTitle ?? ""),
+      department: String(profile.department ?? ""),
+      companyIds: Array.isArray(profile.companyIds)
+        ? profile.companyIds.filter((value): value is string => typeof value === "string")
+        : [],
+      companyNames: Array.isArray(profile.companyNames)
+        ? profile.companyNames.filter((value): value is string => typeof value === "string")
+        : [],
+      primaryCompanyId: String(profile.primaryCompanyId ?? ""),
+      primaryCompanyName: String(profile.primaryCompanyName ?? ""),
+      role: profile.role as AppAuthUser["role"],
       active: true,
-      role: "admin",
-      themeKey,
-      createdAt: Date.now(),
-      lastSeenAt: Date.now(),
-      lastActiveAt: Date.now(),
-      isOnline: true,
-      createdAtServer: serverTimestamp(),
-      lastSeenAtServer: serverTimestamp(),
-      lastActiveAtServer: serverTimestamp(),
+      globalAdmin: profile.globalAdmin === true,
     });
-
-    return;
-  }
-
-  const existing = snap.data();
-  const nextName =
-    overrideName ||
-    existing.fullName ||
-    firebaseUser.displayName ||
-    firebaseUser.email ||
-    "Utilizator";
-
-  const nextThemeKey =
-    existing.themeKey && String(existing.themeKey).trim()
-      ? existing.themeKey
-      : await getNextUserThemeKey();
-
-  await setDoc(
-    userRef,
-    {
-      uid: firebaseUser.uid,
-      fullName: nextName,
-      email: firebaseUser.email ?? existing.email ?? "",
-      avatarUrl: existing.avatarUrl || firebaseUser.photoURL || "",
-      avatarThumbUrl: existing.avatarThumbUrl || existing.avatarUrl || firebaseUser.photoURL || "",
-      active: existing.active ?? true,
-      role: existing.role ?? "admin",
-      themeKey: nextThemeKey,
-      updatedAt: Date.now(),
-      lastSeenAt: Date.now(),
-      lastActiveAt: Date.now(),
-      isOnline: true,
-      updatedAtServer: serverTimestamp(),
-      lastSeenAtServer: serverTimestamp(),
-      lastActiveAtServer: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  });
 }
 
 async function maybeDispatchSiteEnteredNotification(user: AppAuthUser) {

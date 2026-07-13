@@ -24,6 +24,7 @@ export type ClientAddress = {
 
 export type MaintenanceClient = {
   id: string;
+  companyId?: string;
   name: string;
   email: string;
   emails: string[];
@@ -43,6 +44,7 @@ export type MaintenanceClient = {
 
 export type MaintenanceCompanyBranding = {
   id: string;
+  companyId?: string;
   companyName: string;
   companyKey: string;
   logoUrl: string;
@@ -62,6 +64,7 @@ export type MaintenanceReportAttachment = {
 
 export type MaintenanceReportHistoryItem = {
   id: string;
+  companyId?: string;
   clientId: string;
   clientName: string;
   reportType: "revizie" | "interventie" | string;
@@ -104,6 +107,7 @@ export type MaintenancePartOrderLine = {
 
 export type MaintenancePartOrder = {
   id: string;
+  companyId?: string;
   title: string;
   status: MaintenancePartOrderStatus;
   priority: MaintenancePartOrderPriority;

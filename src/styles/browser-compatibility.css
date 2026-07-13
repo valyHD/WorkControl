@@ -1,0 +1,605 @@
+/* Samsung Internet / Android PWA compatibility layer */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@supports (-webkit-backdrop-filter: blur(1px)) {
+  .sidebar {
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .topbar {
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .install-app-banner,
+  .notification-permission-banner {
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .mobile-overlay,
+  .install-guide-modal,
+  .voice-assistant-backdrop {
+    -webkit-backdrop-filter: blur(5px);
+  }
+
+  .mobile-drawer {
+    -webkit-backdrop-filter: blur(20px);
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sidebar,
+  .topbar,
+  .install-app-banner,
+  .notification-permission-banner,
+  .mobile-drawer,
+  .voice-assistant__panel {
+    background: rgba(255, 255, 255, 0.98) !important;
+  }
+
+  .mobile-overlay,
+  .install-guide-modal,
+  .voice-assistant-backdrop {
+    background: rgba(12, 23, 42, 0.42) !important;
+  }
+}
+
+@supports not (overflow: clip) {
+  @media (max-width: 640px) {
+    html,
+    body,
+    #root,
+    .shell,
+    .main-area,
+    .topbar,
+    .page-content,
+    .page-section,
+    .panel,
+    .content-grid,
+    .kpi-grid,
+    .quick-actions-grid,
+    .expense-kpi-grid,
+    .audit-list,
+    .simple-list,
+    .simple-list-item {
+      overflow-x: hidden !important;
+    }
+  }
+}
+
+html.is-samsung-internet body,
+html.is-android body {
+  background-attachment: scroll;
+}
+
+html.is-samsung-internet,
+html.is-samsung-internet body,
+html.is-samsung-internet #root {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+html.is-samsung-internet .page-content {
+  width: 100% !important;
+  min-width: 0;
+}
+
+html.is-samsung-internet .topbar,
+html.is-samsung-internet .install-app-banner,
+html.is-samsung-internet .notification-permission-banner {
+  transform: translateZ(0);
+}
+
+html.is-samsung-internet .primary-btn,
+html.is-samsung-internet .secondary-btn,
+html.is-samsung-internet .danger-btn,
+html.is-samsung-internet .success-btn,
+html.is-samsung-internet button,
+html.is-samsung-internet input,
+html.is-samsung-internet select,
+html.is-samsung-internet textarea {
+  -webkit-tap-highlight-color: rgba(37, 99, 235, 0.16);
+}
+
+@supports not (height: 100dvh) {
+  .voice-assistant-backdrop,
+  .install-guide-modal {
+    height: 100vh;
+  }
+
+  .voice-assistant__panel {
+    max-height: min(640px, calc(100vh - 36px));
+  }
+
+  @media (max-width: 640px) {
+    .voice-assistant__panel {
+      max-height: calc(100vh - 16px);
+    }
+  }
+}
+
+/* Force WorkControl to stay light in Samsung Internet dark-page mode. */
+:root,
+html,
+body,
+#root {
+  color-scheme: only light !important;
+}
+
+html,
+body,
+#root,
+.shell,
+.main-area,
+.page-content,
+.page-section,
+.my-timesheets-modern-page,
+.vehicle-gps-map-page {
+  background-color: var(--bg) !important;
+}
+
+body {
+  color: var(--text) !important;
+}
+
+.panel,
+.wc-card,
+.wc-table-card,
+.wc-kpi-card,
+.wc-action-card,
+.kpi-card,
+.simple-list-item,
+.topbar,
+.sidebar,
+.install-app-banner,
+.notification-permission-banner,
+.auth-card,
+.login-card,
+.placeholder-page {
+  color-scheme: only light !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: only light;
+    --bg: #f0f4f9;
+    --bg-soft: #eaf0f8;
+    --surface: #ffffff;
+    --surface-alt: #f7fafd;
+    --surface-hover: #f2f6fb;
+    --surface-muted: #edf2f8;
+    --surface-card: #ffffff;
+    --panel: #ffffff;
+    --text: #0c1728;
+    --text-soft: #364560;
+    --text-muted: #6b7e9c;
+    --text-faint: #a3b3c8;
+    --line: rgba(140, 160, 190, 0.20);
+    --line-mid: rgba(140, 160, 190, 0.32);
+    --line-strong: rgba(140, 160, 190, 0.48);
+  }
+
+  html,
+  body,
+  #root,
+  .shell,
+  .main-area,
+  .page-content,
+  .page-section {
+    background: #f0f4f9 !important;
+    color: #0c1728 !important;
+  }
+
+  .panel,
+  .wc-card,
+  .wc-table-card,
+  .wc-kpi-card,
+  .wc-action-card,
+  .kpi-card,
+  .simple-list-item,
+  .topbar,
+  .sidebar,
+  .auth-card,
+  .login-card,
+  .placeholder-page {
+    background-color: #ffffff !important;
+    background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC") !important;
+    background-repeat: repeat !important;
+    color: #0c1728 !important;
+    border-color: rgba(140, 160, 190, 0.32) !important;
+  }
+
+  input,
+  select,
+  textarea {
+    background-color: #ffffff !important;
+    background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC") !important;
+    background-repeat: repeat !important;
+    color: #0c1728 !important;
+  }
+}
+
+html.is-samsung-internet,
+html.is-samsung-internet body,
+html.is-samsung-internet #root,
+html.is-samsung-internet .shell,
+html.is-samsung-internet .main-area,
+html.is-samsung-internet .page-content,
+html.is-samsung-internet .page-section {
+  background: #f0f4f9 !important;
+  color: #0c1728 !important;
+}
+
+html.is-samsung-internet .panel,
+html.is-samsung-internet .wc-card,
+html.is-samsung-internet .wc-table-card,
+html.is-samsung-internet .wc-kpi-card,
+html.is-samsung-internet .wc-action-card,
+html.is-samsung-internet .kpi-card,
+html.is-samsung-internet .simple-list-item,
+html.is-samsung-internet .topbar,
+html.is-samsung-internet .sidebar,
+html.is-samsung-internet .auth-card,
+html.is-samsung-internet .login-card,
+html.is-samsung-internet .placeholder-page {
+  background-color: #ffffff !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+  color: #0c1728 !important;
+}
+
+/* Hard opt-out for Samsung Internet dark page rendering. */
+html.wc-force-light,
+html.wc-force-light *,
+html.is-samsung-internet,
+html.is-samsung-internet * {
+  forced-color-adjust: none !important;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  mix-blend-mode: normal !important;
+}
+
+html.wc-force-light,
+html.wc-force-light body,
+html.wc-force-light #root,
+html.is-samsung-internet,
+html.is-samsung-internet body,
+html.is-samsung-internet #root {
+  background-color: #f0f4f9 !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+  color: #0c1728 !important;
+  color-scheme: only light !important;
+  filter: none !important;
+}
+
+html.wc-force-light body::before,
+html.is-samsung-internet body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: #f0f4f9 !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+}
+
+html.wc-force-light .shell,
+html.wc-force-light .main-area,
+html.wc-force-light .page-content,
+html.wc-force-light .page-section,
+html.is-samsung-internet .shell,
+html.is-samsung-internet .main-area,
+html.is-samsung-internet .page-content,
+html.is-samsung-internet .page-section {
+  background-color: #f0f4f9 !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+  color: #0c1728 !important;
+}
+
+html.wc-force-light .panel,
+html.wc-force-light .wc-card,
+html.wc-force-light .wc-table-card,
+html.wc-force-light .wc-kpi-card,
+html.wc-force-light .wc-action-card,
+html.wc-force-light .kpi-card,
+html.wc-force-light .simple-list-item,
+html.wc-force-light .topbar,
+html.wc-force-light .sidebar,
+html.wc-force-light .auth-card,
+html.wc-force-light .login-card,
+html.wc-force-light .placeholder-page,
+html.wc-force-light .public-home-card,
+html.wc-force-light .tool-inner-panel,
+html.wc-force-light .vehicle-live-panel,
+html.wc-force-light .vehicle-live-route-card,
+html.wc-force-light .vehicle-fleet-map-card,
+html.wc-force-light .vehicle-info-card,
+html.wc-force-light .vehicle-timeline-card,
+html.wc-force-light .vehicle-control-card,
+html.wc-force-light .gps-sim-panel,
+html.wc-force-light .gps-sim-summary-card,
+html.wc-force-light .vehicle-doc-card,
+html.wc-force-light .vehicle-map-card,
+html.wc-force-light .vehicle-card,
+html.wc-force-light .maintenance-tab-panel,
+html.wc-force-light .maintenance-action-panel,
+html.wc-force-light .maintenance-client-form-panel,
+html.wc-force-light .maintenance-step-card,
+html.wc-force-light .maintenance-action-card,
+html.wc-force-light .maintenance-client-card,
+html.wc-force-light .maintenance-company-card,
+html.wc-force-light .maintenance-history-card,
+html.wc-force-light .expense-report-panel,
+html.wc-force-light .expense-upload-card,
+html.wc-force-light .expense-dropzone,
+html.wc-force-light .expense-step-card,
+html.wc-force-light .voice-assistant__panel,
+html.wc-force-light .collection-card,
+html.wc-force-light .quick-action-card,
+html.wc-force-light .profile-collapsible,
+html.wc-force-light .my-profile-company-panel,
+html.wc-force-light .user-profile-hero,
+html.wc-force-light .user-profile-overview-panel,
+html.wc-force-light .timesheet-policy-modal__panel,
+html.wc-force-light .install-guide-modal__panel,
+html.wc-force-light .leave-year-modal-panel,
+html.is-samsung-internet .panel,
+html.is-samsung-internet .wc-card,
+html.is-samsung-internet .wc-table-card,
+html.is-samsung-internet .wc-kpi-card,
+html.is-samsung-internet .wc-action-card,
+html.is-samsung-internet .kpi-card,
+html.is-samsung-internet .simple-list-item,
+html.is-samsung-internet .topbar,
+html.is-samsung-internet .sidebar,
+html.is-samsung-internet .auth-card,
+html.is-samsung-internet .login-card,
+html.is-samsung-internet .placeholder-page,
+html.is-samsung-internet .public-home-card,
+html.is-samsung-internet .tool-inner-panel,
+html.is-samsung-internet .vehicle-live-panel,
+html.is-samsung-internet .vehicle-live-route-card,
+html.is-samsung-internet .vehicle-fleet-map-card,
+html.is-samsung-internet .vehicle-info-card,
+html.is-samsung-internet .vehicle-timeline-card,
+html.is-samsung-internet .vehicle-control-card,
+html.is-samsung-internet .gps-sim-panel,
+html.is-samsung-internet .gps-sim-summary-card,
+html.is-samsung-internet .vehicle-doc-card,
+html.is-samsung-internet .vehicle-map-card,
+html.is-samsung-internet .vehicle-card,
+html.is-samsung-internet .maintenance-tab-panel,
+html.is-samsung-internet .maintenance-action-panel,
+html.is-samsung-internet .maintenance-client-form-panel,
+html.is-samsung-internet .maintenance-step-card,
+html.is-samsung-internet .maintenance-action-card,
+html.is-samsung-internet .maintenance-client-card,
+html.is-samsung-internet .maintenance-company-card,
+html.is-samsung-internet .maintenance-history-card,
+html.is-samsung-internet .expense-report-panel,
+html.is-samsung-internet .expense-upload-card,
+html.is-samsung-internet .expense-dropzone,
+html.is-samsung-internet .expense-step-card,
+html.is-samsung-internet .voice-assistant__panel,
+html.is-samsung-internet .collection-card,
+html.is-samsung-internet .quick-action-card,
+html.is-samsung-internet .profile-collapsible,
+html.is-samsung-internet .my-profile-company-panel,
+html.is-samsung-internet .user-profile-hero,
+html.is-samsung-internet .user-profile-overview-panel,
+html.is-samsung-internet .timesheet-policy-modal__panel,
+html.is-samsung-internet .install-guide-modal__panel,
+html.is-samsung-internet .leave-year-modal-panel,
+html.is-samsung-internet [class*="-card"],
+html.is-samsung-internet [class*="-panel"] {
+  background-color: #ffffff !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+  color: #0c1728 !important;
+}
+
+html.wc-force-light input,
+html.wc-force-light select,
+html.wc-force-light textarea,
+html.is-samsung-internet input,
+html.is-samsung-internet select,
+html.is-samsung-internet textarea {
+  background-color: #ffffff !important;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/j///9/AAn7A/0FQ0XKAAAAAElFTkSuQmCC") !important;
+  background-repeat: repeat !important;
+  color: #0c1728 !important;
+  -webkit-text-fill-color: #0c1728;
+}
+
+@media (max-width: 640px) {
+  .voice-assistant.voice-assistant--open {
+    inset: 0;
+    width: auto;
+    height: auto;
+    transform: none;
+    pointer-events: none;
+  }
+
+  .voice-assistant.voice-assistant--open .voice-assistant__fab {
+    position: fixed;
+    right: 14px;
+    top: auto;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    z-index: 3;
+  }
+
+  .voice-assistant.voice-assistant--open .voice-assistant__panel {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 82px);
+    width: auto;
+    max-width: none;
+    max-height: none;
+    display: flex;
+    flex-direction: column;
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .voice-assistant.voice-assistant--open .voice-assistant__body {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .voice-assistant.voice-assistant--open .voice-assistant__manual,
+  .voice-assistant.voice-assistant--open .voice-assistant__actions {
+    flex: 0 0 auto;
+  }
+}
+
+#wc-light-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: #f0f4f9 url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC") repeat !important;
+  forced-color-adjust: none !important;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* Compact mobile dashboards: keep the main operational cards visible without long scrolling. */
+@media (max-width: 640px) {
+  .dashboard-modern-page .dashboard-action-strip,
+  .timesheets-management-page .wc-page-hero__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    width: 100%;
+  }
+
+  .dashboard-modern-page .dashboard-action-strip .primary-btn,
+  .dashboard-modern-page .dashboard-action-strip .secondary-btn,
+  .timesheets-management-page .wc-page-hero__actions .primary-btn,
+  .timesheets-management-page .wc-page-hero__actions .secondary-btn {
+    width: auto;
+    min-height: 36px;
+    padding: 7px 8px;
+    border-radius: 12px;
+    font-size: 11.5px;
+    line-height: 1.12;
+    gap: 5px;
+    justify-content: center;
+    white-space: normal;
+  }
+
+  .dashboard-modern-page .dashboard-action-strip svg,
+  .timesheets-management-page .wc-page-hero__actions svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .dashboard-modern-page .wc-kpi-grid,
+  .timesheets-management-page .wc-kpi-grid,
+  .my-timesheets-modern-page .wc-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card,
+  .timesheets-management-page .wc-kpi-card,
+  .my-timesheets-modern-page .wc-kpi-card {
+    min-height: 76px;
+    padding: 9px 10px 8px;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.055);
+  }
+
+  .dashboard-modern-page .wc-kpi-card::before,
+  .timesheets-management-page .wc-kpi-card::before,
+  .my-timesheets-modern-page .wc-kpi-card::before {
+    width: 3px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__head,
+  .timesheets-management-page .wc-kpi-card__head,
+  .my-timesheets-modern-page .wc-kpi-card__head {
+    gap: 5px;
+    font-size: 9.5px;
+    line-height: 1.12;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__head > span:first-child,
+  .timesheets-management-page .wc-kpi-card__head > span:first-child,
+  .my-timesheets-modern-page .wc-kpi-card__head > span:first-child {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__icon,
+  .timesheets-management-page .wc-kpi-card__icon,
+  .my-timesheets-modern-page .wc-kpi-card__icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__icon svg,
+  .timesheets-management-page .wc-kpi-card__icon svg,
+  .my-timesheets-modern-page .wc-kpi-card__icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__value,
+  .timesheets-management-page .wc-kpi-card__value,
+  .my-timesheets-modern-page .wc-kpi-card__value {
+    margin-top: 7px;
+    font-size: 19px;
+    line-height: 1;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__helper,
+  .timesheets-management-page .wc-kpi-card__helper,
+  .my-timesheets-modern-page .wc-kpi-card__helper {
+    margin-top: 4px;
+    font-size: 10.5px;
+    line-height: 1.12;
+  }
+}
+
+@media (max-width: 380px) {
+  .dashboard-modern-page .dashboard-action-strip .primary-btn,
+  .dashboard-modern-page .dashboard-action-strip .secondary-btn,
+  .timesheets-management-page .wc-page-hero__actions .primary-btn,
+  .timesheets-management-page .wc-page-hero__actions .secondary-btn {
+    min-height: 34px;
+    padding: 6px 7px;
+    font-size: 11px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card,
+  .timesheets-management-page .wc-kpi-card,
+  .my-timesheets-modern-page .wc-kpi-card {
+    min-height: 70px;
+    padding: 8px 9px 7px;
+  }
+
+  .dashboard-modern-page .wc-kpi-card__value,
+  .timesheets-management-page .wc-kpi-card__value,
+  .my-timesheets-modern-page .wc-kpi-card__value {
+    font-size: 17px;
+  }
+}

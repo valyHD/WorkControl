@@ -1,16 +1,19 @@
 import {
-  addDoc,
   collection,
   getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
-  serverTimestamp,
   where,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "../../../lib/firebase/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
 import type { AuditLogCategory, AuditLogInput, AuditLogItem } from "../../../types/audit";
 
 const auditLogsCollection = collection(db, "auditLogs");
@@ -92,28 +95,10 @@ function shouldSkipAudit(input: AuditLogInput): boolean {
   return haystack.includes("gpssim") || haystack.includes("gps_sim") || haystack.includes("test gps");
 }
 
-function buildSearchableText(input: AuditLogInput, metadata: Record<string, unknown>): string {
-  return [
-    input.category,
-    input.action,
-    input.title,
-    input.message,
-    input.actorUserName,
-    input.targetUserName,
-    input.entityLabel,
-    input.entityId,
-    input.path,
-    input.pageTitle,
-    ...Object.values(metadata).map((value) => String(value)),
-  ]
-    .join(" ")
-    .toLowerCase()
-    .slice(0, 5000);
-}
-
 function mapAuditLogDoc(id: string, data: Record<string, unknown>): AuditLogItem {
   return {
     id,
+    companyId: toText(data.companyId),
     category: normalizeCategory(data.category),
     action: toText(data.action),
     title: toText(data.title),
@@ -141,29 +126,23 @@ export async function createAuditLog(input: AuditLogInput): Promise<void> {
   if (shouldSkipAudit(input)) return;
 
   const metadata = cleanMetadata(input.metadata);
-  const now = Date.now();
-  const payload = {
+  const recordAudit = httpsCallable<Record<string, unknown>, { auditId: string }>(
+    functions,
+    "recordAuditEvent"
+  );
+  await recordAudit({
     category: input.category,
     action: input.action.trim(),
     title: input.title.trim(),
     message: toText(input.message),
-    actorUserId: toText(input.actorUserId),
-    actorUserName: toText(input.actorUserName, "WorkControl"),
-    actorUserThemeKey: input.actorUserThemeKey ?? null,
     targetUserId: toText(input.targetUserId),
     targetUserName: toText(input.targetUserName),
-    targetUserThemeKey: input.targetUserThemeKey ?? null,
     entityId: toText(input.entityId),
     entityLabel: toText(input.entityLabel),
     path: toText(input.path),
     pageTitle: toText(input.pageTitle),
     metadata,
-    searchableText: buildSearchableText(input, metadata),
-    createdAt: now,
-    createdAtServer: serverTimestamp(),
-  };
-
-  await addDoc(auditLogsCollection, payload);
+  });
 }
 
 export function logPageView(params: {
@@ -195,14 +174,34 @@ export function logPageView(params: {
 }
 
 export async function getAuditLogs(maxItems = 800): Promise<AuditLogItem[]> {
-  const snap = await getDocs(query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems)));
+  const context = await getCurrentCompanyAccessContext();
+  const scoped = context.globalAdmin
+    ? query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems))
+    : context.role === "angajat"
+      ? query(
+          auditLogsCollection,
+          ...buildCompanyScopeConstraints(context),
+          where("actorUserId", "==", context.uid),
+          orderBy("createdAt", "desc"),
+          limit(maxItems)
+        )
+      : query(
+          auditLogsCollection,
+          ...buildCompanyScopeConstraints(context),
+          orderBy("createdAt", "desc"),
+          limit(maxItems)
+        );
+  const snap = await getDocs(scoped);
   return snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()));
 }
 
 export async function getAuditLogsForEntity(entityId: string, maxItems = 40): Promise<AuditLogItem[]> {
   if (!entityId) return [];
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(query(
     auditLogsCollection,
+    ...buildCompanyScopeConstraints(context),
+    ...(context.role === "angajat" ? [where("actorUserId", "==", context.uid)] : []),
     where("entityId", "==", entityId),
     orderBy("createdAt", "desc"),
     limit(Math.max(1, Math.min(40, maxItems)))
@@ -215,9 +214,36 @@ export function subscribeAuditLogs(
   onError?: (error: unknown) => void,
   maxItems = 800
 ): Unsubscribe {
-  return onSnapshot(
-    query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems)),
-    (snap) => callback(snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()))),
-    (error) => onError?.(error)
-  );
+  let unsubscribe: Unsubscribe = () => undefined;
+  let cancelled = false;
+  void getCurrentCompanyAccessContext()
+    .then((context) => {
+      if (cancelled) return;
+      const scoped = context.globalAdmin
+        ? query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems))
+        : context.role === "angajat"
+          ? query(
+              auditLogsCollection,
+              ...buildCompanyScopeConstraints(context),
+              where("actorUserId", "==", context.uid),
+              orderBy("createdAt", "desc"),
+              limit(maxItems)
+            )
+          : query(
+              auditLogsCollection,
+              ...buildCompanyScopeConstraints(context),
+              orderBy("createdAt", "desc"),
+              limit(maxItems)
+            );
+      unsubscribe = onSnapshot(
+        scoped,
+        (snap) => callback(snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()))),
+        (error) => onError?.(error)
+      );
+    })
+    .catch((error) => onError?.(error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }

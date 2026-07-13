@@ -13,10 +13,13 @@ import {
   ContentGrid,
   DetailsDrawer,
   EmptyState,
+  ErrorState,
+  FilterDrawer,
   FormSection,
   InlineError,
   KpiCard,
   KpiGrid,
+  LoadingState,
   MobileActionSheet,
   OfflineState,
   PageHeader,
@@ -40,6 +43,7 @@ export default function UiLabPage() {
   const [activeTab, setActiveTab] = useState("components");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   if (role !== "admin") return <PermissionState />;
 
@@ -51,6 +55,7 @@ export default function UiLabPage() {
         description="Catalog intern pentru tokenuri, componente, stari si comportament responsive."
         actions={[
           { id: "drawer", label: "Deschide drawer", icon: Settings2, onClick: () => setDrawerOpen(true) },
+          { id: "filters", label: "Filtre", icon: Settings2, onClick: () => setFilterOpen(true) },
           { id: "sheet", label: "Actiuni mobile", icon: Plus, tone: "primary", onClick: () => setSheetOpen(true) },
         ]}
       />
@@ -81,6 +86,8 @@ export default function UiLabPage() {
       {activeTab === "states" ? (
         <div className="wc-ui-lab__states">
           <Skeleton lines={4} />
+          <LoadingState />
+          <ErrorState description="Exemplu de eroare la nivel de pagina." retry={() => undefined} />
           <InlineError message="Datele nu au putut fi incarcate." retry={() => undefined} />
           <StaleState updatedLabel="acum 12 minute" retry={() => undefined} />
           <OfflineState retry={() => undefined} />
@@ -107,6 +114,10 @@ export default function UiLabPage() {
       <MobileActionSheet open={sheetOpen} title="Actiuni rapide" description="Pe mobil apare din partea de jos." onClose={() => setSheetOpen(false)}>
         <button type="button" className="primary-btn" onClick={() => setSheetOpen(false)}>Confirma</button>
       </MobileActionSheet>
+      <FilterDrawer open={filterOpen} title="Filtre lista" description="Filtrele secundare raman in afara continutului principal." onClose={() => setFilterOpen(false)}>
+        <label>Status<select className="tool-input" defaultValue="toate"><option value="toate">Toate</option><option value="activ">Active</option></select></label>
+        <button type="button" className="primary-btn" onClick={() => setFilterOpen(false)}>Aplica filtrele</button>
+      </FilterDrawer>
     </PageLayout>
   );
 }

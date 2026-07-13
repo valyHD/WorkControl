@@ -111,6 +111,13 @@ export function useGpsSimulator(vehicle: VehicleItem | null) {
   const pointIndexRef = useRef(0);
   const configRef = useRef<SimulationConfig | null>(null);
   const forceRealStartRef = useRef(false);
+  const hadPersistedSimulationRef = useRef(
+    Boolean(
+      vehicle?.gpsSim &&
+        vehicle.gpsSim.active !== false &&
+        (vehicle.gpsSim.points?.length ?? 0) > 0
+    )
+  );
 
   useEffect(() => {
     return () => {
@@ -132,6 +139,22 @@ export function useGpsSimulator(vehicle: VehicleItem | null) {
     pointIndexRef.current = 0;
     setState(INITIAL_STATE);
   }, []);
+
+  const persistedSimulationActive = Boolean(
+    vehicle?.gpsSim &&
+      vehicle.gpsSim.active !== false &&
+      (vehicle.gpsSim.points?.length ?? 0) > 0
+  );
+
+  useEffect(() => {
+    const persistedSimulationStopped =
+      hadPersistedSimulationRef.current && !persistedSimulationActive;
+    hadPersistedSimulationRef.current = persistedSimulationActive;
+
+    if (persistedSimulationStopped) {
+      resetSimulation();
+    }
+  }, [persistedSimulationActive, resetSimulation]);
 
   const planRoute = useCallback(async (query: string) => {
     if (!vehicle) return;
@@ -263,10 +286,12 @@ export function useGpsSimulator(vehicle: VehicleItem | null) {
       intervalRef.current = null;
     }
     const vehicleId = vehicle?.id || configRef.current?.vehicleId;
+    // Clear the optimistic route immediately. Firestore remains the source of truth,
+    // but a delayed/lost acknowledgement must not leave the current tab in test mode.
+    resetSimulation();
     if (vehicleId) {
       await stopGpsSimOnFirestore(vehicleId);
     }
-    resetSimulation();
   }, [resetSimulation, vehicle?.id]);
 
   return {
