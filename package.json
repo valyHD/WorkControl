@@ -34,7 +34,7 @@
     "@sentry/react": "^10.65.0",
     "dotenv": "^16.6.1",
     "firebase": "^12.11.0",
-    "firebase-admin": "^13.5.0",
+    "firebase-admin": "^14.1.0",
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.7.0",
