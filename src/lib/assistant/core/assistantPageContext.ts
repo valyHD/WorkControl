@@ -1,5 +1,5 @@
 import { getPageExperience } from "../../../config/pageExperience";
-import { getAssistantPageActions } from "../runtime/assistantPageActionRegistry";
+import { getAssistantGlobalPageActions } from "../assistantGlobalActionRegistry";
 import type { AssistantConversationMemorySnapshot } from "../runtime/assistantTypes";
 import type { AssistantV3EntityType, AssistantV3PageContext } from "./assistantV3Types";
 
@@ -23,7 +23,7 @@ export function buildAssistantV3PageContext(params: {
   memory: AssistantConversationMemorySnapshot;
 }): AssistantV3PageContext {
   const experience = getPageExperience(params.pathname);
-  const actions = getAssistantPageActions(params.pathname);
+  const actions = getAssistantGlobalPageActions(params.pathname);
   const openForm = params.pathname.endsWith("/new")
     ? { id: experience?.id || "form", mode: "create" as const }
     : params.pathname.endsWith("/edit")

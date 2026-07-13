@@ -28,6 +28,7 @@ import WorkflowStepper from "../../../components/product/WorkflowStepper";
 import { getLatestTimesheetProjectForUser } from "../../timesheets/services/timesheetsService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_EXPENSE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import {
   getOfflineExpenseUploads,
   flushOfflineExpenseUploads,
@@ -179,13 +180,11 @@ export default function ExpenseScanPage() {
   }
 
   useEffect(() => {
-    const handleDraft = (event: Event) => {
-      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleDraft = (fields: Readonly<Record<string, unknown>>) => {
       if (fields.projectId !== undefined) setProjectId(String(fields.projectId));
       if (fields.companyName !== undefined) setCompanyName(String(fields.companyName));
     };
-    window.addEventListener(ASSISTANT_FILL_EXPENSE_FORM_EVENT, handleDraft);
-    return () => window.removeEventListener(ASSISTANT_FILL_EXPENSE_FORM_EVENT, handleDraft);
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_EXPENSE_FORM_EVENT, handleDraft);
   }, []);
 
   async function loadData() {

@@ -15,7 +15,7 @@ import {
 import type { AssistantV3Contract } from "../lib/assistant/core/assistantV3Types";
 import {
   createBrowserAssistantAdapterRuntime,
-  registerAssistantV3Adapters,
+  getAssistantV3ToolRegistry,
 } from "../lib/assistant/adapters";
 import { resolveAssistantTimesheetLocation } from "../lib/assistant/adapters/timesheetAdapter";
 import { scheduleAssistantNextStepHighlight } from "../lib/assistant/runtime/assistantButtonHighlighter";
@@ -91,7 +91,7 @@ function valueLabel(value: unknown) {
 
 function outcomeRisk(
   outcome: AssistantOrchestratorResult,
-  registry: ReturnType<typeof registerAssistantV3Adapters>
+  registry: ReturnType<typeof getAssistantV3ToolRegistry>
 ): AssistantRisk {
   const risks =
     outcome.contract?.toolCalls.map((call) => registry.get(call.id)?.risk || "low") || [];
@@ -139,7 +139,7 @@ export default function VoiceCommandAssistant() {
   const [history, setHistory] = useState<AssistantHistoryItem[]>([]);
   const [serverAudioConsent, setServerAudioConsent] = useState(false);
 
-  const registry = useMemo(() => registerAssistantV3Adapters(), []);
+  const registry = useMemo(() => getAssistantV3ToolRegistry(), []);
   const orchestrator = useMemo(
     () =>
       new AssistantV3Orchestrator(
@@ -455,7 +455,7 @@ export default function VoiceCommandAssistant() {
   }, [audioCapture, serverTranscription, speech]);
 
   const planSteps = lastOutcome?.contract
-    ? buildAssistantExecutionSteps(lastOutcome.contract, uiState === "executing")
+    ? buildAssistantExecutionSteps(lastOutcome.contract, uiState === "executing", registry)
     : [];
   const debugEntries = lastOutcome
     ? [

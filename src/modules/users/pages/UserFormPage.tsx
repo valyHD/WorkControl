@@ -10,6 +10,7 @@ import { pickNextAvailableThemeKey } from "../../../lib/ui/userTheme";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { ASSISTANT_FILL_USER_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 
 type UserFormValues = {
   fullName: string;
@@ -79,8 +80,7 @@ export default function UserFormPage() {
 
   useEffect(() => {
     if (isEdit) return undefined;
-    const handleDraft = (event: Event) => {
-      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleDraft = (fields: Readonly<Record<string, unknown>>) => {
       setInitialValues((current) => ({
         ...current,
         fullName: String(fields.fullName ?? current.fullName),
@@ -90,8 +90,7 @@ export default function UserFormPage() {
         active: typeof fields.active === "boolean" ? fields.active : current.active,
       }));
     };
-    window.addEventListener(ASSISTANT_FILL_USER_FORM_EVENT, handleDraft);
-    return () => window.removeEventListener(ASSISTANT_FILL_USER_FORM_EVENT, handleDraft);
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_USER_FORM_EVENT, handleDraft);
   }, [isEdit]);
 
   async function handleSubmit(values: UserFormValues) {

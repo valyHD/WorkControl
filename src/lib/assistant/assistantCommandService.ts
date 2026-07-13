@@ -109,6 +109,7 @@ export type AssistantCommandPlanStep = {
 
 export type AssistantCommandInterpretation = {
   version?: "3";
+  traceId?: string;
   commandType?: AssistantCommandType;
   intent: AssistantCommandIntent;
   targetModule?: string;

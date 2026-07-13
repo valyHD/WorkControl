@@ -31,6 +31,7 @@ export type AssistantV3EntityReference = {
 
 export type AssistantV3Contract = {
   version: typeof ASSISTANT_V3_VERSION;
+  traceId?: string;
   commandType: AssistantV3CommandType;
   intent: AssistantCommandIntent;
   toolCalls: AssistantV3ToolCall[];

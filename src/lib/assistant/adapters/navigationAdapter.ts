@@ -1,4 +1,4 @@
-import { getAssistantNavigationActions } from "../assistantActionCatalog";
+import { getAssistantGlobalNavigationActions } from "../assistantGlobalActionRegistry";
 import { resolveAssistantKnownPageNavigation } from "../runtime/assistantNavigation";
 import type { NavigationRole } from "../../../config/navigation";
 import {
@@ -29,7 +29,7 @@ function cleanPathname(path: string) {
 export function isAssistantNavigationPathAllowed(path: string, role: string) {
   if (!path.startsWith("/") || path.startsWith("//")) return false;
   const pathname = cleanPathname(path);
-  return getAssistantNavigationActions(navigationRole(role)).some((action) => {
+  return getAssistantGlobalNavigationActions(navigationRole(role)).some((action) => {
     const allowedPath = cleanPathname(action.path);
     if (pathname === allowedPath) return true;
     return allowedPath !== "/" && pathname.startsWith(`${allowedPath}/`);

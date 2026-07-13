@@ -18,8 +18,8 @@ import { useAuth } from "../../providers/AuthProvider";
 import { normalizeAssistantText } from "../../lib/assistant/runtime/assistantFuzzy";
 import {
   ASSISTANT_ACTION_IDS,
-  getAssistantNavigationActions,
 } from "../../lib/assistant/assistantActionCatalog";
+import { getAssistantGlobalNavigationActions } from "../../lib/assistant/assistantGlobalActionRegistry";
 import {
   searchWorkControlEntities,
   type GlobalSearchResult,
@@ -167,7 +167,7 @@ export default function GlobalCommandPalette({ buttonOnly = false }: { buttonOnl
   }, [open, query, role]);
 
   const navigationActions = useMemo(
-    () => getAssistantNavigationActions(role || "angajat"),
+    () => getAssistantGlobalNavigationActions(role || "angajat"),
     [role]
   );
 

@@ -21,6 +21,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { ASSISTANT_FILL_VEHICLE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 
 const emptyValues: VehicleFormValues = {
   plateNumber: "",
@@ -183,8 +184,7 @@ export default function VehicleFormPage() {
 
   useEffect(() => {
     if (isEdit) return undefined;
-    const handleDraft = (event: Event) => {
-      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleDraft = (fields: Readonly<Record<string, unknown>>) => {
       setInitialValues((current) => ({
         ...current,
         plateNumber: String(fields.plateNumber ?? current.plateNumber).toUpperCase(),
@@ -196,8 +196,7 @@ export default function VehicleFormPage() {
         currentKm: fields.currentKm === undefined ? current.currentKm : Number(fields.currentKm),
       }));
     };
-    window.addEventListener(ASSISTANT_FILL_VEHICLE_FORM_EVENT, handleDraft);
-    return () => window.removeEventListener(ASSISTANT_FILL_VEHICLE_FORM_EVENT, handleDraft);
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_VEHICLE_FORM_EVENT, handleDraft);
   }, [isEdit]);
 
   useEffect(() => {

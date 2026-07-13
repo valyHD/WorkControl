@@ -18,6 +18,7 @@ import { useAuth } from "../../../providers/AuthProvider";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { ASSISTANT_FILL_TOOL_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 
 const emptyValues: ToolFormValues = {
   name: "",
@@ -138,8 +139,7 @@ export default function ToolFormPage() {
 
   useEffect(() => {
     if (isEdit) return undefined;
-    const handleDraft = (event: Event) => {
-      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleDraft = (fields: Readonly<Record<string, unknown>>) => {
       setInitialValues((current) => ({
         ...current,
         name: String(fields.name ?? current.name),
@@ -149,8 +149,7 @@ export default function ToolFormPage() {
         warrantyUntil: String(fields.warrantyUntil ?? current.warrantyUntil),
       }));
     };
-    window.addEventListener(ASSISTANT_FILL_TOOL_FORM_EVENT, handleDraft);
-    return () => window.removeEventListener(ASSISTANT_FILL_TOOL_FORM_EVENT, handleDraft);
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_TOOL_FORM_EVENT, handleDraft);
   }, [isEdit]);
 
   async function handleSubmit(values: ToolFormValues, selectedFiles: File[]) {

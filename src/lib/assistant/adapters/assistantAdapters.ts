@@ -106,11 +106,20 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
   ];
 }
 
-export function registerAssistantV3Adapters(registry = new AssistantToolRegistry()) {
+function registerAssistantV3Adapters(registry: AssistantToolRegistry) {
   for (const adapter of createAssistantModuleAdapters()) {
     adapter.register(registry);
   }
   return registry;
+}
+
+let assistantV3ToolRegistry: AssistantToolRegistry | null = null;
+
+export function getAssistantV3ToolRegistry() {
+  if (!assistantV3ToolRegistry) {
+    assistantV3ToolRegistry = registerAssistantV3Adapters(new AssistantToolRegistry());
+  }
+  return assistantV3ToolRegistry;
 }
 
 export function createBrowserAssistantAdapterRuntime(params: {

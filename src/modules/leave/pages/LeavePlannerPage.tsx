@@ -25,6 +25,7 @@ import PageQuickActions from "../../../components/PageQuickActions";
 import ProductTabs from "../../../components/product/ProductTabs";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
 import {
   inferAssistantLeaveRange,
@@ -292,8 +293,7 @@ export default function LeavePlannerPage() {
   }, [location.search, user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
-    const handleAssistantLeaveFill = (event: Event) => {
-      const detail = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleAssistantLeaveFill = (detail: Readonly<Record<string, unknown>>) => {
       const inferredRange = inferAssistantLeaveRange(
         [
           assistantLeaveField(detail, ["period", "perioada", "text", "range"]),
@@ -340,10 +340,7 @@ export default function LeavePlannerPage() {
       }, 180);
     };
 
-    window.addEventListener(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
-    return () => {
-      window.removeEventListener(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
-    };
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
   }, [user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {

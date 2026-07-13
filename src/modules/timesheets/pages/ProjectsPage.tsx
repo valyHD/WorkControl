@@ -14,6 +14,7 @@ import ProjectForm from "../components/ProjectForm";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import { ASSISTANT_FILL_PROJECT_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 
 type TimesheetGroupMode = "day" | "week" | "month";
 
@@ -153,8 +154,7 @@ export default function ProjectsPage() {
   }, []);
 
   useEffect(() => {
-    const handleDraft = (event: Event) => {
-      const fields = (event as CustomEvent<Record<string, unknown>>).detail || {};
+    const handleDraft = (fields: Readonly<Record<string, unknown>>) => {
       setCreateDraft((current) => ({
         name: String(fields.name ?? current.name),
         status:
@@ -163,8 +163,7 @@ export default function ProjectsPage() {
             : "activ",
       }));
     };
-    window.addEventListener(ASSISTANT_FILL_PROJECT_FORM_EVENT, handleDraft);
-    return () => window.removeEventListener(ASSISTANT_FILL_PROJECT_FORM_EVENT, handleDraft);
+    return registerAssistantFormDraftAdapter(ASSISTANT_FILL_PROJECT_FORM_EVENT, handleDraft);
   }, []);
 
   const timesheetsByProject = useMemo(() => {
