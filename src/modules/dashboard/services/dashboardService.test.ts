@@ -31,9 +31,9 @@ describe("dashboardService cost bounds", () => {
     expect(firestoreMocks.where).toHaveBeenCalledWith("workDate", "==", "2026-07-12");
     expect(firestoreMocks.where).toHaveBeenCalledWith("userId", "==", "user-1");
     expect(firestoreMocks.limit).toHaveBeenCalledWith(10);
-    expect(firestoreMocks.limit).toHaveBeenCalledWith(500);
-    expect(firestoreMocks.limit).toHaveBeenCalledWith(250);
-    expect(firestoreMocks.limit).toHaveBeenCalledWith(150);
+    expect(firestoreMocks.limit).toHaveBeenCalledWith(100);
+    expect(firestoreMocks.limit).toHaveBeenCalledWith(80);
+    expect(firestoreMocks.limit).toHaveBeenCalledWith(50);
 
     const timesheetQuery = firestoreMocks.query.mock.calls.find(([base]) => base === "timesheets");
     const notificationQuery = firestoreMocks.query.mock.calls.find(

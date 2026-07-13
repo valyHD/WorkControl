@@ -20,9 +20,18 @@ vi.mock("../services/billingMetricsService", () => ({
     estimatedReadsAvoided: 65_000,
     peakConcurrentRequestsPerVehicle: 1,
     estimatedBytesAvoided: 251_000_000,
+    queryTelemetry: {
+      startedAt: Date.now(),
+      activeListeners: 1,
+      queries: 2,
+      documents: 11,
+      averageDocumentsPerQuery: 5.5,
+      topConsumers: [],
+    },
   })),
   refreshBillingMetricsNow: vi.fn(),
   saveBillingCostSettings: vi.fn(),
+  saveFirestoreCostControl: vi.fn(),
 }));
 
 const mockedGetData = vi.mocked(getBillingControlPanelData);
@@ -49,10 +58,22 @@ describe("BillingCostPanel", () => {
       readsLastHour: 60_000,
       writesLastHour: 6_000,
       deletesLastHour: 0,
+      snapshotListeners: 4,
+      activeConnections: 3,
+      functionRequestsLastHour: 12,
       excludes: ["network_egress", "storage"],
       exchangeRate: { source: "ECB", rateDate: "2026-07-10" },
     });
     mockedGetData.mockResolvedValue({
+      firestoreCostControl: {
+        emergencyMode: true,
+        fleetRoutesOnDemandOnly: true,
+        disableBackgroundRouteSync: true,
+        maxFleetSnapshotRefreshSeconds: 60,
+        maxRoutePointsPerRequest: 2000,
+        disableHiddenPageListeners: true,
+        billingRefreshMinutes: 30,
+      },
       settings: {
         budgetMonthlyEur: 50,
         warningPercent: 70,

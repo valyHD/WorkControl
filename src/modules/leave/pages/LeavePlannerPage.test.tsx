@@ -19,6 +19,7 @@ const highlighterMocks = vi.hoisted(() => ({
 
 vi.mock("firebase/firestore", () => ({
   collection: vi.fn((...parts: unknown[]) => ({ parts })),
+  documentId: vi.fn(() => ({ fieldPath: "__name__" })),
   limit: vi.fn((value: unknown) => ({ limit: value })),
   onSnapshot: vi.fn((...args: unknown[]) => {
     const onData = args.find((arg) => typeof arg === "function") as

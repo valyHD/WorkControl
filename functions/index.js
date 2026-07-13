@@ -10,6 +10,11 @@ const {
 } = require('./billingMetricsRuntime');
 const { getLiveFirebaseCostEstimate } = require('./liveCostEstimateRuntime');
 const {
+  getFirestoreCostControl,
+  normalizeFirestoreCostControl,
+  saveFirestoreCostControl,
+} = require('./firestoreCostControl');
+const {
   buildAssistantTraceDocument,
   fingerprintAssistantTranscript,
   isAssistantOutcomeTransitionAllowed,
@@ -28,6 +33,9 @@ const openaiApiKey = defineSecret('OPENAI_API_KEY');
 const VEHICLE_POSITION_ARCHIVE_RETENTION_DAYS = 30;
 const VEHICLE_POSITION_ARCHIVE_MAX_DAYS_PER_RUN = 80;
 const FIRESTORE_DELETE_BATCH_SIZE = 450;
+const FLEET_OVERVIEW_CACHE_MS = 20_000;
+let fleetOverviewCache = null;
+let fleetOverviewRequest = null;
 
 const VEHICLE_DOC_SCHEMA = {
   type: 'object',
@@ -3098,6 +3106,92 @@ exports.archiveOldVehiclePositionDays = onCall(
   }
 );
 
+async function loadFleetGpsOverview() {
+  const now = Date.now();
+  if (fleetOverviewCache?.expiresAt > now) return fleetOverviewCache.value;
+  if (fleetOverviewRequest) return fleetOverviewRequest;
+
+  fleetOverviewRequest = (async () => {
+    const [config, vehiclesSnap] = await Promise.all([
+      getFirestoreCostControl(db),
+      db
+        .collection('vehicles')
+        .orderBy('plateNumber', 'asc')
+        .limit(250)
+        .select(
+          'plateNumber',
+          'brand',
+          'model',
+          'status',
+          'currentDriverUserId',
+          'currentDriverUserName',
+          'currentDriverThemeKey',
+          'gpsSnapshot',
+          'tracker',
+          'gpsSim',
+          'updatedAt'
+        )
+        .get(),
+    ]);
+    const value = {
+      config,
+      vehicles: vehiclesSnap.docs.map((vehicleDoc) => {
+        const data = vehicleDoc.data() || {};
+        return {
+          id: vehicleDoc.id,
+          plateNumber: toSafeString(data.plateNumber),
+          brand: toSafeString(data.brand),
+          model: toSafeString(data.model),
+          status: toSafeString(data.status) || 'activa',
+          currentDriverUserId: toSafeString(data.currentDriverUserId),
+          currentDriverUserName: toSafeString(data.currentDriverUserName),
+          currentDriverThemeKey: data.currentDriverThemeKey || null,
+          gpsSnapshot: data.gpsSnapshot || null,
+          tracker: data.tracker || null,
+          gpsSim: data.gpsSim || null,
+        };
+      }),
+      generatedAtMs: now,
+    };
+    fleetOverviewCache = { value, expiresAt: Date.now() + FLEET_OVERVIEW_CACHE_MS };
+    return value;
+  })();
+
+  try {
+    return await fleetOverviewRequest;
+  } finally {
+    fleetOverviewRequest = null;
+  }
+}
+
+exports.getFleetGpsOverview = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
+    }
+    return loadFleetGpsOverview();
+  }
+);
+
+exports.saveFirestoreCostControl = onCall(
+  {
+    region: 'europe-west1',
+    timeoutSeconds: 30,
+    memory: '256MiB',
+  },
+  async (request) => {
+    await assertAdminRequest(request);
+    const config = await saveFirestoreCostControl(db, admin, request.data, request.auth.uid);
+    fleetOverviewCache = null;
+    return { status: 'ok', config };
+  }
+);
+
 exports.refreshBillingMetrics = onSchedule(
   {
     region: 'europe-west1',
@@ -3139,10 +3233,11 @@ exports.getBillingControlPanelData = onCall(
   },
   async (request) => {
     await assertAdminRequest(request);
-    const [metricsSnap, settingsSnap, canarySnap] = await Promise.all([
+    const [metricsSnap, settingsSnap, canarySnap, firestoreCostControl] = await Promise.all([
       db.collection('systemMetrics').doc('billing').get(),
       db.collection('systemCostSettings').doc('billing').get(),
       db.collection('systemPrivateSettings').doc('gpsCostOptimization').get(),
+      getFirestoreCostControl(db),
     ]);
     const metrics = metricsSnap.exists ? metricsSnap.data() || {} : {};
     const settings = settingsSnap.exists ? settingsSnap.data() || {} : {};
@@ -3179,6 +3274,7 @@ exports.getBillingControlPanelData = onCall(
         ),
         updatedAt: toSafeNumber(canary.updatedAtMs, 0) || null,
       },
+      firestoreCostControl: normalizeFirestoreCostControl(firestoreCostControl),
     };
   }
 );
@@ -3197,6 +3293,7 @@ exports.getLiveFirebaseCostEstimate = onCall(
         projectId: process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d',
         usdPerEur: rates.rates?.USD,
         rateDate: rates.rateDate,
+        force: request.data?.force === true,
       });
     } catch (error) {
       logger.error('[getLiveFirebaseCostEstimate] Nu am putut citi Cloud Monitoring.', {

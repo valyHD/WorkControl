@@ -168,7 +168,9 @@ function mapReportHistory(id: string, data: Record<string, unknown>): Maintenanc
 }
 
 export async function getMaintenanceClients(): Promise<MaintenanceClient[]> {
-  const snap = await getDocs(query(maintenanceClientsCollection, orderBy("updatedAt", "desc")));
+  const snap = await getDocs(
+    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(200))
+  );
   return snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>));
 }
 
@@ -177,7 +179,7 @@ export function subscribeMaintenanceClients(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(500)),
+    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(200)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>)));
     },
@@ -382,7 +384,7 @@ export function subscribeMaintenanceCompanyBranding(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(maintenanceBrandingCollection, orderBy("companyName", "asc")),
+    query(maintenanceBrandingCollection, orderBy("companyName", "asc"), limit(50)),
     (snap) => {
       onData(snap.docs.map((docItem) => mapBranding(docItem.id, docItem.data() as Record<string, unknown>)));
     },
@@ -564,9 +566,9 @@ export function subscribeMaintenanceReportHistory(
 export function subscribeMaintenanceReportsOverview(
   onData: (items: MaintenanceReportHistoryItem[]) => void,
   onError?: (error: Error) => void,
-  maxItems = 300
+  maxItems = 100
 ): () => void {
-  const safeLimit = Math.max(25, Math.min(500, Math.floor(maxItems)));
+  const safeLimit = Math.max(25, Math.min(200, Math.floor(maxItems)));
   return onSnapshot(
     query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(safeLimit)),
     (snap) => {

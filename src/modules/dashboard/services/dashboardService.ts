@@ -5,6 +5,7 @@ import type { ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { ProjectItem, TimesheetItem } from "../../../types/timesheet";
 import { getLocalDateKey } from "../../timesheets/utils/timesheetAnalytics";
+import { recordFirestoreQuery } from "../../../lib/firebase/firestoreQueryTelemetry";
 
 export type DashboardNotificationItem = {
   id: string;
@@ -64,17 +65,19 @@ export type DashboardMaintenanceSummary = {
 
 type DashboardReferenceData = Pick<DashboardData, "users" | "tools" | "vehicles" | "projects">;
 
-const DASHBOARD_REFERENCE_CACHE_MS = 15 * 60_000;
+const DASHBOARD_REFERENCE_CACHE_MS = 30 * 60_000;
 const DASHBOARD_LIMITS = {
-  users: 250,
-  tools: 250,
-  vehicles: 150,
-  projects: 200,
-  timesheets: 500,
-  maintenanceClients: 160,
+  users: 80,
+  tools: 50,
+  vehicles: 50,
+  projects: 50,
+  timesheets: 100,
+  maintenanceClients: 50,
 } as const;
 let referenceCache: { expiresAt: number; data: DashboardReferenceData } | null = null;
 let referenceRequest: Promise<DashboardReferenceData> | null = null;
+let maintenanceCache: { expiresAt: number; data: DashboardMaintenanceSummary } | null = null;
+let maintenanceRequest: Promise<DashboardMaintenanceSummary> | null = null;
 
 function mapUserDoc(id: string, data: Record<string, any>): AppUserItem {
   return {
@@ -278,6 +281,16 @@ async function getDashboardReferenceData(): Promise<DashboardReferenceData> {
       vehicles: vehiclesSnap.docs.map((d) => mapVehicleDoc(d.id, d.data())),
       projects: projectsSnap.docs.map((d) => mapProjectDoc(d.id, d.data())),
     };
+    recordFirestoreQuery({
+      module: "dashboard",
+      operation: "reference-data",
+      documents:
+        (usersSnap.size ?? usersSnap.docs.length) +
+        (toolsSnap.size ?? toolsSnap.docs.length) +
+        (vehiclesSnap.size ?? vehiclesSnap.docs.length) +
+        (projectsSnap.size ?? projectsSnap.docs.length),
+      reason: "Date operaționale limitate și cache-uite pentru dashboard",
+    });
     referenceCache = { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS };
     return data;
   })();
@@ -298,6 +311,12 @@ function parseDateOnly(value: unknown): number | null {
 }
 
 async function getDashboardMaintenanceSummary(): Promise<DashboardMaintenanceSummary> {
+  if (maintenanceCache?.expiresAt && maintenanceCache.expiresAt > Date.now()) {
+    return maintenanceCache.data;
+  }
+  if (maintenanceRequest) return maintenanceRequest;
+
+  maintenanceRequest = (async () => {
   const snap = await getDocs(
     query(
       collection(db, "maintenanceClients"),
@@ -353,13 +372,28 @@ async function getDashboardMaintenanceSummary(): Promise<DashboardMaintenanceSum
     });
   });
 
-  return {
+  const data = {
     clients: snap.size,
     lifts,
     expiredLifts,
     expiringSoonLifts,
     isPartial: snap.size >= DASHBOARD_LIMITS.maintenanceClients,
   };
+  recordFirestoreQuery({
+    module: "dashboard",
+    operation: "maintenance-summary",
+    documents: snap.size ?? snap.docs.length,
+    reason: "Sumar mentenanță limitat și cache-uit",
+  });
+  maintenanceCache = { data, expiresAt: Date.now() + DASHBOARD_REFERENCE_CACHE_MS };
+  return data;
+  })();
+
+  try {
+    return await maintenanceRequest;
+  } finally {
+    maintenanceRequest = null;
+  }
 }
 
 export async function getDashboardData(
@@ -412,6 +446,12 @@ export async function getDashboardData(
           isPartial: false,
         }),
   ]);
+  recordFirestoreQuery({
+    module: "dashboard",
+    operation: "current-activity",
+    documents: (timesheetsSnap?.size ?? 0) + (notificationsSnap?.size ?? 0),
+    reason: "Pontaje curente și ultimele notificări",
+  });
 
   const { users, tools, vehicles, projects } = references;
   const timesheets = timesheetsSnap

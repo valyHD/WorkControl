@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -179,7 +180,7 @@ export function subscribeMaintenancePartOrders(
   onError?: (error: Error) => void
 ): () => void {
   return onSnapshot(
-    query(partOrdersCollection, orderBy("updatedAt", "desc")),
+    query(partOrdersCollection, orderBy("updatedAt", "desc"), limit(200)),
     (snap) => onData(snap.docs.map((docItem) => mapOrder(docItem.id, docItem.data() as Record<string, unknown>))),
     (error) => onError?.(error)
   );

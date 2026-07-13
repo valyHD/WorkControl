@@ -234,3 +234,32 @@ protejate prin default deny si sunt accesate numai de Admin SDK in Functions.
 ## Roadmap
 
 `NEXT: reluare remediere P0 securitate - registration, company isolation, GPS metadata access, notification spam.`
+
+## Emergency cost reduction V2 - 13 iulie 2026
+
+Flag privat: `systemPrivateSettings/firestoreCostControl`. Daca documentul lipseste,
+backend-ul foloseste implicit modul de urgenta, astfel incat un deploy nou nu poate reveni
+accidental la full-route fleet scans.
+
+Comportamentul V2:
+
+- `getFleetGpsOverview` intoarce maximum 250 proiectii slabe din `vehicles`;
+- proiectia exclude `gpsSimHistory`, documente, imagini, diagnostic si alte campuri mari;
+- snapshoturile flotei sunt cerute la 60 secunde numai cu pagina vizibila;
+- un singur vehicul selectat poate avea document complet si controller de traseu;
+- traseul implicit acopera ultimele doua ore, maximum 24 ore si maximum 2.000 puncte;
+- `ControlPanelService.getCollectionCounters` foloseste agregari `count()`;
+- Dashboard-ul foloseste limite reduse, cache 30 minute si refresh protejat de stale time;
+- estimatorul Cloud Monitoring este cache-uit 15 minute si include listener-e snapshot,
+  conexiuni active si requesturi Cloud Run/Functions;
+- telemetria per query este numai in memoria browserului si nu produce writes Firestore.
+
+Rollback:
+
+1. in Control Panel dezactiveaza `Mod economie Firestore`;
+2. sau seteaza `emergencyMode=false` si `fleetRoutesOnDemandOnly=false` prin callable-ul
+   admin-only `saveFirestoreCostControl`;
+3. pentru rollback complet Hosting, foloseste branch-ul
+   `backup/all-gps-before-emergency-v2-20260713-0615`.
+
+Inventarul complet si baseline-ul se afla in `docs/firestore-listener-inventory.md`.

@@ -328,7 +328,7 @@ export default function MyProfilePage() {
     void load();
 
     const vehiclesUnsubscribe = onSnapshot(
-      query(collection(db, "vehicles"), orderBy("updatedAt", "desc"), limit(50)),
+      query(collection(db, "vehicles"), orderBy("updatedAt", "desc"), limit(20)),
       (vehiclesSnap) => {
         setMyVehicles(
           vehiclesSnap.docs
@@ -378,7 +378,7 @@ export default function MyProfilePage() {
       }
     );
     const timesheetsUnsubscribe = onSnapshot(
-      query(collection(db, "timesheets"), where("userId", "==", user.uid), orderBy("startAt", "desc"), limit(80)),
+      query(collection(db, "timesheets"), where("userId", "==", user.uid), orderBy("startAt", "desc"), limit(20)),
       (timesheetsSnap) => {
         setMyTimesheets(
           timesheetsSnap.docs.map((docItem) => {
@@ -419,7 +419,7 @@ export default function MyProfilePage() {
       }
     );
     const notificationsUnsubscribe = onSnapshot(
-      query(collection(db, "notifications"), where("userId", "==", user.uid), orderBy("createdAt", "desc"), limit(80)),
+      query(collection(db, "notifications"), where("userId", "==", user.uid), orderBy("createdAt", "desc"), limit(10)),
       (notificationsSnap) => {
         setMyNotifications(
           notificationsSnap.docs.map((docItem) => ({
@@ -435,7 +435,7 @@ export default function MyProfilePage() {
       }
     );
     const leaveUnsubscribe = onSnapshot(
-      query(collection(db, "leaveRequests"), where("userId", "==", user.uid), orderBy("createdAt", "desc"), limit(80)),
+      query(collection(db, "leaveRequests"), where("userId", "==", user.uid), orderBy("createdAt", "desc"), limit(20)),
       (leaveSnap) => {
         setMyLeaveRequests(
           leaveSnap.docs

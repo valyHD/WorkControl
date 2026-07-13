@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import {
   collection,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -18,7 +19,8 @@ export function useNotificationsListener(userId: string | undefined) {
       collection(db, "notifications"),
       where("userId", "==", userId),
       where("read", "==", false),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(10)
     );
 
     const unsub = onSnapshot(
