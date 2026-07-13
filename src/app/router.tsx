@@ -55,6 +55,9 @@ const ExpenseReportsPage = lazyWithRetry(() => import("../modules/expenses/pages
 const ExpenseInvoicesPage = lazyWithRetry(() => import("../modules/expenses/pages/ExpenseInvoicesPage"));
 const CompaniesPage = lazyWithRetry(() => import("../modules/companies/pages/CompaniesPage"));
 const AuditLogPage = lazyWithRetry(() => import("../modules/audit/pages/AuditLogPage"));
+const CompanySelectionGate = lazyWithRetry(
+  () => import("../modules/auth/components/CompanySelectionGate")
+);
 
 function RouteLoader() {
   return (
@@ -103,7 +106,11 @@ function ProtectedLayout() {
     return <Navigate to="/login" replace />;
   }
 
-  return <AppShell />;
+  return withSuspense(
+    <CompanySelectionGate key={user.uid}>
+      <AppShell />
+    </CompanySelectionGate>
+  );
 }
 
 export const router = createBrowserRouter([

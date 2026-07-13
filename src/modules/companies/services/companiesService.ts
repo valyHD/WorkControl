@@ -179,6 +179,29 @@ export async function setUserPrimaryCompany(params: {
   await setPrimary({ companyId: params.company.companyKey });
 }
 
+export type CompanyChoice = {
+  companyId: string;
+  companyName: string;
+};
+
+export async function getAvailableCompanyChoices(): Promise<CompanyChoice[]> {
+  const loadChoices = httpsCallable<void, { companies: CompanyChoice[] }>(
+    functions,
+    "listCompanyChoices"
+  );
+  const result = await loadChoices();
+  return Array.isArray(result.data.companies) ? result.data.companies : [];
+}
+
+export async function claimInitialCompany(companyId: string): Promise<CompanyChoice> {
+  const claimCompany = httpsCallable<{ companyId: string }, CompanyChoice>(
+    functions,
+    "claimInitialCompany"
+  );
+  const result = await claimCompany({ companyId });
+  return result.data;
+}
+
 async function commitBatchItems(
   items: Array<(batch: ReturnType<typeof writeBatch>) => void>
 ): Promise<void> {

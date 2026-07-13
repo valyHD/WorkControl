@@ -58,6 +58,8 @@ let fleetOverviewRequest = null;
 
 exports.adminCreateUser = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.adminCreateUser);
 exports.setPrimaryCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.setPrimaryCompany);
+exports.listCompanyChoices = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.listCompanyChoices);
+exports.claimInitialCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimInitialCompany);
 exports.assignUsersToCompany = onCall(
   SECURITY_CALLABLE_OPTIONS,
   securityHandlers.assignUsersToCompany

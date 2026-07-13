@@ -6,6 +6,7 @@ import { initializeApp, applicationDefault, getApps } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import {
   COMPANY_SCOPED_COLLECTIONS,
+  buildAccessBootstrapUpdate,
   cleanId,
   getUserCompanyIds,
   inferCompanyId,
@@ -45,6 +46,7 @@ function previousFields(data) {
     companyIds: Object.hasOwn(data, "companyIds") ? data.companyIds : null,
     primaryCompanyId: Object.hasOwn(data, "primaryCompanyId") ? data.primaryCompanyId : null,
     accessStatus: Object.hasOwn(data, "accessStatus") ? data.accessStatus : null,
+    globalAdmin: Object.hasOwn(data, "globalAdmin") ? data.globalAdmin : null,
   };
 }
 
@@ -77,8 +79,11 @@ async function main() {
   const defaultCompanyId = cleanId(args.get("--default-company"));
   const reportDirectory = path.resolve(cleanId(args.get("--output")) || "migration-reports");
   if (!projectId) throw new Error("Foloseste --project <firebase-project-id>.");
-  if (!["dry-run", "backfill", "rollback"].includes(mode)) throw new Error("Mod --mode invalid.");
-  if (mode !== "dry-run" && (args.get("--apply") !== true || args.get("--confirm-project") !== projectId)) {
+  if (!["dry-run", "backfill", "rollback", "access-bootstrap-dry-run", "access-bootstrap"].includes(mode)) {
+    throw new Error("Mod --mode invalid.");
+  }
+  if (!["dry-run", "access-bootstrap-dry-run"].includes(mode) &&
+      (args.get("--apply") !== true || args.get("--confirm-project") !== projectId)) {
     throw new Error("Scrierea necesita --apply si --confirm-project cu Project ID-ul exact.");
   }
 
@@ -88,6 +93,73 @@ async function main() {
     const backupPath = path.resolve(cleanId(args.get("--backup")));
     if (!backupPath) throw new Error("Rollback necesita --backup <fisier.json>.");
     console.log(JSON.stringify(await rollback(db, backupPath, projectId), null, 2));
+    return;
+  }
+
+
+  if (mode === "access-bootstrap" || mode === "access-bootstrap-dry-run") {
+    const requestedAdmins = new Set(
+      cleanId(args.get("--global-admin-emails"))
+        .split(",")
+        .map((value) => cleanId(value).toLowerCase())
+        .filter(Boolean)
+    );
+    if (requestedAdmins.size === 0) {
+      throw new Error("Foloseste --global-admin-emails cu cel putin un email explicit.");
+    }
+    const usersSnap = await db.collection("users").get();
+    const matchedAdmins = new Set();
+    const changes = [];
+    for (const userDoc of usersSnap.docs) {
+      const data = userDoc.data() || {};
+      const email = cleanId(data.email).toLowerCase();
+      const update = buildAccessBootstrapUpdate(data, email, requestedAdmins);
+      if (update.globalAdmin) {
+        matchedAdmins.add(email);
+        if (data.role !== "admin" || data.active !== true) {
+          throw new Error("Administratorii globali solicitati trebuie sa fie conturi admin active.");
+        }
+      }
+      if (data.accessStatus === update.accessStatus && data.globalAdmin === update.globalAdmin) continue;
+      changes.push({
+        ref: userDoc.ref,
+        path: userDoc.ref.path,
+        previous: previousFields(data),
+        update: {
+          ...update,
+          updatedAt: Date.now(),
+          updatedAtServer: FieldValue.serverTimestamp(),
+        },
+      });
+    }
+    const missingAdmins = [...requestedAdmins].filter((email) => !matchedAdmins.has(email));
+    if (missingAdmins.length > 0) throw new Error("Unul dintre conturile global admin nu exista.");
+    await fs.mkdir(reportDirectory, { recursive: true });
+    const timestamp = new Date().toISOString().replaceAll(":", "-");
+    const reportPath = path.join(reportDirectory, `company-isolation-${mode}-${timestamp}.json`);
+    const report = {
+      projectId,
+      mode,
+      generatedAt: new Date().toISOString(),
+      scannedUsers: usersSnap.size,
+      eligibleChanges: changes.length,
+      requestedGlobalAdmins: requestedAdmins.size,
+      matchedGlobalAdmins: matchedAdmins.size,
+      applied: 0,
+    };
+    if (mode === "access-bootstrap") {
+      const backupPath = path.join(reportDirectory, `company-isolation-backup-${timestamp}.json`);
+      await fs.writeFile(backupPath, JSON.stringify({
+        projectId,
+        createdAt: new Date().toISOString(),
+        changes: changes.map((change) => ({ path: change.path, previous: change.previous })),
+      }, null, 2));
+      await writeBatches(db, changes);
+      report.applied = changes.length;
+      report.backupPath = backupPath;
+    }
+    await fs.writeFile(reportPath, JSON.stringify(report, null, 2));
+    console.log(JSON.stringify({ ...report, reportPath }, null, 2));
     return;
   }
 

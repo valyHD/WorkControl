@@ -67,6 +67,28 @@ Publica mai intai numai Functions si indexurile compatibile:
 Rules vechi raman active in aceasta etapa. Verifica logurile Functions inainte de
 backfill.
 
+## Bootstrap acces si alegerea initiala a firmei
+
+Pentru utilizatorii legacy activi fara firma, publicarea poate introduce un pas de
+alegere initiala controlat server-side. Alegerea este permisa o singura data; dupa
+asignare, firma nu poate fi schimbata arbitrar de utilizator.
+
+Mai intai verifica modificarile de acces si administratorii globali expliciti:
+
+```powershell
+node scripts/company-isolation-migration.mjs --mode access-bootstrap-dry-run --project workcontrol-53b1d --global-admin-emails <email-1>,<email-2>
+```
+
+Aplicarea necesita confirmarea proiectului si creeaza backup local:
+
+```powershell
+node scripts/company-isolation-migration.mjs --mode access-bootstrap --project workcontrol-53b1d --global-admin-emails <email-1>,<email-2> --confirm-project workcontrol-53b1d --apply
+```
+
+Bootstrap-ul nu asigneaza automat o firma. Marcheaza conturile legacy explicit active
+si seteaza `globalAdmin` numai pentru emailurile indicate. Utilizatorii fara firma vad
+doar selectorul initial pana cand aleg o firma activa.
+
 ## Etapa 3 - backfill
 
 Backfill-ul este permis numai dupa ce raportul dry-run a fost aprobat:

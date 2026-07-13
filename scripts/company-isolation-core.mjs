@@ -119,3 +119,11 @@ export function normalizeLegacyUser(data, inferredCompanyId) {
     accessStatus: data?.accessStatus || (data?.active === true ? "active" : "disabled"),
   };
 }
+
+export function buildAccessBootstrapUpdate(data, email, globalAdminEmails) {
+  const normalizedEmail = cleanId(email).toLowerCase();
+  return {
+    accessStatus: data?.active === true ? "active" : "disabled",
+    globalAdmin: globalAdminEmails.has(normalizedEmail),
+  };
+}

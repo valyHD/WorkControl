@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildAccessBootstrapUpdate,
   inferCompanyId,
   normalizeLegacyUser,
   resolveUniqueCompany,
@@ -67,5 +68,17 @@ test("legacy users remain disabled unless they were explicitly active", () => {
     companyIds: ["company-a"],
     primaryCompanyId: "company-a",
     accessStatus: "disabled",
+  });
+});
+
+test("access bootstrap activates legacy active users without assigning a company", () => {
+  const admins = new Set(["owner@example.com", "backup@example.com"]);
+  assert.deepEqual(buildAccessBootstrapUpdate({ active: true }, "worker@example.com", admins), {
+    accessStatus: "active",
+    globalAdmin: false,
+  });
+  assert.deepEqual(buildAccessBootstrapUpdate({ active: true }, "OWNER@example.com", admins), {
+    accessStatus: "active",
+    globalAdmin: true,
   });
 });

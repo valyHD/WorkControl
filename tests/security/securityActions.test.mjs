@@ -112,6 +112,13 @@ async function seed() {
       companyKey: "company-b",
       companyName: "Company B",
     }),
+    db.collection("firmeMentenanta").doc("company-a-legacy").set({
+      companyName: "Company A",
+    }),
+    db.collection("firmeMentenanta").doc("company-inactive").set({
+      companyName: "Company Inactive",
+      active: false,
+    }),
     db.collection("projects").doc("project-a").set({
       companyId: "company-a",
       name: "Project A",
@@ -301,6 +308,40 @@ test("primary company selection and assignments are server validated", async () 
   assert.equal(assigned.assignedCount, 1);
   assert.deepEqual(user.get("companyIds"), ["company-b"]);
   assert.equal(user.get("primaryCompanyId"), "company-b");
+});
+
+test("initial company choice is minimal, deduplicated and can be claimed only once", async () => {
+  const choices = await handlers.listCompanyChoices({ auth: { uid: "unassigned-user" } });
+  assert.deepEqual(choices.companies, [
+    { companyId: "company-a", companyName: "Company A" },
+    { companyId: "company-b", companyName: "Company B" },
+  ]);
+
+  const claimed = await handlers.claimInitialCompany({
+    auth: { uid: "unassigned-user" },
+    data: { companyId: "company-b" },
+  });
+  assert.deepEqual(claimed, { companyId: "company-b", companyName: "Company B" });
+
+  const user = await db.collection("users").doc("unassigned-user").get();
+  assert.equal(user.get("companyId"), "company-b");
+  assert.deepEqual(user.get("companyIds"), ["company-b"]);
+  assert.equal(user.get("primaryCompanyId"), "company-b");
+
+  const audit = await db.collection("auditLogs")
+    .where("action", "==", "user_initial_company_claimed")
+    .where("actorUserId", "==", "unassigned-user")
+    .limit(1)
+    .get();
+  assert.equal(audit.size, 1);
+
+  await assert.rejects(
+    handlers.claimInitialCompany({
+      auth: { uid: "unassigned-user" },
+      data: { companyId: "company-a" },
+    }),
+    (error) => error.code === "failed-precondition"
+  );
 });
 
 test("notification dispatch has server-side idempotency and rate limiting", async () => {

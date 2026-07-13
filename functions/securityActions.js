@@ -171,6 +171,27 @@ function canManageCompany(actor, companyId) {
   );
 }
 
+function buildCompanyChoices(companyDocs) {
+  const byName = new Map();
+  for (const companyDoc of companyDocs) {
+    const data = companyDoc.data() || {};
+    if (data.active === false) continue;
+    const companyName = cleanText(data.companyName || data.name || companyDoc.id, 160);
+    if (!companyName) continue;
+    const key = companyName.toLocaleLowerCase('ro-RO');
+    const candidate = {
+      companyId: companyDoc.id,
+      companyName,
+      score: Object.keys(data).length,
+    };
+    const current = byName.get(key);
+    if (!current || candidate.score > current.score) byName.set(key, candidate);
+  }
+  return [...byName.values()]
+    .map(({ companyId, companyName }) => ({ companyId, companyName }))
+    .sort((left, right) => left.companyName.localeCompare(right.companyName, 'ro-RO'));
+}
+
 async function loadActor(db, uid, HttpsError) {
   if (!uid) throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
   const snap = await db.collection('users').doc(uid).get();
@@ -435,11 +456,13 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
   async function setPrimaryCompany(request) {
     const actor = await loadActor(db, request.auth?.uid, HttpsError);
     const companyId = cleanText(request.data?.companyId, 120);
-    if (!companyId || !actor.companyIds.includes(companyId)) {
+    if (!companyId || (!isGlobalAdmin(actor) && !actor.companyIds.includes(companyId))) {
       throw new HttpsError('permission-denied', 'Firma principala trebuie sa fie deja asignata contului.');
     }
     const companySnap = await db.collection('firmeMentenanta').doc(companyId).get();
-    if (!companySnap.exists) throw new HttpsError('not-found', 'Firma nu exista.');
+    if (!companySnap.exists || companySnap.get('active') === false) {
+      throw new HttpsError('not-found', 'Firma nu exista sau este inactiva.');
+    }
     const companyName = cleanText(
       companySnap.get('companyName') || companySnap.get('name') || companyId,
       160
@@ -468,6 +491,72 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       }));
     });
     return { companyId, companyName };
+  }
+
+  async function listCompanyChoices(request) {
+    await loadActor(db, request.auth?.uid, HttpsError);
+    const companiesSnap = await db.collection('firmeMentenanta').get();
+    return { companies: buildCompanyChoices(companiesSnap.docs) };
+  }
+
+  async function claimInitialCompany(request) {
+    const actor = await loadActor(db, request.auth?.uid, HttpsError);
+    if (isGlobalAdmin(actor)) {
+      throw new HttpsError('failed-precondition', 'Administratorul global poate selecta direct firma principala.');
+    }
+    if (actor.companyIds.length > 0) {
+      throw new HttpsError('failed-precondition', 'Firma initiala a fost deja selectata.');
+    }
+    const companyId = cleanText(request.data?.companyId, 120);
+    if (!companyId) throw new HttpsError('invalid-argument', 'Selecteaza o firma valida.');
+    const companyRef = db.collection('firmeMentenanta').doc(companyId);
+    const userRef = db.collection('users').doc(actor.uid);
+
+    const result = await db.runTransaction(async (tx) => {
+      const [companySnap, userSnap] = await Promise.all([tx.get(companyRef), tx.get(userRef)]);
+      if (!companySnap.exists || companySnap.get('active') === false) {
+        throw new HttpsError('not-found', 'Firma nu exista sau este inactiva.');
+      }
+      if (!userSnap.exists) throw new HttpsError('not-found', 'Profilul intern nu exista.');
+      const before = userSnap.data() || {};
+      if (before.active !== true || cleanText(before.accessStatus, 32) !== 'active') {
+        throw new HttpsError('permission-denied', 'Contul intern nu este activ.');
+      }
+      if (userCompanyIds(before).length > 0) {
+        throw new HttpsError('failed-precondition', 'Firma initiala a fost deja selectata.');
+      }
+      const companyName = cleanText(
+        companySnap.get('companyName') || companySnap.get('name') || companyId,
+        160
+      );
+      const after = {
+        companyId,
+        companyIds: [companyId],
+        companyNames: [companyName],
+        primaryCompanyId: companyId,
+        primaryCompanyName: companyName,
+      };
+      tx.update(userRef, {
+        ...after,
+        companyClaimedAt: Date.now(),
+        companyClaimedAtServer: fieldValue.serverTimestamp(),
+        updatedAt: Date.now(),
+        updatedAtServer: fieldValue.serverTimestamp(),
+      });
+      tx.create(db.collection('auditLogs').doc(), buildAuditPayload(fieldValue, actor, {
+        companyId,
+        category: 'users',
+        action: 'user_initial_company_claimed',
+        title: 'Firma initiala selectata',
+        message: `${actor.fullName} si-a selectat firma ${companyName}.`,
+        entityId: actor.uid,
+        targetUserId: actor.uid,
+        before: { companyIds: [] },
+        after,
+      }));
+      return { companyId, companyName };
+    });
+    return result;
   }
 
   async function assignUsersToCompany(request) {
@@ -1368,6 +1457,8 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
   return {
     adminCreateUser,
     setPrimaryCompany,
+    listCompanyChoices,
+    claimInitialCompany,
     assignUsersToCompany,
     recordAuditEvent,
     dispatchNotificationEvent,
@@ -1391,4 +1482,5 @@ module.exports = {
   cleanMetadata,
   userCompanyIds,
   canAccessCompany,
+  buildCompanyChoices,
 };
