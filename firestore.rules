@@ -1,212 +1,586 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
 
-    function isAdminUser() {
-      return isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
-    function canControlVehicleGpsVisibility() {
-      return isSignedIn() && request.auth.token.email == "ionut.matura23@gmail.com";
+    function userExists() {
+      return signedIn() && exists(userPath());
+    }
+
+    function userData() {
+      return get(userPath()).data;
+    }
+
+    function activeUser() {
+      return userExists() &&
+        userData().get('active', false) == true &&
+        userData().get('accessStatus', '') == 'active';
+    }
+
+    function role() {
+      return activeUser() ? userData().get('role', '') : '';
+    }
+
+    function globalAdmin() {
+      return activeUser() && userData().get('role', '') == 'admin' &&
+        userData().get('globalAdmin', false) == true;
+    }
+
+    function sameCompany(companyId) {
+      return globalAdmin() ||
+        (
+          activeUser() && companyId is string && companyId.size() > 0 &&
+          (
+            companyId == userData().get('primaryCompanyId', '') ||
+            companyId in userData().get('companyIds', [])
+          )
+        );
+    }
+
+    function sameCompanyData(data) {
+      return globalAdmin() ||
+        (data.get('companyId', '') is string && sameCompany(data.get('companyId', '')));
+    }
+
+    function sharesUserCompany(data) {
+      return activeUser() &&
+        (
+          (userData().get('role', '') == 'admin' && userData().get('globalAdmin', false) == true) ||
+          data.get('companyIds', []) is list &&
+          data.get('companyIds', []).hasAny(userData().get('companyIds', []))
+        );
+    }
+
+    function managerFor(companyId) {
+      return sameCompany(companyId) && userData().get('role', '') in ['admin', 'manager'];
+    }
+
+    function adminFor(companyId) {
+      return sameCompany(companyId) && userData().get('role', '') == 'admin';
+    }
+
+    function self(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function changedOnly(fields) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
+    }
+
+    function immutableCompany() {
+      return request.resource.data.get('companyId', '') == resource.data.get('companyId', '');
+    }
+
+    function vehicle(vehicleId) {
+      return get(/databases/$(database)/documents/vehicles/$(vehicleId)).data;
+    }
+
+    function assignedVehicleData(data) {
+      return activeUser() && request.auth.uid in [
+        data.get('ownerUserId', ''),
+        data.get('currentDriverUserId', ''),
+        data.get('pendingDriverUserId', '')
+      ];
+    }
+
+    function canReadVehicle(vehicleId) {
+      return sameCompanyData(vehicle(vehicleId)) &&
+        (managerFor(vehicle(vehicleId).get('companyId', '')) || assignedVehicleData(vehicle(vehicleId)));
+    }
+
+    function tool(toolId) {
+      return get(/databases/$(database)/documents/tools/$(toolId)).data;
+    }
+
+    function assignedToolData(data) {
+      return activeUser() && request.auth.uid in [
+        data.get('ownerUserId', ''),
+        data.get('currentHolderUserId', ''),
+        data.get('pendingHolderUserId', '')
+      ];
+    }
+
+    function userBelongsToCompany(userId, companyId) {
+      return userId is string && userId.size() > 0 &&
+        exists(/databases/$(database)/documents/users/$(userId)) &&
+        companyId in get(/databases/$(database)/documents/users/$(userId)).data.get('companyIds', []);
     }
 
     match /users/{userId} {
-      allow read, write: if isSignedIn();
+      allow get: if self(userId) ||
+        (activeUser() && sharesUserCompany(resource.data) && role() in ['admin', 'manager']);
+      allow list: if globalAdmin();
+      allow create: if false;
+      allow update: if
+        activeUser() && request.resource.data.get('uid', userId) == resource.data.get('uid', userId) &&
+        (
+          globalAdmin() ||
+          (
+            role() == 'admin' && sharesUserCompany(resource.data) && sharesUserCompany(request.resource.data) &&
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'globalAdmin', 'companyId', 'companyIds', 'companyNames',
+              'primaryCompanyId', 'primaryCompanyName'
+            ])
+          ) ||
+          (
+            role() == 'manager' && sharesUserCompany(resource.data) && sharesUserCompany(request.resource.data) &&
+            changedOnly(['fullName', 'roleTitle', 'department', 'active', 'updatedAt', 'updatedAtServer'])
+          ) ||
+          (
+          self(userId) &&
+          request.resource.data.get('uid', userId) == resource.data.get('uid', userId) &&
+          changedOnly([
+            'fullName', 'themeKey', 'avatarUrl', 'avatarThumbUrl', 'avatarPath',
+            'avatarThumbPath', 'roleTitle', 'department', 'isOnline', 'lastSeenAt',
+            'lastActiveAt', 'lastSiteEnteredAt', 'lastSiteEnterNotifiedAt',
+            'lastSeenAtServer', 'lastActiveAtServer', 'lastSiteEnteredAtServer',
+            'timesheetDefaultProjectId', 'lastTimesheetProjectId',
+            'lastExpenseAssignedUserId', 'lastExpenseProjectId',
+            'lastExpenseCompanyName', 'expenseCompanyName', 'updatedAt',
+            'updatedAtServer'
+          ])
+          )
+        );
+      allow delete: if globalAdmin() || (role() == 'admin' && sharesUserCompany(resource.data));
 
       match /pageChangeReads/{readId} {
-        allow read, write: if isSignedIn() && request.auth.uid == userId;
+        allow read, create, update, delete: if self(userId) && activeUser();
       }
     }
 
-    match /tools/{toolId} {
-      allow read, write: if isSignedIn();
+    match /userOperationalViews/{viewId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || resource.data.get('uid', '') == request.auth.uid);
+      allow write: if false;
     }
 
-    match /toolEvents/{eventId} {
-      allow read, write: if isSignedIn();
+    match /firmeMentenanta/{companyId} {
+      allow read: if sameCompany(companyId);
+      allow create, delete: if globalAdmin();
+      allow update: if globalAdmin() || adminFor(companyId);
+    }
+
+    match /projects/{projectId} {
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /timesheets/{timesheetId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (resource.data.get('userId', '') == request.auth.uid || managerFor(resource.data.get('companyId', '')));
+      allow create: if false;
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany() &&
+        request.resource.data.get('userId', '') == resource.data.get('userId', '') &&
+        changedOnly([
+          'status', 'stopAt', 'workedMinutes', 'explanation', 'startExplanation',
+          'stopExplanation', 'startPolicyFlag', 'stopPolicyFlag', 'startExpectedTime',
+          'stopExpectedMinutes', 'startLocation', 'stopLocation', 'projectId',
+          'projectCode', 'projectName', 'updatedAt', 'updatedAtServer', 'managerNote',
+          'approvedByUserId', 'approvedAt'
+        ]);
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /activeTimesheets/{userId} {
+      allow read, write: if false;
     }
 
     match /vehicles/{vehicleId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || assignedVehicleData(resource.data));
+      allow create: if managerFor(request.resource.data.get('companyId', '')) &&
+        request.resource.data.get('currentKm', 0) >= 0;
+      allow update: if
+        (
+          managerFor(resource.data.get('companyId', '')) && immutableCompany() &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'currentKm', 'initialRecordedKm',
+            'ownerUserId', 'ownerUserName', 'ownerThemeKey',
+            'currentDriverUserId', 'currentDriverUserName', 'currentDriverThemeKey',
+            'pendingDriverUserId', 'pendingDriverUserName', 'pendingDriverThemeKey',
+            'pendingDriverRequestedAt'
+          ])
+        ) ||
+        (
+          sameCompanyData(resource.data) && assignedVehicleData(resource.data) &&
+          assignedVehicleData(request.resource.data) && immutableCompany() &&
+          request.resource.data.get('ownerUserId', '') == resource.data.get('ownerUserId', '') &&
+          request.resource.data.get('currentDriverUserId', '') == resource.data.get('currentDriverUserId', '') &&
+          request.resource.data.get('pendingDriverUserId', '') == resource.data.get('pendingDriverUserId', '') &&
+          changedOnly([
+            'images', 'imageUrls', 'coverImageUrl', 'coverThumbUrl',
+            'updatedAt', 'updatedAtServer'
+          ])
+        );
+      allow delete: if adminFor(resource.data.get('companyId', ''));
 
       match /positions/{positionId} {
-        allow read, write: if isSignedIn();
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
       }
 
       match /positionDays/{dayKey} {
-        allow read, write: if isSignedIn();
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
 
         match /points/{pointId} {
-          allow read, write: if isSignedIn();
+          allow read: if canReadVehicle(vehicleId);
+          allow write: if false;
         }
       }
 
       match /diagnosticDays/{dayKey} {
-        allow read, write: if isSignedIn();
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
       }
 
       match /events/{eventId} {
-        allow read, write: if isSignedIn();
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
       }
 
       match /commands/{commandId} {
-        allow read, write: if isSignedIn();
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
       }
     }
 
-    match /vehicleEvents/{eventId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /vehiclePositionArchives/{archiveId} {
-      allow read: if isSignedIn();
-      allow write: if isAdminUser();
-    }
-
-    match /vehicleMaintenanceAlerts/{alertId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /trackerBindings/{imei} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /unboundTrackerPackets/{packetId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /projects/{projectId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /timesheets/{timesheetId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /expenseDocuments/{expenseId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /expenseScanJobs/{jobId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /notifications/{notificationId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /auditLogs/{auditId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isAdminUser();
-    }
-
-    match /aiCommandLogs/{traceId} {
-      allow read: if isAdminUser();
+    match /vehicleOperationalViews/{vehicleId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || assignedVehicleData(resource.data));
       allow write: if false;
     }
 
-    match /appFeedback/{feedbackId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.ownerUserId == request.auth.uid &&
+    match /vehicleTrackerAdmin/{vehicleId} {
+      allow read: if adminFor(resource.data.get('companyId', ''));
+      allow write: if false;
+    }
+
+    match /vehicleCommandLocks/{lockId} {
+      allow read, write: if false;
+    }
+
+    match /vehicleEvents/{eventId} {
+      allow read: if canReadVehicle(resource.data.get('vehicleId', ''));
+      allow create: if activeUser() &&
+        request.resource.data.get('actorUserId', '') == request.auth.uid &&
         request.resource.data.keys().hasOnly([
-          "ownerUserId", "category", "message", "path", "status", "createdAt", "createdAtServer"
+          'vehicleId', 'type', 'message', 'actorUserId', 'actorUserName',
+          'actorUserThemeKey', 'createdAt', 'createdAtServer'
         ]) &&
-        request.resource.data.category in ["idea", "problem", "usability"] &&
-        request.resource.data.message is string &&
-        request.resource.data.message.size() >= 5 &&
-        request.resource.data.message.size() <= 1500 &&
-        request.resource.data.status == "new";
-      allow read, update, delete: if isAdminUser();
+        canReadVehicle(request.resource.data.get('vehicleId', ''));
+      allow update, delete: if false;
+    }
+
+    match /vehiclePositionArchives/{archiveId} {
+      allow read: if canReadVehicle(resource.data.get('vehicleId', ''));
+      allow write: if false;
+    }
+
+    match /vehicleMaintenanceAlerts/{alertId} {
+      allow read: if sameCompanyData(resource.data);
+      allow write: if false;
+    }
+
+    match /trackerBindings/{imei} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /unboundTrackerPackets/{packetId} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /tools/{toolId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || assignedToolData(resource.data));
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow update: if sameCompanyData(resource.data) && assignedToolData(resource.data) &&
+        assignedToolData(request.resource.data) && immutableCompany() &&
+        request.resource.data.get('ownerUserId', '') == resource.data.get('ownerUserId', '') &&
+        request.resource.data.get('currentHolderUserId', '') == resource.data.get('currentHolderUserId', '') &&
+        request.resource.data.get('pendingHolderUserId', '') == resource.data.get('pendingHolderUserId', '') &&
+        changedOnly([
+          'images', 'imageUrls', 'coverImageUrl', 'coverThumbUrl',
+          'updatedAt', 'updatedAtServer'
+        ]);
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /toolEvents/{eventId} {
+      allow read: if canReadTool(resource.data.get('toolId', ''));
+      allow create: if activeUser() && canReadTool(request.resource.data.get('toolId', '')) &&
+        request.resource.data.get('actorUserId', '') == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'toolId', 'type', 'message', 'actorUserId', 'actorUserName',
+          'actorUserThemeKey', 'createdAt', 'createdAtServer'
+        ]);
+      allow update, delete: if false;
+    }
+
+    function canReadTool(toolId) {
+      return sameCompanyData(tool(toolId)) &&
+        (managerFor(tool(toolId).get('companyId', '')) || assignedToolData(tool(toolId)));
+    }
+
+    match /leaveRequests/{leaveId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (resource.data.get('userId', '') == request.auth.uid || managerFor(resource.data.get('companyId', '')));
+      allow create: if activeUser() &&
+        request.resource.data.get('userId', '') == request.auth.uid &&
+        sameCompany(request.resource.data.get('companyId', '')) &&
+        request.resource.data.get('status', '') == 'in_asteptare';
+      allow update: if
+        (
+          resource.data.get('userId', '') == request.auth.uid && sameCompanyData(resource.data) &&
+          immutableCompany() && request.resource.data.get('userId', '') == resource.data.get('userId', '') &&
+          request.resource.data.get('status', '') == resource.data.get('status', '') &&
+          changedOnly([
+            'requestType', 'legalReason', 'periodStart', 'periodEnd', 'requestedDays',
+            'requestedMinutes', 'reason', 'signatureData', 'pdfDataUrl', 'updatedAt',
+            'updatedAtServer'
+          ])
+        ) ||
+        (
+          managerFor(resource.data.get('companyId', '')) && immutableCompany() &&
+          request.resource.data.get('userId', '') == resource.data.get('userId', '')
+        );
+      allow delete: if adminFor(resource.data.get('companyId', '')) ||
+        (resource.data.get('userId', '') == request.auth.uid && resource.data.get('status', '') == 'in_asteptare');
+    }
+
+    match /leaveBalances/{userId} {
+      allow read: if self(userId) || (sameCompanyData(resource.data) && managerFor(resource.data.get('companyId', '')));
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /leaveSettings/{settingId} {
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /holidays/{holidayId} {
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /expenseDocuments/{expenseId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (
+          managerFor(resource.data.get('companyId', '')) ||
+          request.auth.uid in [resource.data.get('uploadedByUserId', ''), resource.data.get('assignedUserId', '')]
+        );
+      allow create: if activeUser() &&
+        request.resource.data.get('uploadedByUserId', '') == request.auth.uid &&
+        sameCompany(request.resource.data.get('companyId', '')) &&
+        userBelongsToCompany(
+          request.resource.data.get('assignedUserId', request.auth.uid),
+          request.resource.data.get('companyId', '')
+        );
+      allow update: if immutableCompany() &&
+        request.resource.data.get('uploadedByUserId', '') == resource.data.get('uploadedByUserId', '') &&
+        (
+          managerFor(resource.data.get('companyId', '')) ||
+          request.auth.uid == resource.data.get('uploadedByUserId', '')
+        ) &&
+        userBelongsToCompany(
+          request.resource.data.get('assignedUserId', request.auth.uid),
+          resource.data.get('companyId', '')
+        ) &&
+        request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0);
+      allow delete: if managerFor(resource.data.get('companyId', '')) ||
+        request.auth.uid == resource.data.get('uploadedByUserId', '');
+    }
+
+    match /expenseScanJobs/{jobId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || resource.data.get('uploadedByUserId', '') == request.auth.uid);
+      allow create: if activeUser() &&
+        request.resource.data.get('uploadedByUserId', '') == request.auth.uid &&
+        sameCompany(request.resource.data.get('companyId', '')) &&
+        request.resource.data.get('status', '') == 'queued' &&
+        request.resource.data.get('filePath', '').matches(
+          '^expenses/' + request.auth.uid + '/.*$'
+        ) &&
+        request.resource.data.keys().hasOnly([
+          'companyId', 'status', 'scanMode', 'fileName', 'fileUrl', 'filePath',
+          'contentType', 'sizeBytes', 'extension', 'uploadedByUserId',
+          'uploadedByUserName', 'assignedUserId', 'assignedUserName', 'projectId',
+          'projectCode', 'projectName', 'companyName', 'reimbursable', 'createdAt',
+          'updatedAt', 'createdAtServer', 'updatedAtServer'
+        ]);
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if globalAdmin() ||
+        (activeUser() && resource.data.get('userId', '') == request.auth.uid);
+      allow create: if false;
+      allow update: if activeUser() && resource.data.get('userId', '') == request.auth.uid &&
+        request.resource.data.get('userId', '') == resource.data.get('userId', '') &&
+        immutableCompany() && changedOnly(['read', 'readAt']);
+      allow delete: if globalAdmin() ||
+        (activeUser() && resource.data.get('userId', '') == request.auth.uid);
     }
 
     match /notificationRules/{ruleId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
     }
-
 
     match /pushTokens/{tokenId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if activeUser() && resource.data.get('userId', '') == request.auth.uid;
+      allow create: if activeUser() && request.resource.data.get('userId', '') == request.auth.uid &&
+        sameCompany(request.resource.data.get('companyId', ''));
+      allow update: if activeUser() && resource.data.get('userId', '') == request.auth.uid &&
+        request.resource.data.get('userId', '') == request.auth.uid && immutableCompany();
+      allow delete: if activeUser() && resource.data.get('userId', '') == request.auth.uid;
     }
 
-    match /systemSettings/{settingId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn() &&
-        (settingId != "vehicleGpsVisibility" || canControlVehicleGpsVisibility());
+    match /auditLogs/{auditId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || resource.data.get('actorUserId', '') == request.auth.uid);
+      allow write: if false;
     }
 
-    match /backupJobs/{jobId} {
-      allow read, write: if isSignedIn();
+    match /aiCommandLogs/{traceId} {
+      allow read: if sameCompanyData(resource.data) &&
+        (managerFor(resource.data.get('companyId', '')) || resource.data.get('ownerUserId', '') == request.auth.uid);
+      allow write: if false;
+    }
+
+    match /notificationDispatchLimits/{userId} {
+      allow read, write: if false;
+    }
+
+    match /notificationDispatchMarkers/{markerId} {
+      allow read, write: if false;
+    }
+
+    match /timesheetReminderMarkers/{markerId} {
+      allow read, write: if false;
+    }
+
+    match /systemLogs/{logId} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /systemMetrics/{metricId} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /systemMetricDaily/{metricId} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /systemCostSettings/{settingId} {
+      allow read: if globalAdmin();
+      allow write: if false;
+    }
+
+    match /systemPrivateSettings/{settingId} {
+      allow read: if globalAdmin();
+      allow write: if false;
     }
 
     match /maintenanceClients/{clientId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
 
       match /rapoarte/{reportId} {
-        allow read, write: if isSignedIn();
+        allow read: if sameCompanyData(resource.data);
+        allow create: if managerFor(request.resource.data.get('companyId', ''));
+        allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+        allow delete: if adminFor(resource.data.get('companyId', ''));
       }
     }
 
     match /maintenanceLifts/{liftId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
     }
 
     match /maintenanceReports/{reportId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
     }
 
     match /maintenancePartOrders/{orderId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
+    }
+
+    match /{parentPath=**}/rapoarte/{reportId} {
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
     }
 
     match /rapoarte/{reportId} {
-      allow read, write: if isSignedIn();
+      allow read: if sameCompanyData(resource.data);
+      allow create: if managerFor(request.resource.data.get('companyId', ''));
+      allow update: if managerFor(resource.data.get('companyId', '')) && immutableCompany();
+      allow delete: if adminFor(resource.data.get('companyId', ''));
     }
 
-    match /leaveRequests/{requestId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isSignedIn() && (isAdminUser() || resource.data.userId == request.auth.uid);
+    match /systemSettings/{settingId} {
+      allow read: if activeUser();
+      allow write: if globalAdmin();
     }
 
-    match /leaveBalances/{balanceId} {
-      allow read, write: if isSignedIn();
+    match /backupJobs/{jobId} {
+      allow read, write: if globalAdmin();
     }
 
-    match /leaveSettings/{settingId} {
-      allow read, write: if isSignedIn();
+    match /appFeedback/{feedbackId} {
+      allow create: if activeUser() &&
+        request.resource.data.get('ownerUserId', '') == request.auth.uid &&
+        sameCompany(request.resource.data.get('companyId', '')) &&
+        request.resource.data.keys().hasOnly([
+          'ownerUserId', 'companyId', 'category', 'message', 'path', 'status',
+          'createdAt', 'createdAtServer'
+        ]) &&
+        request.resource.data.get('category', '') in ['idea', 'problem', 'usability'] &&
+        request.resource.data.get('message', '').size() >= 5 &&
+        request.resource.data.get('message', '').size() <= 1500 &&
+        request.resource.data.get('path', '').size() <= 200 &&
+        request.resource.data.get('status', '') == 'new';
+      allow read: if sameCompanyData(resource.data) && managerFor(resource.data.get('companyId', ''));
+      allow update, delete: if adminFor(resource.data.get('companyId', ''));
     }
 
-    match /holidays/{holidayId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /firmeMentenanta/{brandingId} {
-      allow read, write: if isSignedIn();
-    }
-        match /leaveRequests/{requestId} {
-      allow read: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isSignedIn() && (isAdminUser() || resource.data.userId == request.auth.uid);
-    }
-
-    match /leaveBalances/{balanceId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /leaveSettings/{settingId} {
-      allow read, write: if isSignedIn();
-    }
-
-    match /holidays/{holidayId} {
-      allow read, write: if isSignedIn();
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

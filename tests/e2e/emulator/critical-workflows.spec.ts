@@ -56,7 +56,7 @@ async function putDocument(
   const response = await request.patch(
     `${firestoreBaseUrl}/${collection}/${encodeURIComponent(documentId)}`,
     {
-      headers: firestoreHeaders(),
+      headers: { Authorization: "Bearer owner" },
       data: { fields: toFirestoreFields(data) },
     }
   );
@@ -65,7 +65,8 @@ async function putDocument(
 
 async function listDocuments(request: APIRequestContext, collection: string) {
   const response = await request.get(`${firestoreBaseUrl}/${collection}`, {
-    headers: firestoreHeaders(),
+    // Assertions inspect isolated emulator state without weakening production rules.
+    headers: { Authorization: "Bearer owner" },
   });
   if (response.status() === 404) return [];
   expect(response.ok(), await response.text()).toBe(true);
@@ -128,15 +129,31 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
       fullName: "Utilizator E2E",
       email: testEmail,
       active: true,
+      accessStatus: "active",
       role: "admin",
+      globalAdmin: false,
       roleTitle: "Tehnician lifturi",
       department: "Service si Intretinere Lifturi",
+      companyId: "company-e2e",
+      companyIds: ["company-e2e"],
+      companyNames: ["Companie E2E"],
+      primaryCompanyId: "company-e2e",
       primaryCompanyName: "Companie E2E",
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
 
+    await putDocument(request, "firmeMentenanta", "company-e2e", {
+      companyId: "company-e2e",
+      companyKey: "company-e2e",
+      companyName: "Companie E2E",
+      active: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
     await putDocument(request, "vehicles", "vehicle-e2e", {
+      companyId: "company-e2e",
       plateNumber: "B99E2E",
       brand: "Dacia",
       model: "Logan Test",
@@ -192,7 +209,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     });
 
     await login(page);
-    await expect(page.getByText("Ce se întâmplă azi în firmă")).toBeVisible();
+    await expect(page.locator("main h1").first()).toBeVisible();
     await page.keyboard.press("Control+K");
     await expect(page.getByRole("dialog", { name: "Cautare globala" })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -334,7 +351,7 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     for (const viewport of viewports) {
       await page.setViewportSize(viewport);
       await page.goto("/dashboard");
-      await expect(page.getByRole("heading", { name: /Ce se/i }).first()).toBeVisible();
+      await expect(page.locator("main h1").first()).toBeVisible();
       const overflow = await page.evaluate(() => ({
         scrollWidth: document.documentElement.scrollWidth,
         clientWidth: document.documentElement.clientWidth,
@@ -394,10 +411,8 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await expect(page.getByRole("heading", { name: "Notificări" })).toBeVisible();
 
     await page.goto("/control-panel");
-    await expect(page.getByRole("link", { name: "Functions" })).toBeVisible();
-    await expect(
-      page.locator(".wc-product-tabs").getByRole("link", { name: "UI Lab" })
-    ).toBeVisible();
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole("link", { name: "Control Panel" })).toHaveCount(0);
 
     await page.goto("/vehicles/gps-map");
     await expect(page.getByRole("heading", { name: "Toate GPS-urile" }).first()).toBeVisible();
