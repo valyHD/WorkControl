@@ -2,6 +2,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   limit,
@@ -12,6 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import { recordFirestoreQuery } from "../../../lib/firebase/firestoreQueryTelemetry";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 
 export type ControlPanelSettings = {
@@ -535,12 +537,19 @@ export async function exportBackupDataset(): Promise<{ payload: string; prettyPa
 }
 
 export async function getCollectionCounters(): Promise<Record<string, number>> {
-  const counters: Record<string, number> = {};
-  for (const collectionName of BACKUP_COLLECTIONS) {
-    const snap = await getDocs(collection(db, collectionName));
-    counters[collectionName] = snap.size;
-  }
-  return counters;
+  const entries = await Promise.all(
+    BACKUP_COLLECTIONS.map(async (collectionName) => {
+      const aggregate = await getCountFromServer(collection(db, collectionName));
+      return [collectionName, aggregate.data().count] as const;
+    })
+  );
+  recordFirestoreQuery({
+    module: "control-panel",
+    operation: "collection-counts",
+    documents: BACKUP_COLLECTIONS.length,
+    reason: "Agregări count fără descărcarea colecțiilor",
+  });
+  return Object.fromEntries(entries);
 }
 
 export async function cleanupHistory(params: {

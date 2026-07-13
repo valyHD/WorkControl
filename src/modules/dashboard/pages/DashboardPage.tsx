@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const mountedRef = useRef(true);
   const loadInProgressRef = useRef(false);
+  const lastLoadedAtRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -175,6 +176,7 @@ export default function DashboardPage() {
         setNotifications(data.notifications ?? []);
         setMaintenance(data.maintenance);
         setLastRefreshed(new Date());
+        lastLoadedAtRef.current = Date.now();
       } catch (error) {
         console.error("[DashboardPage][load]", error);
       } finally {
@@ -191,9 +193,14 @@ export default function DashboardPage() {
   useEffect(() => {
     void load();
     const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") void load(true);
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastLoadedAtRef.current >= 30 * 60_000
+      ) {
+        void load(true);
+      }
     };
-    const interval = window.setInterval(refreshIfVisible, 5 * 60_000);
+    const interval = window.setInterval(refreshIfVisible, 30 * 60_000);
     document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       window.clearInterval(interval);

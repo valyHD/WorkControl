@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, documentId, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { BadgeCheck, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Send } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -359,7 +359,10 @@ export default function LeavePlannerPage() {
       setExpandedUserId("");
       return undefined;
     }
-    const usersQuery = query(collection(db, "users"), orderBy("createdAt", "asc"), limit(250));
+    const managementScope = role === "admin" || role === "manager";
+    const usersQuery = managementScope
+      ? query(collection(db, "users"), orderBy("createdAt", "asc"), limit(100))
+      : query(collection(db, "users"), where(documentId(), "==", user.uid), limit(1));
 
     return onSnapshot(usersQuery, (snap) => {
       const mapped = snap.docs.map((docItem) => {
@@ -384,9 +387,9 @@ export default function LeavePlannerPage() {
       });
 
       setUsers(mapped);
-      if (!expandedUserId) setExpandedUserId(mapped[0]?.uid ?? "");
+      setExpandedUserId((current) => current || mapped[0]?.uid || "");
     });
-  }, [expandedUserId, user?.uid]);
+  }, [role, user?.uid]);
 
   useEffect(() => {
     if (!expandedUserId) {
@@ -419,10 +422,20 @@ export default function LeavePlannerPage() {
   }, [expandedUserId]);
 
   useEffect(() => {
-    return onSnapshot(query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(200)), (snap) => {
+    if (!user?.uid) return;
+    const managementScope = role === "admin" || role === "manager";
+    const requestsQuery = managementScope
+      ? query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(100))
+      : query(
+          collection(db, "leaveRequests"),
+          where("userId", "==", user.uid),
+          orderBy("createdAt", "desc"),
+          limit(30)
+        );
+    return onSnapshot(requestsQuery, (snap) => {
       setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
     });
-  }, []);
+  }, [role, user?.uid]);
 
   const monthTitle = useMemo(
     () => visibleMonth.toLocaleDateString("ro-RO", { month: "long", year: "numeric" }),
