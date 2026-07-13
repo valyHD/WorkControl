@@ -27,10 +27,6 @@ import {
   uploadBytes,
 } from "firebase/storage";
 import { db, functions, storage } from "../../../lib/firebase/firebase";
-import {
-  recordFirestoreQuery,
-  registerFirestoreListener,
-} from "../../../lib/firebase/firestoreQueryTelemetry";
 import type {
   VehicleCommandItem,
   VehicleCommandStatus,
@@ -60,7 +56,6 @@ import {
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
-import { buildFleetRouteSamplingPlan } from "./fleetRouteSampling";
 
 const vehiclesCollection = collection(db, "vehicles");
 const vehicleEventsCollection = collection(db, "vehicleEvents");
@@ -1143,16 +1138,9 @@ export async function getVehiclesList(): Promise<VehicleItem[]> {
 }
 
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
-  const releaseListener = registerFirestoreListener();
-  const unsubscribe = onSnapshot(
+  return onSnapshot(
     query(vehiclesCollection, orderBy("plateNumber", "asc"), limit(250)),
     (snap) => {
-      recordFirestoreQuery({
-        module: "vehicles",
-        operation: "list-listener",
-        documents: snap.size,
-        reason: "Lista completa de vehicule",
-      });
       onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data())));
     },
     (error) => {
@@ -1160,10 +1148,6 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
       onData([]);
     }
   );
-  return () => {
-    releaseListener();
-    unsubscribe();
-  };
 }
 
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
@@ -1212,8 +1196,7 @@ export function subscribeVehicleById(
     return () => undefined;
   }
 
-  const releaseListener = registerFirestoreListener();
-  const unsubscribe = onSnapshot(
+  return onSnapshot(
     doc(db, "vehicles", vehicleId),
     (snap) => {
       if (!snap.exists()) {
@@ -1228,10 +1211,6 @@ export function subscribeVehicleById(
       onData(null);
     }
   );
-  return () => {
-    releaseListener();
-    unsubscribe();
-  };
 }
 
 export function subscribeVehicleDailyDiagnostics(
@@ -2837,127 +2816,6 @@ export async function getVehiclePositionsForSelectedDay(
   }
 
   return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
-}
-
-async function getVehicleSampledPositionsFromCollection(
-  pointsRef: CollectionReference<DocumentData>,
-  fromTs: number,
-  toTs: number,
-  maxReads: number
-): Promise<VehiclePositionItem[]> {
-  const windows = buildFleetRouteSamplingPlan(
-    [{ dayKey: "collection", fromTs, toTs }],
-    maxReads
-  )[0]?.windows;
-  if (!windows?.length) return [];
-
-  const sampledItems: VehiclePositionItem[] = [];
-  let firstQueryError: unknown = null;
-  const windowBatches: typeof windows[] = [];
-  for (let index = 0; index < windows.length; index += DAY_QUERY_CONCURRENCY) {
-    windowBatches.push(windows.slice(index, index + DAY_QUERY_CONCURRENCY));
-  }
-
-  for (const windowBatch of windowBatches) {
-    const batchResults = await Promise.all(
-      windowBatch.map(async (window) => {
-        const constraints = [
-          where("gpsTimestamp", ">=", window.fromTs),
-          where("gpsTimestamp", "<=", window.toTs),
-        ];
-        const queries = [
-          getDocs(query(pointsRef, ...constraints, orderBy("gpsTimestamp", "asc"), limit(1))),
-        ];
-        if (window.includeLastPoint) {
-          queries.push(
-            getDocs(query(pointsRef, ...constraints, orderBy("gpsTimestamp", "desc"), limit(1)))
-          );
-        }
-
-        const snapshots = await Promise.allSettled(
-          queries.map((request) => withTimeout(request, ROUTE_QUERY_TIMEOUT_MS))
-        );
-        const fulfilledSnapshots = snapshots.flatMap((result) => {
-          if (result.status === "fulfilled") return [result.value];
-          firstQueryError ??= result.reason;
-          return [];
-        });
-        return fulfilledSnapshots.flatMap((snapshot) =>
-          snapshot.docs.map((docItem) =>
-            mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>)
-          )
-        );
-      })
-    );
-    sampledItems.push(...batchResults.flat());
-  }
-
-  if (!sampledItems.length && firstQueryError) throw firstQueryError;
-  return normalizePositionItems(sampledItems);
-}
-
-export async function getVehiclePositionsForFleetRangeBounded(
-  vehicleId: string,
-  fromTs: number,
-  toTs: number,
-  maxItems = 2000
-): Promise<VehiclePositionItem[]> {
-  if (!vehicleId || !Number.isFinite(fromTs) || !Number.isFinite(toTs) || fromTs > toTs) {
-    return [];
-  }
-
-  const safeLimit = Math.max(1, Math.min(2000, Math.round(maxItems)));
-  let items: VehiclePositionItem[] = [];
-  const samplingPlan = buildFleetRouteSamplingPlan(
-    enumerateDayKeys(fromTs, toTs).map((dayKey) => {
-      const dayStart = getDayStartTs(dayKey);
-      return {
-        dayKey,
-        fromTs: Math.max(fromTs, dayStart),
-        toTs: Math.min(toTs, dayStart + 24 * 60 * 60 * 1000 - 1),
-      };
-    }),
-    safeLimit
-  );
-
-  for (const segment of samplingPlan) {
-    try {
-      const pointsRef = collection(
-        db,
-        "vehicles",
-        vehicleId,
-        "positionDays",
-        segment.dayKey,
-        "points"
-      ) as CollectionReference<DocumentData>;
-      const dayItems = await getVehicleSampledPositionsFromCollection(
-        pointsRef,
-        segment.fromTs,
-        segment.toTs,
-        segment.maxReads
-      );
-      items = normalizePositionItems([...items, ...dayItems]);
-    } catch (error) {
-      console.warn(
-        "[getVehiclePositionsForFleetRangeBounded][positionDays]",
-        segment.dayKey,
-        error
-      );
-    }
-  }
-
-  if (!items.length) {
-    try {
-      const pointsRef = collection(db, "vehicles", vehicleId, "positions") as CollectionReference<
-        DocumentData
-      >;
-      items = await getVehicleSampledPositionsFromCollection(pointsRef, fromTs, toTs, safeLimit);
-    } catch (error) {
-      console.warn("[getVehiclePositionsForFleetRangeBounded][legacyFallback]", error);
-    }
-  }
-
-  return normalizePositionItems(items).slice(0, safeLimit);
 }
 
 export async function getVehiclePositionsIncremental(

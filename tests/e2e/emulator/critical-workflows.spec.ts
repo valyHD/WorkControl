@@ -413,9 +413,8 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     });
     const showRouteButtons = page.getByRole("button", { name: "Arată traseul" });
     await expect(showRouteButtons).toHaveCount(0);
-    await expect(page.getByText(/trasee la 30 min/i)).toBeVisible();
     await expect(page.locator(".vehicle-fleet-map-card")).toHaveCount(1);
-    await expect(page.locator(".vehicle-fleet-map-card.is-route-selected")).toHaveCount(0);
-    await expect(page.getByText(/Traseu compact · GPS:/)).toBeVisible();
+    await expect(page.locator(".vehicle-fleet-map-card__empty")).toBeVisible();
+    await expect(page.getByText("Nu exista pozitie GPS.")).toBeVisible();
   });
 });
