@@ -17,6 +17,7 @@ import {
   evaluateInternalAccessProfile,
   InternalAccessError,
 } from "./internalAccessPolicy";
+import { shouldDispatchSiteEnteredNotification } from "./presenceNotificationPolicy";
 
 export type AppAuthUser = {
   uid: string;
@@ -168,7 +169,7 @@ async function maybeDispatchSiteEnteredNotification(user: AppAuthUser) {
     console.warn("[audit][site_entered]", error);
   });
 
-  if (!shouldNotify) return;
+  if (!shouldNotify || !shouldDispatchSiteEnteredNotification(user)) return;
 
   await dispatchNotificationEvent({
     module: "users",
