@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_FIRESTORE_COST_CONTROL } from "../../../config/firestoreCostControl";
 import {
   estimateFleetScenarioReads,
+  getFleetRouteRange,
   getFleetRouteRuntimePolicy,
   shouldLoadFleetRoute,
 } from "./fleetRouteCostPolicy";
@@ -47,5 +48,26 @@ describe("fleet route emergency cost policy", () => {
     expect(shouldLoadFleetRoute(config, "vehicle-1", "vehicle-2")).toBe(false);
     expect(shouldLoadFleetRoute(config, "vehicle-2", "vehicle-2")).toBe(true);
     expect(getFleetRouteRuntimePolicy(config).mode).toBe("on-demand");
+  });
+
+  it("loads the whole current day for compact fleet routes", () => {
+    const anchor = new Date(2026, 6, 13, 14, 35, 0, 0);
+    const expectedStart = new Date(anchor);
+    expectedStart.setHours(0, 0, 0, 0);
+    const expectedEnd = new Date(anchor);
+    expectedEnd.setHours(23, 59, 59, 999);
+
+    expect(getFleetRouteRange(anchor.getTime(), 2, "compact-all")).toEqual({
+      fromTs: expectedStart.getTime(),
+      toTs: expectedEnd.getTime(),
+    });
+  });
+
+  it("keeps the selected route window bounded in on-demand mode", () => {
+    const anchorTs = new Date(2026, 6, 13, 14, 35, 0, 0).getTime();
+
+    expect(getFleetRouteRange(anchorTs, 2, "on-demand").fromTs).toBe(
+      anchorTs - 2 * 60 * 60 * 1000
+    );
   });
 });

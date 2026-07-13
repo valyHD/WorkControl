@@ -2,6 +2,25 @@ import type { FirestoreCostControlConfig } from "../../../config/firestoreCostCo
 
 export type FleetRouteDisplayMode = "legacy-all" | "compact-all" | "on-demand";
 
+export function getFleetRouteRange(
+  anchorTs: number,
+  hours: number,
+  mode: FleetRouteDisplayMode
+) {
+  const start = new Date(anchorTs);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(anchorTs);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    fromTs:
+      mode === "on-demand"
+        ? Math.max(0, anchorTs - Math.max(1, Math.min(24, hours)) * 60 * 60 * 1000)
+        : start.getTime(),
+    toTs: end.getTime(),
+  };
+}
+
 export function getFleetRouteDisplayMode(
   config: FirestoreCostControlConfig
 ): FleetRouteDisplayMode {
