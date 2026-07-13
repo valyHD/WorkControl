@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantCommandInterpretationV3 } from "../lib/assistant/assistantCommandService";
+import { registerAssistantFormDraftAdapter } from "../lib/assistant/adapters/assistantFormDraftChannel";
 import type { VehicleFormValues } from "../types/vehicle";
 import VehicleForm from "../modules/vehicles/components/VehicleForm";
 import VoiceCommandAssistant from "./VoiceCommandAssistant";
@@ -255,7 +256,10 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     const inputSpy = vi.fn();
     const fillSpy = vi.fn();
     plateInput.addEventListener("input", inputSpy);
-    window.addEventListener("workcontrol:assistant-fill-vehicle-form", fillSpy);
+    const unregisterDraft = registerAssistantFormDraftAdapter(
+      "workcontrol:assistant-fill-vehicle-form",
+      fillSpy
+    );
 
     await sendCommand("Du-te pe pagina concedii.");
 
@@ -263,7 +267,7 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     expect(plateInput).toHaveValue("B33LGR");
     expect(inputSpy).not.toHaveBeenCalled();
     expect(fillSpy).not.toHaveBeenCalled();
-    window.removeEventListener("workcontrol:assistant-fill-vehicle-form", fillSpy);
+    unregisterDraft();
   });
 
   it.each([

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { registerAssistantV3Adapters } from "../adapters";
+import { getAssistantV3ToolRegistry } from "../adapters";
 import { validateAssistantV3Contract } from "./assistantV3Contract";
 import {
   ASSISTANT_ROMANIAN_COMMAND_CATEGORIES,
@@ -74,7 +74,7 @@ describe("Romanian WorkControl assistant command matrix", () => {
   });
 
   it("references only tools registered by the local V3 adapters", () => {
-    const registry = registerAssistantV3Adapters();
+    const registry = getAssistantV3ToolRegistry();
     const referencedToolIds = new Set(
       ASSISTANT_ROMANIAN_COMMAND_MATRIX.flatMap(({ expected }) => expected.toolIds)
     );
