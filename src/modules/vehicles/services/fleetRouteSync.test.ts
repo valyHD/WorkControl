@@ -112,7 +112,7 @@ describe("fleetRouteSync", () => {
 
     await controller.start();
     visibility.setVisibility("hidden");
-    currentTime = 500;
+    currentTime = 20_000;
     await controller.refresh();
     expect(modes).toEqual(["full"]);
 
@@ -201,5 +201,62 @@ describe("fleetRouteSync", () => {
     expect(getFleetRouteSyncMetrics().cacheHits).toBe(1);
     expect(getFleetRouteSyncMetrics().fullRouteRequests).toBe(1);
     remounted.stop();
+  });
+
+  it("keeps only the newest compact route points", async () => {
+    const received: VehiclePositionItem[][] = [];
+    const controller = createFleetRouteSync({
+      scopeKey: "compact-user",
+      vehicleId: "compact-vehicle",
+      fromTs: 0,
+      toTs: 10_000,
+      refreshMs: 30 * 60_000,
+      pageSize: 50,
+      maxPages: 1,
+      maxPoints: 50,
+      now: () => 1_000,
+      loader: async () =>
+        Array.from({ length: 80 }, (_, index) => point("compact-vehicle", index + 1)),
+      onData: (items) => received.push(items),
+    });
+
+    await controller.start();
+
+    expect(received.at(-1)).toHaveLength(50);
+    expect(received.at(-1)?.[0]?.gpsTimestamp).toBe(31);
+    controller.stop();
+  });
+
+  it("does not refresh early when a visible tab returns before the interval", async () => {
+    const visibility = new VisibilityDocument();
+    let currentTime = 1_000;
+    const modes: FleetRouteRequestMode[] = [];
+    const controller = createFleetRouteSync({
+      scopeKey: "visibility-user",
+      vehicleId: "visibility-vehicle",
+      fromTs: 0,
+      toTs: 10_000_000,
+      refreshMs: 30 * 60_000,
+      pageSize: 50,
+      maxPages: 1,
+      visibilityDocument: visibility as unknown as Document,
+      now: () => currentTime,
+      loader: async ({ mode, toTs }) => {
+        modes.push(mode);
+        return [point("visibility-vehicle", toTs)];
+      },
+      onData: () => undefined,
+    });
+
+    await controller.start();
+    visibility.setVisibility("hidden");
+    currentTime += 5 * 60_000;
+    visibility.setVisibility("visible");
+    await vi.advanceTimersByTimeAsync(24 * 60_000);
+    expect(modes).toEqual(["full"]);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(modes).toEqual(["full", "incremental"]);
+    controller.stop();
   });
 });

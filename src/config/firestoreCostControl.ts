@@ -1,9 +1,12 @@
 export type FirestoreCostControlConfig = {
   emergencyMode: boolean;
   fleetRoutesOnDemandOnly: boolean;
+  fleetRoutesCompactAll: boolean;
   disableBackgroundRouteSync: boolean;
   maxFleetSnapshotRefreshSeconds: number;
   maxRoutePointsPerRequest: number;
+  fleetRouteRefreshMinutes: number;
+  fleetRoutePointsPerVehicle: number;
   disableHiddenPageListeners: boolean;
   billingRefreshMinutes: number;
 };
@@ -11,9 +14,12 @@ export type FirestoreCostControlConfig = {
 export const DEFAULT_FIRESTORE_COST_CONTROL: FirestoreCostControlConfig = {
   emergencyMode: true,
   fleetRoutesOnDemandOnly: true,
+  fleetRoutesCompactAll: true,
   disableBackgroundRouteSync: true,
   maxFleetSnapshotRefreshSeconds: 60,
   maxRoutePointsPerRequest: 2000,
+  fleetRouteRefreshMinutes: 30,
+  fleetRoutePointsPerVehicle: 50,
   disableHiddenPageListeners: true,
   billingRefreshMinutes: 30,
 };
@@ -29,6 +35,7 @@ export function normalizeFirestoreCostControl(value: unknown): FirestoreCostCont
   return {
     emergencyMode: data.emergencyMode !== false,
     fleetRoutesOnDemandOnly: data.fleetRoutesOnDemandOnly !== false,
+    fleetRoutesCompactAll: data.fleetRoutesCompactAll !== false,
     disableBackgroundRouteSync: data.disableBackgroundRouteSync !== false,
     maxFleetSnapshotRefreshSeconds: finiteInteger(
       data.maxFleetSnapshotRefreshSeconds,
@@ -41,6 +48,18 @@ export function normalizeFirestoreCostControl(value: unknown): FirestoreCostCont
       DEFAULT_FIRESTORE_COST_CONTROL.maxRoutePointsPerRequest,
       200,
       2000
+    ),
+    fleetRouteRefreshMinutes: finiteInteger(
+      data.fleetRouteRefreshMinutes,
+      DEFAULT_FIRESTORE_COST_CONTROL.fleetRouteRefreshMinutes,
+      15,
+      180
+    ),
+    fleetRoutePointsPerVehicle: finiteInteger(
+      data.fleetRoutePointsPerVehicle,
+      DEFAULT_FIRESTORE_COST_CONTROL.fleetRoutePointsPerVehicle,
+      20,
+      100
     ),
     disableHiddenPageListeners: data.disableHiddenPageListeners !== false,
     billingRefreshMinutes: finiteInteger(

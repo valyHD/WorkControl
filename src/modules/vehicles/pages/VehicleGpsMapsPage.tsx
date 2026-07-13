@@ -30,7 +30,10 @@ import {
   type FleetRouteSyncController,
 } from "../services/fleetRouteSync";
 import { createFleetGpsOverviewPoller } from "../services/fleetGpsOverviewService";
-import { shouldLoadFleetRoute } from "../services/fleetRouteCostPolicy";
+import {
+  getFleetRouteRuntimePolicy,
+  shouldLoadFleetRoute,
+} from "../services/fleetRouteCostPolicy";
 import {
   DEFAULT_FIRESTORE_COST_CONTROL,
   type FirestoreCostControlConfig,
@@ -838,10 +841,13 @@ function VehicleFleetMapCard({
   scopeKey,
   refreshCommand,
   routeEnabled,
+  routeSelected,
   routeRange,
   routeRefreshMs,
   maxRoutePoints,
   boundedRoute,
+  compactRoute,
+  routeStartDelayMs,
   showRouteToggle,
   onToggleRoute,
 }: {
@@ -850,10 +856,13 @@ function VehicleFleetMapCard({
   scopeKey: string;
   refreshCommand: FleetRefreshCommand;
   routeEnabled: boolean;
+  routeSelected: boolean;
   routeRange: { fromTs: number; toTs: number };
   routeRefreshMs: number;
   maxRoutePoints: number;
   boundedRoute: boolean;
+  compactRoute: boolean;
+  routeStartDelayMs: number;
   showRouteToggle: boolean;
   onToggleRoute: (vehicleId: string) => void;
 }) {
@@ -899,6 +908,7 @@ function VehicleFleetMapCard({
       refreshMs: routeRefreshMs,
       pageSize: boundedRoute ? Math.min(2000, maxRoutePoints) : ROUTE_PAGE_SIZE,
       maxPages: boundedRoute ? EMERGENCY_ROUTE_MAX_PAGES : ROUTE_MAX_PAGES,
+      maxPoints: boundedRoute ? maxRoutePoints : undefined,
       loader: async ({ vehicleId, fromTs, toTs, pageSize, maxPages, mode }) => {
         const startedAt = performance.now();
         const items =
@@ -930,7 +940,9 @@ function VehicleFleetMapCard({
           operation: `route-${mode}`,
           documents: bounded.length,
           durationMs: performance.now() - startedAt,
-          reason: "Traseul vehiculului selectat explicit",
+          reason: compactRoute
+            ? "Traseu compact flota"
+            : "Traseul vehiculului selectat explicit",
         });
         return bounded;
       },
@@ -939,19 +951,36 @@ function VehicleFleetMapCard({
       onError: (error) => console.error("[VehicleGpsMapsPage][route-sync]", error),
     });
     routeSyncRef.current = controller;
-    void controller.start();
+    const startTimer = window.setTimeout(() => {
+      void controller.start();
+    }, routeStartDelayMs);
 
     return () => {
+      window.clearTimeout(startTimer);
       controller.stop();
       if (routeSyncRef.current === controller) routeSyncRef.current = null;
     };
-  }, [boundedRoute, dayEnd, from, maxRoutePoints, routeEnabled, routeRefreshMs, scopeKey, vehicle.id]);
+  }, [
+    boundedRoute,
+    compactRoute,
+    dayEnd,
+    from,
+    maxRoutePoints,
+    routeEnabled,
+    routeRefreshMs,
+    routeStartDelayMs,
+    scopeKey,
+    vehicle.id,
+  ]);
 
   useEffect(() => {
     if (!refreshCommand.id || handledRefreshCommandRef.current === refreshCommand.id) return;
     handledRefreshCommandRef.current = refreshCommand.id;
-    void routeSyncRef.current?.refresh(refreshCommand.forceFull);
-  }, [refreshCommand]);
+    const refreshTimer = window.setTimeout(() => {
+      void routeSyncRef.current?.refresh(refreshCommand.forceFull);
+    }, routeStartDelayMs);
+    return () => window.clearTimeout(refreshTimer);
+  }, [refreshCommand, routeStartDelayMs]);
 
   useEffect(() => {
     setLiveRealTrail((current) => (current.length ? [] : current));
@@ -1147,7 +1176,7 @@ function VehicleFleetMapCard({
   return (
     <article
       id={`vehicle-fleet-map-card-${vehicle.id}`}
-      className={`vehicle-fleet-map-card ${focused ? "is-assistant-focused" : ""} ${routeEnabled ? "is-route-selected" : ""}`}
+      className={`vehicle-fleet-map-card ${focused ? "is-assistant-focused" : ""} ${routeSelected ? "is-route-selected" : ""}`}
     >
       <div className="vehicle-fleet-map-card__head">
         <div>
@@ -1172,10 +1201,10 @@ function VehicleFleetMapCard({
           {showRouteToggle ? (
             <button
               type="button"
-              className={routeEnabled ? "secondary-btn" : "primary-btn"}
+              className={routeSelected ? "secondary-btn" : "primary-btn"}
               onClick={() => onToggleRoute(vehicle.id)}
             >
-              {routeEnabled ? "Ascunde traseul" : "Arată traseul"}
+              {routeSelected ? "Ascunde traseul" : "Arată traseul"}
             </button>
           ) : null}
         </div>
@@ -1230,7 +1259,13 @@ function VehicleFleetMapCard({
 
       <div className="vehicle-fleet-map-card__foot">
         <span>{[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || "-"}</span>
-        <span>{routeEnabled ? "Traseu selectat" : `Ultim GPS: ${formatTime(lastSeenAt)}`}</span>
+        <span>
+          {routeSelected
+            ? "Traseu selectat"
+            : compactRoute
+              ? `Traseu compact · GPS: ${formatTime(lastSeenAt)}`
+              : `Ultim GPS: ${formatTime(lastSeenAt)}`}
+        </span>
       </div>
     </article>
   );
@@ -1261,10 +1296,12 @@ export default function VehicleGpsMapsPage() {
     forceFull: false,
   });
   const routeCacheScopeKey = user?.uid || "anonymous";
-  const routesOnDemand = costControl.emergencyMode && costControl.fleetRoutesOnDemandOnly;
+  const routePolicy = useMemo(() => getFleetRouteRuntimePolicy(costControl), [costControl]);
+  const routesOnDemand = routePolicy.mode === "on-demand";
+  const compactAllRoutes = routePolicy.mode === "compact-all";
   const routeRange = useMemo(
-    () => toFleetRouteRange(routeWindowAnchor, routeWindowHours, routesOnDemand),
-    [routeWindowAnchor, routeWindowHours, routesOnDemand]
+    () => toFleetRouteRange(routeWindowAnchor, routeWindowHours, routePolicy.boundedRoute),
+    [routePolicy.boundedRoute, routeWindowAnchor, routeWindowHours]
   );
 
   function keepFleetOrderStable(items: VehicleItem[]) {
@@ -1319,6 +1356,10 @@ export default function VehicleGpsMapsPage() {
     () => Array.from(new Set(effectiveVehicles.map((vehicle) => vehicle.currentDriverUserName).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ro")),
     [effectiveVehicles]
   );
+  const vehicleRouteOrder = useMemo(
+    () => new Map(effectiveVehicles.map((vehicle, index) => [vehicle.id, index])),
+    [effectiveVehicles]
+  );
 
   const filteredVehicles = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("ro-RO");
@@ -1340,7 +1381,7 @@ export default function VehicleGpsMapsPage() {
       onData: (overview) => {
         setOverviewFailed(false);
         setCostControl(overview.config);
-        if (overview.config.emergencyMode && overview.config.fleetRoutesOnDemandOnly) {
+        if (getFleetRouteRuntimePolicy(overview.config).usesLeanOverview) {
           setVehicles(keepFleetOrderStable(overview.vehicles));
           setLoading(false);
         } else {
@@ -1362,7 +1403,7 @@ export default function VehicleGpsMapsPage() {
   }, []);
 
   useEffect(() => {
-    if (routesOnDemand && !overviewFailed) return;
+    if (routePolicy.usesLeanOverview && !overviewFailed) return;
     const unsubscribe = subscribeVehiclesList((items) => {
       setVehicles(keepFleetOrderStable(items ?? []));
       setLoading(false);
@@ -1375,21 +1416,21 @@ export default function VehicleGpsMapsPage() {
         console.error("[VehicleGpsMapsPage][unsubscribe]", error);
       }
     };
-  }, [overviewFailed, routesOnDemand]);
+  }, [overviewFailed, routePolicy.usesLeanOverview]);
 
   useEffect(() => {
-    if (!routesOnDemand || !selectedVehicleId) {
+    if (routePolicy.mode !== "on-demand" || !selectedVehicleId) {
       setSelectedVehicleDetails(null);
       return;
     }
     return subscribeVehicleById(selectedVehicleId, setSelectedVehicleDetails);
-  }, [routesOnDemand, selectedVehicleId]);
+  }, [routePolicy.mode, selectedVehicleId]);
 
   useEffect(() => {
-    if (!routesOnDemand || !focusedVehicleId) return;
+    if (routePolicy.mode !== "on-demand" || !focusedVehicleId) return;
     setSelectedVehicleId(focusedVehicleId);
     setRouteWindowAnchor(Date.now());
-  }, [focusedVehicleId, routesOnDemand]);
+  }, [focusedVehicleId, routePolicy.mode]);
 
   useEffect(() => {
     if (loading || !focusedVehicleId) return;
@@ -1411,7 +1452,7 @@ export default function VehicleGpsMapsPage() {
 
   function refreshFleet() {
     void overviewPollerRef.current?.refresh();
-    if (!routesOnDemand || selectedVehicleId) {
+    if (routePolicy.mode !== "on-demand" || selectedVehicleId) {
       setRefreshCommand((current) => ({ id: current.id + 1, forceFull: false }));
     }
   }
@@ -1468,7 +1509,11 @@ export default function VehicleGpsMapsPage() {
           <div>
             <h2 className="panel-title">Lista harta GPS</h2>
             <p className="tools-subtitle">
-              {loading ? "Se incarca..." : `${filteredVehicles.length} masini`}
+              {loading
+                ? "Se incarca..."
+                : compactAllRoutes
+                  ? `${filteredVehicles.length} masini · pozitii live · trasee la ${costControl.fleetRouteRefreshMinutes} min`
+                  : `${filteredVehicles.length} masini`}
             </p>
           </div>
           <div className="tools-header-actions">
@@ -1490,7 +1535,7 @@ export default function VehicleGpsMapsPage() {
                 </select>
               </label>
             ) : null}
-            {role === "admin" && (!routesOnDemand || selectedVehicleId) ? (
+            {role === "admin" && !compactAllRoutes && (!routesOnDemand || selectedVehicleId) ? (
               <button
                 className="secondary-btn"
                 type="button"
@@ -1533,11 +1578,18 @@ export default function VehicleGpsMapsPage() {
                 scopeKey={routeCacheScopeKey}
                 refreshCommand={refreshCommand}
                 routeEnabled={shouldLoadFleetRoute(costControl, vehicle.id, selectedVehicleId)}
+                routeSelected={routesOnDemand && vehicle.id === selectedVehicleId}
                 routeRange={routeRange}
-                routeRefreshMs={costControl.maxFleetSnapshotRefreshSeconds * 1000}
-                maxRoutePoints={costControl.maxRoutePointsPerRequest}
-                boundedRoute={routesOnDemand}
-                showRouteToggle={routesOnDemand}
+                routeRefreshMs={routePolicy.refreshMs}
+                maxRoutePoints={routePolicy.maxRoutePoints}
+                boundedRoute={routePolicy.boundedRoute}
+                compactRoute={compactAllRoutes}
+                routeStartDelayMs={
+                  compactAllRoutes
+                    ? Math.min((vehicleRouteOrder.get(vehicle.id) ?? 0) * 150, 2_500)
+                    : 0
+                }
+                showRouteToggle={routePolicy.showRouteToggle}
                 onToggleRoute={toggleSelectedRoute}
               />
             ))}

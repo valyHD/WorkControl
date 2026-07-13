@@ -92,8 +92,9 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     criticalPercent: 90,
   });
   const [canary, setCanary] = useState<GpsCostOptimizationStatus | null>(null);
-  const [firestoreCostControl, setFirestoreCostControl] =
-    useState<FirestoreCostControlConfig>(DEFAULT_FIRESTORE_COST_CONTROL);
+  const [firestoreCostControl, setFirestoreCostControl] = useState<FirestoreCostControlConfig>(
+    DEFAULT_FIRESTORE_COST_CONTROL
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -352,15 +353,17 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           <span>~{decimal(liveEstimate?.estimatedEgressMiBPerMinute ?? 0)} MiB egress/min</span>
           <span>{count(liveEstimate?.snapshotListeners ?? null)} listener-e snapshot</span>
           <span>{count(liveEstimate?.activeConnections ?? null)} conexiuni active</span>
-          <span>{count(liveEstimate?.functionRequestsLastHour ?? null)} requesturi Functions/60 min</span>
+          <span>
+            {count(liveEstimate?.functionRequestsLastHour ?? null)} requesturi Functions/60 min
+          </span>
           <span>{liveLagLabel(liveEstimate)}</span>
         </div>
         {liveLoading ? <small>Actualizez estimarea...</small> : null}
         {liveError ? <small className="is-error">{liveError}</small> : null}
         <small>
-          Include toate operațiunile Firestore ale proiectului WorkControl, nu doar GPS-ul.
-          Costul pe 60 minute este o fereastră mobilă completă. Egress-ul este aproximat la
-          3,78 KiB/citire; Storage, Functions, quota gratuită și discounturile nu sunt incluse.
+          Include toate operațiunile Firestore ale proiectului WorkControl, nu doar GPS-ul. Costul
+          pe 60 minute este o fereastră mobilă completă. Egress-ul este aproximat la 3,78
+          KiB/citire; Storage, Functions, quota gratuită și discounturile nu sunt incluse.
         </small>
       </section>
 
@@ -566,6 +569,19 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
               />
               Mod economie Firestore
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={firestoreCostControl.fleetRoutesCompactAll}
+                onChange={(event) =>
+                  setFirestoreCostControl((current) => ({
+                    ...current,
+                    fleetRoutesCompactAll: event.target.checked,
+                  }))
+                }
+              />
+              Trasee compacte toate
+            </label>
             <button
               className="secondary-btn"
               type="button"
@@ -578,7 +594,15 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           <dl>
             <div>
               <dt>Trasee flotă</dt>
-              <dd>{firestoreCostControl.fleetRoutesOnDemandOnly ? "La cerere" : "Toate"}</dd>
+              <dd>
+                {!firestoreCostControl.emergencyMode
+                  ? "Legacy toate"
+                  : firestoreCostControl.fleetRoutesCompactAll
+                    ? "Compact toate"
+                    : firestoreCostControl.fleetRoutesOnDemandOnly
+                      ? "La cerere"
+                      : "Toate"}
+              </dd>
             </div>
             <div>
               <dt>Refresh snapshot</dt>
@@ -587,6 +611,14 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
             <div>
               <dt>Limită traseu</dt>
               <dd>{count(firestoreCostControl.maxRoutePointsPerRequest)}</dd>
+            </div>
+            <div>
+              <dt>Refresh trasee compacte</dt>
+              <dd>{firestoreCostControl.fleetRouteRefreshMinutes} min</dd>
+            </div>
+            <div>
+              <dt>Puncte / mașină</dt>
+              <dd>{count(firestoreCostControl.fleetRoutePointsPerVehicle)}</dd>
             </div>
             <div>
               <dt>Listener-e active local</dt>
