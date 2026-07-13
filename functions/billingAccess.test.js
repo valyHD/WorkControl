@@ -35,3 +35,15 @@ test("private cost documents are never exposed through a direct client rule", ()
   assert.doesNotMatch(rules, /match \/systemPrivateSettings\//);
   assert.doesNotMatch(rules, /match \/systemCostSettings\//);
 });
+
+test("fleet overview requires authentication and cost-control writes require admin", () => {
+  const fleetBody = callableBody("getFleetGpsOverview", "saveFirestoreCostControl");
+  const saveBody = callableBody("saveFirestoreCostControl", "refreshBillingMetrics");
+  assert.ok(fleetBody.indexOf("if (!request.auth)") >= 0);
+  assert.ok(fleetBody.indexOf("return loadFleetGpsOverview()") > fleetBody.indexOf("if (!request.auth)"));
+  assert.ok(saveBody.indexOf("await assertAdminRequest(request)") >= 0);
+  assert.ok(
+    saveBody.indexOf("saveFirestoreCostControl(db") >
+      saveBody.indexOf("await assertAdminRequest(request)")
+  );
+});

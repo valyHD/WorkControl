@@ -1,5 +1,10 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../../../lib/firebase/firebase";
+import {
+  normalizeFirestoreCostControl,
+  type FirestoreCostControlConfig,
+} from "../../../config/firestoreCostControl";
+import { getFirestoreQueryTelemetry } from "../../../lib/firebase/firestoreQueryTelemetry";
 import { getFleetRouteSyncMetrics } from "../../vehicles/services/fleetRouteSync";
 
 export type BillingBreakdownItem = {
@@ -70,6 +75,7 @@ export type BillingControlPanelData = {
   metrics: BillingMetrics;
   settings: BillingCostSettings;
   canary: GpsCostOptimizationStatus;
+  firestoreCostControl: FirestoreCostControlConfig;
 };
 
 export type LiveFirebaseCostEstimate = {
@@ -91,6 +97,9 @@ export type LiveFirebaseCostEstimate = {
   readsLastHour: number | null;
   writesLastHour: number | null;
   deletesLastHour: number | null;
+  snapshotListeners: number | null;
+  activeConnections: number | null;
+  functionRequestsLastHour: number | null;
   excludes: string[];
   exchangeRate: {
     source: string;
@@ -251,6 +260,9 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
     readsLastHour: finiteOrNull(data.readsLastHour),
     writesLastHour: finiteOrNull(data.writesLastHour),
     deletesLastHour: finiteOrNull(data.deletesLastHour),
+    snapshotListeners: finiteOrNull(data.snapshotListeners),
+    activeConnections: finiteOrNull(data.activeConnections),
+    functionRequestsLastHour: finiteOrNull(data.functionRequestsLastHour),
     excludes: Array.isArray(data.excludes)
       ? data.excludes.map((item) => String(item)).slice(0, 10)
       : [],
@@ -264,14 +276,25 @@ function mapLiveCostEstimate(value: unknown): LiveFirebaseCostEstimate {
 export async function getBillingControlPanelData(): Promise<BillingControlPanelData> {
   const callable = httpsCallable<
     Record<string, never>,
-    { metrics?: unknown; settings?: unknown; canary?: unknown }
+    { metrics?: unknown; settings?: unknown; canary?: unknown; firestoreCostControl?: unknown }
   >(functions, "getBillingControlPanelData");
   const result = await callable({});
   return {
     metrics: mapBillingMetrics(result.data.metrics),
     settings: mapBillingSettings(result.data.settings),
     canary: mapCanaryStatus(result.data.canary),
+    firestoreCostControl: normalizeFirestoreCostControl(result.data.firestoreCostControl),
   };
+}
+
+export async function saveFirestoreCostControl(config: FirestoreCostControlConfig) {
+  const normalized = normalizeFirestoreCostControl(config);
+  const callable = httpsCallable<
+    FirestoreCostControlConfig,
+    { status: string; config?: unknown }
+  >(functions, "saveFirestoreCostControl");
+  const result = await callable(normalized);
+  return normalizeFirestoreCostControl(result.data.config);
 }
 
 export async function saveBillingCostSettings(settings: BillingCostSettings) {
@@ -312,11 +335,11 @@ export async function getLiveFirebaseCostEstimate(options: { force?: boolean } =
   if (liveEstimateRequest) return liveEstimateRequest;
 
   liveEstimateRequest = (async () => {
-    const callable = httpsCallable<Record<string, never>, unknown>(
+    const callable = httpsCallable<{ force?: boolean }, unknown>(
       functions,
       "getLiveFirebaseCostEstimate"
     );
-    const result = await callable({});
+    const result = await callable({ force: options.force === true });
     const value = mapLiveCostEstimate(result.data);
     liveEstimateCache = { value, expiresAt: Date.now() + 45_000 };
     return value;
@@ -334,5 +357,6 @@ export function getLocalGpsRouteCostMetrics() {
   return {
     ...route,
     estimatedBytesAvoided: Math.round(route.estimatedReadsAvoided * 3.78 * 1024),
+    queryTelemetry: getFirestoreQueryTelemetry(),
   };
 }

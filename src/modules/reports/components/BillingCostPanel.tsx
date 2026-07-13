@@ -14,11 +14,16 @@ import {
   getLocalGpsRouteCostMetrics,
   refreshBillingMetricsNow,
   saveBillingCostSettings,
+  saveFirestoreCostControl,
   type BillingCostSettings,
   type BillingMetrics,
   type GpsCostOptimizationStatus,
   type LiveFirebaseCostEstimate,
 } from "../services/billingMetricsService";
+import {
+  DEFAULT_FIRESTORE_COST_CONTROL,
+  type FirestoreCostControlConfig,
+} from "../../../config/firestoreCostControl";
 
 type BillingCostPanelProps = {
   isAdmin: boolean;
@@ -87,6 +92,8 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     criticalPercent: 90,
   });
   const [canary, setCanary] = useState<GpsCostOptimizationStatus | null>(null);
+  const [firestoreCostControl, setFirestoreCostControl] =
+    useState<FirestoreCostControlConfig>(DEFAULT_FIRESTORE_COST_CONTROL);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -95,6 +102,13 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
   const [liveLoading, setLiveLoading] = useState(true);
   const [liveError, setLiveError] = useState("");
   const [localRouteMetrics] = useState(() => getLocalGpsRouteCostMetrics());
+  const queryTelemetry = localRouteMetrics.queryTelemetry ?? {
+    activeListeners: 0,
+    queries: 0,
+    documents: 0,
+    averageDocumentsPerQuery: 0,
+    topConsumers: [],
+  };
 
   const loadLiveEstimate = useCallback(
     async (force = false) => {
@@ -123,6 +137,7 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       setMetrics(data.metrics);
       setSettings(data.settings);
       setCanary(data.canary);
+      setFirestoreCostControl(data.firestoreCostControl);
     } catch (loadError) {
       console.error("[BillingCostPanel][load]", loadError);
       setError("Nu am putut încărca datele de consum și cost.");
@@ -139,7 +154,10 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
   useEffect(() => {
     if (!isAdmin) return;
     queueMicrotask(() => void loadLiveEstimate());
-    const timer = window.setInterval(() => void loadLiveEstimate(), 60_000);
+    const timer = window.setInterval(
+      () => void loadLiveEstimate(),
+      firestoreCostControl.billingRefreshMinutes * 60_000
+    );
     const handleVisibility = () => {
       if (document.visibilityState === "visible") void loadLiveEstimate();
     };
@@ -148,7 +166,7 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [isAdmin, loadLiveEstimate]);
+  }, [firestoreCostControl.billingRefreshMinutes, isAdmin, loadLiveEstimate]);
 
   if (!isAdmin) return null;
 
@@ -248,6 +266,26 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
     }
   }
 
+  async function handleSaveEmergencyMode() {
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const saved = await saveFirestoreCostControl(firestoreCostControl);
+      setFirestoreCostControl(saved);
+      setMessage(
+        saved.emergencyMode
+          ? "Modul de economisire Firestore este activ."
+          : "Modul de economisire a fost dezactivat; hărțile flotei revin la comportamentul anterior."
+      );
+    } catch (saveError) {
+      console.error("[BillingCostPanel][firestore-cost-control]", saveError);
+      setError("Configurația de urgență nu a putut fi salvată.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <section className="panel billing-cost-panel" data-assistant-section="firebase-costs">
       <div className="tools-header">
@@ -312,6 +350,9 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           <span>{count(liveEstimate?.readsPerMinute ?? null)} citiri/min</span>
           <span>{count(liveEstimate?.writesPerMinute ?? null)} scrieri/min</span>
           <span>~{decimal(liveEstimate?.estimatedEgressMiBPerMinute ?? 0)} MiB egress/min</span>
+          <span>{count(liveEstimate?.snapshotListeners ?? null)} listener-e snapshot</span>
+          <span>{count(liveEstimate?.activeConnections ?? null)} conexiuni active</span>
+          <span>{count(liveEstimate?.functionRequestsLastHour ?? null)} requesturi Functions/60 min</span>
           <span>{liveLagLabel(liveEstimate)}</span>
         </div>
         {liveLoading ? <small>Actualizez estimarea...</small> : null}
@@ -508,7 +549,57 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
 
         <article className="billing-technical-card">
           <h4>Optimizare GPS</h4>
+          <div className="billing-emergency-control">
+            <label>
+              <input
+                type="checkbox"
+                checked={firestoreCostControl.emergencyMode}
+                onChange={(event) =>
+                  setFirestoreCostControl((current) => ({
+                    ...current,
+                    emergencyMode: event.target.checked,
+                    fleetRoutesOnDemandOnly: event.target.checked,
+                    disableBackgroundRouteSync: event.target.checked,
+                    disableHiddenPageListeners: event.target.checked,
+                  }))
+                }
+              />
+              Mod economie Firestore
+            </label>
+            <button
+              className="secondary-btn"
+              type="button"
+              disabled={busy}
+              onClick={() => void handleSaveEmergencyMode()}
+            >
+              Salvează modul
+            </button>
+          </div>
           <dl>
+            <div>
+              <dt>Trasee flotă</dt>
+              <dd>{firestoreCostControl.fleetRoutesOnDemandOnly ? "La cerere" : "Toate"}</dd>
+            </div>
+            <div>
+              <dt>Refresh snapshot</dt>
+              <dd>{firestoreCostControl.maxFleetSnapshotRefreshSeconds} sec</dd>
+            </div>
+            <div>
+              <dt>Limită traseu</dt>
+              <dd>{count(firestoreCostControl.maxRoutePointsPerRequest)}</dd>
+            </div>
+            <div>
+              <dt>Listener-e active local</dt>
+              <dd>{queryTelemetry.activeListeners}</dd>
+            </div>
+            <div>
+              <dt>Query-uri locale</dt>
+              <dd>{queryTelemetry.queries}</dd>
+            </div>
+            <div>
+              <dt>Documente/query</dt>
+              <dd>{decimal(queryTelemetry.averageDocumentsPerQuery, 1)}</dd>
+            </div>
             <div>
               <dt>Canary gateway</dt>
               <dd>{canary?.enabled ? "Activ" : "Oprit"}</dd>
@@ -553,6 +644,16 @@ export default function BillingCostPanel({ isAdmin }: BillingCostPanelProps) {
           <small>
             Metricile de traseu sunt agregate pentru sesiunea curentă; billing-ul este global.
           </small>
+          {queryTelemetry.topConsumers.length ? (
+            <div className="billing-query-consumers">
+              <strong>Consumatori locali principali</strong>
+              {queryTelemetry.topConsumers.map((item) => (
+                <span key={`${item.module}:${item.operation}`}>
+                  {item.module} · {item.operation}: {count(item.documents)} doc.
+                </span>
+              ))}
+            </div>
+          ) : null}
         </article>
       </div>
 
