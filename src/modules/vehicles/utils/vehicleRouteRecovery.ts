@@ -7,6 +7,7 @@ type RouteRecoveryOptions<T extends TimestampedRoutePoint> = {
   toTs: number;
   snapshotTimestamp?: number | null;
   staleToleranceMs?: number;
+  preferRecovery?: boolean;
   loadPrimary: () => Promise<T[]>;
   loadRecovery: () => Promise<T[]>;
 };
@@ -44,9 +45,19 @@ export async function loadSelectedDayRouteWithRecovery<T extends TimestampedRout
   toTs,
   snapshotTimestamp,
   staleToleranceMs,
+  preferRecovery = false,
   loadPrimary,
   loadRecovery,
 }: RouteRecoveryOptions<T>): Promise<T[]> {
+  if (preferRecovery) {
+    try {
+      const recoveredPoints = await loadRecovery();
+      if (recoveredPoints.length > 0) return recoveredPoints;
+    } catch {
+      // The primary loader remains the compatibility fallback for legacy routes.
+    }
+  }
+
   let primaryPoints: T[] = [];
   let primaryError: unknown = null;
 
@@ -64,7 +75,7 @@ export async function loadSelectedDayRouteWithRecovery<T extends TimestampedRout
     staleToleranceMs
   );
 
-  if (!shouldRecover) {
+  if (!shouldRecover || preferRecovery) {
     if (primaryError) throw primaryError;
     return primaryPoints;
   }

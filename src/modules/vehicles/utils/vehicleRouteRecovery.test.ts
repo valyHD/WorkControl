@@ -47,6 +47,30 @@ describe("vehicle route recovery", () => {
     expect(loadRecovery).not.toHaveBeenCalled();
   });
 
+  it("prefers the authoritative daily route when sparse fresh points hide a real route", async () => {
+    const primary = [{ gpsTimestamp: 1_950_000 }];
+    const recovered = [
+      { gpsTimestamp: 1_700_000 },
+      { gpsTimestamp: 1_800_000 },
+      { gpsTimestamp: 1_900_000 },
+    ];
+    const loadPrimary = vi.fn().mockResolvedValue(primary);
+    const loadRecovery = vi.fn().mockResolvedValue(recovered);
+
+    await expect(
+      loadSelectedDayRouteWithRecovery({
+        fromTs,
+        toTs,
+        snapshotTimestamp: 1_950_000,
+        preferRecovery: true,
+        loadPrimary,
+        loadRecovery,
+      })
+    ).resolves.toEqual(recovered);
+    expect(loadRecovery).toHaveBeenCalledOnce();
+    expect(loadPrimary).not.toHaveBeenCalled();
+  });
+
   it("does not retry when the snapshot is outside the selected day", () => {
     expect(shouldRecoverSelectedDayRoute([], toTs + 1, fromTs, toTs)).toBe(false);
   });
