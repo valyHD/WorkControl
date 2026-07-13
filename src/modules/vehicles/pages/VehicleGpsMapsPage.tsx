@@ -31,6 +31,7 @@ import {
 } from "../services/fleetRouteSync";
 import { createFleetGpsOverviewPoller } from "../services/fleetGpsOverviewService";
 import {
+  getFleetRouteRange,
   getFleetRouteRuntimePolicy,
   shouldLoadFleetRoute,
 } from "../services/fleetRouteCostPolicy";
@@ -91,19 +92,6 @@ const currentIcon = new L.DivIcon({
   iconSize: [22, 22],
   iconAnchor: [11, 11],
 });
-
-function toFleetRouteRange(anchorTs: number, hours: number, onDemand: boolean) {
-  const start = new Date(anchorTs);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(anchorTs);
-  end.setHours(23, 59, 59, 999);
-  return {
-    fromTs: onDemand
-      ? Math.max(0, anchorTs - Math.max(1, Math.min(24, hours)) * 60 * 60 * 1000)
-      : start.getTime(),
-    toTs: end.getTime(),
-  };
-}
 
 function formatTime(ts?: number) {
   if (!ts) return "-";
@@ -1300,8 +1288,8 @@ export default function VehicleGpsMapsPage() {
   const routesOnDemand = routePolicy.mode === "on-demand";
   const compactAllRoutes = routePolicy.mode === "compact-all";
   const routeRange = useMemo(
-    () => toFleetRouteRange(routeWindowAnchor, routeWindowHours, routePolicy.boundedRoute),
-    [routePolicy.boundedRoute, routeWindowAnchor, routeWindowHours]
+    () => getFleetRouteRange(routeWindowAnchor, routeWindowHours, routePolicy.mode),
+    [routePolicy.mode, routeWindowAnchor, routeWindowHours]
   );
 
   function keepFleetOrderStable(items: VehicleItem[]) {
