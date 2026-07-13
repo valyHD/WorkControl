@@ -28,6 +28,7 @@ const {
 } = require('./assistantTranscription');
 const { createSecurityHandlers } = require('./securityActions');
 const { buildVehicleOperationalView } = require('./vehicleOperationalView');
+const { buildInternalCompanyContext } = require('./internalRequestContext');
 const {
   buildUserOperationalView,
   cleanIds: getUserOperationalCompanyIds,
@@ -1399,20 +1400,17 @@ async function assertActiveInternalRequest(request) {
   if (!['admin', 'manager', 'angajat'].includes(role)) {
     throw new HttpsError('permission-denied', 'Rolul intern nu este valid.');
   }
-  const companyId = toSafeString(user.primaryCompanyId) ||
-    (Array.isArray(user.companyIds) ? toSafeString(user.companyIds[0]) : '');
-  if (!companyId) throw new HttpsError('failed-precondition', 'Contul nu are firma asociata.');
-  const companyIds = Array.isArray(user.companyIds)
-    ? [...new Set(user.companyIds.map((value) => toSafeString(value)).filter(Boolean))]
-    : [];
-  if (!companyIds.includes(companyId)) companyIds.unshift(companyId);
+  const companyContext = buildInternalCompanyContext(user, role);
+  if (companyContext.requiresCompany) {
+    throw new HttpsError('failed-precondition', 'Contul nu are firma asociata.');
+  }
   return {
     userSnap,
     user,
-    companyId,
-    companyIds,
+    companyId: companyContext.companyId,
+    companyIds: companyContext.companyIds,
     role,
-    globalAdmin: role === 'admin' && user.globalAdmin === true,
+    globalAdmin: companyContext.globalAdmin,
   };
 }
 
