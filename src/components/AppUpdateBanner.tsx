@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import {
+  activateWaitingWorkControlUpdate,
+  hasWaitingWorkControlUpdate,
+} from "../lib/pwa/serviceWorkerUpdates";
 
 const UPDATE_CHECK_INTERVAL_MS = 60_000;
 const UPDATE_RELOAD_GRACE_MS = 5 * 60_000;
@@ -110,6 +114,13 @@ export function AppUpdateBanner() {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.getRegistration().then((registration) => {
         if (!registration) return;
+        if (
+          navigator.serviceWorker.controller &&
+          hasWaitingWorkControlUpdate(registration) &&
+          !isInsideUpdateReloadGrace()
+        ) {
+          setUpdateAvailable(true);
+        }
         const handleUpdateFound = () => {
           const worker = registration.installing;
           if (!worker) return;
@@ -141,15 +152,14 @@ export function AppUpdateBanner() {
       if ("serviceWorker" in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
         await Promise.all(
-          registrations.map(async (registration) => {
-            registration.waiting?.postMessage({ type: "SKIP_WAITING" });
-            registration.installing?.postMessage({ type: "SKIP_WAITING" });
-            await registration.update().catch(() => undefined);
-          })
+          registrations.map((registration) => registration.update().catch(() => undefined))
         );
+        await activateWaitingWorkControlUpdate();
       }
-    } catch {
-      // Reload still works even if service worker update checks fail.
+    } catch (error) {
+      console.error("Actualizarea PWA nu a putut fi activată:", error);
+      setUpdateAvailable(true);
+      return;
     }
 
     const nextUrl = new URL(window.location.href);

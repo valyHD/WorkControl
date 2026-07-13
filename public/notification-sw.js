@@ -48,10 +48,10 @@ try {
   console.warn('[notification-sw] Firebase Messaging indisponibil. App shell ramane activ.', error);
 }
 
-const APP_SHELL_CACHE_NAME = 'workcontrol-app-shell-v7';
+const APP_SHELL_CACHE_NAME = 'workcontrol-app-shell-v8';
 const APP_SHELL_URLS = ['/', '/manifest.webmanifest'];
 const IMAGE_CACHE_NAME = 'workcontrol-image-cache-v1';
-const STATIC_CACHE_NAME = 'workcontrol-static-v1';
+const STATIC_CACHE_NAME = 'workcontrol-static-v2';
 const RECENT_NOTIFICATION_TTL_MS = 2 * 60 * 1000;
 const recentNotificationTags = new Map();
 const IMAGE_CACHEABLE_HOSTS = [
@@ -63,7 +63,6 @@ const IMAGE_CACHEABLE_HOSTS = [
 ];
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
   event.waitUntil((async () => {
     try {
       const cache = await caches.open(APP_SHELL_CACHE_NAME);
@@ -145,6 +144,22 @@ function isCacheableImageRequest(requestUrl) {
   }
 }
 
+function isValidStaticResponse(request, response) {
+  if (!response || !response.ok) return false;
+
+  const contentType = response.headers.get('content-type') || '';
+  if (request.destination === 'script' || request.destination === 'worker') {
+    return /(javascript|ecmascript|wasm)/i.test(contentType);
+  }
+  if (request.destination === 'style') {
+    return /text\/css/i.test(contentType);
+  }
+  if (request.destination === 'font') {
+    return /(font|woff|octet-stream)/i.test(contentType);
+  }
+  return false;
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
@@ -175,9 +190,16 @@ self.addEventListener('fetch', (event) => {
       event.respondWith((async () => {
         const cache = await caches.open(STATIC_CACHE_NAME);
         const cachedResponse = await cache.match(request);
-        if (cachedResponse) return cachedResponse;
+        if (cachedResponse && isValidStaticResponse(request, cachedResponse)) {
+          return cachedResponse;
+        }
+        if (cachedResponse) {
+          await cache.delete(request);
+        }
         const networkResponse = await fetch(request);
-        if (networkResponse?.ok) await cache.put(request, networkResponse.clone());
+        if (isValidStaticResponse(request, networkResponse)) {
+          await cache.put(request, networkResponse.clone());
+        }
         return networkResponse;
       })());
     }
