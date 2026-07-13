@@ -329,12 +329,14 @@ function NavItems({
   unreadCount,
   pageChangeMap,
   role,
+  globalAdmin,
   mobile = false,
 }: {
   onNavigate?: () => void;
   unreadCount: number;
   pageChangeMap: PageChangeMap;
   role: string;
+  globalAdmin: boolean;
   mobile?: boolean;
 }) {
   const location = useLocation();
@@ -348,6 +350,7 @@ function NavItems({
         <div key={section.label} className={section.compact ? "nav-section nav-section--compact" : "nav-section"}>
           <div className="nav-section-label">{section.label}</div>
           {[...section.items]
+            .filter((item) => globalAdmin || item.path !== "/control-panel")
             .sort((left, right) => mobile ? left.mobilePriority - right.mobilePriority : 0)
             .map(({ label, path, icon: Icon, colorClass }) => {
             const changeCount = pageChangeMap[path]?.items.length || 0;
@@ -651,7 +654,12 @@ export default function AppShell() {
           </div>
         </div>
         <nav className="sidebar-nav">
-          <NavItems unreadCount={unreadCount} pageChangeMap={pageChangeMap} role={role} />
+          <NavItems
+            unreadCount={unreadCount}
+            pageChangeMap={pageChangeMap}
+            role={role}
+            globalAdmin={user?.globalAdmin === true}
+          />
         </nav>
         <div className="sidebar-footer">
           <button
@@ -700,7 +708,14 @@ export default function AppShell() {
           </button>
         </div>
         <nav className="sidebar-nav">
-          <NavItems mobile onNavigate={() => setMobileMenuOpen(false)} unreadCount={unreadCount} pageChangeMap={pageChangeMap} role={role} />
+          <NavItems
+            mobile
+            onNavigate={() => setMobileMenuOpen(false)}
+            unreadCount={unreadCount}
+            pageChangeMap={pageChangeMap}
+            role={role}
+            globalAdmin={user?.globalAdmin === true}
+          />
         </nav>
         <div className="mobile-drawer-footer">
           <button type="button" className="secondary-btn mobile-logout-btn"

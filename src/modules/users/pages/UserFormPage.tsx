@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { collection, getDocs } from "firebase/firestore";
 import { ArrowLeft, BriefcaseBusiness, Building2, Save } from "lucide-react";
 import UserForm from "../components/UserForm";
 import { adminCreateUserWithEmail } from "../services/adminCreateUserService";
-import { getUserById, updateUserProfile } from "../services/usersService";
+import { getAllUsers, getUserById, updateUserProfile } from "../services/usersService";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { UserRole } from "../../../types/user";
-import { db } from "../../../lib/firebase/firebase";
 import { pickNextAvailableThemeKey } from "../../../lib/ui/userTheme";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
@@ -34,15 +32,13 @@ const emptyValues: UserFormValues = {
 };
 
 async function getNextUserThemeKey() {
-  const snapshot = await getDocs(collection(db, "users"));
-  const usedThemeKeys = snapshot.docs.map((doc) =>
-  String(doc.data()?.themeKey || "").trim().toLowerCase()
-);
+  const users = await getAllUsers();
+  const usedThemeKeys = users.map((item) => String(item.themeKey || "").trim().toLowerCase());
   return pickNextAvailableThemeKey(usedThemeKeys);
 }
 
 export default function UserFormPage() {
-  const { role, user } = useAuth();
+  const { role } = useAuth();
   const { userId } = useParams();
   const navigate = useNavigate();
   const isEdit = Boolean(userId);
@@ -131,25 +127,8 @@ export default function UserFormPage() {
         return;
       }
 
-      if (!user?.email) {
-        setError("Adminul curent nu are email disponibil.");
-        return;
-      }
-
-      const adminPassword = window.prompt(
-        "Introdu parola ta de admin pentru a crea utilizatorul:"
-      );
-
-      if (!adminPassword) {
-        setError("Crearea a fost anulata. Parola admin lipseste.");
-        return;
-      }
-
       const themeKey = await getNextUserThemeKey();
-console.log("THEME ales pentru user nou:", themeKey);
       await adminCreateUserWithEmail({
-        adminEmail: user.email,
-        adminPassword,
         fullName: values.fullName.trim(),
         email: values.email.trim(),
         password: values.password.trim(),

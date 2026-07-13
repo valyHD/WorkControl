@@ -146,7 +146,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (role !== "admin") return;
+    if (user?.globalAdmin !== true) return;
     let active = true;
     void getLiveFirebaseCostEstimate()
       .then((value) => {
@@ -156,7 +156,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [role]);
+  }, [user?.globalAdmin]);
 
   const load = useCallback(
     async (silent = false) => {
@@ -485,7 +485,7 @@ export default function DashboardPage() {
             to="/notifications"
           />
         ) : null}
-        {role === "admin" ? (
+        {user?.globalAdmin === true ? (
           <KpiCard
             label="Cost Firebase live"
             value={
@@ -503,7 +503,7 @@ export default function DashboardPage() {
             to="/control-panel#billing"
           />
         ) : null}
-        {role === "admin" ? (
+        {user?.globalAdmin === true ? (
           <KpiCard
             label="Cost estimat luna"
             value={

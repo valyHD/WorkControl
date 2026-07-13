@@ -73,6 +73,18 @@ function withVehicleGpsGate(element: ReactNode) {
   return withSuspense(<VehicleGpsVisibilityGate>{element}</VehicleGpsVisibilityGate>);
 }
 
+function GlobalAdminRoute({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading) return <RouteLoader />;
+  if (!user?.globalAdmin) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+function withGlobalAdmin(element: ReactNode) {
+  return <GlobalAdminRoute>{withSuspense(element)}</GlobalAdminRoute>;
+}
+
 function ProtectedLayout() {
   const { user, loading } = useAuth();
 
@@ -151,8 +163,8 @@ export const router = createBrowserRouter([
 
       { path: "/notifications", element: withSuspense(<NotificationsPage />) },
       { path: "/inbox", element: withSuspense(<OperationalInboxPage />) },
-      { path: "/control-panel", element: withSuspense(<ControlPanelPage />) },
-      { path: "/control-panel/backup-preview", element: withSuspense(<BackupPreviewPage />) },
+      { path: "/control-panel", element: withGlobalAdmin(<ControlPanelPage />) },
+      { path: "/control-panel/backup-preview", element: withGlobalAdmin(<BackupPreviewPage />) },
       { path: "/control-panel/ui-lab", element: withSuspense(<UiLabPage />) },
       { path: "/maintenance", element: withSuspense(<MaintenancePage />) },
       { path: "/maintenance/manage", element: withSuspense(<MaintenancePage />) },

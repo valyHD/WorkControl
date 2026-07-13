@@ -11,10 +11,17 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  where,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, functions, storage } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  buildUserDirectoryConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type { AppUser } from "../../../types/tool";
 import type {
@@ -33,7 +40,7 @@ import { getActiveProjectsList } from "../../timesheets/services/timesheetsServi
 
 const expensesCollection = collection(db, "expenseDocuments");
 const expenseScanJobsCollection = collection(db, "expenseScanJobs");
-const usersCollection = collection(db, "users");
+const userOperationalViewsCollection = collection(db, "userOperationalViews");
 const maintenanceCompaniesCollection = collection(db, "firmeMentenanta");
 
 export type ExpenseScanProgressStep = "prepare" | "upload" | "analyze" | "save" | "done";
@@ -198,6 +205,7 @@ function waitForExpenseScanJob(params: {
 function mapExpenseDoc(id: string, data: Record<string, any>): ExpenseDocumentItem {
   return {
     id,
+    companyId: toSafeString(data.companyId),
     fileName: toSafeString(data.fileName),
     fileUrl: toSafeString(data.fileUrl),
     filePath: toSafeString(data.filePath),
@@ -221,11 +229,18 @@ function mapExpenseDoc(id: string, data: Record<string, any>): ExpenseDocumentIt
 }
 
 export async function getExpenseUsers(): Promise<AppUser[]> {
-  const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc")));
-  return snap.docs.map((docItem) => {
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    userOperationalViewsCollection,
+    ...buildUserDirectoryConstraints(context),
+    orderBy("fullName", "asc")
+  ));
+  const users = new Map<string, AppUser>();
+  snap.docs.forEach((docItem) => {
     const data = docItem.data();
-    return {
-      id: docItem.id,
+    const uid = toSafeString(data.uid) || docItem.id;
+    users.set(uid, {
+      id: uid,
       email: toSafeString(data.email),
       fullName: toSafeString(data.fullName) || toSafeString(data.displayName) || toSafeString(data.email),
       role: data.role ?? "user",
@@ -233,14 +248,15 @@ export async function getExpenseUsers(): Promise<AppUser[]> {
       themeKey: data.themeKey ?? null,
       avatarUrl: toSafeString(data.avatarUrl),
       avatarThumbUrl: toSafeString(data.avatarThumbUrl) || toSafeString(data.avatarUrl),
-      companyIds: Array.isArray(data.companyIds) ? data.companyIds.map((item) => toSafeString(item)).filter(Boolean) : [],
-      companyNames: Array.isArray(data.companyNames) ? data.companyNames.map((item) => toSafeString(item)).filter(Boolean) : [],
-      primaryCompanyId: toSafeString(data.primaryCompanyId),
-      primaryCompanyName: toSafeString(data.primaryCompanyName),
+      companyIds: [toSafeString(data.companyId)].filter(Boolean),
+      companyNames: [],
+      primaryCompanyId: toSafeString(data.companyId),
+      primaryCompanyName: "",
       createdAt: toSafeNumber(data.createdAt, Date.now()),
       updatedAt: toSafeNumber(data.updatedAt, Date.now()),
-    } as AppUser;
+    } as AppUser);
   });
+  return [...users.values()];
 }
 
 export async function getExpenseProjects(): Promise<ExpenseProjectOption[]> {
@@ -248,7 +264,12 @@ export async function getExpenseProjects(): Promise<ExpenseProjectOption[]> {
 }
 
 export async function getExpenseCompanies(): Promise<ExpenseCompanyOption[]> {
-  const snap = await getDocs(query(maintenanceCompaniesCollection, orderBy("companyName", "asc")));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    maintenanceCompaniesCollection,
+    ...buildCompanyScopeConstraints(context),
+    orderBy("companyName", "asc")
+  ));
   return snap.docs
     .map((docItem) => {
       const data = docItem.data();
@@ -322,6 +343,8 @@ export async function saveUserExpenseFormPreference(
 }
 
 export async function saveExpenseCompanyOption(companyName: string): Promise<void> {
+  const context = await getCurrentCompanyAccessContext();
+  if (context.role === "angajat") return;
   const cleanName = companyName.trim();
   const companyKey = normalizeCompanyKey(cleanName);
   if (!cleanName || !companyKey) return;
@@ -329,6 +352,7 @@ export async function saveExpenseCompanyOption(companyName: string): Promise<voi
   await setDoc(
     doc(maintenanceCompaniesCollection, companyKey),
     {
+      companyId: companyKey,
       companyName: cleanName,
       companyKey,
       updatedAt: Date.now(),
@@ -339,9 +363,31 @@ export async function saveExpenseCompanyOption(companyName: string): Promise<voi
 }
 
 export async function getExpenseDocuments(maxItems = 1000): Promise<ExpenseDocumentItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const safeLimit = Math.max(1, Math.min(1000, Math.floor(maxItems)));
-  const snap = await getDocs(query(expensesCollection, orderBy("documentDate", "desc"), limit(safeLimit)));
-  return snap.docs.map((docItem) => mapExpenseDoc(docItem.id, docItem.data()));
+  if (context.role !== "angajat") {
+    const snap = await getDocs(query(
+      expensesCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("documentDate", "desc"),
+      limit(safeLimit)
+    ));
+    return snap.docs.map((docItem) => mapExpenseDoc(docItem.id, docItem.data()));
+  }
+  const snapshots = await Promise.all(["uploadedByUserId", "assignedUserId"].map((field) => getDocs(query(
+    expensesCollection,
+    ...buildCompanyScopeConstraints(context),
+    where(field, "==", context.uid),
+    orderBy("documentDate", "desc"),
+    limit(safeLimit)
+  ))));
+  const unique = new Map<string, ExpenseDocumentItem>();
+  snapshots.forEach((snap) => snap.docs.forEach((docItem) => {
+    unique.set(docItem.id, mapExpenseDoc(docItem.id, docItem.data()));
+  }));
+  return [...unique.values()]
+    .sort((a, b) => b.documentDate.localeCompare(a.documentDate))
+    .slice(0, safeLimit);
 }
 
 export function filterExpenseDocuments(
@@ -370,7 +416,15 @@ export async function uploadExpenseFile(params: {
   file: File;
   user: AppUser;
 }): Promise<ExpenseFileDraft> {
+  const context = await getCurrentCompanyAccessContext();
+  if (params.user.id !== context.uid) throw new Error("Poti incarca numai documentele proprii.");
   const file = params.file;
+  if (file.size <= 0 || file.size > 15 * 1024 * 1024) {
+    throw new Error("Fisierul trebuie sa aiba maximum 15 MB.");
+  }
+  if (!/^(application\/pdf|image\/(jpeg|png|webp))$/.test(file.type)) {
+    throw new Error("Sunt acceptate numai PDF, JPG, PNG sau WEBP.");
+  }
   const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : "";
   const safeBaseName = `${Date.now()}_${file.name.replace(/\s+/g, "_").replace(/[^\w.-]/g, "")}`;
   const filePath = `expenses/${params.user.id}/${safeBaseName}`;
@@ -406,6 +460,9 @@ export async function analyzeExpenseUploadedFile(params: {
 }
 
 export async function saveExpenseDocument(payload: ExpenseDocumentPayload): Promise<ExpenseDocumentItem> {
+  const context = await getCurrentCompanyAccessContext();
+  if (payload.uploadedByUserId !== context.uid) throw new Error("Documentul poate fi salvat numai de autor.");
+  const companyId = payload.companyId || requirePrimaryCompanyId(context);
   const now = Date.now();
   const analysis = mapAnalysis(payload);
   const documentDate = analysis.documentDate || new Date(now).toISOString().slice(0, 10);
@@ -413,6 +470,7 @@ export async function saveExpenseDocument(payload: ExpenseDocumentPayload): Prom
   const companyName = payload.companyName || analysis.buyerCompanyName || analysis.companyHint || "";
 
   const storedPayload = {
+    companyId,
     ...analysis,
     documentDate,
     yearMonth,
@@ -517,6 +575,7 @@ export async function uploadAndAnalyzeExpenseDocument(params: {
 
   params.onProgress?.("analyze", "Document incarcat. Scanarea continua in fundal...");
   const jobRef = await addDoc(expenseScanJobsCollection, {
+    companyId: requirePrimaryCompanyId(await getCurrentCompanyAccessContext()),
     status: "queued",
     scanMode: "full",
     fileName: uploaded.fileName,

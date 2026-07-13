@@ -603,7 +603,7 @@ export async function cleanupHistory(params: {
   }
 
   await dispatchNotificationEvent({
-    module: "backup",
+    module: "system",
     eventType: "data_retention_cleanup",
     title: "Curățare istoric executată",
     message: `Au fost șterse ${deletedCount} înregistrări istorice mai vechi de ${params.retentionMonths} luni.`,

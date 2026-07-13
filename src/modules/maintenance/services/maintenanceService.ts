@@ -16,6 +16,12 @@ import {
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  canAccessCompany,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type {
   ClientAddress,
@@ -84,6 +90,7 @@ function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient
 
   return {
     id,
+    companyId: toText(data.companyId),
     name: toText(data.name),
     email: fallbackEmail,
     emails,
@@ -127,6 +134,7 @@ function mapBranding(
   const companyName = toText(data.companyName);
   return {
     id,
+    companyId: toText(data.companyId) || id,
     companyName,
     companyKey: toText(data.companyKey) || normalizeCompanyKey(companyName) || id,
     logoUrl: toText(data.logoUrl),
@@ -142,6 +150,7 @@ function mapReportHistory(id: string, data: Record<string, unknown>): Maintenanc
   const imagesRaw = Array.isArray(data.images) ? data.images : [];
   return {
     id,
+    companyId: toText(data.companyId),
     clientId: toText(data.clientId),
     clientName: toText(data.clientName),
     reportType: toText(data.reportType),
@@ -168,8 +177,14 @@ function mapReportHistory(id: string, data: Record<string, unknown>): Maintenanc
 }
 
 export async function getMaintenanceClients(): Promise<MaintenanceClient[]> {
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(
-    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(200))
+    query(
+      maintenanceClientsCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("updatedAt", "desc"),
+      limit(200)
+    )
   );
   return snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>));
 }
@@ -178,15 +193,28 @@ export function subscribeMaintenanceClients(
   onData: (clients: MaintenanceClient[]) => void,
   onError?: (error: Error) => void
 ): () => void {
-  return onSnapshot(
-    query(maintenanceClientsCollection, orderBy("updatedAt", "desc"), limit(200)),
-    (snap) => {
-      onData(snap.docs.map((docItem) => mapClient(docItem.id, docItem.data() as Record<string, unknown>)));
-    },
-    (error) => {
-      onError?.(error);
-    }
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        maintenanceClientsCollection,
+        ...buildCompanyScopeConstraints(context),
+        orderBy("updatedAt", "desc"),
+        limit(200)
+      ),
+      (snap) => onData(snap.docs.map((docItem) => mapClient(
+        docItem.id,
+        docItem.data() as Record<string, unknown>
+      ))),
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error as Error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function createMaintenanceClient(input: {
@@ -207,6 +235,8 @@ export async function createMaintenanceClient(input: {
     }>;
   }>;
 }): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = requirePrimaryCompanyId(context);
   const now = Date.now();
   const addressRows = (input.addresses || [])
     .map((address) => ({
@@ -248,6 +278,7 @@ export async function createMaintenanceClient(input: {
   const firstExpiryDate = (firstLift ? liftExpiryDates[firstLift] : "") || input.expiryDate.trim();
 
   const docRef = await addDoc(maintenanceClientsCollection, {
+    companyId,
     name: input.name.trim(),
     email: input.email.trim(),
     address: primaryAddress,
@@ -310,7 +341,12 @@ export async function getMaintenanceClientById(clientId: string): Promise<Mainte
 }
 
 export async function getMaintenanceReportHistory(clientId: string): Promise<MaintenanceReportHistoryItem[]> {
-  const snap = await getDocs(query(collection(db, "maintenanceClients", clientId, "rapoarte"), orderBy("createdAt", "desc")));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    collection(db, "maintenanceClients", clientId, "rapoarte"),
+    ...buildCompanyScopeConstraints(context),
+    orderBy("createdAt", "desc")
+  ));
   return snap.docs.map((docItem) => mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>));
 }
 
@@ -367,8 +403,6 @@ export async function updateMaintenanceClient(clientId: string, payload: Partial
 export async function deleteMaintenanceClient(clientId: string): Promise<void> {
   const snap = await getDoc(doc(db, "maintenanceClients", clientId));
   const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
-  await deleteDoc(doc(db, "maintenanceClients", clientId));
-
   await dispatchNotificationEvent({
     module: "maintenance",
     eventType: "maintenance_client_deleted",
@@ -377,21 +411,35 @@ export async function deleteMaintenanceClient(clientId: string): Promise<void> {
     message: `Clientul ${toText(data?.name) || clientId} a fost sters.`,
     notificationPath: "/maintenance",
   });
+  await deleteDoc(doc(db, "maintenanceClients", clientId));
 }
 
 export function subscribeMaintenanceCompanyBranding(
   onData: (items: MaintenanceCompanyBranding[]) => void,
   onError?: (error: Error) => void
 ): () => void {
-  return onSnapshot(
-    query(maintenanceBrandingCollection, orderBy("companyName", "asc"), limit(50)),
-    (snap) => {
-      onData(snap.docs.map((docItem) => mapBranding(docItem.id, docItem.data() as Record<string, unknown>)));
-    },
-    (error) => {
-      onError?.(error);
-    }
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        maintenanceBrandingCollection,
+        ...buildCompanyScopeConstraints(context),
+        orderBy("companyName", "asc"),
+        limit(50)
+      ),
+      (snap) => onData(snap.docs.map((docItem) => mapBranding(
+        docItem.id,
+        docItem.data() as Record<string, unknown>
+      ))),
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error as Error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function uploadMaintenanceBrandingAsset(input: {
@@ -399,7 +447,12 @@ export async function uploadMaintenanceBrandingAsset(input: {
   assetType: "logo" | "stamp";
   file: File;
 }): Promise<{ url: string; path: string }> {
-  const companyKey = normalizeCompanyKey(input.companyName) || "firma";
+  const context = await getCurrentCompanyAccessContext();
+  const normalizedCompanyKey = normalizeCompanyKey(input.companyName) || "firma";
+  const companyKey = context.globalAdmin ? normalizedCompanyKey : requirePrimaryCompanyId(context);
+  if (!context.globalAdmin && normalizedCompanyKey !== companyKey) {
+    throw new Error("Fisierul poate fi incarcat numai pentru firma curenta.");
+  }
   const ext = input.file.name.split(".").pop()?.toLowerCase() || "png";
   const safeExt = ext.replace(/[^a-z0-9]/g, "") || "png";
   const fileName = `${input.assetType}_${Date.now()}.${safeExt}`;
@@ -425,6 +478,12 @@ export async function saveMaintenanceCompanyBranding(input: {
     throw new Error("Compania este obligatorie.");
   }
 
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = context.globalAdmin ? companyKey : requirePrimaryCompanyId(context);
+  if (!canAccessCompany(context, companyId) || (!context.globalAdmin && companyKey !== companyId)) {
+    throw new Error("Brandingul poate fi modificat numai pentru firma curenta.");
+  }
+
   const docRef = doc(db, "firmeMentenanta", companyKey);
   const snap = await getDoc(docRef);
   const existing = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
@@ -435,6 +494,7 @@ export async function saveMaintenanceCompanyBranding(input: {
     {
       companyName,
       companyKey,
+      companyId,
       logoUrl: input.logoUrl ?? toText(existing?.logoUrl),
       stampUrl: input.stampUrl ?? toText(existing?.stampUrl),
       logoPath: input.logoPath ?? toText(existing?.logoPath),
@@ -473,6 +533,9 @@ export async function saveMaintenanceReportHistory(input: {
   dateText: string;
   timeText: string;
 }): Promise<MaintenanceReportHistoryItem> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = input.client.companyId || requirePrimaryCompanyId(context);
+  if (!canAccessCompany(context, companyId)) throw new Error("Clientul nu apartine firmei curente.");
   const pdfPath = `maintenance-reports/${input.client.id}/${input.fileName}`;
   const pdfRef = ref(storage, pdfPath);
   await uploadBytes(pdfRef, input.pdfBlob, {
@@ -498,6 +561,7 @@ export async function saveMaintenanceReportHistory(input: {
   }
 
   const reportRef = await addDoc(collection(db, "maintenanceClients", input.client.id, "rapoarte"), {
+    companyId,
     clientId: input.client.id,
     clientName: input.client.name || "",
     reportType: input.reportType,
@@ -526,6 +590,7 @@ export async function saveMaintenanceReportHistory(input: {
 
   return {
     id: reportRef.id,
+    companyId,
     clientId: input.client.id,
     clientName: input.client.name || "",
     reportType: input.reportType,
@@ -548,19 +613,30 @@ export function subscribeMaintenanceReportHistory(
   onData: (items: MaintenanceReportHistoryItem[]) => void,
   onError?: (error: Error) => void
 ): () => void {
-  return onSnapshot(
-    query(
-      collection(db, "maintenanceClients", clientId, "rapoarte"),
-      orderBy("createdAt", "desc"),
-      limit(100)
-    ),
-    (snap) => {
-      onData(snap.docs.map((docItem) => mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>)));
-    },
-    (error) => {
-      onError?.(error);
-    }
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        collection(db, "maintenanceClients", clientId, "rapoarte"),
+        ...buildCompanyScopeConstraints(context),
+        orderBy("createdAt", "desc"),
+        limit(100)
+      ),
+      (snap) => {
+        onData(snap.docs.map((docItem) => mapReportHistory(
+          docItem.id,
+          docItem.data() as Record<string, unknown>
+        )));
+      },
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error as Error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export function subscribeMaintenanceReportsOverview(
@@ -569,17 +645,26 @@ export function subscribeMaintenanceReportsOverview(
   maxItems = 100
 ): () => void {
   const safeLimit = Math.max(25, Math.min(200, Math.floor(maxItems)));
-  return onSnapshot(
-    query(collectionGroup(db, "rapoarte"), orderBy("createdAt", "desc"), limit(safeLimit)),
-    (snap) => {
-      onData(
-        snap.docs.map((docItem) =>
-          mapReportHistory(docItem.id, docItem.data() as Record<string, unknown>)
-        )
-      );
-    },
-    (error) => {
-      onError?.(error);
-    }
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        collectionGroup(db, "rapoarte"),
+        ...buildCompanyScopeConstraints(context),
+        orderBy("createdAt", "desc"),
+        limit(safeLimit)
+      ),
+      (snap) => onData(snap.docs.map((docItem) => mapReportHistory(
+        docItem.id,
+        docItem.data() as Record<string, unknown>
+      ))),
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error as Error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }

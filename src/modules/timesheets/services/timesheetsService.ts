@@ -14,7 +14,13 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { db } from "../../../lib/firebase/firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import type {
   ProjectFormValues,
   ProjectItem,
@@ -46,6 +52,7 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
     status: data.status ?? "activ",
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),
+    companyId: data.companyId ?? "",
   };
 }
 
@@ -98,6 +105,7 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
 
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),
+    companyId: data.companyId ?? "",
   };
 }
 
@@ -121,61 +129,19 @@ function getDateParts(ts: number) {
   };
 }
 
-function getSafeOfflineActionTime(value?: number) {
-  const now = Date.now();
-  if (value === undefined) return now;
-  if (!Number.isFinite(value)) throw new Error("Ora actiunii offline este invalida.");
-  const oldestAllowed = now - 7 * 24 * 60 * 60 * 1000;
-  const newestAllowed = now + 5 * 60 * 1000;
-  if (value < oldestAllowed || value > newestAllowed) {
-    throw new Error("Actiunea offline este prea veche sau are o ora invalida.");
-  }
-  return Math.round(value);
-}
-
 function getProjectDisplayName(projectName?: string, projectCode?: string): string {
   const name = String(projectName ?? "").trim();
   const code = String(projectCode ?? "").trim();
   return name || code || "Fara proiect";
 }
 
-function getStartExplanationLabel(startPolicyFlag?: string): string {
-  return startPolicyFlag === "late_start" ? "Explicatie start tarziu" : "Explicatie start";
-}
-
-function getStopExplanationLabel(stopPolicyFlag?: string): string {
-  if (stopPolicyFlag === "early_stop") return "Explicatie stop devreme";
-  if (stopPolicyFlag === "late_stop") return "Explicatie stop tarziu";
-  return "Explicatie stop";
-}
-
-function formatExplanationBlock(label: string, explanation: string): string {
-  const cleanExplanation = explanation.trim();
-  return cleanExplanation ? `${label}:\n${cleanExplanation}` : "";
-}
-
-function buildTimesheetExplanationSummary(params: {
-  startExplanation?: string;
-  stopExplanation?: string;
-  startPolicyFlag?: string;
-  stopPolicyFlag?: string;
-}): string {
-  return [
-    formatExplanationBlock(
-      getStartExplanationLabel(params.startPolicyFlag),
-      String(params.startExplanation ?? "")
-    ),
-    formatExplanationBlock(
-      getStopExplanationLabel(params.stopPolicyFlag),
-      String(params.stopExplanation ?? "")
-    ),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 export async function getProjectsList(): Promise<ProjectItem[]> {
-  const snap = await getDocs(query(projectsCollection, orderBy("name", "asc")));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    projectsCollection,
+    ...buildCompanyScopeConstraints(context),
+    orderBy("name", "asc")
+  ));
   return snap.docs.map((docItem) => mapProjectDoc(docItem.id, docItem.data()));
 }
 
@@ -216,11 +182,14 @@ export async function saveUserTimesheetProjectPreference(
 }
 
 export async function createProject(values: ProjectFormValues): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = requirePrimaryCompanyId(context);
   const now = Date.now();
   const savedValues = { ...values, name: values.name.trim() };
   const fieldsText = buildAuditSnapshot(savedValues, projectAuditFields);
 
   const refDoc = await addDoc(projectsCollection, {
+    companyId,
     name: savedValues.name,
     status: savedValues.status,
     createdAt: now,
@@ -292,8 +261,6 @@ export async function updateProject(projectId: string, values: ProjectFormValues
 }
 
 export async function deleteProject(project: ProjectItem): Promise<void> {
-  await deleteDoc(doc(db, "projects", project.id));
-
   await dispatchNotificationEvent({
     module: "projects",
     eventType: "project_deleted",
@@ -302,6 +269,7 @@ export async function deleteProject(project: ProjectItem): Promise<void> {
     message: `Proiectul ${project.name || project.code || project.id} a fost sters.`,
     notificationPath: "/projects",
   });
+  await deleteDoc(doc(db, "projects", project.id));
 }
 
 function cleanTimesheetLocation(location: TimesheetLocation): TimesheetLocation {
@@ -313,9 +281,11 @@ function cleanTimesheetLocation(location: TimesheetLocation): TimesheetLocation 
 }
 
 export async function getActiveTimesheetForUser(userId: string): Promise<TimesheetItem | null> {
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(
     query(
       timesheetsCollection,
+      ...buildCompanyScopeConstraints(context),
       where("userId", "==", userId),
       where("status", "==", "activ"),
       limit(1)
@@ -339,60 +309,41 @@ export async function startTimesheet(params: {
   startExpectedTime?: string;
   occurredAt?: number;
 }): Promise<string> {
-  const existing = await getActiveTimesheetForUser(params.userId);
-  if (existing) {
-    throw new Error("Exista deja un pontaj activ pentru acest utilizator.");
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== params.userId) {
+    throw new Error("Poti porni numai pontajul propriu.");
   }
-
-  const now = getSafeOfflineActionTime(params.occurredAt);
-  const parts = getDateParts(now);
-  const startExplanation = String(params.startExplanation ?? "").trim();
-  const startPolicyFlag = params.startPolicyFlag ?? "";
-
-  const refDoc = await addDoc(timesheetsCollection, {
-    userId: params.userId,
-    userName: params.userName,
-
+  const companyId = requirePrimaryCompanyId(context);
+  const callable = httpsCallable<
+    {
+      companyId: string;
+      projectId: string;
+      startLocation: TimesheetLocation;
+      startExplanation?: string;
+      startPolicyFlag?: string;
+      startExpectedTime?: string;
+      occurredAt?: number;
+      startSource: "web";
+    },
+    { timesheetId: string; duplicate: boolean }
+  >(functions, "startTimesheetSecure");
+  const response = await callable({
+    companyId,
     projectId: params.projectId,
-    projectCode: params.projectCode,
-    projectName: params.projectName,
-    userThemeKey: params.userThemeKey ?? null,
-    status: "activ",
-    explanation: buildTimesheetExplanationSummary({
-      startExplanation,
-      startPolicyFlag,
-    }),
-    startExplanation,
-    stopExplanation: "",
-    startPolicyFlag,
-    stopPolicyFlag: "",
-    startExpectedTime: params.startExpectedTime ?? "",
-    stopExpectedMinutes: null,
-
-    startAt: now,
-    stopAt: null,
-    workedMinutes: 0,
-
     startLocation: cleanTimesheetLocation(params.startLocation),
-    stopLocation: null,
-
+    startExplanation: params.startExplanation,
+    startPolicyFlag: params.startPolicyFlag,
+    startExpectedTime: params.startExpectedTime ?? "",
+    occurredAt: params.occurredAt,
     startSource: "web",
-    stopSource: "",
-
-    workDate: parts.workDate,
-    yearMonth: parts.yearMonth,
-    weekKey: parts.weekKey,
-
-    createdAt: now,
-    updatedAt: now,
-    createdAtServer: serverTimestamp(),
-    updatedAtServer: serverTimestamp(),
   });
+  const timesheetId = response.data.timesheetId;
+  if (!timesheetId) throw new Error("Pontajul nu a returnat un identificator valid.");
 
   await dispatchNotificationEvent({
     module: "timesheets",
     eventType: "timesheet_started",
-    entityId: refDoc.id,
+    entityId: timesheetId,
     title: "Pontaj pornit",
     message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
     directUserId: params.userId,
@@ -404,16 +355,17 @@ export async function startTimesheet(params: {
       fieldsText: [
         `User: ${params.userName}`,
         `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
-        `Data lucru: ${parts.workDate}`,
         `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
         `Explicatie start: ${params.startExplanation || "-"}`,
         `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
       ],
-      fieldsCount: 6,
+      fieldsCount: 5,
     },
+    companyId,
+    idempotencyKey: `timesheet-started-${timesheetId}`,
   });
 
-  return refDoc.id;
+  return timesheetId;
 }
 
 export async function stopTimesheet(params: {
@@ -432,41 +384,29 @@ export async function stopTimesheet(params: {
   }
 
   const data = snap.data();
-  const startAt = data.startAt ?? Date.now();
-  const stopAt = Math.max(startAt, getSafeOfflineActionTime(params.occurredAt));
-  const workedMinutes = Math.max(1, Math.round((stopAt - startAt) / 60000));
-
-  let status: TimesheetItem["status"] = "inchis";
-  if (workedMinutes < 8 * 60 || workedMinutes > 9 * 60) {
-    status = "corectat";
-  }
-
-  const stopExplanation = params.explanation.trim();
-  const startExplanation = String(data.startExplanation ?? "").trim();
-  const legacyExplanation = String(data.explanation ?? "").trim();
-  const startPolicyFlag = String(data.startPolicyFlag ?? "");
-  const stopPolicyFlag = params.stopPolicyFlag ?? "";
-  const explanationSummary = buildTimesheetExplanationSummary({
-    startExplanation: startExplanation || (!data.startExplanation ? legacyExplanation : ""),
-    stopExplanation,
-    startPolicyFlag,
-    stopPolicyFlag,
-  });
-
-  await updateDoc(refDoc, {
-    stopAt,
-    workedMinutes,
+  const callable = httpsCallable<
+    {
+      timesheetId: string;
+      stopLocation: TimesheetLocation;
+      stopExplanation: string;
+      stopPolicyFlag?: string;
+      stopExpectedMinutes?: number;
+      occurredAt?: number;
+      stopSource: "web";
+    },
+    { duplicate: boolean; workedMinutes?: number; status?: TimesheetItem["status"] }
+  >(functions, "stopTimesheetSecure");
+  const response = await callable({
+    timesheetId: params.timesheetId,
     stopLocation: cleanTimesheetLocation(params.stopLocation),
+    stopExplanation: params.explanation.trim(),
+    stopPolicyFlag: params.stopPolicyFlag,
+    stopExpectedMinutes: params.stopExpectedMinutes,
+    occurredAt: params.occurredAt,
     stopSource: "web",
-    explanation: explanationSummary,
-    stopExplanation,
-    stopPolicyFlag,
-    stopExpectedMinutes:
-      typeof params.stopExpectedMinutes === "number" ? params.stopExpectedMinutes : null,
-    status,
-    updatedAt: stopAt,
-    updatedAtServer: serverTimestamp(),
   });
+  const workedMinutes = response.data.workedMinutes ?? Number(data.workedMinutes ?? 0);
+  const status = response.data.status ?? (data.status as TimesheetItem["status"]);
 
   await dispatchNotificationEvent({
     module: "timesheets",
@@ -485,23 +425,36 @@ export async function stopTimesheet(params: {
         `Proiect: ${getProjectDisplayName(data.projectName, data.projectCode)}`,
         `Minute lucrate: ${workedMinutes}`,
         `Status: ${status}`,
-        `Explicatie stop: ${stopExplanation || "-"}`,
+        `Explicatie stop: ${params.explanation.trim() || "-"}`,
         `Locatie stop: ${cleanTimesheetLocation(params.stopLocation).label || "-"}`,
       ],
       fieldsCount: 6,
     },
+    companyId: String(data.companyId ?? ""),
+    idempotencyKey: `timesheet-stopped-${params.timesheetId}`,
   });
 }
 
 export async function getTimesheetsList(): Promise<TimesheetItem[]> {
-  const snap = await getDocs(query(timesheetsCollection, orderBy("startAt", "desc")));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    timesheetsCollection,
+    ...buildCompanyScopeConstraints(context),
+    orderBy("startAt", "desc")
+  ));
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
 
 export async function getTimesheetsManagementList(maxItems = 1000): Promise<TimesheetItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const safeLimit = Math.max(50, Math.min(1500, Math.floor(maxItems)));
   const snap = await getDocs(
-    query(timesheetsCollection, orderBy("startAt", "desc"), limit(safeLimit))
+    query(
+      timesheetsCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("startAt", "desc"),
+      limit(safeLimit)
+    )
   );
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
@@ -510,10 +463,12 @@ export async function getTimesheetsForUser(
   userId: string,
   maxItems = 500
 ): Promise<TimesheetItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const safeLimit = Math.max(1, Math.min(500, Math.floor(maxItems)));
   const snap = await getDocs(
     query(
       timesheetsCollection,
+      ...buildCompanyScopeConstraints(context),
       where("userId", "==", userId),
       orderBy("startAt", "desc"),
       limit(safeLimit)
@@ -546,6 +501,7 @@ export async function getLatestTimesheetProjectForUser(
     status: "activ",
     createdAt: latestTimesheet.createdAt,
     updatedAt: latestTimesheet.updatedAt,
+    companyId: latestTimesheet.companyId,
   };
 }
 
@@ -556,8 +512,6 @@ export async function getTimesheetById(timesheetId: string): Promise<TimesheetIt
 }
 
 export async function deleteTimesheet(item: TimesheetItem): Promise<void> {
-  await deleteDoc(doc(db, "timesheets", item.id));
-
   await dispatchNotificationEvent({
     module: "timesheets",
     eventType: "timesheet_deleted",
@@ -568,6 +522,7 @@ export async function deleteTimesheet(item: TimesheetItem): Promise<void> {
     ownerUserId: item.userId,
     notificationPath: "/timesheets",
   });
+  await deleteDoc(doc(db, "timesheets", item.id));
 }
 
 export function computeTimesheetStats(

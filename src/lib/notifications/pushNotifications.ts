@@ -11,6 +11,10 @@ import {
 } from "firebase/firestore";
 import { getToken } from "firebase/messaging";
 import { db } from "../firebase/firebase";
+import {
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../firebase/companyAccess";
 import { getMessagingClient } from "../firebase/messaging";
 
 export type PushActivationResult = {
@@ -100,6 +104,9 @@ function toSafeDocId(value: string): string {
 }
 
 async function saveTokenForUser(userId: string, token: string): Promise<void> {
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== userId) throw new Error("Tokenul push poate fi salvat numai pentru contul curent.");
+  const companyId = requirePrimaryCompanyId(context);
   const tokensRef = collection(db, "pushTokens");
   const installationId = getPushInstallationId();
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "unknown";
@@ -113,6 +120,7 @@ async function saveTokenForUser(userId: string, token: string): Promise<void> {
   await Promise.all(staleDocs.map((item) => deleteDoc(item.ref)));
 
   await setDoc(doc(tokensRef, tokenDocId), {
+    companyId,
     userId,
     token,
     installationId,

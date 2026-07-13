@@ -13,6 +13,11 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import type {
   NotificationRuleFormValues,
   NotificationRuleItem,
@@ -24,6 +29,7 @@ const notificationRulesCollection = collection(db, "notificationRules");
 function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem {
   return {
     id,
+    companyId: data.companyId ?? "",
     name: data.name ?? "",
     module: data.module ?? "general",
     eventType: data.eventType ?? "user_created",
@@ -52,8 +58,14 @@ function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem
 }
 
 export async function getNotificationRules(): Promise<NotificationRuleItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(
-    query(notificationRulesCollection, orderBy("updatedAt", "desc"), limit(100))
+    query(
+      notificationRulesCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("updatedAt", "desc"),
+      limit(100)
+    )
   );
   return snap.docs.map((docItem) => mapRuleDoc(docItem.id, docItem.data()));
 }
@@ -62,16 +74,25 @@ export function subscribeNotificationRules(
   onData: (rules: NotificationRuleItem[]) => void,
   onError?: (error: unknown) => void
 ): () => void {
-  const rulesQuery = query(notificationRulesCollection, orderBy("updatedAt", "desc"), limit(100));
-  return onSnapshot(
-    rulesQuery,
-    (snap) => {
-      onData(snap.docs.map((docItem) => mapRuleDoc(docItem.id, docItem.data())));
-    },
-    (error) => {
-      onError?.(error);
-    }
-  );
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    unsubscribe = onSnapshot(
+      query(
+        notificationRulesCollection,
+        ...buildCompanyScopeConstraints(context),
+        orderBy("updatedAt", "desc"),
+        limit(100)
+      ),
+      (snap) => onData(snap.docs.map((docItem) => mapRuleDoc(docItem.id, docItem.data()))),
+      (error) => onError?.(error)
+    );
+  }).catch((error) => onError?.(error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function getNotificationRuleById(
@@ -85,9 +106,12 @@ export async function getNotificationRuleById(
 export async function createNotificationRule(
   values: NotificationRuleFormValues
 ): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = requirePrimaryCompanyId(context);
   const now = Date.now();
 
   const refDoc = await addDoc(notificationRulesCollection, {
+    companyId,
     ...values,
     createdAt: now,
     updatedAt: now,
@@ -128,8 +152,6 @@ export async function updateNotificationRule(
 }
 
 export async function deleteNotificationRule(rule: NotificationRuleItem): Promise<void> {
-  await deleteDoc(doc(db, "notificationRules", rule.id));
-
   await dispatchNotificationEvent({
     module: "notifications",
     eventType: "notification_rule_deleted",
@@ -138,4 +160,5 @@ export async function deleteNotificationRule(rule: NotificationRuleItem): Promis
     message: `Regula "${rule.name}" a fost stearsa.`,
     notificationPath: "/notification-rules",
   });
+  await deleteDoc(doc(db, "notificationRules", rule.id));
 }

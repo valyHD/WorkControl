@@ -34,6 +34,7 @@ export interface ExpenseAiAnalysis {
 
 export interface ExpenseDocumentItem extends ExpenseAiAnalysis {
   id: string;
+  companyId?: string;
   fileName: string;
   fileUrl: string;
   filePath: string;
@@ -88,6 +89,7 @@ export interface ExpenseFileDraft {
 }
 
 export interface ExpenseDocumentPayload extends ExpenseAiAnalysis {
+  companyId?: string;
   fileName: string;
   fileUrl: string;
   filePath: string;

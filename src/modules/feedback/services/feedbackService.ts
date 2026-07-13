@@ -1,5 +1,9 @@
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 
 export type FeedbackCategory = "idea" | "problem" | "usability";
 
@@ -31,8 +35,11 @@ export async function submitAppFeedback(input: {
   path: string;
 }) {
   const validated = validateFeedbackInput(input);
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== validated.ownerUserId) throw new Error("Poti trimite numai feedback propriu.");
   await addDoc(collection(db, "appFeedback"), {
     ...validated,
+    companyId: requirePrimaryCompanyId(context),
     status: "new",
     createdAt: Date.now(),
     createdAtServer: serverTimestamp(),

@@ -14,6 +14,11 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import type { LeaveRequestFormValues, LeaveRequestItem, LeaveRequestType } from "../../../types/leave";
 import type { TimesheetItem } from "../../../types/timesheet";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
@@ -137,6 +142,7 @@ export function buildLeaveRequestPdf(values: LeaveRequestFormValues, issuedAt: n
 function mapLeaveDoc(id: string, data: Record<string, any>): LeaveRequestItem {
   return {
     id,
+    companyId: String(data.companyId ?? ""),
     userId: data.userId ?? "",
     userName: data.userName ?? "",
     userEmail: data.userEmail ?? "",
@@ -160,6 +166,9 @@ function mapLeaveDoc(id: string, data: Record<string, any>): LeaveRequestItem {
 }
 
 export async function saveLeaveRequest(userId: string, values: LeaveRequestFormValues): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== userId) throw new Error("Poti crea numai cererea proprie.");
+  const companyId = requirePrimaryCompanyId(context);
   const now = Date.now();
   const requestedDays = calculateLeaveIntervalDays(values.periodStart, values.periodEnd);
   const requestedMinutes = requestedDays * 8 * 60;
@@ -171,6 +180,7 @@ export async function saveLeaveRequest(userId: string, values: LeaveRequestFormV
   const pdfDataUrl = buildLeaveRequestPdf(values, now);
 
   const refDoc = await addDoc(leaveRequestsCollection, {
+    companyId,
     userId,
     userName: values.userName.trim(),
     userEmail: values.userEmail.trim(),
@@ -283,8 +293,6 @@ export async function deleteLeaveRequest(
   if (!isAdmin && data.userId !== actorUserId) {
     throw new Error("Doar adminul sau creatorul cererii poate sterge PDF-ul.");
   }
-  await deleteDoc(requestRef);
-
   const requestUserId = String(data.userId ?? "");
   const requestUserName = String(data.userName ?? "Utilizator");
 
@@ -300,6 +308,7 @@ export async function deleteLeaveRequest(
     actorUserName,
     actorUserThemeKey,
   });
+  await deleteDoc(requestRef);
 }
 
 
@@ -307,18 +316,33 @@ export function subscribeLeaveRequestsForUser(
   userId: string,
   onNext: (requests: LeaveRequestItem[]) => void
 ): () => void {
-  const q = query(leaveRequestsCollection, where("userId", "==", userId), orderBy("createdAt", "desc"));
-
-  return onSnapshot(q, (snap) => {
-    onNext(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
-  });
+  let unsubscribe: () => void = () => {};
+  let cancelled = false;
+  void getCurrentCompanyAccessContext().then((context) => {
+    if (cancelled) return;
+    const scopedQuery = query(
+      leaveRequestsCollection,
+      ...buildCompanyScopeConstraints(context),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+    unsubscribe = onSnapshot(scopedQuery, (snap) => {
+      onNext(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+    });
+  }).catch((error) => console.error("[subscribeLeaveRequestsForUser]", error));
+  return () => {
+    cancelled = true;
+    unsubscribe();
+  };
 }
 
 export async function getLeaveRequestsForUser(userId: string, maxItems = 200): Promise<LeaveRequestItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const safeLimit = Math.max(1, Math.min(200, Math.floor(maxItems)));
   const snap = await getDocs(
     query(
       leaveRequestsCollection,
+      ...buildCompanyScopeConstraints(context),
       where("userId", "==", userId),
       orderBy("createdAt", "desc"),
       limit(safeLimit)

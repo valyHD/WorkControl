@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, documentId, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { BadgeCheck, CalendarDays, ChevronLeft, ChevronRight, Download, FileSignature, Send } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import { db } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  getCurrentCompanyAccessContext,
+} from "../../../lib/firebase/companyAccess";
 import type { TimesheetItem } from "../../../types/timesheet";
 import type { AppUserItem } from "../../../types/user";
 import type { LeaveRequestFormValues, LeaveRequestItem } from "../../../types/leave";
@@ -359,17 +363,25 @@ export default function LeavePlannerPage() {
       setExpandedUserId("");
       return undefined;
     }
-    const managementScope = role === "admin" || role === "manager";
-    const usersQuery = managementScope
-      ? query(collection(db, "users"), orderBy("createdAt", "asc"), limit(100))
-      : query(collection(db, "users"), where(documentId(), "==", user.uid), limit(1));
+    let unsubscribe: () => void = () => {};
+    let cancelled = false;
+    void getCurrentCompanyAccessContext().then((context) => {
+      if (cancelled) return;
+      const managementScope = role === "admin" || role === "manager";
+      const userViews = collection(db, "userOperationalViews");
+      const companyScope = buildCompanyScopeConstraints(context);
+      const usersQuery = managementScope
+        ? query(userViews, ...companyScope, orderBy("fullName", "asc"), limit(100))
+        : query(userViews, ...companyScope, where("uid", "==", user.uid), limit(1));
 
-    return onSnapshot(usersQuery, (snap) => {
-      const mapped = snap.docs.map((docItem) => {
+      unsubscribe = onSnapshot(usersQuery, (snap) => {
+      const mappedByUser = new Map<string, AppUserItem>();
+      snap.docs.forEach((docItem) => {
         const data = docItem.data();
-        return {
-          id: docItem.id,
-          uid: data.uid ?? docItem.id,
+        const uid = data.uid ?? docItem.id;
+        mappedByUser.set(uid, {
+          id: uid,
+          uid,
           fullName: data.fullName ?? "",
           email: data.email ?? "",
           active: data.active !== false,
@@ -377,18 +389,24 @@ export default function LeavePlannerPage() {
           roleTitle: data.roleTitle ?? "",
           department: data.department ?? "",
           themeKey: data.themeKey ?? undefined,
-          companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
-          companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
-          primaryCompanyId: data.primaryCompanyId ?? "",
-          primaryCompanyName: data.primaryCompanyName ?? "",
+          companyIds: [data.companyId].filter(Boolean),
+          companyNames: [],
+          primaryCompanyId: data.companyId ?? "",
+          primaryCompanyName: "",
           createdAt: Number(data.createdAt ?? 0),
           updatedAt: Number(data.updatedAt ?? 0),
-        } as AppUserItem;
+        } as AppUserItem);
       });
+      const mapped = [...mappedByUser.values()];
 
       setUsers(mapped);
       setExpandedUserId((current) => current || mapped[0]?.uid || "");
-    });
+      });
+    }).catch((error) => console.error("[LeavePlannerPage][users]", error));
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [role, user?.uid]);
 
   useEffect(() => {
@@ -399,23 +417,43 @@ export default function LeavePlannerPage() {
 
     setCalendarData({ timesheets: [], leaveRequests: [], timesheetsLoaded: false, leaveLoaded: false });
 
-    const timesheetsUnsub = onSnapshot(
-      query(collection(db, "timesheets"), where("userId", "==", expandedUserId), orderBy("startAt", "desc"), limit(180)),
-      (snap) => {
+    let timesheetsUnsub: () => void = () => {};
+    let leaveUnsub: () => void = () => {};
+    let cancelled = false;
+    void getCurrentCompanyAccessContext().then((context) => {
+      if (cancelled) return;
+      const companyScope = buildCompanyScopeConstraints(context);
+      timesheetsUnsub = onSnapshot(
+        query(
+          collection(db, "timesheets"),
+          ...companyScope,
+          where("userId", "==", expandedUserId),
+          orderBy("startAt", "desc"),
+          limit(180)
+        ),
+        (snap) => {
         const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, timesheets: mapped, timesheetsLoaded: true }));
-      }
-    );
+        }
+      );
 
-    const leaveUnsub = onSnapshot(
-      query(collection(db, "leaveRequests"), where("userId", "==", expandedUserId), orderBy("createdAt", "desc"), limit(100)),
-      (snap) => {
+      leaveUnsub = onSnapshot(
+        query(
+          collection(db, "leaveRequests"),
+          ...companyScope,
+          where("userId", "==", expandedUserId),
+          orderBy("createdAt", "desc"),
+          limit(100)
+        ),
+        (snap) => {
         const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, leaveRequests: mapped, leaveLoaded: true }));
-      }
-    );
+        }
+      );
+    }).catch((error) => console.error("[LeavePlannerPage][calendar]", error));
 
     return () => {
+      cancelled = true;
       timesheetsUnsub();
       leaveUnsub();
     };
@@ -423,18 +461,26 @@ export default function LeavePlannerPage() {
 
   useEffect(() => {
     if (!user?.uid) return;
-    const managementScope = role === "admin" || role === "manager";
-    const requestsQuery = managementScope
-      ? query(collection(db, "leaveRequests"), orderBy("createdAt", "desc"), limit(100))
-      : query(
-          collection(db, "leaveRequests"),
-          where("userId", "==", user.uid),
-          orderBy("createdAt", "desc"),
-          limit(30)
-        );
-    return onSnapshot(requestsQuery, (snap) => {
-      setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
-    });
+    let unsubscribe: () => void = () => {};
+    let cancelled = false;
+    void getCurrentCompanyAccessContext().then((context) => {
+      if (cancelled) return;
+      const managementScope = role === "admin" || role === "manager";
+      const requestsQuery = query(
+        collection(db, "leaveRequests"),
+        ...buildCompanyScopeConstraints(context),
+        ...(managementScope ? [] : [where("userId", "==", user.uid)]),
+        orderBy("createdAt", "desc"),
+        limit(managementScope ? 100 : 30)
+      );
+      unsubscribe = onSnapshot(requestsQuery, (snap) => {
+        setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+      });
+    }).catch((error) => console.error("[LeavePlannerPage][requests]", error));
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, [role, user?.uid]);
 
   const monthTitle = useMemo(

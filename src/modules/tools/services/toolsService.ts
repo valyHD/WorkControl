@@ -18,7 +18,14 @@ import {
   ref,
   uploadBytes,
 } from "firebase/storage";
-import { db, storage } from "../../../lib/firebase/firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions, storage } from "../../../lib/firebase/firebase";
+import {
+  buildCompanyScopeConstraints,
+  buildUserDirectoryConstraints,
+  getCurrentCompanyAccessContext,
+  requirePrimaryCompanyId,
+} from "../../../lib/firebase/companyAccess";
 import type {
   AppUser,
   ToolEventItem,
@@ -30,7 +37,7 @@ import { dispatchNotificationEvent } from "../../notifications/services/notifica
 import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 
 const toolsCollection = collection(db, "tools");
-const usersCollection = collection(db, "users");
+const userOperationalViewsCollection = collection(db, "userOperationalViews");
 const toolEventsCollection = collection(db, "toolEvents");
 
 const toolAuditFields: AuditFieldDescriptor<ToolFormValues>[] = [
@@ -143,33 +150,65 @@ currentHolderThemeKey: data.currentHolderThemeKey ?? null,
 
     createdAt: data.createdAt ?? Date.now(),
     updatedAt: data.updatedAt ?? Date.now(),
+    companyId: data.companyId ?? "",
   };
 }
 
 export async function getUsersList(): Promise<AppUser[]> {
-  const snap = await getDocs(query(usersCollection, orderBy("fullName", "asc")));
-  return snap.docs.map((docItem) => ({
-    id: docItem.id,
-    uid: docItem.data().uid ?? "",
-      themeKey: docItem.data().themeKey ?? null,
-      avatarUrl: docItem.data().avatarUrl ?? "",
-      avatarThumbUrl: docItem.data().avatarThumbUrl ?? docItem.data().avatarUrl ?? "",
-      fullName: docItem.data().fullName ?? "Utilizator fara nume",
-    email: docItem.data().email ?? "",
-    active: docItem.data().active ?? true,
-    role: docItem.data().role ?? "",
-    roleTitle: docItem.data().roleTitle ?? "",
-    department: docItem.data().department ?? "",
-    companyIds: Array.isArray(docItem.data().companyIds) ? docItem.data().companyIds : [],
-    companyNames: Array.isArray(docItem.data().companyNames) ? docItem.data().companyNames : [],
-    primaryCompanyId: docItem.data().primaryCompanyId ?? "",
-    primaryCompanyName: docItem.data().primaryCompanyName ?? "",
-  }));
+  const context = await getCurrentCompanyAccessContext();
+  const snap = await getDocs(query(
+    userOperationalViewsCollection,
+    ...buildUserDirectoryConstraints(context),
+    orderBy("fullName", "asc")
+  ));
+  const users = new Map<string, AppUser>();
+  snap.docs.forEach((docItem) => {
+    const data = docItem.data();
+    const uid = String(data.uid || "").trim() || docItem.id;
+    users.set(uid, {
+      id: uid,
+      uid,
+      themeKey: data.themeKey ?? null,
+      avatarUrl: data.avatarUrl ?? "",
+      avatarThumbUrl: data.avatarThumbUrl ?? data.avatarUrl ?? "",
+      fullName: data.fullName ?? "Utilizator fara nume",
+      email: data.email ?? "",
+      active: data.active ?? true,
+      role: data.role ?? "",
+      roleTitle: data.roleTitle ?? "",
+      department: data.department ?? "",
+      companyIds: [data.companyId].filter(Boolean),
+      companyNames: [],
+      primaryCompanyId: data.companyId ?? "",
+      primaryCompanyName: "",
+    });
+  });
+  return [...users.values()];
 }
 
 export async function getToolsList(): Promise<ToolItem[]> {
-  const snap = await getDocs(query(toolsCollection, orderBy("updatedAt", "desc"), limit(500)));
-  return snap.docs.map((docItem) => mapToolDoc(docItem.id, docItem.data()));
+  const context = await getCurrentCompanyAccessContext();
+  if (context.role !== "angajat") {
+    const snap = await getDocs(query(
+      toolsCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("updatedAt", "desc"),
+      limit(500)
+    ));
+    return snap.docs.map((docItem) => mapToolDoc(docItem.id, docItem.data()));
+  }
+  const assignmentFields = ["ownerUserId", "currentHolderUserId", "pendingHolderUserId"] as const;
+  const snapshots = await Promise.all(assignmentFields.map((field) => getDocs(query(
+    toolsCollection,
+    ...buildCompanyScopeConstraints(context),
+    where(field, "==", context.uid),
+    limit(500)
+  ))));
+  const unique = new Map<string, ToolItem>();
+  snapshots.forEach((snap) => snap.docs.forEach((docItem) => {
+    unique.set(docItem.id, mapToolDoc(docItem.id, docItem.data()));
+  }));
+  return [...unique.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function getToolById(toolId: string): Promise<ToolItem | null> {
@@ -182,12 +221,8 @@ export async function findToolByQrCode(qrCodeValue: string): Promise<ToolItem | 
   const clean = qrCodeValue.trim();
   if (!clean) return null;
 
-  const snap = await getDocs(
-    query(toolsCollection, where("qrCodeValue", "==", clean), limit(1))
-  );
-
-  if (snap.empty) return null;
-  return mapToolDoc(snap.docs[0].id, snap.docs[0].data());
+  const tools = await getToolsList();
+  return tools.find((tool) => tool.qrCodeValue === clean) ?? null;
 }
 
 export async function findToolByInternalCode(
@@ -196,12 +231,8 @@ export async function findToolByInternalCode(
   const clean = internalCode.trim();
   if (!clean) return null;
 
-  const snap = await getDocs(
-    query(toolsCollection, where("internalCode", "==", clean), limit(1))
-  );
-
-  if (snap.empty) return null;
-  return mapToolDoc(snap.docs[0].id, snap.docs[0].data());
+  const tools = await getToolsList();
+  return tools.find((tool) => tool.internalCode === clean) ?? null;
 }
 
 export async function isQrCodeUsed(
@@ -211,13 +242,8 @@ export async function isQrCodeUsed(
   const clean = qrCodeValue.trim();
   if (!clean) return false;
 
-  const snap = await getDocs(
-    query(toolsCollection, where("qrCodeValue", "==", clean), limit(10))
-  );
-
-  if (snap.empty) return false;
-
-  return snap.docs.some((docItem) => docItem.id !== excludeToolId);
+  const tools = await getToolsList();
+  return tools.some((tool) => tool.qrCodeValue === clean && tool.id !== excludeToolId);
 }
 
 export async function isInternalCodeUsed(
@@ -227,21 +253,19 @@ export async function isInternalCodeUsed(
   const clean = internalCode.trim();
   if (!clean) return false;
 
-  const snap = await getDocs(
-    query(toolsCollection, where("internalCode", "==", clean), limit(10))
-  );
-
-  if (snap.empty) return false;
-
-  return snap.docs.some((docItem) => docItem.id !== excludeToolId);
+  const tools = await getToolsList();
+  return tools.some((tool) => tool.internalCode === clean && tool.id !== excludeToolId);
 }
 
 export async function createTool(values: ToolFormValues): Promise<string> {
+  const context = await getCurrentCompanyAccessContext();
+  const companyId = values.companyId || requirePrimaryCompanyId(context);
   const now = Date.now();
   const fieldsText = buildAuditSnapshot(values, toolAuditFields);
 
   const docRef = await addDoc(toolsCollection, {
     ...values,
+    companyId,
     createdAt: now,
     updatedAt: now,
     createdAtServer: serverTimestamp(),
@@ -342,11 +366,12 @@ export async function addToolEvent(
     actorUserThemeKey?: string | null;
   }
 ): Promise<void> {
+  const actorUserId = actor?.actorUserId || auth.currentUser?.uid || "";
   await addDoc(toolEventsCollection, {
     toolId,
     type,
     message,
-    actorUserId: actor?.actorUserId ?? "",
+    actorUserId,
     actorUserName: actor?.actorUserName ?? "",
     actorUserThemeKey: actor?.actorUserThemeKey ?? null,
     createdAt: Date.now(),
@@ -571,8 +596,6 @@ export async function deleteTool(toolId: string): Promise<void> {
   const snap = await getDoc(doc(db, "tools", toolId));
   const data = snap.exists() ? snap.data() : null;
 
-  await deleteDoc(doc(db, "tools", toolId));
-
   await dispatchNotificationEvent({
     module: "tools",
     eventType: "tool_deleted",
@@ -581,6 +604,7 @@ export async function deleteTool(toolId: string): Promise<void> {
     message: `Scula ${data?.name ?? toolId} a fost ștearsă din sistem.`,
     ownerUserId: data?.ownerUserId ?? "",
   });
+  await deleteDoc(doc(db, "tools", toolId));
 }
 
 export async function changeToolHolder(
@@ -594,6 +618,7 @@ export async function changeToolHolder(
     userThemeKey: string | null;
   }
 ): Promise<void> {
+  void nextHolderThemeKey;
   const toolSnap = await getDoc(doc(db, "tools", toolId));
   if (!toolSnap.exists()) return;
 
@@ -604,15 +629,13 @@ export async function changeToolHolder(
   const initiatorName = initiator.userName || (isOwnerInitiator ? toolData.ownerUserName : toolData.currentHolderUserName) || "Utilizator";
   const initiatorThemeKey = initiator.userThemeKey ?? (isOwnerInitiator ? toolData.ownerThemeKey : toolData.currentHolderThemeKey) ?? null;
 
+  const transferCallable = httpsCallable<
+    { toolId: string; nextHolderUserId: string },
+    { toolId: string; pendingHolderUserId: string }
+  >(functions, "requestToolTransfer");
+  await transferCallable({ toolId, nextHolderUserId });
+
   if (nextHolderUserId) {
-    await updateDoc(doc(db, "tools", toolId), {
-      pendingHolderUserId: nextHolderUserId,
-      pendingHolderUserName: nextHolderUserName || "",
-      pendingHolderThemeKey: nextHolderThemeKey ?? null,
-      pendingHolderRequestedAt: Date.now(),
-      updatedAt: Date.now(),
-      updatedAtServer: serverTimestamp(),
-    });
 
     await addToolEvent(
       toolId,
@@ -634,21 +657,6 @@ export async function changeToolHolder(
     });
     return;
   }
-
-  await updateDoc(doc(db, "tools", toolId), {
-    currentHolderUserId: "",
-    currentHolderUserName: "",
-    currentHolderThemeKey: null,
-    pendingHolderUserId: "",
-    pendingHolderUserName: "",
-    pendingHolderThemeKey: null,
-    pendingHolderRequestedAt: 0,
-    locationType: "depozit",
-    locationLabel: "Depozit",
-    status: "depozit",
-    updatedAt: Date.now(),
-    updatedAtServer: serverTimestamp(),
-  });
 
   const message = `Scula a fost returnata in depozit de ${initiatorName}.`;
 
@@ -683,20 +691,11 @@ export async function acceptToolHolderChange(
   const pendingHolderThemeKey = toolData.pendingHolderThemeKey ?? null;
   const toolName = toolData.name ?? "Scula";
 
-  await updateDoc(doc(db, "tools", toolId), {
-    currentHolderUserId: pendingHolderUserId,
-    currentHolderUserName: pendingHolderUserName,
-    currentHolderThemeKey: pendingHolderThemeKey,
-    pendingHolderUserId: "",
-    pendingHolderUserName: "",
-    pendingHolderThemeKey: null,
-    pendingHolderRequestedAt: 0,
-    locationType: "utilizator",
-    locationLabel: pendingHolderUserName || "Utilizator",
-    status: "atribuita",
-    updatedAt: Date.now(),
-    updatedAtServer: serverTimestamp(),
-  });
+  const acceptCallable = httpsCallable<{ toolId: string }, { toolId: string }>(
+    functions,
+    "acceptToolTransfer"
+  );
+  await acceptCallable({ toolId });
 
   await addToolEvent(
     toolId,
@@ -719,8 +718,13 @@ export async function acceptToolHolderChange(
 }
 
 export async function getToolsOwnedByUser(userId: string): Promise<ToolItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(
-    query(toolsCollection, where("ownerUserId", "==", userId))
+    query(
+      toolsCollection,
+      ...buildCompanyScopeConstraints(context),
+      where("ownerUserId", "==", userId)
+    )
   );
 
   return snap.docs
@@ -729,8 +733,13 @@ export async function getToolsOwnedByUser(userId: string): Promise<ToolItem[]> {
 }
 
 export async function getToolsHeldByUser(userId: string): Promise<ToolItem[]> {
+  const context = await getCurrentCompanyAccessContext();
   const snap = await getDocs(
-    query(toolsCollection, where("currentHolderUserId", "==", userId))
+    query(
+      toolsCollection,
+      ...buildCompanyScopeConstraints(context),
+      where("currentHolderUserId", "==", userId)
+    )
   );
 
   return snap.docs
@@ -749,18 +758,13 @@ export async function claimToolForCurrentUser(
   userName: string,
   userThemeKey: string | null
 ): Promise<void>{
-  await updateDoc(doc(db, "tools", toolId), {
-ownerUserId: userId,
-ownerUserName: userName,
-ownerThemeKey: userThemeKey ?? null,
-currentHolderUserId: userId,
-currentHolderUserName: userName,
-currentHolderThemeKey: userThemeKey ?? null,
-locationType: "utilizator",
-locationLabel: userName,
-updatedAt: Date.now(),
-updatedAtServer: serverTimestamp(),
-  });
+  const context = await getCurrentCompanyAccessContext();
+  if (context.uid !== userId) throw new Error("Poti prelua scula numai pentru tine.");
+  const claimCallable = httpsCallable<{ toolId: string }, { toolId: string }>(
+    functions,
+    "claimTool"
+  );
+  await claimCallable({ toolId });
 
   await addToolEvent(
     toolId,

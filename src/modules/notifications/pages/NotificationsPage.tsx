@@ -255,25 +255,7 @@ export default function NotificationsPage() {
 
     setDeletingId(id);
     try {
-      const notification = notifications.find((item) => item.id === id);
       await deleteDoc(doc(db, "notifications", id));
-      if (notification && user?.uid) {
-        void createAuditLog({
-          category: "notifications",
-          action: "notification_deleted",
-          title: "Notificare stearsa",
-          message: `${user.displayName || user.email || "Utilizator"} a sters notificarea: ${notification.title}.`,
-          actorUserId: user.uid,
-          actorUserName: user.displayName || user.email || "Utilizator",
-          actorUserThemeKey: user.themeKey ?? null,
-          targetUserId: notification.userId,
-          targetUserName: user.displayName || user.email || notification.userId,
-          entityId: id,
-          entityLabel: notification.title,
-          path: "/notifications",
-          pageTitle: "Notificari",
-        }).catch((error) => console.warn("[audit][notification_deleted]", error));
-      }
     } finally {
       setDeletingId("");
     }

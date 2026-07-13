@@ -24,9 +24,22 @@ vi.mock("firebase/firestore", () => ({
 vi.mock("firebase/functions", () => ({ httpsCallable: vi.fn() }));
 vi.mock("firebase/storage", () => storageMocks);
 vi.mock("../../../lib/firebase/firebase", () => ({
+  auth: { currentUser: { uid: "expense-user-test" } },
   db: { project: "test" },
   functions: { project: "test" },
   storage: { project: "test" },
+}));
+vi.mock("../../../lib/firebase/companyAccess", () => ({
+  buildCompanyScopeConstraints: () => [],
+  canAccessCompany: () => true,
+  getCurrentCompanyAccessContext: vi.fn().mockResolvedValue({
+    uid: "expense-user-test",
+    role: "angajat",
+    primaryCompanyId: "company-test",
+    companyIds: ["company-test"],
+    globalAdmin: false,
+  }),
+  requirePrimaryCompanyId: () => "company-test",
 }));
 vi.mock("../../notifications/services/notificationsService", () => ({
   dispatchNotificationEvent: vi.fn(),

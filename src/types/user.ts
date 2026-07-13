@@ -22,4 +22,6 @@ export interface AppUserItem {
   companyNames?: string[];
   primaryCompanyId?: string;
   primaryCompanyName?: string;
+  globalAdmin?: boolean;
+  accessStatus?: "active" | "pending" | "disabled";
 }

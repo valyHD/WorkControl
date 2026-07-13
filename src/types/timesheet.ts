@@ -7,6 +7,7 @@ export interface ProjectItem {
   status: ProjectStatus;
   createdAt: number;
   updatedAt: number;
+  companyId?: string;
 }
 
 export type TimesheetStatus =
@@ -57,6 +58,7 @@ export interface TimesheetItem {
 
   createdAt: number;
   updatedAt: number;
+  companyId?: string;
 }
 
 export interface ProjectFormValues {

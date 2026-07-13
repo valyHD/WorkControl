@@ -33,6 +33,7 @@ import {
   getToolsOwnedByUserButHeldByOthers,
   getUsersList,
 } from "../../tools/services/toolsService";
+import { subscribeVehiclesList } from "../../vehicles/services/vehiclesService";
 import MyToolCard from "../components/MyToolCard";
 import type { VehicleItem } from "../../../types/vehicle";
 import type { TimesheetItem } from "../../../types/timesheet";
@@ -325,60 +326,32 @@ export default function MyProfilePage() {
   useEffect(() => {
     if (!user?.uid) return;
 
+    const companyIds = Array.from(new Set([
+      user.primaryCompanyId,
+      ...(user.companyIds ?? []),
+    ].filter(Boolean))).slice(0, 10);
+    if (companyIds.length === 0) return;
+    const companyConstraint = companyIds.length === 1
+      ? where("companyId", "==", companyIds[0])
+      : where("companyId", "in", companyIds);
+
     void load();
 
-    const vehiclesUnsubscribe = onSnapshot(
-      query(collection(db, "vehicles"), orderBy("updatedAt", "desc"), limit(20)),
-      (vehiclesSnap) => {
-        setMyVehicles(
-          vehiclesSnap.docs
-            .filter((docItem) => {
-              const data = docItem.data();
-              return data.ownerUserId === user.uid || data.currentDriverUserId === user.uid;
-            })
-            .map((docItem) => {
-              const data = docItem.data();
-              return {
-                id: docItem.id,
-                plateNumber: data.plateNumber ?? "",
-                brand: data.brand ?? "",
-                model: data.model ?? "",
-                year: data.year ?? "",
-                vin: data.vin ?? "",
-                fuelType: data.fuelType ?? "",
-                status: data.status ?? "activa",
-                currentKm: Math.max(Number(data.currentKm ?? 0), Number(data.gpsSnapshot?.odometerKm ?? 0)),
-                initialRecordedKm: Number(data.initialRecordedKm ?? data.currentKm ?? 0),
-                ownerUserId: data.ownerUserId ?? "",
-                ownerUserName: data.ownerUserName ?? "",
-                ownerThemeKey: data.ownerThemeKey ?? null,
-                currentDriverUserId: data.currentDriverUserId ?? "",
-                currentDriverUserName: data.currentDriverUserName ?? "",
-                currentDriverThemeKey: data.currentDriverThemeKey ?? null,
-                maintenanceNotes: data.maintenanceNotes ?? "",
-                serviceStrategy: data.serviceStrategy === "absolute" ? "absolute" : "interval",
-                serviceIntervalKm: Number(data.serviceIntervalKm ?? 15000),
-                nextServiceKm: Number(data.nextServiceKm ?? 0),
-                nextOilServiceKm: Number(data.nextOilServiceKm ?? 0),
-                nextItpDate: data.nextItpDate ?? "",
-                nextRcaDate: data.nextRcaDate ?? "",
-                nextCascoDate: data.nextCascoDate ?? "",
-                nextRovinietaDate: data.nextRovinietaDate ?? "",
-                coverImageUrl: data.coverImageUrl ?? "",
-                coverThumbUrl: data.coverThumbUrl ?? "",
-                images: Array.isArray(data.images) ? data.images : [],
-                documents: Array.isArray(data.documents) ? data.documents : [],
-                gpsSnapshot: data.gpsSnapshot ?? null,
-                tracker: data.tracker ?? null,
-                createdAt: data.createdAt ?? Date.now(),
-                updatedAt: data.updatedAt ?? Date.now(),
-              };
-            })
-        );
-      }
-    );
+    const vehiclesUnsubscribe = subscribeVehiclesList((items) => {
+      setMyVehicles(
+        items
+          .filter((item) => item.ownerUserId === user.uid || item.currentDriverUserId === user.uid)
+          .slice(0, 20)
+      );
+    });
     const timesheetsUnsubscribe = onSnapshot(
-      query(collection(db, "timesheets"), where("userId", "==", user.uid), orderBy("startAt", "desc"), limit(20)),
+      query(
+        collection(db, "timesheets"),
+        companyConstraint,
+        where("userId", "==", user.uid),
+        orderBy("startAt", "desc"),
+        limit(20)
+      ),
       (timesheetsSnap) => {
         setMyTimesheets(
           timesheetsSnap.docs.map((docItem) => {
@@ -413,6 +386,7 @@ export default function MyProfilePage() {
               weekKey: data.weekKey ?? "",
               createdAt: data.createdAt ?? Date.now(),
               updatedAt: data.updatedAt ?? Date.now(),
+              companyId: data.companyId ?? "",
             } as TimesheetItem;
           })
         );
@@ -435,7 +409,13 @@ export default function MyProfilePage() {
       }
     );
     const leaveUnsubscribe = onSnapshot(
-      query(collection(db, "leaveRequests"), where("userId", "==", user.uid), orderBy("createdAt", "desc"), limit(20)),
+      query(
+        collection(db, "leaveRequests"),
+        companyConstraint,
+        where("userId", "==", user.uid),
+        orderBy("createdAt", "desc"),
+        limit(20)
+      ),
       (leaveSnap) => {
         setMyLeaveRequests(
           leaveSnap.docs
@@ -465,6 +445,7 @@ export default function MyProfilePage() {
                 pdfDataUrl: data.pdfDataUrl ?? "",
                 createdAt: Number(data.createdAt ?? Date.now()),
                 updatedAt: Number(data.updatedAt ?? Date.now()),
+                companyId: data.companyId ?? "",
               } as LeaveRequestItem;
             })
             .filter((request) => request.status === "aprobat")
@@ -478,7 +459,7 @@ export default function MyProfilePage() {
       notificationsUnsubscribe();
       leaveUnsubscribe();
     };
-  }, [user?.uid]);
+  }, [user?.uid, user?.primaryCompanyId, user?.companyIds]);
 
   const selectedCompany = useMemo(
     () => companies.find((item) => item.companyKey === selectedCompanyKey) || null,

@@ -25,7 +25,6 @@ import UserProfileLink from "../../../components/UserProfileLink";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import WorkflowStepper from "../../../components/product/WorkflowStepper";
-import { createAuditLog } from "../../audit/services/auditLogService";
 import { getLatestTimesheetProjectForUser } from "../../timesheets/services/timesheetsService";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import { ASSISTANT_FILL_EXPENSE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
@@ -473,23 +472,6 @@ export default function ExpenseScanPage() {
       await deleteExpenseDocument(item);
       setItems((prev) => prev.filter((entry) => entry.id !== item.id));
       setStatus("Document sters.");
-      if (currentUser?.id) {
-        void createAuditLog({
-          category: "expenses",
-          action: "expense_document_deleted",
-          title: "Bon/factura stearsa",
-          message: `${currentUser.fullName || currentUser.email || "Utilizator"} a sters documentul ${label}.`,
-          actorUserId: currentUser.id,
-          actorUserName: currentUser.fullName || currentUser.email || "Utilizator",
-          actorUserThemeKey: currentUser.themeKey ?? null,
-          targetUserId: item.assignedUserId,
-          targetUserName: item.assignedUserName,
-          entityId: item.id,
-          entityLabel: label,
-          path: "/expenses/scan",
-          pageTitle: "Scanare bonuri",
-        }).catch((auditError) => console.warn("[audit][expense_delete]", auditError));
-      }
     } catch (err) {
       console.error("[ExpenseScanPage][delete]", err);
       setError("Nu am putut sterge documentul.");

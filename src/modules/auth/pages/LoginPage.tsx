@@ -1,15 +1,12 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import {
-  loginWithEmail,
-  registerWithEmail,
-} from "../services/authService";
+import { loginWithEmail } from "../services/authService";
+import { InternalAccessError } from "../services/internalAccessPolicy";
 import { useAuth } from "../../../providers/AuthProvider";
 
 export default function LoginPage() {
   const { user, loading } = useAuth();
 
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,7 +22,6 @@ export default function LoginPage() {
     try {
       const formData = new FormData(event.currentTarget);
 
-      const fullName = String(formData.get("fullName") || "").trim();
       const email = String(formData.get("email") || "").trim();
       const password = String(formData.get("password") || "");
 
@@ -34,19 +30,14 @@ export default function LoginPage() {
         return;
       }
 
-      if (mode === "register") {
-        if (!fullName) {
-          setError("Completeaza numele complet.");
-          return;
-        }
-
-        await registerWithEmail(fullName, email, password);
-      } else {
-        await loginWithEmail(email, password);
-      }
-    } catch (err: any) {
+      await loginWithEmail(email, password);
+    } catch (err: unknown) {
       console.error(err);
-      setError("Autentificare esuata. Verifica emailul si parola.");
+      setError(
+        err instanceof InternalAccessError
+          ? err.message
+          : "Autentificare esuata. Verifica emailul si parola."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -63,29 +54,13 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <h1 className="auth-title">
-          {mode === "login" ? "Conectare" : "Creeaza cont"}
-        </h1>
+        <h1 className="auth-title">Conectare</h1>
 
         <p className="auth-subtitle">
-          {mode === "login"
-            ? "Intra in panoul de control."
-            : "Primul user creat se salveaza automat in Firestore."}
+          Accesul este disponibil numai conturilor create de administrator.
         </p>
 
         <form className="tool-form" onSubmit={handleSubmit}>
-          {mode === "register" && (
-            <div className="tool-form-block">
-              <label className="tool-form-label">Nume complet</label>
-              <input
-                className="tool-input"
-                name="fullName"
-                autoComplete="name"
-                placeholder="Ex: Ionut Matura"
-              />
-            </div>
-          )}
-
           <div className="tool-form-block">
             <label className="tool-form-label">Email</label>
             <input
@@ -103,7 +78,7 @@ export default function LoginPage() {
               className="tool-input"
               name="password"
               type="password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              autoComplete="current-password"
               placeholder="Introdu parola"
             />
           </div>
@@ -112,23 +87,7 @@ export default function LoginPage() {
 
           <div className="tool-form-actions">
             <button className="primary-btn" type="submit" disabled={submitting}>
-              {submitting
-                ? "Se proceseaza..."
-                : mode === "login"
-                ? "Conecteaza-te"
-                : "Creeaza cont"}
-            </button>
-
-            <button
-              className="secondary-btn"
-              type="button"
-              onClick={() =>
-                setMode((prev) => (prev === "login" ? "register" : "login"))
-              }
-            >
-              {mode === "login"
-                ? "Nu ai cont? Creeaza cont"
-                : "Ai deja cont? Conecteaza-te"}
+              {submitting ? "Se proceseaza..." : "Conecteaza-te"}
             </button>
           </div>
         </form>
