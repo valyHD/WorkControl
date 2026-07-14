@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildAccessBootstrapUpdate,
   inferCompanyId,
+  legacyUserUpdateNeeded,
   migrationDefaultCompanyId,
   normalizeLegacyUser,
   requiresInitialCompanySelection,
@@ -111,4 +112,18 @@ test("unassigned active users are reported for the initial company gate", () => 
     result: { companyId: "company-a" },
     allowUserCompanySelection: true,
   }), false);
+});
+
+test("an already normalized legacy user is a migration no-op", () => {
+  const data = {
+    companyId: "company-a",
+    companyIds: ["company-a"],
+    primaryCompanyId: "company-a",
+    accessStatus: "active",
+  };
+  assert.equal(legacyUserUpdateNeeded(data, normalizeLegacyUser(data, "company-a")), false);
+  assert.equal(legacyUserUpdateNeeded(
+    { ...data, companyIds: [] },
+    normalizeLegacyUser({ ...data, companyIds: [] }, "company-a")
+  ), true);
 });

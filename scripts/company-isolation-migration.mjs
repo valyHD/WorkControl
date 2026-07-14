@@ -9,6 +9,7 @@ import {
   cleanId,
   getUserCompanyIds,
   inferCompanyId,
+  legacyUserUpdateNeeded,
   migrationDefaultCompanyId,
   normalizeLegacyUser,
   requiresInitialCompanySelection,
@@ -236,7 +237,8 @@ async function main() {
     const update = collectionName === "users"
       ? normalizeLegacyUser(data, result.companyId)
       : { companyId: result.companyId };
-    if (cleanId(data.companyId) === result.companyId && collectionName !== "users") continue;
+    if (collectionName === "users" && !legacyUserUpdateNeeded(data, update)) continue;
+    if (collectionName !== "users" && cleanId(data.companyId) === result.companyId) continue;
     changes.push({
       ref: document.ref,
       path: document.ref.path,
