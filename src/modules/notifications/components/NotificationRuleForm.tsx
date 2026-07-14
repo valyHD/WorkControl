@@ -103,7 +103,6 @@ const eventOptionsByModule: Record<
     { value: "user_updated", label: "Utilizator actualizat", description: "Date profil utilizator modificate." },
     { value: "user_role_changed", label: "Rol schimbat", description: "Rolul utilizatorului s-a modificat." },
     { value: "user_activation_changed", label: "Activare/dezactivare", description: "Statusul activ/inactiv a fost schimbat." },
-    { value: "user_site_entered", label: "A intrat pe site", description: "Un utilizator autentificat a intrat in aplicatie." },
   ],
   notifications: [
     { value: "notification_created", label: "Notificare nouă", description: "A fost generată o notificare internă." },

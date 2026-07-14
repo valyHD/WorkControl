@@ -6,18 +6,15 @@ import {
 import {
   doc,
   getDoc,
-  runTransaction,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
 import { auth, db } from "../../../lib/firebase/firebase";
 import { createAuditLog } from "../../audit/services/auditLogService";
-import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import {
   evaluateInternalAccessProfile,
   InternalAccessError,
 } from "./internalAccessPolicy";
-import { shouldDispatchSiteEnteredNotification } from "./presenceNotificationPolicy";
 
 export type AppAuthUser = {
   uid: string;
@@ -38,7 +35,6 @@ export type AppAuthUser = {
 };
 
 const USER_PRESENCE_HEARTBEAT_MS = 30_000;
-const USER_SITE_ENTER_NOTIFICATION_COOLDOWN_MS = 2 * 60 * 1000;
 
 export async function loginWithEmail(email: string, password: string) {
   const result = await signInWithEmailAndPassword(auth, email, password);
@@ -120,37 +116,25 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
   });
 }
 
-async function maybeDispatchSiteEnteredNotification(user: AppAuthUser) {
+async function recordSiteEntry(user: AppAuthUser) {
   const userRef = doc(db, "users", user.uid);
   const now = Date.now();
-  let shouldNotify = false;
-  let actorName = user.displayName || user.email || "Utilizator";
-  let actorThemeKey: string | null = user.themeKey ?? null;
+  const actorName = user.displayName || user.email || "Utilizator";
+  const actorThemeKey: string | null = user.themeKey ?? null;
 
-  await runTransaction(db, async (tx) => {
-    const snap = await tx.get(userRef);
-    const data = snap.exists() ? snap.data() : {};
-    const lastNotifiedAt = Number(data.lastSiteEnterNotifiedAt || 0);
-    actorName = String(data.fullName || actorName);
-    actorThemeKey = data.themeKey ?? actorThemeKey ?? null;
-
-    shouldNotify = now - lastNotifiedAt >= USER_SITE_ENTER_NOTIFICATION_COOLDOWN_MS;
-
-    tx.set(
-      userRef,
-      {
-        isOnline: true,
-        lastSeenAt: now,
-        lastActiveAt: now,
-        lastSiteEnteredAt: now,
-        ...(shouldNotify ? { lastSiteEnterNotifiedAt: now } : {}),
-        lastSeenAtServer: serverTimestamp(),
-        lastActiveAtServer: serverTimestamp(),
-        lastSiteEnteredAtServer: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  });
+  await setDoc(
+    userRef,
+    {
+      isOnline: true,
+      lastSeenAt: now,
+      lastActiveAt: now,
+      lastSiteEnteredAt: now,
+      lastSeenAtServer: serverTimestamp(),
+      lastActiveAtServer: serverTimestamp(),
+      lastSiteEnteredAtServer: serverTimestamp(),
+    },
+    { merge: true }
+  );
 
   await createAuditLog({
     category: "auth",
@@ -167,24 +151,6 @@ async function maybeDispatchSiteEnteredNotification(user: AppAuthUser) {
     pageTitle: "WorkControl",
   }).catch((error) => {
     console.warn("[audit][site_entered]", error);
-  });
-
-  if (!shouldNotify || !shouldDispatchSiteEnteredNotification(user)) return;
-
-  await dispatchNotificationEvent({
-    module: "users",
-    eventType: "user_site_entered",
-    entityId: user.uid,
-    title: "Utilizator pe site",
-    message: `${actorName} a intrat pe site.`,
-    notificationPath: "/users",
-    directUserId: user.uid,
-    ownerUserId: user.uid,
-    actorUserId: user.uid,
-    actorUserName: actorName,
-    actorUserThemeKey: actorThemeKey,
-  }).catch((error) => {
-    console.error("[presence][siteEnteredNotification]", error);
   });
 }
 
@@ -236,7 +202,7 @@ export function startUserPresence(user: AppAuthUser): () => void {
     void writePresence(false);
   };
 
-  void maybeDispatchSiteEnteredNotification(user).finally(() => {
+  void recordSiteEntry(user).finally(() => {
     if (!stopped) scheduleHeartbeat();
   });
 
