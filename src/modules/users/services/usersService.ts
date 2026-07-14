@@ -194,7 +194,11 @@ export async function getUserById(userId: string): Promise<AppUserItem | null> {
   return mapUserDoc(snap.id, snap.data());
 }
 
-export async function getUserAvatar(userId: string): Promise<{ avatarUrl: string; avatarThumbUrl: string } | null> {
+export async function getUserAvatar(userId: string): Promise<{
+  avatarUrl: string;
+  avatarThumbUrl: string;
+  themeKey: string | null;
+} | null> {
   if (!userId) return null;
   const snap = await getDoc(doc(db, "users", userId));
   if (!snap.exists()) return null;
@@ -202,6 +206,7 @@ export async function getUserAvatar(userId: string): Promise<{ avatarUrl: string
   return {
     avatarUrl: toText(data.avatarUrl),
     avatarThumbUrl: toText(data.avatarThumbUrl) || toText(data.avatarUrl),
+    themeKey: toText(data.themeKey) || null,
   };
 }
 

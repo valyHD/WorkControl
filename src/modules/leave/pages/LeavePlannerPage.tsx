@@ -32,6 +32,7 @@ import {
   parseAssistantLeaveDate,
   toLeaveIsoDate,
 } from "../utils/leaveDateUtils";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 const weekDays = ["L", "Ma", "Mi", "J", "V", "S", "D"];
 
@@ -545,6 +546,10 @@ export default function LeavePlannerPage() {
   );
   const expandedUser = useMemo(() => users.find((userItem) => userItem.uid === expandedUserId), [expandedUserId, users]);
   const expandedUserName = expandedUser ? buildUserLabel(expandedUser) : "Utilizator";
+  const userThemeById = useMemo(
+    () => new Map(users.flatMap((userItem) => [userItem.uid, userItem.id].filter(Boolean).map((id) => [id, userItem.themeKey ?? null] as const))),
+    [users]
+  );
   const attentionClass = (condition: boolean) => (condition ? "attention-pulse" : "");
 
   useEffect(() => {
@@ -830,13 +835,14 @@ export default function LeavePlannerPage() {
             const uid = userItem.uid;
             const isExpanded = expandedUserId === uid;
             const isLoading = isExpanded && (!calendarData.timesheetsLoaded || !calendarData.leaveLoaded);
+            const userThemeClass = getUserThemeClass(userItem.themeKey);
 
             return (
-              <div key={uid} className="leave-user-item">
+              <div key={uid} className={`leave-user-item ${userThemeClass}`}>
                 <button
                   type="button"
                   data-assistant-action="view-leave-calendar"
-                  className={`leave-user-trigger ${attentionClass(uid === user.uid)}`}
+                  className={`leave-user-trigger user-accent-surface ${userThemeClass} ${attentionClass(uid === user.uid)}`}
                   title="Deschide calendarul acestui utilizator"
                   onClick={() => setExpandedUserId(isExpanded ? "" : uid)}
                 >
@@ -845,7 +851,7 @@ export default function LeavePlannerPage() {
                 </button>
 
                 {isExpanded && (
-                  <div className="leave-user-dropdown">
+                  <div className={`leave-user-dropdown user-accent-surface ${userThemeClass}`}>
                     <div className="leave-inline-calendar-header">
                       <strong className="leave-month-title">{monthTitle}</strong>
                       <div className="leave-inline-calendar-actions">
@@ -976,7 +982,7 @@ export default function LeavePlannerPage() {
               <div
                 id={`leave-request-${request.id}`}
                 key={request.id}
-                className={`simple-list-item leave-history-item leave-history-item-vertical ${attentionClass(request.id === submittedLeaveRequestId)}`}
+                className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item leave-history-item-vertical ${attentionClass(request.id === submittedLeaveRequestId)}`}
               >
                 <div className="simple-list-text">
                   <div className="simple-list-label">{requestTypeLabel(request.requestType)}</div>
@@ -1025,10 +1031,10 @@ export default function LeavePlannerPage() {
         ) : (
           <div className="simple-list">
             {pendingLeaveRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item">
+              <div key={request.id} className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item`}>
                 <div className="simple-list-text">
                   <div className="simple-list-label">
-                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    <UserProfileLink userId={request.userId} name={request.userName} themeKey={userThemeById.get(request.userId)} />
                     {" "}· {requestTypeLabel(request.requestType)}
                   </div>
                   <div className="simple-list-subtitle">
@@ -1072,10 +1078,10 @@ export default function LeavePlannerPage() {
         ) : (
           <div className="simple-list">
             {approvedRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item leave-history-item-vertical">
+              <div key={request.id} className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item leave-history-item-vertical`}>
                 <div className="simple-list-text">
                   <div className="simple-list-label">
-                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    <UserProfileLink userId={request.userId} name={request.userName} themeKey={userThemeById.get(request.userId)} />
                     {" "}· {requestTypeLabel(request.requestType)}
                   </div>
                   <div className="simple-list-subtitle">

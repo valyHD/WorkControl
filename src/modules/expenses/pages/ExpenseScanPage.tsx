@@ -35,6 +35,7 @@ import {
   queueOfflineExpenseUpload,
 } from "../services/offlineExpenseQueue";
 import { useFeatureFlags } from "../../../lib/productIntelligence";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 const emptyFilters: ExpenseFilters = {
   yearMonth: new Date().toISOString().slice(0, 7),
@@ -143,6 +144,10 @@ export default function ExpenseScanPage() {
   const [deletingItemId, setDeletingItemId] = useState("");
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const deferredDetailsSearch = useDeferredValue(detailsSearch);
+  const userThemeById = useMemo(
+    () => new Map([...users, ...(currentUser ? [currentUser] : [])].map((userItem) => [userItem.id, userItem.themeKey ?? null])),
+    [currentUser, users]
+  );
   const lastAutoProjectUserRef = useRef("");
   const previousProfileCompanyNameRef = useRef(currentUser?.primaryCompanyName || "");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1022,7 +1027,7 @@ export default function ExpenseScanPage() {
               </thead>
               <tbody>
                 {filteredItems.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={`user-table-row ${getUserThemeClass(userThemeById.get(item.assignedUserId))}`}>
                     <td>{formatDate(item.documentDate)}</td>
                     <td>{item.documentKind}</td>
                     <td>
@@ -1033,7 +1038,7 @@ export default function ExpenseScanPage() {
                     <td>{formatMoney(item.totalAmount, item.currency)}</td>
                     <td>{formatMoney(item.vatAmount, item.currency)}</td>
                     <td>
-                      <UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} />
+                      <UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} themeKey={userThemeById.get(item.assignedUserId)} />
                     </td>
                     <td>{item.projectName || item.projectCode || "-"}</td>
                     <td>{item.companyName || item.buyerCompanyName || "-"}</td>
