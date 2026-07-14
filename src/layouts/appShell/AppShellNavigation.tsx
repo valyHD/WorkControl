@@ -1,6 +1,6 @@
 import { useEffect, useState, type RefObject } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { LogOut, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { BarChart3, LogOut, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { getNavigationSectionsForRole, isNavigationItemActive } from "../../config/navigation";
 import { prefetchNavigationPath } from "../../config/navigationPrefetch";
 import type { PageChangeMap } from "./pageChanges";
@@ -31,6 +31,7 @@ function NavItems({
       <div className="nav-section-label">{section.label}</div>
       {[...section.items]
         .filter((item) => globalAdmin || item.path !== "/control-panel")
+        .filter((item) => !mobile || item.path !== "/control-panel")
         .sort((left, right) => (mobile ? left.mobilePriority - right.mobilePriority : 0))
         .map(({ label, path, icon: Icon, colorClass }) => {
           const changeCount = pageChangeMap[path]?.items.length || 0;
@@ -205,6 +206,22 @@ export function AppShellNavigation({
           />
         </nav>
         <div className="mobile-drawer-footer">
+          {globalAdmin ? (
+            <NavLink
+              to="/control-panel"
+              onClick={onCloseMobile}
+              onMouseEnter={() => prefetchNavigationPath("/control-panel")}
+              onFocus={() => prefetchNavigationPath("/control-panel")}
+              className={({ isActive }) =>
+                isActive ? "nav-item nav-item-active" : "nav-item"
+              }
+            >
+              <span className="nav-item-icon-wrap menu-icon-cyan">
+                <BarChart3 size={17} strokeWidth={2.2} className="nav-item-icon" />
+              </span>
+              <span className="nav-item-label">Control Panel</span>
+            </NavLink>
+          ) : null}
           <button
             type="button"
             className="secondary-btn mobile-logout-btn"

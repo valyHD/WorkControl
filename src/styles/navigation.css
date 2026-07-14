@@ -57,7 +57,7 @@
   -webkit-overflow-scrolling: touch;
 }
 .mobile-drawer-navigation::-webkit-scrollbar { display: none; }
-.mobile-drawer-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); flex: 0 0 auto; }
+.mobile-drawer-footer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); flex: 0 0 auto; display: grid; gap: 8px; }
 .mobile-logout-btn { width: 100%; }
 
 .desktop-sidebar { display: flex; }
