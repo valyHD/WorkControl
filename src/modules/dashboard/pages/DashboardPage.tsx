@@ -216,9 +216,13 @@ export default function DashboardPage() {
     () => timesheets.filter((item) => item.workDate === todayKey),
     [timesheets, todayKey]
   );
-  const activeTimesheetsToday = useMemo(
-    () => todayTimesheets.filter((item) => item.status === "activ"),
-    [todayTimesheets]
+  const activeTimesheetsNow = useMemo(
+    () => timesheets.filter((item) => item.status === "activ"),
+    [timesheets]
+  );
+  const currentTeamTimesheets = useMemo(
+    () => timesheets.filter((item) => item.workDate === todayKey || item.status === "activ"),
+    [timesheets, todayKey]
   );
   const todayMinutes = useMemo(
     () => todayTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0),
@@ -260,7 +264,7 @@ export default function DashboardPage() {
 
   const rows = useMemo<TodayRow[]>(() => {
     const latestByUser = new Map<string, TimesheetItem>();
-    for (const item of todayTimesheets) {
+    for (const item of currentTeamTimesheets) {
       const current = latestByUser.get(item.userId);
       if (!current || (item.startAt || 0) > (current.startAt || 0)) {
         latestByUser.set(item.userId, item);
@@ -272,7 +276,7 @@ export default function DashboardPage() {
       user: userItem,
       timesheet: latestByUser.get(userItem.uid || userItem.id) ?? null,
     }));
-  }, [activeUsers, todayTimesheets]);
+  }, [activeUsers, currentTeamTimesheets]);
 
   const activityItems = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
@@ -418,8 +422,8 @@ export default function DashboardPage() {
 
       <div className="wc-kpi-grid wc-kpi-grid--six">
         <KpiCard
-          label="Pontaje active azi"
-          value={activeTimesheetsToday.length}
+          label="Pontaje active acum"
+          value={activeTimesheetsNow.length}
           helper={`${todayTimesheets.length} pontaje azi`}
           tone="blue"
           icon={Clock3}
