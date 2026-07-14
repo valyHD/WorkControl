@@ -53,6 +53,27 @@ export function resolveUniqueCompany(candidates, defaultCompanyId = "") {
     : { companyId: "", confidence: "unresolved", candidates: [] };
 }
 
+export function migrationDefaultCompanyId({
+  collectionName,
+  defaultResourceCompanyId,
+  allowUserCompanySelection,
+}) {
+  if (collectionName === "users" && allowUserCompanySelection === true) return "";
+  return cleanId(defaultResourceCompanyId);
+}
+
+export function requiresInitialCompanySelection({
+  collectionName,
+  data,
+  result,
+  allowUserCompanySelection,
+}) {
+  return collectionName === "users" &&
+    allowUserCompanySelection === true &&
+    getUserCompanyIds(data).length === 0 &&
+    !cleanId(result?.companyId);
+}
+
 export function inferCompanyId({ collectionName, documentId, path, data, references, defaultCompanyId }) {
   const existing = cleanId(data?.companyId);
   if (existing) return { companyId: existing, confidence: "existing" };
