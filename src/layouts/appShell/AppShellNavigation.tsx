@@ -194,7 +194,7 @@ export function AppShellNavigation({
             <X size={16} />
           </button>
         </div>
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav mobile-drawer-navigation">
           <NavItems
             mobile
             onNavigate={onCloseMobile}
