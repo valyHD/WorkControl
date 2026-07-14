@@ -1,15 +1,18 @@
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import {
   doc,
   getDoc,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { auth, db } from "../../../lib/firebase/firebase";
+import { auth, db, functions } from "../../../lib/firebase/firebase";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import {
   evaluateInternalAccessProfile,
@@ -40,6 +43,56 @@ export type AppAuthUser = {
 };
 
 let stopActivePresenceSession: ((writeOffline?: boolean) => void) | null = null;
+let registrationBarrier: Promise<void> | null = null;
+
+export async function registerWithEmail(params: {
+  fullName: string;
+  email: string;
+  password: string;
+}) {
+  if (registrationBarrier) {
+    throw new Error("O alta inregistrare este deja in curs.");
+  }
+
+  let releaseBarrier: () => void = () => undefined;
+  registrationBarrier = new Promise<void>((resolve) => {
+    releaseBarrier = resolve;
+  });
+
+  let createdUser: Awaited<ReturnType<typeof createUserWithEmailAndPassword>> | null = null;
+  let ownsNewAuthUser = false;
+  try {
+    const email = params.email.trim().toLowerCase();
+    try {
+      createdUser = await createUserWithEmailAndPassword(auth, email, params.password);
+      ownsNewAuthUser = true;
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? String(error.code)
+        : "";
+      if (!code.includes("email-already-in-use")) throw error;
+      createdUser = await signInWithEmailAndPassword(auth, email, params.password);
+    }
+    const registerProfile = httpsCallable<
+      { fullName: string },
+      { userId: string; created: boolean }
+    >(functions, "registerInternalAccount");
+    const response = await registerProfile({ fullName: params.fullName.trim() });
+    if (response.data.userId !== createdUser.user.uid) {
+      throw new Error("Profilul intern nu corespunde contului autentificat.");
+    }
+    return createdUser;
+  } catch (error) {
+    if (ownsNewAuthUser && createdUser?.user) {
+      await deleteUser(createdUser.user).catch(() => undefined);
+    }
+    await signOut(auth).catch(() => undefined);
+    throw error;
+  } finally {
+    releaseBarrier();
+    registrationBarrier = null;
+  }
+}
 
 export async function loginWithEmail(email: string, password: string) {
   const result = await signInWithEmailAndPassword(auth, email, password);
@@ -81,6 +134,9 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       callback(null);
       return;
     }
+
+    const pendingRegistration = registrationBarrier;
+    if (pendingRegistration) await pendingRegistration;
 
     const profileSnap = await getDoc(doc(db, "users", firebaseUser.uid));
     const profile = profileSnap.exists() ? profileSnap.data() : null;

@@ -385,6 +385,64 @@ function notificationPath(input) {
 }
 
 function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger }) {
+  async function registerInternalAccount(request) {
+    const uid = cleanText(request.auth?.uid, 128);
+    const tokenEmail = cleanText(request.auth?.token?.email, 240).toLowerCase();
+    const fullName = cleanText(request.data?.fullName, 160);
+    if (!uid || !tokenEmail) {
+      throw new HttpsError('unauthenticated', 'Contul Firebase autentificat este obligatoriu.');
+    }
+    if (!fullName) {
+      throw new HttpsError('invalid-argument', 'Numele complet este obligatoriu.');
+    }
+
+    const authUser = await authAdmin.getUser(uid).catch((error) => {
+      logger.error('[registerInternalAccount][auth]', { code: cleanText(error?.code, 80) });
+      throw new HttpsError('unauthenticated', 'Contul Firebase nu a putut fi verificat.');
+    });
+    const authEmail = cleanText(authUser?.email, 240).toLowerCase();
+    if (!authEmail || authEmail !== tokenEmail || authUser.disabled === true) {
+      throw new HttpsError('permission-denied', 'Contul Firebase nu este eligibil pentru inregistrare.');
+    }
+
+    const userRef = db.collection('users').doc(uid);
+    const created = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(userRef);
+      if (existing.exists) {
+        const data = existing.data() || {};
+        if (cleanText(data.email, 240).toLowerCase() !== authEmail) {
+          throw new HttpsError('already-exists', 'Exista deja un profil intern diferit pentru acest cont.');
+        }
+        return false;
+      }
+
+      tx.create(userRef, {
+        uid,
+        fullName,
+        email: authEmail,
+        role: 'angajat',
+        active: true,
+        accessStatus: 'active',
+        globalAdmin: false,
+        companyId: '',
+        primaryCompanyId: '',
+        primaryCompanyName: '',
+        companyIds: [],
+        companyNames: [],
+        roleTitle: '',
+        department: '',
+        themeKey: null,
+        selfRegistered: true,
+        createdByUserId: uid,
+        createdAt: Date.now(),
+        createdAtServer: fieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+
+    return { userId: uid, created };
+  }
+
   async function adminCreateUser(request) {
     const actor = await loadActor(db, request.auth?.uid, HttpsError);
     if (actor.role !== 'admin') {
@@ -411,10 +469,30 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     }
 
     let createdUser;
+    let createdAuthUser = false;
     try {
-      createdUser = await authAdmin.createUser({ email, password, displayName: fullName, disabled: false });
+      try {
+        createdUser = await authAdmin.createUser({ email, password, displayName: fullName, disabled: false });
+        createdAuthUser = true;
+      } catch (error) {
+        if (cleanText(error?.code, 80) !== 'auth/email-already-exists') throw error;
+        createdUser = await authAdmin.getUserByEmail(email);
+        const existingProfile = await db.collection('users').doc(createdUser.uid).get();
+        if (existingProfile.exists) {
+          throw new HttpsError('already-exists', 'Exista deja un utilizator intern cu acest email.');
+        }
+        createdUser = await authAdmin.updateUser(createdUser.uid, {
+          password,
+          displayName: fullName,
+          disabled: false,
+        });
+      }
       await db.runTransaction(async (tx) => {
         const userRef = db.collection('users').doc(createdUser.uid);
+        const existingProfile = await tx.get(userRef);
+        if (existingProfile.exists) {
+          throw new HttpsError('already-exists', 'Exista deja un utilizator intern cu acest email.');
+        }
         tx.create(userRef, {
           uid: createdUser.uid,
           fullName,
@@ -445,7 +523,9 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         }));
       });
     } catch (error) {
-      if (createdUser?.uid) await authAdmin.deleteUser(createdUser.uid).catch(() => undefined);
+      if (createdAuthUser && createdUser?.uid) {
+        await authAdmin.deleteUser(createdUser.uid).catch(() => undefined);
+      }
       if (error instanceof HttpsError) throw error;
       logger.error('[adminCreateUser]', { code: cleanText(error?.code, 80) });
       throw new HttpsError('internal', 'Utilizatorul nu a putut fi creat.');
@@ -1461,6 +1541,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
   }
 
   return {
+    registerInternalAccount,
     adminCreateUser,
     setPrimaryCompany,
     listCompanyChoices,

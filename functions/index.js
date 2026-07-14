@@ -67,6 +67,10 @@ let fleetOverviewCache = null;
 let fleetOverviewRequest = null;
 
 exports.adminCreateUser = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.adminCreateUser);
+exports.registerInternalAccount = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.registerInternalAccount
+);
 exports.setPrimaryCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.setPrimaryCompany);
 exports.listCompanyChoices = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.listCompanyChoices);
 exports.claimInitialCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimInitialCompany);
