@@ -7,7 +7,7 @@ const NOTIFICATION_MODULES = new Set([
   'backup', 'general',
 ]);
 const ALLOWED_NOTIFICATION_EVENTS = new Set([
-  'user_site_entered', 'user_updated', 'user_role_changed', 'user_activation_changed',
+  'user_updated', 'user_role_changed', 'user_activation_changed',
   'vehicle_created', 'vehicle_updated', 'vehicle_status_changed', 'vehicle_images_updated',
   'vehicle_documents_updated', 'vehicle_document_deleted', 'vehicle_cover_changed',
   'vehicle_image_deleted', 'vehicle_deleted', 'vehicle_driver_changed', 'vehicle_driver_removed',
@@ -33,7 +33,6 @@ const ALLOWED_NOTIFICATION_EVENTS = new Set([
   'data_retention_cleanup',
 ]);
 const EMPLOYEE_NOTIFICATION_EVENTS = new Set([
-  'user_site_entered',
   'vehicle_updated', 'vehicle_images_updated', 'vehicle_cover_changed',
   'vehicle_image_deleted', 'vehicle_driver_changed', 'vehicle_driver_removed',
   'tool_updated', 'tool_images_updated', 'tool_cover_changed', 'tool_image_deleted',
@@ -74,6 +73,7 @@ const MAX_NOTIFICATION_PAYLOAD_BYTES = 8 * 1024;
 const NOTIFICATION_WINDOW_MS = 60 * 1000;
 const NOTIFICATION_MAX_PER_WINDOW = 20;
 const ALLOWED_VEHICLE_COMMANDS = new Set(['pulse_dout1', 'allow_start', 'block_start']);
+const AUDIT_ONLY_NOTIFICATION_EVENTS = new Set(['user_site_entered']);
 
 function cleanText(value, maxLength = 200) {
   return String(value ?? '').trim().slice(0, maxLength);
@@ -643,6 +643,12 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     const input = request.data || {};
     const moduleName = cleanText(input.module, 60);
     const eventType = cleanText(input.eventType, 100);
+    if (AUDIT_ONLY_NOTIFICATION_EVENTS.has(eventType)) {
+      if (moduleName !== 'users') {
+        throw new HttpsError('invalid-argument', 'Evenimentul nu corespunde modulului selectat.');
+      }
+      return { delivered: 0, duplicate: false, skipped: true };
+    }
     if (!NOTIFICATION_MODULES.has(moduleName) || !ALLOWED_NOTIFICATION_EVENTS.has(eventType)) {
       throw new HttpsError('invalid-argument', 'Tipul notificarii nu este permis.');
     }

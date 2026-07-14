@@ -344,16 +344,48 @@ test("initial company choice is minimal, deduplicated and can be claimed only on
   );
 });
 
-test("notification dispatch has server-side idempotency and rate limiting", async () => {
-  const request = (index) => ({
+test("site entry remains in audit and never creates a notification", async () => {
+  const auditResult = await handlers.recordAuditEvent({
+    auth: { uid: "employee-a" },
+    data: {
+      companyId: "company-a",
+      category: "auth",
+      action: "site_entered",
+    },
+  });
+  const audit = await db.collection("auditLogs").doc(auditResult.auditId).get();
+  assert.equal(audit.get("action"), "site_entered");
+  assert.equal(audit.get("title"), "Intrare pe site");
+
+  const result = await handlers.dispatchNotificationEvent({
     auth: { uid: "employee-a" },
     data: {
       companyId: "company-a",
       module: "users",
       eventType: "user_site_entered",
       entityId: "employee-a",
+      title: "Utilizator pe site",
+      message: "Employee A a intrat pe site.",
+      directUserId: "employee-a",
+    },
+  });
+  const notifications = await db.collection("notifications").get();
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.delivered, 0);
+  assert.equal(notifications.empty, true);
+});
+
+test("notification dispatch has server-side idempotency and rate limiting", async () => {
+  const request = (index) => ({
+    auth: { uid: "employee-a" },
+    data: {
+      companyId: "company-a",
+      module: "vehicles",
+      eventType: "vehicle_updated",
+      entityId: "vehicle-a",
       title: "Activitate",
-      message: "Utilizator activ.",
+      message: "Vehicul actualizat.",
       directUserId: "employee-a",
       idempotencyKey: `notification-${index}`,
     },
@@ -364,7 +396,7 @@ test("notification dispatch has server-side idempotency and rate limiting", asyn
   assert.equal(duplicate.duplicate, true);
   const notification = await db.collection("notifications").limit(1).get();
   assert.equal(notification.docs[0].get("title"), "Actualizare WorkControl");
-  assert.notEqual(notification.docs[0].get("message"), "Utilizator activ.");
+  assert.notEqual(notification.docs[0].get("message"), "Vehicul actualizat.");
 
   for (let index = 1; index < 19; index += 1) {
     await handlers.dispatchNotificationEvent(request(index));
