@@ -407,8 +407,10 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await page.goto("/control-panel");
     await menuButton.click();
     const mobileNavigation = page.locator(".mobile-drawer-navigation");
+    const mobileFooter = page.locator(".mobile-drawer-footer");
     await expect(mobileNavigation).toBeVisible();
-    await expect(mobileNavigation.getByRole("link", { name: "Control Panel" })).toBeVisible();
+    await expect(mobileFooter.getByRole("link", { name: "Control Panel" })).toBeVisible();
+    await expect(mobileNavigation.getByRole("link", { name: "Control Panel" })).toHaveCount(0);
     await expect(mobileNavigation.getByRole("link", { name: "Dashboard", exact: true })).toBeAttached();
     await mobileNavigation.evaluate((element) => {
       element.scrollTop = 0;

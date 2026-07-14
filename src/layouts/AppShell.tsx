@@ -180,13 +180,14 @@ export default function AppShell() {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const getFocusable = () => Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector));
-    const activeItem = drawer.querySelector<HTMLElement>(".nav-item-active");
     const navigation = drawer.querySelector<HTMLElement>(".mobile-drawer-navigation");
+    const activeItem = drawer.querySelector<HTMLElement>(".nav-item-active");
+    const activeNavigationItem = navigation?.querySelector<HTMLElement>(".nav-item-active");
     const initialFocusTarget = activeItem || getFocusable()[0];
     initialFocusTarget?.focus({ preventScroll: true });
-    if (activeItem && navigation) {
+    if (activeNavigationItem && navigation) {
       const navigationRect = navigation.getBoundingClientRect();
-      const itemRect = activeItem.getBoundingClientRect();
+      const itemRect = activeNavigationItem.getBoundingClientRect();
       const centeredOffset = (navigationRect.height - itemRect.height) / 2;
       navigation.scrollTop = Math.max(
         0,
