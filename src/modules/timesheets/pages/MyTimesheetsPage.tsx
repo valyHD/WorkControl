@@ -29,7 +29,7 @@ import type { NotificationRuleItem } from "../../../types/notification-rule";
 import type { LeaveRequestItem } from "../../../types/leave";
 import { getLeaveRequestsForUser } from "../../leave/services/leaveRequestsService";
 import KpiCard from "../../../components/KpiCard";
-import { LoadingState, PageHeader, PageLayout } from "../../../components/experience";
+import { ErrorState, LoadingState, PageHeader, PageLayout } from "../../../components/experience";
 import TimesheetStatusCard from "../../../components/TimesheetStatusCard";
 import TimesheetChartCard from "../../../components/TimesheetChartCard";
 import StatusBadge from "../../../components/StatusBadge";
@@ -236,6 +236,7 @@ export default function MyTimesheetsPage() {
   const [attentionClock, setAttentionClock] = useState(() => Date.now());
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [projectSubmitting, setProjectSubmitting] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [preferredProjectId, setPreferredProjectId] = useState("");
@@ -250,6 +251,7 @@ export default function MyTimesheetsPage() {
       if (!silent) {
         setLoading(true);
       }
+      setLoadError("");
       try {
         const [projectsData, timesheetsData, activeData, savedProjectId, leaveData] =
           await Promise.all([
@@ -270,6 +272,13 @@ export default function MyTimesheetsPage() {
         setActiveTimesheet(activeData);
         setLeaveRequests(leaveData);
         setPreferredProjectId(nextPreferredProjectId);
+      } catch (error) {
+        console.error("[MyTimesheetsPage][load]", error);
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "Nu am putut incarca pontajele."
+        );
       } finally {
         setLoading(false);
       }
@@ -548,6 +557,18 @@ export default function MyTimesheetsPage() {
     return (
       <PageLayout className="my-timesheets-modern-page">
         <LoadingState title="Se incarca pontajul tau" description="Verificam statusul curent si ultimele inregistrari." />
+      </PageLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <PageLayout className="my-timesheets-modern-page">
+        <ErrorState
+          title="Pontajele nu au putut fi incarcate"
+          description={loadError}
+          retry={() => void load()}
+        />
       </PageLayout>
     );
   }

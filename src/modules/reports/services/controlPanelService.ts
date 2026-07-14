@@ -15,6 +15,7 @@ import {
 import { db } from "../../../lib/firebase/firebase";
 import { recordFirestoreQuery } from "../../../lib/firebase/firestoreQueryTelemetry";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
+import { assertHistoryCleanupSelection } from "./historyCleanupPolicy";
 
 export type ControlPanelSettings = {
   retentionMonths: number;
@@ -560,6 +561,7 @@ export async function cleanupHistory(params: {
   cleanVehicleEvents: boolean;
   cleanTimesheets: boolean;
 }): Promise<{ deletedCount: number; cutoffTs: number }> {
+  assertHistoryCleanupSelection(params);
   const cutoffDate = new Date();
   cutoffDate.setMonth(cutoffDate.getMonth() - Math.max(1, params.retentionMonths));
   const cutoffTs = cutoffDate.getTime();
@@ -582,19 +584,6 @@ export async function cleanupHistory(params: {
   if (params.cleanNotifications) await purge("notifications", "createdAt");
   if (params.cleanToolEvents) await purge("toolEvents", "createdAt");
   if (params.cleanVehicleEvents) await purge("vehicleEvents", "createdAt");
-
-  if (params.cleanTimesheets) {
-    const timesheetsSnap =
-      params.cleanupMode === "delete_all_selected"
-        ? await getDocs(query(collection(db, "timesheets"), orderBy("startAt", "desc"), limit(2000)))
-        : await getDocs(
-            query(collection(db, "timesheets"), where("startAt", "<", cutoffTs), orderBy("startAt", "asc"), limit(2000))
-          );
-    timesheetsSnap.docs.forEach((item) => {
-      deletedCount += 1;
-      deleteTargets.push({ collectionName: "timesheets", id: item.id });
-    });
-  }
 
   const DELETE_CHUNK_SIZE = 25;
   for (let index = 0; index < deleteTargets.length; index += DELETE_CHUNK_SIZE) {

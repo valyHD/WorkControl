@@ -91,7 +91,6 @@ export default function ControlPanelPage() {
   const [cleanupNotifications, setCleanupNotifications] = useState(true);
   const [cleanupToolEvents, setCleanupToolEvents] = useState(true);
   const [cleanupVehicleEvents, setCleanupVehicleEvents] = useState(true);
-  const [cleanupTimesheets, setCleanupTimesheets] = useState(false);
   const [cleanupMode, setCleanupMode] = useState<"retention_only" | "delete_all_selected">("retention_only");
   const [numericSettingDrafts, setNumericSettingDrafts] = useState<Partial<Record<NumericSettingKey, string>>>({});
 
@@ -312,7 +311,7 @@ export default function ControlPanelPage() {
         cleanNotifications: cleanupNotifications,
         cleanToolEvents: cleanupToolEvents,
         cleanVehicleEvents: cleanupVehicleEvents,
-        cleanTimesheets: cleanupTimesheets,
+        cleanTimesheets: false,
       });
 
       setCleanupMessage(
@@ -687,8 +686,10 @@ export default function ControlPanelPage() {
           <label className="checkbox-line"><input type="checkbox" checked={cleanupNotifications} onChange={(e) => setCleanupNotifications(e.target.checked)} />Notificări</label>
           <label className="checkbox-line"><input type="checkbox" checked={cleanupToolEvents} onChange={(e) => setCleanupToolEvents(e.target.checked)} />Istoric scule</label>
           <label className="checkbox-line"><input type="checkbox" checked={cleanupVehicleEvents} onChange={(e) => setCleanupVehicleEvents(e.target.checked)} />Istoric mașini</label>
-          <label className="checkbox-line"><input type="checkbox" checked={cleanupTimesheets} onChange={(e) => setCleanupTimesheets(e.target.checked)} />Pontaje vechi</label>
         </div>
+        <p className="tools-subtitle" style={{ marginTop: 8 }}>
+          Pontajele sunt protejate si nu sunt incluse in curatarea istoricului.
+        </p>
         <div className="checkbox-grid" style={{ marginTop: 8 }}>
           <label className="checkbox-line">
             <input
