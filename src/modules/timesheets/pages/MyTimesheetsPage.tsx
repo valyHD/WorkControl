@@ -40,10 +40,11 @@ import {
   getEffectiveWorkedMinutes,
   getLocalDateKey,
   getMissingWorkdaysForUser,
+  getTimesheetMinutesForDay,
   getTimesheetPeriodRange,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
-  sumTimesheetMinutes,
+  sumTimesheetMinutesForDay,
 } from "../utils/timesheetAnalytics";
 import { CalendarDays, Clock3, TimerReset, TrendingUp, AlertTriangle } from "lucide-react";
 import {
@@ -55,8 +56,8 @@ import {
   type OfflineTimesheetAction,
 } from "../services/offlineTimesheetQueue";
 import { useFeatureFlags } from "../../../lib/productIntelligence";
+import { subscribeTimesheetsChanged } from "../services/timesheetLiveUpdates";
 
-const TIMESHEETS_CHANGED_EVENT = "workcontrol:timesheets-changed";
 const DEFAULT_START_ATTENTION_FROM_MINUTES = 7 * 60;
 const DEFAULT_START_ATTENTION_TO_MINUTES = 9 * 60;
 const DEFAULT_STOP_ATTENTION_FROM_MINUTES = 16 * 60;
@@ -237,6 +238,7 @@ export default function MyTimesheetsPage() {
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [loadWarning, setLoadWarning] = useState("");
   const [projectSubmitting, setProjectSubmitting] = useState(false);
   const [projectError, setProjectError] = useState("");
   const [preferredProjectId, setPreferredProjectId] = useState("");
@@ -244,24 +246,37 @@ export default function MyTimesheetsPage() {
   const [offlineStatus, setOfflineStatus] = useState("");
   const [historyLimit, setHistoryLimit] = useState(20);
   const offlineSyncInProgress = useRef(false);
+  const loadInProgress = useRef(false);
 
   const load = useCallback(
     async (silent = false) => {
       if (!user?.uid) return;
+      if (loadInProgress.current) return;
+      loadInProgress.current = true;
 
       if (!silent) {
         setLoading(true);
       }
       setLoadError("");
+      setLoadWarning("");
       try {
-        const [projectsData, timesheetsData, activeData, savedProjectId, leaveData] =
-          await Promise.all([
+        const [projectsResult, timesheetsResult, activeResult, savedProjectResult, leaveResult] =
+          await Promise.allSettled([
             getActiveProjectsList(),
             getTimesheetsForUser(user.uid),
             getActiveTimesheetForUser(user.uid),
             getUserTimesheetProjectPreference(user.uid),
             getLeaveRequestsForUser(user.uid, 20),
           ]);
+        if (timesheetsResult.status === "rejected") throw timesheetsResult.reason;
+
+        const projectsData = projectsResult.status === "fulfilled" ? projectsResult.value : [];
+        const timesheetsData =
+          timesheetsResult.status === "fulfilled" ? timesheetsResult.value : [];
+        const activeData = activeResult.status === "fulfilled" ? activeResult.value : null;
+        const savedProjectId =
+          savedProjectResult.status === "fulfilled" ? savedProjectResult.value : "";
+        const leaveData = leaveResult.status === "fulfilled" ? leaveResult.value : [];
         const fallbackProjectId = readSavedProjectId(user.uid);
         const nextPreferredProjectId =
           [fallbackProjectId, savedProjectId].find((projectId) =>
@@ -273,6 +288,15 @@ export default function MyTimesheetsPage() {
         setActiveTimesheet(activeData);
         setLeaveRequests(leaveData);
         setPreferredProjectId(nextPreferredProjectId);
+
+        const optionalFailures = [projectsResult, activeResult, savedProjectResult, leaveResult].filter(
+          (result) => result.status === "rejected"
+        ).length;
+        if (optionalFailures) {
+          setLoadWarning(
+            "Pontajele disponibile au fost incarcate, dar unele date auxiliare nu au raspuns. Reincearca actualizarea."
+          );
+        }
       } catch (error) {
         console.error("[MyTimesheetsPage][load]", error);
         setLoadError(
@@ -281,6 +305,7 @@ export default function MyTimesheetsPage() {
             : "Nu am putut incarca pontajele."
         );
       } finally {
+        loadInProgress.current = false;
         setLoading(false);
       }
     },
@@ -296,6 +321,8 @@ export default function MyTimesheetsPage() {
       setActiveTimesheet((current) => current && !current.id.startsWith("offline:")
         ? current
         : buildOfflineActiveTimesheet(queuedStart));
+    } else {
+      setActiveTimesheet((current) => current?.id.startsWith("offline:") ? null : current);
     }
   }, [user?.uid]);
 
@@ -354,14 +381,10 @@ export default function MyTimesheetsPage() {
     const currentUserId = user?.uid;
     if (!currentUserId) return;
 
-    function handleTimesheetsChanged(event: Event) {
-      const detail = (event as CustomEvent<{ userId?: string }>).detail;
+    return subscribeTimesheetsChanged((detail) => {
       if (detail?.userId && detail.userId !== currentUserId) return;
       void load(true);
-    }
-
-    window.addEventListener(TIMESHEETS_CHANGED_EVENT, handleTimesheetsChanged);
-    return () => window.removeEventListener(TIMESHEETS_CHANGED_EVENT, handleTimesheetsChanged);
+    });
   }, [load, user?.uid]);
 
   function handlePreferredProjectChange(projectId: string) {
@@ -482,27 +505,25 @@ export default function MyTimesheetsPage() {
   }, [timesheets]);
   const todayKey = getLocalDateKey(attentionClock);
   const todayTimesheets = useMemo(
-    () => timesheets.filter((item) => item.workDate === todayKey),
-    [timesheets, todayKey]
+    () => timesheets.filter(
+      (item) => item.workDate === todayKey ||
+        getTimesheetMinutesForDay(item, todayKey, attentionClock) > 0
+    ),
+    [attentionClock, timesheets, todayKey]
   );
   const liveTodayTimesheets = useMemo(() => {
-    const activeWorkDate = activeTimesheet
-      ? activeTimesheet.workDate || getLocalDateKey(activeTimesheet.startAt)
-      : "";
-
     if (
       !activeTimesheet ||
-      activeWorkDate !== todayKey ||
       todayTimesheets.some((item) => item.id === activeTimesheet.id)
     ) {
       return todayTimesheets;
     }
 
     return [activeTimesheet, ...todayTimesheets];
-  }, [activeTimesheet, todayKey, todayTimesheets]);
+  }, [activeTimesheet, todayTimesheets]);
   const todayLiveMinutes = useMemo(
-    () => sumTimesheetMinutes(liveTodayTimesheets, attentionClock),
-    [attentionClock, liveTodayTimesheets]
+    () => sumTimesheetMinutesForDay(liveTodayTimesheets, todayKey, attentionClock),
+    [attentionClock, liveTodayTimesheets, todayKey]
   );
   const todayClosedTimesheet = useMemo(
     () => todayTimesheets.find((item) => item.status !== "activ" && item.stopAt),
@@ -613,6 +634,11 @@ export default function MyTimesheetsPage() {
           },
         ]}
       />
+      {loadWarning ? (
+        <div className="tool-message warning-message" role="status">
+          {loadWarning}
+        </div>
+      ) : null}
       {offlineQueueCount || offlineStatus ? (
         <div className="wc-offline-queue-status" role="status">
           <strong>{offlineQueueCount ? `${offlineQueueCount} actiuni de pontaj in asteptare` : "Pontaj sincronizat"}</strong>

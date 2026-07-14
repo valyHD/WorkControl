@@ -1,5 +1,9 @@
 import type { TimesheetLocation } from "../../../types/timesheet";
-import { getActiveTimesheetForUser, startTimesheet, stopTimesheet } from "./timesheetsService";
+import {
+  getActiveTimesheetForUser,
+  startTimesheetDetailed,
+  stopTimesheet,
+} from "./timesheetsService";
 
 const STORAGE_KEY = "wc_offline_timesheet_queue_v1";
 const MAX_QUEUE_ITEMS = 20;
@@ -103,15 +107,38 @@ export function flushOfflineTimesheetQueue(userId: string) {
   if (flushPromise) return flushPromise;
   flushPromise = (async () => {
     let processed = 0;
+    const resolvedTimesheetIds = new Map<string, string>();
     for (const action of getOfflineTimesheetQueue(userId)) {
       if (action.type === "start") {
-        const active = await getActiveTimesheetForUser(action.payload.userId);
-        if (!active) await startTimesheet({ ...action.payload, occurredAt: action.occurredAt });
+        const result = await startTimesheetDetailed({
+          ...action.payload,
+          occurredAt: action.occurredAt,
+        });
+        if (result.duplicate) {
+          const active = await getActiveTimesheetForUser(action.payload.userId);
+          const representsQueuedStart = active?.id === result.timesheetId &&
+            Math.abs(Number(active.startAt || 0) - action.occurredAt) <= 5 * 60_000;
+          if (!representsQueuedStart) {
+            throw new Error(
+              "Exista deja un pontaj activ diferit. Sincronizarea offline a fost oprita pentru a nu modifica pontajul curent."
+            );
+          }
+        }
+        resolvedTimesheetIds.set(action.id, result.timesheetId);
+        resolvedTimesheetIds.set(`offline:${action.id}`, result.timesheetId);
       } else {
-        const active = await getActiveTimesheetForUser(action.payload.userId);
-        if (active) {
+        const queuedTimesheetId = action.payload.timesheetId || "";
+        const resolvedTimesheetId = resolvedTimesheetIds.get(queuedTimesheetId);
+        const active = resolvedTimesheetId || queuedTimesheetId.startsWith("offline:")
+          ? null
+          : await getActiveTimesheetForUser(action.payload.userId);
+        const timesheetId = resolvedTimesheetId ||
+          (!queuedTimesheetId.startsWith("offline:") ? queuedTimesheetId : "") ||
+          active?.id ||
+          "";
+        if (timesheetId) {
           await stopTimesheet({
-            timesheetId: active.id,
+            timesheetId,
             explanation: action.payload.explanation,
             stopLocation: action.payload.stopLocation,
             stopPolicyFlag: action.payload.stopPolicyFlag,

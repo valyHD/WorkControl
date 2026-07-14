@@ -122,6 +122,59 @@ export function sumTimesheetMinutes(items: TimesheetItem[], nowTs = Date.now()) 
   return items.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item, nowTs), 0);
 }
 
+function getDayBounds(dayKey: string): { from: number; to: number } | null {
+  const from = new Date(`${dayKey}T00:00:00`);
+  if (!Number.isFinite(from.getTime()) || getLocalDateKey(from.getTime()) !== dayKey) return null;
+  return { from: from.getTime(), to: endOfDay(from).getTime() };
+}
+
+export function getTimesheetMinutesForDay(
+  item: TimesheetItem,
+  dayKey = getLocalDateKey(),
+  nowTs = Date.now()
+) {
+  if (item.status !== "activ") {
+    if (item.workDate === dayKey) return Math.max(0, Number(item.workedMinutes || 0));
+    const bounds = getDayBounds(dayKey);
+    if (!bounds || !item.startAt || !item.stopAt) return 0;
+    const intervalStart = Math.max(item.startAt, bounds.from);
+    const intervalEnd = Math.min(item.stopAt, bounds.to);
+    return intervalEnd > intervalStart
+      ? Math.max(0, Math.floor((intervalEnd - intervalStart) / 60_000))
+      : 0;
+  }
+
+  const bounds = getDayBounds(dayKey);
+  if (!bounds || !item.startAt) return 0;
+  const intervalStart = Math.max(item.startAt, bounds.from);
+  const intervalEnd = Math.min(nowTs, bounds.to);
+  if (intervalEnd <= intervalStart) return 0;
+
+  const liveMinutes = Math.floor((intervalEnd - intervalStart) / 60_000);
+  return item.workDate === dayKey
+    ? Math.max(Math.max(0, Number(item.workedMinutes || 0)), liveMinutes)
+    : liveMinutes;
+}
+
+export function sumTimesheetMinutesForDay(
+  items: TimesheetItem[],
+  dayKey = getLocalDateKey(),
+  nowTs = Date.now()
+) {
+  return items.reduce(
+    (sum, item) => sum + getTimesheetMinutesForDay(item, dayKey, nowTs),
+    0
+  );
+}
+
+export function getActiveTimesheetsNow(items: TimesheetItem[]) {
+  return items.filter((item) => item.status === "activ");
+}
+
+export function getActiveUsersNow(items: TimesheetItem[]) {
+  return new Set(getActiveTimesheetsNow(items).map((item) => item.userId).filter(Boolean));
+}
+
 export function getTimesheetStatusLabel(status: TimesheetItem["status"] | "nepontat" | "pauza") {
   const labels: Record<string, string> = {
     activ: "Activ",

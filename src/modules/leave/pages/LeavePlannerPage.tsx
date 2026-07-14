@@ -400,7 +400,10 @@ export default function LeavePlannerPage() {
       setUsers(mapped);
       setExpandedUserId((current) => current || mapped[0]?.uid || "");
       });
-    }).catch((error) => console.error("[LeavePlannerPage][users]", error));
+    }).catch((error) => {
+      console.error("[LeavePlannerPage][users]", error);
+      setError("Lista utilizatorilor nu a putut fi incarcata.");
+    });
     return () => {
       cancelled = true;
       unsubscribe();
@@ -432,6 +435,11 @@ export default function LeavePlannerPage() {
         (snap) => {
         const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, timesheets: mapped, timesheetsLoaded: true }));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][timesheets]", snapshotError);
+          setCalendarData((prev) => ({ ...prev, timesheetsLoaded: true }));
+          setError("Pontajele din calendar nu au putut fi incarcate.");
         }
       );
 
@@ -446,6 +454,11 @@ export default function LeavePlannerPage() {
         (snap) => {
         const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, leaveRequests: mapped, leaveLoaded: true }));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][leave calendar]", snapshotError);
+          setCalendarData((prev) => ({ ...prev, leaveLoaded: true }));
+          setError("Concediile din calendar nu au putut fi incarcate.");
         }
       );
     }).catch((error) => console.error("[LeavePlannerPage][calendar]", error));
@@ -471,10 +484,20 @@ export default function LeavePlannerPage() {
         orderBy("createdAt", "desc"),
         limit(managementScope ? 100 : 30)
       );
-      unsubscribe = onSnapshot(requestsQuery, (snap) => {
-        setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
-      });
-    }).catch((error) => console.error("[LeavePlannerPage][requests]", error));
+      unsubscribe = onSnapshot(
+        requestsQuery,
+        (snap) => {
+          setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][requests]", snapshotError);
+          setError("Cererile de concediu nu au putut fi incarcate.");
+        }
+      );
+    }).catch((error) => {
+      console.error("[LeavePlannerPage][requests]", error);
+      setError("Cererile de concediu nu au putut fi incarcate.");
+    });
     return () => {
       cancelled = true;
       unsubscribe();

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceMocks = vi.hoisted(() => ({
   getActiveTimesheetForUser: vi.fn(),
-  startTimesheet: vi.fn(),
+  startTimesheetDetailed: vi.fn(),
   stopTimesheet: vi.fn(),
 }));
 
@@ -28,7 +28,10 @@ describe("offline timesheet queue", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
-    serviceMocks.startTimesheet.mockResolvedValue("timesheet-1");
+    serviceMocks.startTimesheetDetailed.mockResolvedValue({
+      timesheetId: "timesheet-1",
+      duplicate: false,
+    });
     serviceMocks.stopTimesheet.mockResolvedValue(undefined);
   });
 
@@ -43,19 +46,43 @@ describe("offline timesheet queue", () => {
   });
 
   it("flushes sequentially and removes processed actions", async () => {
-    queueOfflineTimesheetStart(startPayload);
+    const startAction = queueOfflineTimesheetStart(startPayload);
     queueOfflineTimesheetStop({
       userId: "user-1",
+      timesheetId: `offline:${startAction.id}`,
       explanation: "Final",
       stopLocation: { lat: null, lng: null, label: "Offline" },
     });
-    serviceMocks.getActiveTimesheetForUser
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "timesheet-1" });
+    serviceMocks.getActiveTimesheetForUser.mockResolvedValue({ id: "unrelated-active" });
 
     await expect(flushOfflineTimesheetQueue("user-1")).resolves.toBe(2);
-    expect(serviceMocks.startTimesheet).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.startTimesheetDetailed).toHaveBeenCalledTimes(1);
     expect(serviceMocks.stopTimesheet).toHaveBeenCalledWith(expect.objectContaining({ timesheetId: "timesheet-1" }));
+    expect(serviceMocks.getActiveTimesheetForUser).not.toHaveBeenCalled();
     expect(getOfflineTimesheetQueue("user-1")).toEqual([]);
+  });
+
+  it("does not stop an unrelated active timesheet for a stale offline start", async () => {
+    const startAction = queueOfflineTimesheetStart(startPayload);
+    queueOfflineTimesheetStop({
+      userId: "user-1",
+      timesheetId: `offline:${startAction.id}`,
+      explanation: "",
+      stopLocation: { lat: null, lng: null, label: "Offline" },
+    });
+    serviceMocks.startTimesheetDetailed.mockResolvedValue({
+      timesheetId: "unrelated-active",
+      duplicate: true,
+    });
+    serviceMocks.getActiveTimesheetForUser.mockResolvedValue({
+      id: "unrelated-active",
+      startAt: startAction.occurredAt + 60 * 60_000,
+    });
+
+    await expect(flushOfflineTimesheetQueue("user-1")).rejects.toThrow(
+      "pontaj activ diferit"
+    );
+    expect(serviceMocks.stopTimesheet).not.toHaveBeenCalled();
+    expect(getOfflineTimesheetQueue("user-1")).toHaveLength(2);
   });
 });

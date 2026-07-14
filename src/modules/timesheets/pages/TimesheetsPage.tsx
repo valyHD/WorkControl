@@ -26,7 +26,7 @@ import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
-import { DetailsDrawer, LoadingState, PageHeader, PageLayout, PermissionState } from "../../../components/experience";
+import { DetailsDrawer, ErrorState, LoadingState, PageHeader, PageLayout, PermissionState } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
@@ -40,9 +40,12 @@ import {
   buildUserMinuteBuckets,
   buildUserTimesheetIndex,
   getEffectiveWorkedMinutes,
+  getActiveTimesheetsNow,
+  getActiveUsersNow,
   getLocalDateKey,
   getLocalMonthKey,
   getProjectLabel,
+  getTimesheetMinutesForDay,
   getTimesheetPeriodRange,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
@@ -51,10 +54,12 @@ import {
   isIncompleteTimesheet,
   isTimesheetInRange,
   sumTimesheetMinutes,
+  sumTimesheetMinutesForDay,
   type TimesheetPeriodKey,
 } from "../utils/timesheetAnalytics";
 import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import { subscribeTimesheetsChanged } from "../services/timesheetLiveUpdates";
 
 type SortKey = "date" | "employee" | "department" | "project" | "duration" | "status";
 type TimesheetManagerView =
@@ -144,6 +149,8 @@ export default function TimesheetsPage() {
   const [timesheets, setTimesheets] = useState<TimesheetItem[]>([]);
   const [users, setUsers] = useState<AppUserItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [liveClock, setLiveClock] = useState(() => Date.now());
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState<TimesheetPeriodKey>("today");
   const [customFrom, setCustomFrom] = useState(getLocalDateKey());
@@ -183,6 +190,7 @@ export default function TimesheetsPage() {
 
     async function load() {
       setLoading(true);
+      setLoadError("");
       try {
         const [timesheetsData, usersData] = await Promise.all([
           getTimesheetsManagementList(),
@@ -191,16 +199,31 @@ export default function TimesheetsPage() {
         if (cancelled) return;
         setTimesheets(timesheetsData);
         setUsers(usersData);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error ? error.message : "Nu am putut incarca pontajele."
+          );
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     void load();
+    const unsubscribe = subscribeTimesheetsChanged(() => void load());
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!timesheets.some((item) => item.status === "activ")) return undefined;
+    setLiveClock(Date.now());
+    const timer = window.setInterval(() => setLiveClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [timesheets]);
 
   useEffect(() => {
     const assistantSearch = assistantParams.get("assistantSearch") || "";
@@ -305,7 +328,7 @@ export default function TimesheetsPage() {
       const department = userItem?.department || "";
       const projectKey = item.projectId || item.projectName || item.projectCode || "__no_project__";
 
-      if (!isTimesheetInRange(item, periodRange)) return false;
+      if (!activeOnly && !isTimesheetInRange(item, periodRange)) return false;
       if (userFilter && item.userId !== userFilter) return false;
       if (projectFilter && projectKey !== projectFilter) return false;
       if (statusFilter && item.status !== statusFilter) return false;
@@ -380,16 +403,26 @@ export default function TimesheetsPage() {
   const todayKey = getLocalDateKey();
   const monthKey = getLocalMonthKey();
   const todayItems = useMemo(
-    () => timesheets.filter((item) => item.workDate === todayKey),
-    [timesheets, todayKey]
+    () => timesheets.filter(
+      (item) => item.workDate === todayKey ||
+        getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
+    ),
+    [liveClock, timesheets, todayKey]
   );
   const monthItems = useMemo(
     () => timesheets.filter((item) => item.yearMonth === monthKey),
     [monthKey, timesheets]
   );
-  const activeToday = useMemo(
-    () => todayItems.filter((item) => item.status === "activ"),
-    [todayItems]
+  const activeNow = useMemo(() => getActiveTimesheetsNow(timesheets), [timesheets]);
+  const activeUsersNow = useMemo(() => getActiveUsersNow(timesheets), [timesheets]);
+  const todayOperationalItems = useMemo(() => {
+    const byId = new Map(todayItems.map((item) => [item.id, item]));
+    activeNow.forEach((item) => byId.set(item.id, item));
+    return [...byId.values()];
+  }, [activeNow, todayItems]);
+  const todayMinutes = useMemo(
+    () => sumTimesheetMinutesForDay(todayOperationalItems, todayKey, liveClock),
+    [liveClock, todayKey, todayOperationalItems]
   );
   const incompleteItems = useMemo(
     () => filteredTimesheets.filter(isIncompleteTimesheet),
@@ -613,6 +646,18 @@ export default function TimesheetsPage() {
     );
   }
 
+  if (loadError) {
+    return (
+      <PageLayout className="timesheets-management-page">
+        <ErrorState
+          title="Pontajele nu au putut fi incarcate"
+          description={loadError}
+          retry={() => window.location.reload()}
+        />
+      </PageLayout>
+    );
+  }
+
   return (
     <PageLayout className="timesheets-management-page">
       <PageHeader
@@ -657,7 +702,7 @@ export default function TimesheetsPage() {
         onChange={handleViewChange}
         tabs={[
           { id: "overview", label: "Overview", icon: LayoutDashboard },
-          { id: "active", label: "Active acum", icon: CircleDot, badge: activeToday.length },
+          { id: "active", label: "Active acum", icon: CircleDot, badge: activeNow.length },
           { id: "all", label: "Toate pontajele", icon: CalendarDays },
           { id: "employees", label: "Angajati", icon: Users, badge: users.length },
           { id: "projects", label: "Proiecte", icon: BriefcaseBusiness, to: "/projects" },
@@ -670,8 +715,8 @@ export default function TimesheetsPage() {
       <div className="wc-kpi-grid wc-kpi-grid--five" hidden={activeView !== "overview"}>
         <KpiCard
           label="Total ore azi"
-          value={formatMinutes(sumTimesheetMinutes(todayItems))}
-          helper={`${todayItems.length} pontaje`}
+          value={formatMinutes(todayMinutes)}
+          helper={`${todayOperationalItems.length} pontaje`}
           tone="green"
           icon={TimerReset}
         />
@@ -684,8 +729,8 @@ export default function TimesheetsPage() {
         />
         <KpiCard
           label="Angajati activi azi"
-          value={new Set(activeToday.map((item) => item.userId)).size}
-          helper={`${activeToday.length} pontaje active`}
+          value={activeUsersNow.size}
+          helper={`${activeNow.length} pontaje active`}
           tone="blue"
           icon={Users}
         />

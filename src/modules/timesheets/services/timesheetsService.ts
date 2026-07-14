@@ -35,6 +35,7 @@ import {
   type AuditFieldDescriptor,
 } from "../../audit/utils/auditMetadata";
 import { simplifyTimesheetAddressLabel } from "../utils/timesheetLocation";
+import { notifyTimesheetsChanged } from "./timesheetLiveUpdates";
 
 const projectsCollection = collection(db, "projects");
 const timesheetsCollection = collection(db, "timesheets");
@@ -302,7 +303,7 @@ export async function getActiveTimesheetForUser(userId: string): Promise<Timeshe
   return mapTimesheetDoc(snap.docs[0].id, snap.docs[0].data());
 }
 
-export async function startTimesheet(params: {
+export type StartTimesheetParams = {
   userId: string;
   userName: string;
   userThemeKey?: string | null;
@@ -314,7 +315,16 @@ export async function startTimesheet(params: {
   startPolicyFlag?: string;
   startExpectedTime?: string;
   occurredAt?: number;
-}): Promise<string> {
+};
+
+export type StartTimesheetResult = {
+  timesheetId: string;
+  duplicate: boolean;
+};
+
+export async function startTimesheetDetailed(
+  params: StartTimesheetParams
+): Promise<StartTimesheetResult> {
   const context = await getCurrentCompanyAccessContext();
   if (context.uid !== params.userId) {
     throw new Error("Poti porni numai pontajul propriu.");
@@ -371,7 +381,17 @@ export async function startTimesheet(params: {
     idempotencyKey: `timesheet-started-${timesheetId}`,
   });
 
-  return timesheetId;
+  notifyTimesheetsChanged({ userId: params.userId, reason: "start" });
+
+  return {
+    timesheetId,
+    duplicate: response.data.duplicate === true,
+  };
+}
+
+export async function startTimesheet(params: StartTimesheetParams): Promise<string> {
+  const result = await startTimesheetDetailed(params);
+  return result.timesheetId;
 }
 
 export async function stopTimesheet(params: {
@@ -439,6 +459,8 @@ export async function stopTimesheet(params: {
     companyId: String(data.companyId ?? ""),
     idempotencyKey: `timesheet-stopped-${params.timesheetId}`,
   });
+
+  notifyTimesheetsChanged({ userId: String(data.userId ?? ""), reason: "stop" });
 }
 
 export async function getTimesheetsList(): Promise<TimesheetItem[]> {
