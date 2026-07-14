@@ -181,9 +181,18 @@ export default function AppShell() {
     const focusableSelector = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const getFocusable = () => Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector));
     const activeItem = drawer.querySelector<HTMLElement>(".nav-item-active");
+    const navigation = drawer.querySelector<HTMLElement>(".mobile-drawer-navigation");
     const initialFocusTarget = activeItem || getFocusable()[0];
     initialFocusTarget?.focus({ preventScroll: true });
-    activeItem?.scrollIntoView({ block: "center", inline: "nearest" });
+    if (activeItem && navigation) {
+      const navigationRect = navigation.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      const centeredOffset = (navigationRect.height - itemRect.height) / 2;
+      navigation.scrollTop = Math.max(
+        0,
+        navigation.scrollTop + itemRect.top - navigationRect.top - centeredOffset
+      );
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();

@@ -404,6 +404,18 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await page.keyboard.press("Escape");
     await expect(menuButton).toBeFocused();
 
+    await page.goto("/control-panel");
+    await menuButton.click();
+    const mobileNavigation = page.locator(".mobile-drawer-navigation");
+    await expect(mobileNavigation).toBeVisible();
+    await expect(mobileNavigation.getByRole("link", { name: "Control Panel" })).toBeVisible();
+    await expect(mobileNavigation.getByRole("link", { name: "Dashboard", exact: true })).toBeAttached();
+    await mobileNavigation.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect(mobileNavigation.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
     await page.goto("/vehicles/vehicle-e2e?tab=gps");
     await page.locator("#vehicle-tracker-live-section summary").click();
     const routeCard = page.locator(".vehicle-live-route-card");
