@@ -63,7 +63,7 @@ describe("dashboardService cost bounds", () => {
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "vehicles")).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "projects")).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "timesheets")).toHaveLength(
-      2
+      4
     );
     expect(
       firestoreMocks.query.mock.calls.filter(([base]) => base === "notifications")
@@ -89,5 +89,51 @@ describe("dashboardService cost bounds", () => {
       return item?.kind === "where" && item.field === "userId" && item.value === "employee-1";
     })).toBe(true);
     expect(timesheetQuery?.at(-1)).toMatchObject({ kind: "limit", value: 20 });
+  });
+
+  it("keeps an active timesheet visible after it crosses midnight", async () => {
+    firestoreMocks.getDocs.mockImplementation(async (request: {
+      base?: string;
+      constraints?: Array<{ kind?: string; field?: string; value?: unknown }>;
+    }) => {
+      if (request?.base !== "timesheets") return { docs: [], size: 0 };
+
+      const isActiveQuery = request.constraints?.some(
+        (constraint) =>
+          constraint.kind === "where" &&
+          constraint.field === "status" &&
+          constraint.value === "activ"
+      );
+      const docItem = isActiveQuery
+        ? {
+            id: "active-from-yesterday",
+            data: () => ({
+              userId: "user-1",
+              status: "activ",
+              workDate: "2026-07-13",
+              startAt: 100,
+            }),
+          }
+        : {
+            id: "closed-today",
+            data: () => ({
+              userId: "user-1",
+              status: "inchis",
+              workDate: "2026-07-14",
+              startAt: 200,
+            }),
+          };
+      return { docs: [docItem], size: 1 };
+    });
+
+    const { getDashboardData } = await import("./dashboardService");
+    const result = await getDashboardData("user-1", "2026-07-14", "admin");
+
+    expect(result.timesheets.map((item) => item.id)).toEqual([
+      "closed-today",
+      "active-from-yesterday",
+    ]);
+    expect(result.stats.activeTimesheets).toBe(1);
+    expect(firestoreMocks.where).toHaveBeenCalledWith("status", "==", "activ");
   });
 });

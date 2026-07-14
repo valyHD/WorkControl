@@ -466,11 +466,28 @@ export async function getDashboardData(
           )
         )
       : Promise.resolve(null);
-  const [references, timesheetsSnap, notificationsSnap, maintenance] = await Promise.all([
+  const activeTimesheetsRequest = managementScope
+    ? getDocs(
+        query(
+          collection(db, "timesheets"),
+          ...companyScope,
+          where("status", "==", "activ"),
+          limit(DASHBOARD_LIMITS.timesheets)
+        )
+      )
+    : Promise.resolve(null);
+  const [
+    references,
+    timesheetsSnap,
+    activeTimesheetsSnap,
+    notificationsSnap,
+    maintenance,
+  ] = await Promise.all([
     managementScope
       ? getDashboardReferenceData(companyContext)
       : Promise.resolve({ users: [], tools: [], vehicles: [], projects: [] }),
     timesheetsRequest,
+    activeTimesheetsRequest,
     notificationsRequest,
     managementScope
       ? getDashboardMaintenanceSummary(companyContext)
@@ -485,16 +502,24 @@ export async function getDashboardData(
   recordFirestoreQuery({
     module: "dashboard",
     operation: "current-activity",
-    documents: (timesheetsSnap?.size ?? 0) + (notificationsSnap?.size ?? 0),
-    reason: "Pontaje curente și ultimele notificări",
+    documents:
+      (timesheetsSnap?.size ?? 0) +
+      (activeTimesheetsSnap?.size ?? 0) +
+      (notificationsSnap?.size ?? 0),
+    reason: "Pontaje curente, pontaje active și ultimele notificări",
   });
 
   const { users, tools, vehicles, projects } = references;
-  const timesheets = timesheetsSnap
-    ? timesheetsSnap.docs
-        .map((d) => mapTimesheetDoc(d.id, d.data()))
-        .filter((item) => managementScope || item.workDate === dayKey)
-    : [];
+  const timesheetsById = new Map<string, TimesheetItem>();
+  for (const snapshot of [timesheetsSnap, activeTimesheetsSnap]) {
+    for (const docItem of snapshot?.docs ?? []) {
+      const item = mapTimesheetDoc(docItem.id, docItem.data());
+      if (managementScope || item.workDate === dayKey) {
+        timesheetsById.set(item.id, item);
+      }
+    }
+  }
+  const timesheets = [...timesheetsById.values()].sort((a, b) => b.startAt - a.startAt);
   const notifications = notificationsSnap
     ? notificationsSnap.docs.map((d) => mapNotificationDoc(d.id, d.data()))
     : [];
