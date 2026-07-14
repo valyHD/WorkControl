@@ -141,6 +141,14 @@ export function normalizeLegacyUser(data, inferredCompanyId) {
   };
 }
 
+export function legacyUserUpdateNeeded(data, normalized) {
+  const currentCompanyIds = Array.isArray(data?.companyIds) ? data.companyIds : [];
+  return cleanId(data?.companyId) !== cleanId(normalized?.companyId) ||
+    cleanId(data?.primaryCompanyId) !== cleanId(normalized?.primaryCompanyId) ||
+    cleanId(data?.accessStatus) !== cleanId(normalized?.accessStatus) ||
+    JSON.stringify(currentCompanyIds) !== JSON.stringify(normalized?.companyIds || []);
+}
+
 export function buildAccessBootstrapUpdate(data, email, globalAdminEmails) {
   const normalizedEmail = cleanId(email).toLowerCase();
   return {
