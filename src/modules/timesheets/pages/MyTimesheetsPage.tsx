@@ -799,7 +799,7 @@ export default function MyTimesheetsPage() {
         </div>
       </div>
 
-      <TimesheetCalendar timesheets={timesheets} />
+      <TimesheetCalendar timesheets={timesheets} userThemeKey={user?.themeKey} />
 
       <div className="content-grid timesheet-chart-grid">
         <TimesheetChartCard
@@ -906,6 +906,12 @@ export default function MyTimesheetsPage() {
                       {item.stopAt ? new Date(item.stopAt).toLocaleString("ro-RO") : "-"} · Durata:{" "}
                       {formatMinutes(item.workedMinutes)}
                     </div>
+
+                    {item.status !== "activ" && item.workedMinutes <= 1 ? (
+                      <div className="simple-list-subtitle timesheet-short-session">
+                        Sesiune foarte scurta. Durata din document este 1 minut sau mai putin.
+                      </div>
+                    ) : null}
 
                     <div className="simple-list-subtitle">
                       Locatie start: {formatTimesheetLocation(item.startLocation)}

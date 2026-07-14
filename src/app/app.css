@@ -7312,6 +7312,18 @@ li,
   gap: 8px;
   padding: 16px;
 }
+.timesheet-calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.timesheet-calendar-nav .icon-btn {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}
 .timesheet-day-cell {
   min-height: 78px;
   padding: 9px;
@@ -7332,7 +7344,14 @@ li,
 .timesheet-day-cell--red { background: var(--danger-soft); border-color: var(--danger-line); }
 .timesheet-day-cell--blue { background: var(--primary-soft); border-color: rgba(37, 99, 235, 0.28); }
 .timesheet-day-cell--muted { background: var(--surface-alt); opacity: 0.78; }
-.timesheet-day-cell.is-selected { outline: 3px solid rgba(37, 99, 235, 0.18); }
+.timesheet-day-cell.is-selected {
+  border-color: var(--user-accent, var(--primary));
+  outline: 3px solid var(--user-accent-glow, rgba(37, 99, 235, 0.18));
+}
+.timesheet-short-session {
+  color: var(--warning-strong, #b45309) !important;
+  font-weight: 750;
+}
 .timesheet-day-details { padding: 0 16px 16px; }
 .timesheet-day-details__head {
   display: flex;
