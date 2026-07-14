@@ -242,6 +242,7 @@ export default function MyTimesheetsPage() {
   const [preferredProjectId, setPreferredProjectId] = useState("");
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [offlineStatus, setOfflineStatus] = useState("");
+  const [historyLimit, setHistoryLimit] = useState(20);
   const offlineSyncInProgress = useRef(false);
 
   const load = useCallback(
@@ -467,7 +468,14 @@ export default function MyTimesheetsPage() {
     () => computeTimesheetStats(timesheets, attentionClock),
     [attentionClock, timesheets]
   );
-  const recentTimesheets = useMemo(() => timesheets.slice(0, 10), [timesheets]);
+  const historicalTimesheets = useMemo(
+    () => timesheets.filter((item) => item.status !== "activ"),
+    [timesheets]
+  );
+  const recentTimesheets = useMemo(
+    () => historicalTimesheets.slice(0, historyLimit),
+    [historicalTimesheets, historyLimit]
+  );
   const lastSevenTimesheets = useMemo(() => {
     const from = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return timesheets.filter((item) => (item.startAt || 0) >= from).slice(0, 12);
@@ -838,7 +846,9 @@ export default function MyTimesheetsPage() {
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Istoricul meu de pontaje</h2>
-            <p className="panel-subtitle">Lista completa recenta.</p>
+            <p className="panel-subtitle">
+              {historicalTimesheets.length} pontaje finalizate, ordonate de la cel mai nou.
+            </p>
           </div>
         </div>
 
@@ -884,6 +894,15 @@ export default function MyTimesheetsPage() {
                 </Link>
               );
             })}
+            {recentTimesheets.length < historicalTimesheets.length && (
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setHistoryLimit((current) => current + 20)}
+              >
+                Afiseaza pontaje mai vechi
+              </button>
+            )}
           </div>
         )}
       </div>
