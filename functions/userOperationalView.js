@@ -1,3 +1,5 @@
+const USER_OPERATIONAL_VIEW_VERSION = 2;
+
 function cleanIds(values, primaryCompanyId) {
   const ids = Array.isArray(values)
     ? values.map((value) => String(value || '').trim()).filter(Boolean)
@@ -22,11 +24,7 @@ function buildUserOperationalView(userId, companyId, source) {
     themeKey: data.themeKey || null,
     avatarUrl: String(data.avatarUrl || ''),
     avatarThumbUrl: String(data.avatarThumbUrl || data.avatarUrl || ''),
-    isOnline: data.isOnline === true,
-    lastSeenAt: data.lastSeenAt || data.lastSeenAtServer || null,
-    lastActiveAt: data.lastActiveAt || data.lastActiveAtServer || null,
     createdAt: data.createdAt || null,
-    updatedAt: data.updatedAt || null,
   };
 }
 
@@ -34,4 +32,9 @@ function userOperationalViewId(companyId, userId) {
   return `${companyId}__${userId}`;
 }
 
-module.exports = { buildUserOperationalView, cleanIds, userOperationalViewId };
+module.exports = {
+  buildUserOperationalView,
+  cleanIds,
+  userOperationalViewId,
+  USER_OPERATIONAL_VIEW_VERSION,
+};
