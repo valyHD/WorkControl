@@ -11,8 +11,8 @@ Rules.
 
 - Scriptul ruleaza implicit numai `dry-run`.
 - Nu ghiceste firma atunci cand referintele indica firme diferite.
-- O firma implicita este folosita numai daca operatorul o transmite explicit prin
-  `--default-company`.
+- O firma implicita pentru resurse este folosita numai daca operatorul o transmite
+  explicit prin `--default-resource-company`; scriptul verifica existenta firmei.
 - Scrierea cere simultan `--apply` si `--confirm-project <project-id>`.
 - Inainte de backfill se creeaza un backup JSON pentru campurile modificate.
 - Fisierele generate ajung in `migration-reports/`, director ignorat de Git.
@@ -40,8 +40,14 @@ npm run company-isolation:dry-run -- --project workcontrol-53b1d
 Pentru o instalare legacy despre care se stie sigur ca apartine unei singure firme:
 
 ```powershell
-node scripts/company-isolation-migration.mjs --mode dry-run --project workcontrol-53b1d --default-company <company-id>
+node scripts/company-isolation-migration.mjs --mode dry-run --project workcontrol-53b1d --default-resource-company <company-id> --allow-user-company-selection
 ```
+
+`--default-resource-company` nu asigneaza utilizatorii atunci cand este prezent
+`--allow-user-company-selection`. Utilizatorii legacy fara firma sunt raportati in
+`selectionRequiredUsers` si aleg o singura data firma prin gate-ul controlat. Aliasul
+`--default-company` ramane acceptat pentru compatibilitate, dar nu este recomandat in
+rollout-ul V4.
 
 Raportul trebuie verificat pentru:
 
@@ -94,7 +100,7 @@ doar selectorul initial pana cand aleg o firma activa.
 Backfill-ul este permis numai dupa ce raportul dry-run a fost aprobat:
 
 ```powershell
-node scripts/company-isolation-migration.mjs --mode backfill --project workcontrol-53b1d --confirm-project workcontrol-53b1d --apply
+node scripts/company-isolation-migration.mjs --mode backfill --project workcontrol-53b1d --default-resource-company <company-id> --allow-user-company-selection --confirm-project workcontrol-53b1d --apply
 ```
 
 Daca exista documente nerezolvate, scriptul se opreste. Optiunea
@@ -104,9 +110,10 @@ ramase fara firma nu vor fi accesibile dupa activarea Rules.
 Backfill-ul:
 
 - completeaza `companyId`;
-- normalizeaza `companyIds`, `primaryCompanyId` si `accessStatus` pentru users;
-- creeaza `userOperationalViews` per firma;
-- creeaza `vehicleOperationalViews` fara tracker secrets, raw I/O sau configurari;
+- normalizeaza `companyIds`, `primaryCompanyId` si `accessStatus` numai pentru users
+  deja asignati sau migrati explicit;
+- lasa trigger-ele Functions compatibile sa reconstruiasca proiectiile operationale,
+  evitand scrieri duplicate si facand rollback-ul campurilor determinist;
 - nu activeaza utilizatori care erau dezactivati.
 
 ## Validare dupa backfill

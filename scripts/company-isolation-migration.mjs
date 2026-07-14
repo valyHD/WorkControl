@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { createRequire } from "node:module";
 import { initializeApp, applicationDefault, getApps } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import {
@@ -10,15 +9,10 @@ import {
   cleanId,
   getUserCompanyIds,
   inferCompanyId,
+  migrationDefaultCompanyId,
   normalizeLegacyUser,
+  requiresInitialCompanySelection,
 } from "./company-isolation-core.mjs";
-
-const require = createRequire(import.meta.url);
-const { buildVehicleOperationalView } = require("../functions/vehicleOperationalView.js");
-const {
-  buildUserOperationalView,
-  userOperationalViewId,
-} = require("../functions/userOperationalView.js");
 
 function parseArgs(argv) {
   const args = new Map();
@@ -76,7 +70,10 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const projectId = cleanId(args.get("--project"));
   const mode = cleanId(args.get("--mode") || "dry-run");
-  const defaultCompanyId = cleanId(args.get("--default-company"));
+  const defaultResourceCompanyId = cleanId(
+    args.get("--default-resource-company") || args.get("--default-company")
+  );
+  const allowUserCompanySelection = args.get("--allow-user-company-selection") === true;
   const reportDirectory = path.resolve(cleanId(args.get("--output")) || "migration-reports");
   if (!projectId) throw new Error("Foloseste --project <firebase-project-id>.");
   if (!["dry-run", "backfill", "rollback", "access-bootstrap-dry-run", "access-bootstrap"].includes(mode)) {
@@ -89,6 +86,13 @@ async function main() {
 
   if (getApps().length === 0) initializeApp({ credential: applicationDefault(), projectId });
   const db = getFirestore();
+
+  if (defaultResourceCompanyId) {
+    const defaultCompanySnap = await db.collection("firmeMentenanta").doc(defaultResourceCompanyId).get();
+    if (!defaultCompanySnap.exists || defaultCompanySnap.get("active") === false) {
+      throw new Error("Firma implicita pentru resurse nu exista sau este inactiva.");
+    }
+  }
   if (mode === "rollback") {
     const backupPath = path.resolve(cleanId(args.get("--backup")));
     if (!backupPath) throw new Error("Rollback necesita --backup <fisier.json>.");
@@ -192,7 +196,11 @@ async function main() {
         path: document.ref.path,
         data,
         references,
-        defaultCompanyId,
+        defaultCompanyId: migrationDefaultCompanyId({
+          collectionName,
+          defaultResourceCompanyId,
+          allowUserCompanySelection,
+        }),
       });
       pending.push({ collectionName, document, data, result });
       if (result.companyId) {
@@ -208,37 +216,26 @@ async function main() {
 
   const changes = [];
   const unresolved = [];
+  const selectionRequiredUsers = [];
   for (const item of pending) {
     const { collectionName, document, data, result } = item;
     if (!result.companyId) {
+      if (requiresInitialCompanySelection({
+        collectionName,
+        data,
+        result,
+        allowUserCompanySelection,
+      })) {
+        selectionRequiredUsers.push({ path: document.ref.path });
+        continue;
+      }
       unresolved.push({ path: document.ref.path, reason: result.confidence, candidates: result.candidates || [] });
       continue;
     }
     if (collectionName === "vehicleOperationalViews" || collectionName === "userOperationalViews") continue;
-    if (collectionName === "users") {
-      const normalized = normalizeLegacyUser(data, result.companyId);
-      normalized.companyIds.forEach((companyId) => {
-        changes.push({
-          ref: db.collection("userOperationalViews").doc(userOperationalViewId(companyId, document.id)),
-          path: `userOperationalViews/${userOperationalViewId(companyId, document.id)}`,
-          update: buildUserOperationalView(document.id, companyId, { ...data, ...normalized }),
-          previous: {},
-          generatedOperationalView: true,
-        });
-      });
-    }
     const update = collectionName === "users"
       ? normalizeLegacyUser(data, result.companyId)
       : { companyId: result.companyId };
-    if (collectionName === "vehicles") {
-      changes.push({
-        ref: db.collection("vehicleOperationalViews").doc(document.id),
-        path: `vehicleOperationalViews/${document.id}`,
-        update: buildVehicleOperationalView(document.id, { ...data, ...update }),
-        previous: {},
-        generatedOperationalView: true,
-      });
-    }
     if (cleanId(data.companyId) === result.companyId && collectionName !== "users") continue;
     changes.push({
       ref: document.ref,
@@ -256,7 +253,9 @@ async function main() {
     projectId,
     mode,
     generatedAt: new Date().toISOString(),
-    defaultCompanyId: defaultCompanyId || null,
+    defaultResourceCompanyId: defaultResourceCompanyId || null,
+    allowUserCompanySelection,
+    selectionRequiredUsers,
     scanned: pending.length,
     eligibleChanges: changes.length,
     unresolved,
@@ -272,7 +271,7 @@ async function main() {
     await fs.writeFile(backupPath, JSON.stringify({
       projectId,
       createdAt: new Date().toISOString(),
-      changes: changes.filter((change) => !change.generatedOperationalView).map((change) => ({
+      changes: changes.map((change) => ({
         path: change.path,
         previous: change.previous,
       })),

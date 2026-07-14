@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildAccessBootstrapUpdate,
   inferCompanyId,
+  migrationDefaultCompanyId,
   normalizeLegacyUser,
+  requiresInitialCompanySelection,
   resolveUniqueCompany,
 } from "./company-isolation-core.mjs";
 
@@ -81,4 +83,32 @@ test("access bootstrap activates legacy active users without assigning a company
     accessStatus: "active",
     globalAdmin: true,
   });
+});
+
+test("resource default never assigns a company when the user must choose it", () => {
+  assert.equal(migrationDefaultCompanyId({
+    collectionName: "users",
+    defaultResourceCompanyId: "company-a",
+    allowUserCompanySelection: true,
+  }), "");
+  assert.equal(migrationDefaultCompanyId({
+    collectionName: "vehicles",
+    defaultResourceCompanyId: "company-a",
+    allowUserCompanySelection: true,
+  }), "company-a");
+});
+
+test("unassigned active users are reported for the initial company gate", () => {
+  assert.equal(requiresInitialCompanySelection({
+    collectionName: "users",
+    data: { active: true, accessStatus: "active", companyIds: [] },
+    result: { companyId: "" },
+    allowUserCompanySelection: true,
+  }), true);
+  assert.equal(requiresInitialCompanySelection({
+    collectionName: "users",
+    data: { companyIds: ["company-a"] },
+    result: { companyId: "company-a" },
+    allowUserCompanySelection: true,
+  }), false);
 });
