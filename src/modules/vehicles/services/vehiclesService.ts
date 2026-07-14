@@ -67,6 +67,10 @@ import {
 import type { AppUser } from "../../../types/tool";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import { buildAuditChanges, buildAuditSnapshot, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
+import {
+  mergeVehicleRuntimeLive,
+  type VehicleRuntimeLiveData,
+} from "../utils/vehicleRuntimeLive";
 
 const vehiclesCollection = collection(db, "vehicles");
 const vehicleOperationalViewsCollection = collection(db, "vehicleOperationalViews");
@@ -74,6 +78,85 @@ const vehicleEventsCollection = collection(db, "vehicleEvents");
 const userOperationalViewsCollection = collection(db, "userOperationalViews");
 const usersCollection = collection(db, "users");
 const vehicleGpsVisibilityRef = doc(db, "systemSettings", "vehicleGpsVisibility");
+const VEHICLE_RUNTIME_LIVE_READS_ENABLED =
+  String(import.meta.env.VITE_VEHICLE_RUNTIME_LIVE_READS ?? "true").toLowerCase() !== "false";
+
+function vehicleRuntimeLiveRef(vehicleId: string) {
+  return doc(db, "vehicles", vehicleId, "positions", "_runtime");
+}
+
+function mapRuntimeLive(data: DocumentData | undefined): VehicleRuntimeLiveData | null {
+  return data && typeof data === "object" ? data as VehicleRuntimeLiveData : null;
+}
+
+type RuntimeVehicleListCoordinator = {
+  setItems: (items: VehicleItem[]) => void;
+  stop: () => void;
+};
+
+function createRuntimeVehicleListCoordinator(
+  onData: (items: VehicleItem[]) => void
+): RuntimeVehicleListCoordinator {
+  let baseItems = new Map<string, VehicleItem>();
+  const runtimeItems = new Map<string, VehicleRuntimeLiveData>();
+  const runtimeStops = new Map<string, () => void>();
+  let emitQueued = false;
+  let stopped = false;
+
+  const emit = () => {
+    emitQueued = false;
+    if (stopped) return;
+    onData(
+      [...baseItems.values()]
+        .map((item) => mergeVehicleRuntimeLive(item, runtimeItems.get(item.id)))
+        .sort((left, right) => left.plateNumber.localeCompare(right.plateNumber))
+    );
+  };
+  const scheduleEmit = () => {
+    if (emitQueued || stopped) return;
+    emitQueued = true;
+    queueMicrotask(emit);
+  };
+
+  return {
+    setItems(items) {
+      baseItems = new Map(items.map((item) => [item.id, item]));
+      for (const [vehicleId, stop] of runtimeStops.entries()) {
+        if (baseItems.has(vehicleId)) continue;
+        stop();
+        runtimeStops.delete(vehicleId);
+        runtimeItems.delete(vehicleId);
+      }
+      if (VEHICLE_RUNTIME_LIVE_READS_ENABLED) {
+        for (const vehicleId of baseItems.keys()) {
+          if (runtimeStops.has(vehicleId)) continue;
+          const stop = onSnapshot(
+            vehicleRuntimeLiveRef(vehicleId),
+            (snapshot) => {
+              if (snapshot.exists()) runtimeItems.set(vehicleId, mapRuntimeLive(snapshot.data()) ?? {});
+              else runtimeItems.delete(vehicleId);
+              scheduleEmit();
+            },
+            (error) => {
+              console.warn(`[vehicle-runtime][list][${vehicleId}]`, error);
+              runtimeItems.delete(vehicleId);
+              scheduleEmit();
+            }
+          );
+          runtimeStops.set(vehicleId, stop);
+        }
+      }
+      scheduleEmit();
+    },
+    stop() {
+      stopped = true;
+      runtimeStops.forEach((stop) => stop());
+      runtimeStops.clear();
+      runtimeItems.clear();
+      baseItems.clear();
+    },
+  };
+}
 
 export const VEHICLE_GPS_VISIBILITY_OWNER_EMAIL = "ionut.matura23@gmail.com";
 
@@ -1193,6 +1276,7 @@ export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
 export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
   let unsubscribe: () => void = () => {};
   let cancelled = false;
+  const coordinator = createRuntimeVehicleListCoordinator(onData);
   void getCurrentCompanyAccessContext()
     .then((context) => {
       if (cancelled) return;
@@ -1207,10 +1291,12 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
             orderBy("plateNumber", "asc"),
             limit(250)
           ),
-          (snap) => onData(snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()))),
+          (snap) => coordinator.setItems(
+            snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()))
+          ),
           (error) => {
             console.error("[subscribeVehiclesList]", error);
-            onData([]);
+            coordinator.setItems([]);
           }
         );
         return;
@@ -1220,7 +1306,7 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
       const emit = () => {
         const unique = new Map<string, VehicleItem>();
         resultSets.forEach((items) => items.forEach((item, id) => unique.set(id, item)));
-        onData([...unique.values()].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber)));
+        coordinator.setItems([...unique.values()]);
       };
       const subscriptions = assignmentFields.map((field, index) => onSnapshot(
         query(
@@ -1242,21 +1328,30 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
     })
     .catch((error) => {
       console.error("[subscribeVehiclesList][company]", error);
-      onData([]);
+      coordinator.setItems([]);
     });
   return () => {
     cancelled = true;
     unsubscribe();
+    coordinator.stop();
   };
 }
 
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
   if (!vehicleId) return null;
 
-  const snap = await getDoc(doc(db, "vehicles", vehicleId));
+  const [snap, runtimeSnap] = await Promise.all([
+    getDoc(doc(db, "vehicles", vehicleId)),
+    VEHICLE_RUNTIME_LIVE_READS_ENABLED
+      ? getDoc(vehicleRuntimeLiveRef(vehicleId)).catch(() => null)
+      : Promise.resolve(null),
+  ]);
   if (!snap.exists()) return null;
 
-  return mapVehicleDoc(snap.id, snap.data());
+  return mergeVehicleRuntimeLive(
+    mapVehicleDoc(snap.id, snap.data()),
+    runtimeSnap?.exists() ? mapRuntimeLive(runtimeSnap.data()) : null
+  );
 }
 
 export async function getMyVehicleForUser(userId: string): Promise<VehicleItem | null> {
@@ -1301,21 +1396,50 @@ export function subscribeVehicleById(
     return () => undefined;
   }
 
-  return onSnapshot(
+  let baseVehicle: VehicleItem | null = null;
+  let runtimeLive: VehicleRuntimeLiveData | null = null;
+  let baseLoaded = false;
+  const emit = () => {
+    if (!baseLoaded) return;
+    onData(baseVehicle ? mergeVehicleRuntimeLive(baseVehicle, runtimeLive) : null);
+  };
+
+  const stopVehicle = onSnapshot(
     doc(db, "vehicles", vehicleId),
     (snap) => {
+      baseLoaded = true;
       if (!snap.exists()) {
-        onData(null);
+        baseVehicle = null;
+        emit();
         return;
       }
-
-      onData(mapVehicleDoc(snap.id, snap.data()));
+      baseVehicle = mapVehicleDoc(snap.id, snap.data());
+      emit();
     },
     (error) => {
       console.error("[subscribeVehicleById]", error);
       onData(null);
     }
   );
+  const stopRuntime = VEHICLE_RUNTIME_LIVE_READS_ENABLED
+    ? onSnapshot(
+        vehicleRuntimeLiveRef(vehicleId),
+        (snapshot) => {
+          runtimeLive = snapshot.exists() ? mapRuntimeLive(snapshot.data()) : null;
+          emit();
+        },
+        (error) => {
+          console.warn(`[vehicle-runtime][detail][${vehicleId}]`, error);
+          runtimeLive = null;
+          emit();
+        }
+      )
+    : () => undefined;
+
+  return () => {
+    stopVehicle();
+    stopRuntime();
+  };
 }
 
 export function subscribeVehicleDailyDiagnostics(

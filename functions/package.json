@@ -9,7 +9,7 @@
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
-    "test": "node --test *.test.js ../tests/gateway-cost-optimization.test.cjs"
+    "test": "node --test *.test.js ../tests/gateway-cost-optimization.test.cjs ../tests/gateway-write-amplification.test.cjs"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",
