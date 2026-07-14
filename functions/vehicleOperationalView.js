@@ -1,8 +1,4 @@
-const SAFE_GPS_FIELDS = [
-  'lat', 'lng', 'speedKmh', 'altitude', 'angle', 'satellites', 'gpsTimestamp',
-  'serverTimestamp', 'expiresAt', 'ignitionOn', 'odometerKm', 'tripOdometerKm',
-  'online',
-];
+const VEHICLE_OPERATIONAL_VIEW_VERSION = 2;
 const SAFE_SIM_POINT_FIELDS = [
   'lat', 'lng', 'speedKmh', 'angle', 'odometerKm', 'ts', 'ignitionOn',
 ];
@@ -80,24 +76,16 @@ function buildVehicleOperationalView(vehicleId, source) {
     coverImageUrl: String(data.coverImageUrl || ''),
     coverThumbUrl: String(data.coverThumbUrl || ''),
     documents: sanitizeDocuments(data.documents),
-    gpsSnapshot: pick(data.gpsSnapshot, SAFE_GPS_FIELDS),
-    tracker: data.tracker && typeof data.tracker === 'object'
-      ? { lastSeenAt: Number(data.tracker.lastSeenAt || 0) }
-      : null,
-    gpsDataUsage: data.gpsDataUsage && typeof data.gpsDataUsage === 'object'
-      ? pick(data.gpsDataUsage, ['currentMonthKey', 'months', 'totalBytes', 'updatedAt'])
-      : null,
     gpsSim: sanitizeSimulation(data.gpsSim),
     gpsSimHistory: sanitizeSimulationHistory(data.gpsSimHistory),
     documentCount: Array.isArray(data.documents) ? data.documents.length : 0,
     createdAt: Number(data.createdAt || 0),
-    updatedAt: Number(data.updatedAt || 0),
   };
 }
 
 module.exports = {
   buildVehicleOperationalView,
-  SAFE_GPS_FIELDS,
   sanitizeSimulation,
   sanitizeSimulationHistory,
+  VEHICLE_OPERATIONAL_VIEW_VERSION,
 };

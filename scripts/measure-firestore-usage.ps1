@@ -22,9 +22,9 @@ function Get-MonitoringSeries {
     "interval.endTime" = $now.ToString("o")
     "aggregation.alignmentPeriod" = "60s"
     "aggregation.perSeriesAligner" = $Aligner
-    "aggregation.crossSeriesReducer" = $Reducer
     view = "FULL"
   }
+  if ($Reducer) { $params["aggregation.crossSeriesReducer"] = $Reducer }
   $query = ($params.GetEnumerator() | ForEach-Object {
     "$([uri]::EscapeDataString($_.Key))=$([uri]::EscapeDataString([string]$_.Value))"
   }) -join "&"
@@ -69,9 +69,9 @@ $reads = Get-MonitoringSeries "firestore.googleapis.com/document/read_ops_count"
 $writes = Get-MonitoringSeries "firestore.googleapis.com/document/write_ops_count"
 $listeners = Get-MonitoringSeries "firestore.googleapis.com/network/snapshot_listeners" "ALIGN_MEAN"
 $connections = Get-MonitoringSeries "firestore.googleapis.com/network/active_connections" "ALIGN_MEAN"
-$functionRequests = Get-MonitoringSeries "run.googleapis.com/request_count"
+$functionRequests = Get-MonitoringSeries "run.googleapis.com/request_count" "ALIGN_SUM" ""
 
-$rows = foreach ($minutes in 5, 15, 60) {
+$rows = foreach ($minutes in 5, 15, 30, 60) {
   $readCount = Get-WindowSum $reads $minutes
   $writeCount = Get-WindowSum $writes $minutes
   [pscustomobject]@{
@@ -88,4 +88,31 @@ $rows = foreach ($minutes in 5, 15, 60) {
 }
 
 $rows | Format-Table -AutoSize
+
+$functionRows = foreach ($minutes in 15, 30, 60) {
+  $cutoff = $now.AddMinutes(-$minutes)
+  $byService = @{}
+  foreach ($series in @($functionRequests)) {
+    $serviceName = [string]$series.resource.labels.service_name
+    if (-not $serviceName) { $serviceName = "unknown" }
+    if (-not $byService.ContainsKey($serviceName)) { $byService[$serviceName] = 0 }
+    foreach ($point in @($series.points)) {
+      if ([DateTime]::Parse($point.interval.endTime).ToUniversalTime() -ge $cutoff) {
+        $byService[$serviceName] += Get-PointValue $point
+      }
+    }
+  }
+  foreach ($entry in $byService.GetEnumerator()) {
+    if ($entry.Value -le 0) { continue }
+    [pscustomobject]@{
+      WindowMinutes = $minutes
+      Function = $entry.Key
+      Requests = [math]::Round($entry.Value, 2)
+      RequestsPerHour = [math]::Round($entry.Value * 60 / $minutes, 2)
+    }
+  }
+}
+
+Write-Output "Functions by service"
+$functionRows | Sort-Object WindowMinutes, @{ Expression = "Requests"; Descending = $true } | Format-Table -AutoSize
 Write-Output "MeasuredAtUtc=$($now.ToString('o'))"

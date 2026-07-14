@@ -27,13 +27,18 @@ const {
   requestAssistantTranscription,
 } = require('./assistantTranscription');
 const { createSecurityHandlers } = require('./securityActions');
-const { buildVehicleOperationalView } = require('./vehicleOperationalView');
+const {
+  buildVehicleOperationalView,
+  VEHICLE_OPERATIONAL_VIEW_VERSION,
+} = require('./vehicleOperationalView');
 const { buildInternalCompanyContext } = require('./internalRequestContext');
 const {
   buildUserOperationalView,
   cleanIds: getUserOperationalCompanyIds,
+  USER_OPERATIONAL_VIEW_VERSION,
   userOperationalViewId,
 } = require('./userOperationalView');
+const { writeProjectionIfChanged } = require('./projectionPayload');
 const { GLOBAL_RUNTIME_OPTIONS } = require('./runtimeOptions');
 
 setGlobalOptions(GLOBAL_RUNTIME_OPTIONS);
@@ -142,19 +147,27 @@ exports.syncVehicleOperationalView = onDocumentWritten(
       gpsDataUsage: afterData.gpsDataUsage || null,
       trackerConfig: afterData.trackerConfig || null,
     };
+    const sourceUpdatedAtMs = after.updateTime?.toMillis?.() || Date.parse(event.time || '') || Date.now();
     const writes = [];
     if (JSON.stringify(beforeOperational) !== JSON.stringify(afterOperational)) {
-      writes.push(operationalRef.set({
-        ...afterOperational,
-        updatedAtServer: FieldValue.serverTimestamp(),
-      }, { merge: false }));
+      writes.push(writeProjectionIfChanged({
+        db,
+        ref: operationalRef,
+        payload: afterOperational,
+        version: VEHICLE_OPERATIONAL_VIEW_VERSION,
+        sourceUpdatedAtMs,
+        serverTimestamp: () => FieldValue.serverTimestamp(),
+      }));
     }
     if (JSON.stringify(beforeTrackerAdmin) !== JSON.stringify(afterTrackerAdmin)) {
-      writes.push(trackerAdminRef.set({
-        ...afterTrackerAdmin,
-        updatedAt: Date.now(),
-        updatedAtServer: FieldValue.serverTimestamp(),
-      }, { merge: false }));
+      writes.push(writeProjectionIfChanged({
+        db,
+        ref: trackerAdminRef,
+        payload: afterTrackerAdmin,
+        version: 1,
+        sourceUpdatedAtMs,
+        serverTimestamp: () => FieldValue.serverTimestamp(),
+      }));
     }
     await Promise.all(writes);
   }
@@ -177,13 +190,27 @@ exports.syncUserOperationalViews = onDocumentWritten(
       ? getUserOperationalCompanyIds(afterData.companyIds, afterData.primaryCompanyId)
       : [];
     const allCompanies = [...new Set([...beforeCompanies, ...afterCompanies])];
+    const sourceUpdatedAtMs = event.data?.after?.updateTime?.toMillis?.()
+      || Date.parse(event.time || '')
+      || Date.now();
     const writes = allCompanies.map((companyId) => {
       const ref = db.collection('userOperationalViews').doc(userOperationalViewId(companyId, userId));
       if (!afterData || !afterCompanies.includes(companyId)) return ref.delete().catch(() => undefined);
-      return ref.set({
-        ...buildUserOperationalView(userId, companyId, afterData),
-        updatedAtServer: FieldValue.serverTimestamp(),
-      }, { merge: false });
+      const nextView = buildUserOperationalView(userId, companyId, afterData);
+      const previousView = beforeCompanies.includes(companyId)
+        ? buildUserOperationalView(userId, companyId, beforeData)
+        : null;
+      if (previousView && JSON.stringify(previousView) === JSON.stringify(nextView)) {
+        return Promise.resolve(false);
+      }
+      return writeProjectionIfChanged({
+        db,
+        ref,
+        payload: nextView,
+        version: USER_OPERATIONAL_VIEW_VERSION,
+        sourceUpdatedAtMs,
+        serverTimestamp: () => FieldValue.serverTimestamp(),
+      });
     });
     await Promise.all(writes);
   }

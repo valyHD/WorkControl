@@ -32,3 +32,26 @@ test('company IDs are normalized and view IDs are deterministic', () => {
   ]);
   assert.equal(userOperationalViewId('company-a', 'user-a'), 'company-a__user-a');
 });
+
+test('presence-only updates do not change the user operational payload', () => {
+  const base = {
+    fullName: 'User A',
+    role: 'angajat',
+    active: true,
+    isOnline: true,
+    lastSeenAt: 100,
+    updatedAt: 100,
+  };
+  const next = {
+    ...base,
+    isOnline: false,
+    lastSeenAt: 200,
+    lastActiveAt: 200,
+    updatedAt: 200,
+  };
+
+  assert.deepEqual(
+    buildUserOperationalView('user-a', 'company-a', base),
+    buildUserOperationalView('user-a', 'company-a', next)
+  );
+});

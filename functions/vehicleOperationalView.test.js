@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildVehicleOperationalView } = require('./vehicleOperationalView');
 
-test('vehicle operational view excludes tracker and diagnostic secrets', () => {
+test('vehicle operational view excludes high-frequency GPS and tracker fields', () => {
   const view = buildVehicleOperationalView('vehicle-1', {
     companyId: 'company-a',
     plateNumber: 'B33LGR',
@@ -22,12 +22,35 @@ test('vehicle operational view excludes tracker and diagnostic secrets', () => {
   });
 
   assert.equal(view.companyId, 'company-a');
-  assert.deepEqual(view.gpsSnapshot, { lat: 44, lng: 26, speedKmh: 12 });
-  assert.deepEqual(view.tracker, { lastSeenAt: 123 });
-  assert.equal(view.tracker.imei, undefined);
-  assert.equal(view.tracker.protocol, undefined);
+  assert.equal(Object.hasOwn(view, 'gpsSnapshot'), false);
+  assert.equal(Object.hasOwn(view, 'tracker'), false);
+  assert.equal(Object.hasOwn(view, 'gpsDataUsage'), false);
+  assert.equal(Object.hasOwn(view, 'updatedAt'), false);
   assert.deepEqual(view.gpsSimHistory, [{ points: [{ lat: 44, lng: 26, ts: 100 }] }]);
   assert.equal(view.gpsSimHistory[0].destinationQuery, undefined);
   assert.equal(view.gpsSimHistory[0].points[0].rawIo, undefined);
   assert.equal(Object.hasOwn(view, 'liveDiagnostics'), false);
+});
+
+test('GPS-only updates produce the same operational payload', () => {
+  const base = {
+    companyId: 'company-a',
+    plateNumber: 'B33LGR',
+    currentKm: 6200,
+    gpsSnapshot: { lat: 44, lng: 26, speedKmh: 10 },
+    tracker: { lastSeenAt: 100 },
+    updatedAt: 100,
+  };
+  const next = {
+    ...base,
+    gpsSnapshot: { lat: 44.1, lng: 26.1, speedKmh: 30 },
+    tracker: { lastSeenAt: 200 },
+    liveDiagnostics: { engineRpm: 2500 },
+    updatedAt: 200,
+  };
+
+  assert.deepEqual(
+    buildVehicleOperationalView('vehicle-1', base),
+    buildVehicleOperationalView('vehicle-1', next)
+  );
 });

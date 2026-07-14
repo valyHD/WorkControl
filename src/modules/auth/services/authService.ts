@@ -15,6 +15,11 @@ import {
   evaluateInternalAccessProfile,
   InternalAccessError,
 } from "./internalAccessPolicy";
+import {
+  shouldWritePresence,
+  USER_PRESENCE_HEARTBEAT_MS,
+  type PresenceWriteState,
+} from "./presencePolicy";
 
 export type AppAuthUser = {
   uid: string;
@@ -34,7 +39,7 @@ export type AppAuthUser = {
   globalAdmin?: boolean;
 };
 
-const USER_PRESENCE_HEARTBEAT_MS = 30_000;
+let stopActivePresenceSession: ((writeOffline?: boolean) => void) | null = null;
 
 export async function loginWithEmail(email: string, password: string) {
   const result = await signInWithEmailAndPassword(auth, email, password);
@@ -157,39 +162,59 @@ async function recordSiteEntry(user: AppAuthUser) {
 export function startUserPresence(user: AppAuthUser): () => void {
   if (!user?.uid) return () => undefined;
 
+  stopActivePresenceSession?.(false);
+
   let stopped = false;
   let heartbeatTimer: number | undefined;
+  let writeQueue = Promise.resolve();
+  const writeState: PresenceWriteState = { lastOnline: null, lastWriteAt: 0 };
   const userRef = doc(db, "users", user.uid);
 
-  const writePresence = async (online = true) => {
-    if (!user.uid) return;
+  const writePresence = (online = true, force = false) => {
+    if (!user.uid || stopped) return Promise.resolve(false);
     const now = Date.now();
+    if (!shouldWritePresence(writeState, online, now, force)) {
+      return Promise.resolve(false);
+    }
 
-    await setDoc(
-      userRef,
-      {
-        isOnline: online,
-        lastSeenAt: now,
-        lastActiveAt: now,
-        lastSeenAtServer: serverTimestamp(),
-        lastActiveAtServer: serverTimestamp(),
-      },
-      { merge: true }
-    ).catch((error) => {
-      console.error("[presence][write]", error);
+    const previousState = { ...writeState };
+    writeState.lastOnline = online;
+    writeState.lastWriteAt = now;
+
+    writeQueue = writeQueue.then(async () => {
+      try {
+        await setDoc(
+          userRef,
+          {
+            isOnline: online,
+            lastSeenAt: now,
+            lastActiveAt: now,
+            lastSeenAtServer: serverTimestamp(),
+            lastActiveAtServer: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (error) {
+        if (writeState.lastWriteAt === now && writeState.lastOnline === online) {
+          Object.assign(writeState, previousState);
+        }
+        console.error("[presence][write]", error);
+      }
     });
+    return writeQueue.then(() => true);
   };
 
   const scheduleHeartbeat = () => {
     if (stopped) return;
     heartbeatTimer = window.setTimeout(() => {
-      void writePresence(true).finally(scheduleHeartbeat);
+      const online = document.visibilityState === "visible" && navigator.onLine;
+      void writePresence(online).finally(scheduleHeartbeat);
     }, USER_PRESENCE_HEARTBEAT_MS);
   };
 
   const handleActivity = () => {
     if (stopped) return;
-    void writePresence(true);
+    void writePresence(document.visibilityState === "visible" && navigator.onLine);
   };
 
   const handleVisibilityChange = () => {
@@ -203,7 +228,13 @@ export function startUserPresence(user: AppAuthUser): () => void {
   };
 
   void recordSiteEntry(user).finally(() => {
-    if (!stopped) scheduleHeartbeat();
+    if (!stopped) {
+      if (writeState.lastOnline === null) {
+        writeState.lastOnline = true;
+        writeState.lastWriteAt = Date.now();
+      }
+      scheduleHeartbeat();
+    }
   });
 
   window.addEventListener("focus", handleActivity);
@@ -211,7 +242,8 @@ export function startUserPresence(user: AppAuthUser): () => void {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pagehide", handlePageHide);
 
-  return () => {
+  const stop = (writeOffline = true) => {
+    if (stopped) return;
     stopped = true;
     if (typeof heartbeatTimer === "number") {
       window.clearTimeout(heartbeatTimer);
@@ -220,6 +252,25 @@ export function startUserPresence(user: AppAuthUser): () => void {
     window.removeEventListener("online", handleActivity);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     window.removeEventListener("pagehide", handlePageHide);
-    void writePresence(false);
+    if (writeOffline && writeState.lastOnline !== false) {
+      const now = Date.now();
+      void writeQueue
+        .then(() => setDoc(
+          userRef,
+          {
+            isOnline: false,
+            lastSeenAt: now,
+            lastActiveAt: now,
+            lastSeenAtServer: serverTimestamp(),
+            lastActiveAtServer: serverTimestamp(),
+          },
+          { merge: true }
+        ))
+        .catch((error) => console.error("[presence][stop]", error));
+    }
+    if (stopActivePresenceSession === stop) stopActivePresenceSession = null;
   };
+
+  stopActivePresenceSession = stop;
+  return () => stop(true);
 }

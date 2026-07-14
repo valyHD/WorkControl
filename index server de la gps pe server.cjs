@@ -6,6 +6,12 @@ const net = require("net");
 const admin = require("firebase-admin");
 const { exec } = require("child_process");
 const util = require("util");
+const {
+  computeConsolidatedMileage,
+  normalizeRuntimeLiveConfig,
+  shouldUseRuntimeLive,
+  shouldWriteDayMetadata,
+} = require("./gps-write-amplification-core.cjs");
 
 const execAsync = util.promisify(exec);
 
@@ -45,6 +51,10 @@ const trackerBindingCache = new Map();
 const lastSavedPointByImei = new Map();
 const lastOdometerKmByImei = new Map();
 const lastSnapshotWriteByVehicle = new Map();
+const lastDayMetadataWriteByVehicle = new Map();
+const lastRuntimeRootFlushByVehicle = new Map();
+const runtimeInitializationByVehicle = new Map();
+const saveQueueByImei = new Map();
 const lastUnboundLogByImei = new Map();
 const NOTIFICATION_LISTENER_START_TS = Date.now();
 const NOTIFICATION_STARTUP_GRACE_MS = 90_000;
@@ -66,11 +76,21 @@ const GPS_COST_MAX_FLUSH_SECONDS = 60;
 const GPS_COST_MAX_BUFFERED_RECORDS = 500;
 const GPS_COST_FLUSH_CHECK_MS = 5_000;
 const gpsCostBuffers = new Map();
+const WRITE_AMPLIFICATION_LOG_INTERVAL_MS = 5 * 60 * 1000;
+const writeAmplificationCounters = {
+  runtimeSnapshotWrites: 0,
+  legacyRootSnapshotWrites: 0,
+  runtimeRootFlushes: 0,
+  dayMetadataWrites: 0,
+  dayMetadataWritesSkipped: 0,
+  lastLoggedAt: Date.now(),
+};
 let gpsCostConfigCache = {
   value: {
     enabled: false,
     canaryTrackerImeis: new Set(),
     diagnosticFlushSeconds: GPS_COST_DEFAULT_FLUSH_SECONDS,
+    runtimeLive: normalizeRuntimeLiveConfig({}),
   },
   expiresAt: 0,
 };
@@ -150,7 +170,26 @@ function normalizeGpsCostConfig(data) {
         Number.isFinite(flushSeconds) ? Math.round(flushSeconds) : GPS_COST_DEFAULT_FLUSH_SECONDS
       )
     ),
+    runtimeLive: normalizeRuntimeLiveConfig(data),
   };
+}
+
+function maybeLogWriteAmplificationCounters(now = Date.now()) {
+  if (now - writeAmplificationCounters.lastLoggedAt < WRITE_AMPLIFICATION_LOG_INTERVAL_MS) return;
+  console.log(`[WRITE AMPLIFICATION METRICS] ${JSON.stringify({
+    windowSeconds: Math.round((now - writeAmplificationCounters.lastLoggedAt) / 1000),
+    runtimeSnapshotWrites: writeAmplificationCounters.runtimeSnapshotWrites,
+    legacyRootSnapshotWrites: writeAmplificationCounters.legacyRootSnapshotWrites,
+    runtimeRootFlushes: writeAmplificationCounters.runtimeRootFlushes,
+    dayMetadataWrites: writeAmplificationCounters.dayMetadataWrites,
+    dayMetadataWritesSkipped: writeAmplificationCounters.dayMetadataWritesSkipped,
+  })}`);
+  writeAmplificationCounters.runtimeSnapshotWrites = 0;
+  writeAmplificationCounters.legacyRootSnapshotWrites = 0;
+  writeAmplificationCounters.runtimeRootFlushes = 0;
+  writeAmplificationCounters.dayMetadataWrites = 0;
+  writeAmplificationCounters.dayMetadataWritesSkipped = 0;
+  writeAmplificationCounters.lastLoggedAt = now;
 }
 
 async function getGpsCostOptimizationConfig() {
@@ -223,6 +262,9 @@ async function flushGpsCostBuffer(imei, reason = "interval") {
     const startedAt = Date.now();
     const vehicleRef = db.collection("vehicles").doc(buffer.vehicleId);
     try {
+      const gpsCostConfig = await getGpsCostOptimizationConfig();
+      const useRuntimeLive = shouldUseRuntimeLive(gpsCostConfig.runtimeLive, buffer.imei);
+      const runtimeRef = vehicleRef.collection("positions").doc("_runtime");
       for (const [dayKey, dayRecords] of recordsByDay.entries()) {
         if (!dayRecords.length) continue;
         await updateDailyDiagnostics(
@@ -239,10 +281,31 @@ async function flushGpsCostBuffer(imei, reason = "interval") {
       }
 
       if (dataUsageDelta) {
-        await writeVehicleDataUsageOnly(vehicleRef, buffer.imei, dataUsageDelta, Date.now());
+        if (useRuntimeLive) {
+          await writeVehicleRuntimeDataUsageOnly(
+            vehicleRef,
+            runtimeRef,
+            buffer.vehicleId,
+            buffer.imei,
+            dataUsageDelta,
+            Date.now()
+          );
+        } else {
+          await writeVehicleDataUsageOnly(vehicleRef, buffer.imei, dataUsageDelta, Date.now());
+        }
         dataUsageDelta = null;
         usageWrite = true;
         buffer.counters.usageWrites += 1;
+      }
+
+      if (useRuntimeLive) {
+        await flushVehicleRuntimeToRoot(
+          vehicleRef,
+          runtimeRef,
+          buffer.vehicleId,
+          gpsCostConfig.runtimeLive.rootFlushSeconds,
+          Date.now()
+        );
       }
 
       buffer.lastFlushAt = Date.now();
@@ -1675,6 +1738,182 @@ async function writeVehicleLiveSnapshot(
   }
 }
 
+async function ensureVehicleRuntimeDocument(vehicleRef, runtimeRef, vehicleId) {
+  const existing = runtimeInitializationByVehicle.get(vehicleId);
+  if (existing) return existing;
+
+  const initialization = (async () => {
+    const [vehicleSnap, runtimeSnap] = await Promise.all([
+      vehicleRef.get(),
+      runtimeRef.get(),
+    ]);
+    const vehicleData = vehicleSnap.exists ? vehicleSnap.data() || {} : {};
+    const runtimeData = runtimeSnap.exists ? runtimeSnap.data() || {} : {};
+    const currentBase = Number(runtimeData.mileageBaseKm);
+    if (runtimeSnap.exists && Number.isFinite(currentBase) && currentBase >= 0) return;
+
+    await runtimeRef.set(
+      {
+        schemaVersion: 1,
+        vehicleId,
+        mileageBaseKm: Math.max(0, Number(vehicleData.currentKm || 0)),
+        pendingCurrentKm: Math.max(0, Number(runtimeData.pendingCurrentKm || 0)),
+        createdAt: Date.now(),
+        createdAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  })().catch((error) => {
+    runtimeInitializationByVehicle.delete(vehicleId);
+    throw error;
+  });
+
+  runtimeInitializationByVehicle.set(vehicleId, initialization);
+  return initialization;
+}
+
+async function writeVehicleRuntimeLiveSnapshot(
+  vehicleRef,
+  runtimeRef,
+  vehicleId,
+  imei,
+  latestSnapshot,
+  latestDiagnostics,
+  currentKmIncrement,
+  dataUsageDelta,
+  now
+) {
+  await ensureVehicleRuntimeDocument(vehicleRef, runtimeRef, vehicleId);
+  const updatePayload = {
+    schemaVersion: 1,
+    vehicleId,
+    gpsSnapshot: latestSnapshot,
+    liveDiagnostics: latestDiagnostics,
+    "tracker.imei": imei,
+    "tracker.lastSeenAt": now,
+    "tracker.updatedAt": now,
+    "tracker.protocol": "teltonika_codec_8e_tcp",
+    ...buildGpsDataUsageUpdateFields(dataUsageDelta, now),
+    updatedAt: now,
+    updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  if (currentKmIncrement > 0) {
+    updatePayload.pendingCurrentKm = admin.firestore.FieldValue.increment(currentKmIncrement);
+  }
+
+  try {
+    await runtimeRef.update(updatePayload);
+  } catch (error) {
+    if (error?.code !== 5 && error?.code !== "not-found") throw error;
+    runtimeInitializationByVehicle.delete(vehicleId);
+    await ensureVehicleRuntimeDocument(vehicleRef, runtimeRef, vehicleId);
+    await runtimeRef.update(updatePayload);
+  }
+  writeAmplificationCounters.runtimeSnapshotWrites += 1;
+}
+
+async function writeVehicleRuntimeDataUsageOnly(
+  vehicleRef,
+  runtimeRef,
+  vehicleId,
+  imei,
+  dataUsageDelta,
+  now
+) {
+  const usageUpdateFields = buildGpsDataUsageUpdateFields(dataUsageDelta, now);
+  if (!Object.keys(usageUpdateFields).length) return;
+  await ensureVehicleRuntimeDocument(vehicleRef, runtimeRef, vehicleId);
+  await runtimeRef.update({
+    ...usageUpdateFields,
+    "tracker.imei": imei,
+    "tracker.lastSeenAt": now,
+    "tracker.updatedAt": now,
+    "tracker.protocol": "teltonika_codec_8e_tcp",
+    updatedAt: now,
+    updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+async function flushVehicleRuntimeToRoot(
+  vehicleRef,
+  runtimeRef,
+  vehicleId,
+  rootFlushSeconds,
+  now,
+  force = false
+) {
+  const lastFlushAt = lastRuntimeRootFlushByVehicle.get(vehicleId) || 0;
+  if (!force && lastFlushAt > 0 && now - lastFlushAt < rootFlushSeconds * 1000) {
+    return false;
+  }
+
+  const wrote = await db.runTransaction(async (transaction) => {
+    const [vehicleSnap, runtimeSnap] = await Promise.all([
+      transaction.get(vehicleRef),
+      transaction.get(runtimeRef),
+    ]);
+    if (!runtimeSnap.exists) return false;
+
+    const vehicleData = vehicleSnap.exists ? vehicleSnap.data() || {} : {};
+    const runtimeData = runtimeSnap.data() || {};
+    const pendingCurrentKm = Math.max(0, Number(runtimeData.pendingCurrentKm || 0));
+    const consolidatedKm = computeConsolidatedMileage(
+      vehicleData.currentKm,
+      runtimeData.mileageBaseKm,
+      pendingCurrentKm
+    );
+    const tracker = runtimeData.tracker && typeof runtimeData.tracker === "object"
+      ? runtimeData.tracker
+      : {};
+    const rootPayload = {
+      currentKm: consolidatedKm,
+      ...(runtimeData.gpsDataUsage ? { gpsDataUsage: runtimeData.gpsDataUsage } : {}),
+      "tracker.imei": tracker.imei || "",
+      "tracker.lastSeenAt": Number(tracker.lastSeenAt || now),
+      "tracker.updatedAt": Number(tracker.updatedAt || now),
+      "tracker.protocol": tracker.protocol || "teltonika_codec_8e_tcp",
+      updatedAt: now,
+    };
+
+    if (vehicleSnap.exists) {
+      transaction.update(vehicleRef, rootPayload);
+    } else {
+      transaction.set(
+        vehicleRef,
+        {
+          currentKm: consolidatedKm,
+          ...(runtimeData.gpsDataUsage ? { gpsDataUsage: runtimeData.gpsDataUsage } : {}),
+          tracker: {
+            imei: tracker.imei || "",
+            lastSeenAt: Number(tracker.lastSeenAt || now),
+            updatedAt: Number(tracker.updatedAt || now),
+            protocol: tracker.protocol || "teltonika_codec_8e_tcp",
+          },
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
+    transaction.set(
+      runtimeRef,
+      {
+        mileageBaseKm: consolidatedKm,
+        pendingCurrentKm: 0,
+        lastRootFlushAt: now,
+        lastRootFlushAtServer: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return true;
+  });
+
+  if (wrote) {
+    lastRuntimeRootFlushByVehicle.set(vehicleId, now);
+    writeAmplificationCounters.runtimeRootFlushes += 1;
+  }
+  return wrote;
+}
+
 async function writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now) {
   const usageUpdateFields = buildGpsDataUsageUpdateFields(dataUsageDelta, now);
   if (!Object.keys(usageUpdateFields).length) return;
@@ -1855,6 +2094,8 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
   const gpsCostConfig = await getGpsCostOptimizationConfig();
   const useGpsCostCanary =
     gpsCostConfig.enabled && gpsCostConfig.canaryTrackerImeis.has(String(imei));
+  const useRuntimeLive = shouldUseRuntimeLive(gpsCostConfig.runtimeLive, imei);
+  const runtimeRef = vehicleRef.collection("positions").doc("_runtime");
 
   const validRecords = records
     .filter(isValidGpsRecord)
@@ -1887,8 +2128,14 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
   const hasOdometerInBatch = validRecords.some((record) => getRecordOdometerKm(record) !== null);
 
   if (hasOdometerInBatch && (typeof previousOdometerKm !== "number" || !Number.isFinite(previousOdometerKm))) {
-    const vehicleSnap = await vehicleRef.get().catch(() => null);
-    const snapshotOdometerKm = Number(vehicleSnap?.data()?.gpsSnapshot?.odometerKm);
+    const [vehicleSnap, runtimeSnap] = await Promise.all([
+      vehicleRef.get().catch(() => null),
+      useRuntimeLive ? runtimeRef.get().catch(() => null) : Promise.resolve(null),
+    ]);
+    const snapshotOdometerKm = Number(
+      runtimeSnap?.data()?.gpsSnapshot?.odometerKm
+      ?? vehicleSnap?.data()?.gpsSnapshot?.odometerKm
+    );
     previousOdometerKm = Number.isFinite(snapshotOdometerKm) ? snapshotOdometerKm : null;
   }
 
@@ -1928,21 +2175,31 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
         .doc(dayKey);
 
       const dayChunks = chunkArray(dayRecords, 450);
+      const dayMetadataKey = `${vehicleId}:${dayKey}`;
+      const shouldRefreshDayMetadata = !useRuntimeLive || shouldWriteDayMetadata(
+        lastDayMetadataWriteByVehicle.get(dayMetadataKey),
+        now,
+        gpsCostConfig.runtimeLive.dayMetadataRefreshSeconds
+      );
+      let dayMetadataWritten = false;
 
       for (const dayChunk of dayChunks) {
         const batch = db.batch();
 
-        batch.set(
-          dayRef,
-          {
-            vehicleId,
-            imei,
-            dayKey,
-            updatedAt: now,
-            updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
+        if (shouldRefreshDayMetadata && !dayMetadataWritten) {
+          batch.set(
+            dayRef,
+            {
+              vehicleId,
+              imei,
+              dayKey,
+              updatedAt: now,
+              updatedAtServer: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+          dayMetadataWritten = true;
+        }
 
         for (const record of dayChunk) {
           const ignitionOn =
@@ -1980,6 +2237,13 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
 
         await batch.commit();
       }
+
+      if (dayMetadataWritten) {
+        lastDayMetadataWriteByVehicle.set(dayMetadataKey, now);
+        writeAmplificationCounters.dayMetadataWrites += 1;
+      } else if (useRuntimeLive) {
+        writeAmplificationCounters.dayMetadataWritesSkipped += 1;
+      }
     }
   }
 
@@ -2004,20 +2268,67 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
       (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH ||
       currentKmIncrement > 0;
     if (shouldWriteSnapshot) {
-      await writeVehicleLiveSnapshot(
-        vehicleRef,
-        vehicleId,
-        imei,
-        latestSnapshot,
-        latestDiagnostics,
-        currentKmIncrement,
-        useGpsCostCanary ? null : dataUsageDelta,
-        now
-      );
+      if (useRuntimeLive) {
+        await writeVehicleRuntimeLiveSnapshot(
+          vehicleRef,
+          runtimeRef,
+          vehicleId,
+          imei,
+          latestSnapshot,
+          latestDiagnostics,
+          gpsCostConfig.runtimeLive.dualWriteRoot ? 0 : currentKmIncrement,
+          useGpsCostCanary ? null : dataUsageDelta,
+          now
+        );
+        if (gpsCostConfig.runtimeLive.dualWriteRoot) {
+          await writeVehicleLiveSnapshot(
+            vehicleRef,
+            vehicleId,
+            imei,
+            latestSnapshot,
+            latestDiagnostics,
+            currentKmIncrement,
+            useGpsCostCanary ? null : dataUsageDelta,
+            now
+          );
+          writeAmplificationCounters.legacyRootSnapshotWrites += 1;
+        } else {
+          await flushVehicleRuntimeToRoot(
+            vehicleRef,
+            runtimeRef,
+            vehicleId,
+            gpsCostConfig.runtimeLive.rootFlushSeconds,
+            now
+          );
+        }
+      } else {
+        await writeVehicleLiveSnapshot(
+          vehicleRef,
+          vehicleId,
+          imei,
+          latestSnapshot,
+          latestDiagnostics,
+          currentKmIncrement,
+          useGpsCostCanary ? null : dataUsageDelta,
+          now
+        );
+        writeAmplificationCounters.legacyRootSnapshotWrites += 1;
+      }
       lastSnapshotWriteByVehicle.set(vehicleId, now);
     } else {
       if (!useGpsCostCanary) {
-        await writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now);
+        if (useRuntimeLive) {
+          await writeVehicleRuntimeDataUsageOnly(
+            vehicleRef,
+            runtimeRef,
+            vehicleId,
+            imei,
+            dataUsageDelta,
+            now
+          );
+        } else {
+          await writeVehicleDataUsageOnly(vehicleRef, imei, dataUsageDelta, now);
+        }
       }
     }
   } else {
@@ -2046,6 +2357,18 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
       `[TRACKER OK] imei=${imei} vehicleId=${vehicleId} recordsIn=${validRecords.length} recordsSaved=${recordsForStorage.length}`
     );
   }
+  maybeLogWriteAmplificationCounters(now);
+}
+
+function enqueueTrackerSave(imei, task) {
+  const key = String(imei || "");
+  const previous = saveQueueByImei.get(key) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+  saveQueueByImei.set(key, current);
+  void current.finally(() => {
+    if (saveQueueByImei.get(key) === current) saveQueueByImei.delete(key);
+  });
+  return current;
 }
 
 function sendCodec12CommandToDevice(imei, commandText, meta) {
@@ -2379,7 +2702,10 @@ const server = net.createServer((socket) => {
             socket.write(ack);
 
             const dataUsageDelta = takeSessionDataUsageDelta(session, packet.records.length);
-            void saveRecordsToFirestore(session.imei, packet.records, dataUsageDelta).catch((error) => {
+            void enqueueTrackerSave(
+              session.imei,
+              () => saveRecordsToFirestore(session.imei, packet.records, dataUsageDelta)
+            ).catch((error) => {
               console.error(`[FIRESTORE SAVE ERROR] imei=${session.imei}`, error);
             });
 
