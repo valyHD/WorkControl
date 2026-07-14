@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { loginWithEmail, registerWithEmail } from "../services/authService";
+import {
+  loginWithEmail,
+  registerWithEmail,
+  sendAccountRecoveryEmail,
+} from "../services/authService";
 import { InternalAccessError } from "../services/internalAccessPolicy";
 import { useAuth } from "../../../providers/AuthProvider";
 
@@ -13,6 +17,9 @@ function getAuthErrorMessage(error: unknown, mode: AuthMode): string {
     : "";
   if (code.includes("email-already-in-use")) {
     return "Exista deja un cont cu acest email. Foloseste Conectare.";
+  }
+  if (code.includes("existing-account-password-mismatch")) {
+    return "Acest email are deja un cont Firebase, dar parola introdusa nu corespunde. Recupereaza parola, apoi revino la Cont nou pentru a finaliza profilul WorkControl.";
   }
   if (code.includes("weak-password")) return "Parola trebuie sa aiba minimum 8 caractere.";
   if (code.includes("invalid-email")) return "Adresa de email nu este valida.";
@@ -29,6 +36,9 @@ export default function LoginPage() {
   const [mode, setMode] = useState<AuthMode>("login");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [recoveryMessage, setRecoveryMessage] = useState("");
+  const [sendingRecovery, setSendingRecovery] = useState(false);
 
   if (!loading && user) {
     return <Navigate to="/dashboard" replace />;
@@ -38,6 +48,8 @@ export default function LoginPage() {
     event.preventDefault();
     setSubmitting(true);
     setError("");
+    setRecoveryEmail("");
+    setRecoveryMessage("");
 
     try {
       const formData = new FormData(event.currentTarget);
@@ -71,9 +83,35 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       console.error(err);
+      const code = typeof err === "object" && err !== null && "code" in err
+        ? String(err.code)
+        : "";
+      if (code.includes("existing-account-password-mismatch")) {
+        const existingEmail = "email" in (err as object)
+          ? String((err as { email?: unknown }).email ?? "")
+          : "";
+        setRecoveryEmail(existingEmail);
+      }
       setError(getAuthErrorMessage(err, mode));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleRecovery() {
+    if (!recoveryEmail || sendingRecovery) return;
+    setSendingRecovery(true);
+    setRecoveryMessage("");
+    try {
+      await sendAccountRecoveryEmail(recoveryEmail);
+      setRecoveryMessage(
+        "Am trimis emailul de recuperare. Dupa schimbarea parolei, revino aici si apasa din nou Creeaza cont."
+      );
+    } catch (err) {
+      console.error(err);
+      setError("Emailul de recuperare nu a putut fi trimis. Incearca din nou.");
+    } finally {
+      setSendingRecovery(false);
     }
   }
 
@@ -97,6 +135,8 @@ export default function LoginPage() {
             onClick={() => {
               setMode("login");
               setError("");
+              setRecoveryEmail("");
+              setRecoveryMessage("");
             }}
           >
             Conectare
@@ -109,6 +149,8 @@ export default function LoginPage() {
             onClick={() => {
               setMode("register");
               setError("");
+              setRecoveryEmail("");
+              setRecoveryMessage("");
             }}
           >
             Cont nou
@@ -178,6 +220,23 @@ export default function LoginPage() {
           )}
 
           {error && <div className="tool-message">{error}</div>}
+
+          {recoveryEmail && (
+            <button
+              className="secondary-btn auth-recovery-btn"
+              type="button"
+              disabled={sendingRecovery}
+              onClick={() => void handleRecovery()}
+            >
+              {sendingRecovery ? "Se trimite..." : "Trimite link pentru recuperarea parolei"}
+            </button>
+          )}
+
+          {recoveryMessage && (
+            <div className="tool-message success-message" role="status">
+              {recoveryMessage}
+            </div>
+          )}
 
           <div className="tool-form-actions">
             <button className="primary-btn" type="submit" disabled={submitting}>

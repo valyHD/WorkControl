@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   deleteUser,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
@@ -45,6 +46,23 @@ export type AppAuthUser = {
 let stopActivePresenceSession: ((writeOffline?: boolean) => void) | null = null;
 let registrationBarrier: Promise<void> | null = null;
 
+export class ExistingAuthAccountError extends Error {
+  readonly code = "auth/existing-account-password-mismatch";
+  readonly email: string;
+
+  constructor(email: string) {
+    super("Exista deja un cont Firebase pentru acest email, dar parola introdusa nu corespunde.");
+    this.name = "ExistingAuthAccountError";
+    this.email = email;
+  }
+}
+
+function getAuthErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+}
+
 export async function registerWithEmail(params: {
   fullName: string;
   email: string;
@@ -67,11 +85,21 @@ export async function registerWithEmail(params: {
       createdUser = await createUserWithEmailAndPassword(auth, email, params.password);
       ownsNewAuthUser = true;
     } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error
-        ? String(error.code)
-        : "";
+      const code = getAuthErrorCode(error);
       if (!code.includes("email-already-in-use")) throw error;
-      createdUser = await signInWithEmailAndPassword(auth, email, params.password);
+      try {
+        createdUser = await signInWithEmailAndPassword(auth, email, params.password);
+      } catch (signInError) {
+        const signInCode = getAuthErrorCode(signInError);
+        if (
+          signInCode.includes("invalid-credential") ||
+          signInCode.includes("wrong-password") ||
+          signInCode.includes("invalid-login-credentials")
+        ) {
+          throw new ExistingAuthAccountError(email);
+        }
+        throw signInError;
+      }
     }
     const registerProfile = httpsCallable<
       { fullName: string },
@@ -92,6 +120,12 @@ export async function registerWithEmail(params: {
     releaseBarrier();
     registrationBarrier = null;
   }
+}
+
+export async function sendAccountRecoveryEmail(email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Adresa de email este obligatorie.");
+  await sendPasswordResetEmail(auth, normalizedEmail);
 }
 
 export async function loginWithEmail(email: string, password: string) {

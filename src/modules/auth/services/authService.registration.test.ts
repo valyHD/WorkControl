@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const firebaseAuth = vi.hoisted(() => ({
   createUserWithEmailAndPassword: vi.fn(),
+  sendPasswordResetEmail: vi.fn(),
   signInWithEmailAndPassword: vi.fn(),
   deleteUser: vi.fn(),
   signOut: vi.fn(),
@@ -28,13 +29,47 @@ vi.mock("../../audit/services/auditLogService", () => ({
   createAuditLog: vi.fn(),
 }));
 
-import { registerWithEmail } from "./authService";
+import {
+  registerWithEmail,
+  sendAccountRecoveryEmail,
+} from "./authService";
 
 describe("registerWithEmail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     firebaseAuth.deleteUser.mockResolvedValue(undefined);
     firebaseAuth.signOut.mockResolvedValue(undefined);
+    firebaseAuth.sendPasswordResetEmail.mockResolvedValue(undefined);
+  });
+
+  it("offers safe recovery when an orphan Auth account has a different password", async () => {
+    firebaseAuth.createUserWithEmailAndPassword.mockRejectedValue({
+      code: "auth/email-already-in-use",
+    });
+    firebaseAuth.signInWithEmailAndPassword.mockRejectedValue({
+      code: "auth/invalid-credential",
+    });
+
+    await expect(registerWithEmail({
+      fullName: "Cont Vechi",
+      email: "OLD@example.test",
+      password: "different123",
+    })).rejects.toMatchObject({
+      code: "auth/existing-account-password-mismatch",
+      email: "old@example.test",
+    });
+
+    expect(callable).not.toHaveBeenCalled();
+    expect(firebaseAuth.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it("sends recovery to the normalized account email", async () => {
+    await sendAccountRecoveryEmail(" OLD@example.test ");
+
+    expect(firebaseAuth.sendPasswordResetEmail).toHaveBeenCalledWith(
+      {},
+      "old@example.test"
+    );
   });
 
   it("repairs an existing Auth account without deleting it", async () => {

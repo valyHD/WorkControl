@@ -7,6 +7,7 @@ import LoginPage from "./LoginPage";
 const authService = vi.hoisted(() => ({
   loginWithEmail: vi.fn(),
   registerWithEmail: vi.fn(),
+  sendAccountRecoveryEmail: vi.fn(),
 }));
 
 vi.mock("../services/authService", () => authService);
@@ -18,8 +19,38 @@ describe("LoginPage account flows", () => {
   beforeEach(() => {
     authService.loginWithEmail.mockReset();
     authService.registerWithEmail.mockReset();
+    authService.sendAccountRecoveryEmail.mockReset();
     authService.loginWithEmail.mockResolvedValue({});
     authService.registerWithEmail.mockResolvedValue({});
+    authService.sendAccountRecoveryEmail.mockResolvedValue(undefined);
+  });
+
+  it("offers password recovery for an existing Auth account without taking it over", async () => {
+    const user = userEvent.setup();
+    authService.registerWithEmail.mockRejectedValue({
+      code: "auth/existing-account-password-mismatch",
+      email: "old@example.test",
+    });
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Cont nou" }));
+    await user.type(screen.getByLabelText("Nume complet"), "Cont Vechi");
+    await user.type(screen.getByLabelText("Email"), "old@example.test");
+    await user.type(screen.getByLabelText("Parola"), "different123");
+    await user.type(screen.getByLabelText("Confirma parola"), "different123");
+    await user.click(screen.getByRole("button", { name: "Creeaza cont" }));
+
+    expect(await screen.findByText(/are deja un cont Firebase/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Trimite link pentru recuperarea parolei",
+    }));
+
+    expect(authService.sendAccountRecoveryEmail).toHaveBeenCalledWith("old@example.test");
+    expect(await screen.findByText(/Am trimis emailul de recuperare/)).toBeInTheDocument();
   });
 
   it("creates a new account only after validating the complete registration form", async () => {

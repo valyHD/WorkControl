@@ -61,6 +61,12 @@
   outline: 3px solid color-mix(in srgb, var(--primary, #2563eb) 28%, transparent);
   outline-offset: 1px;
 }
+.auth-recovery-btn {
+  width: 100%;
+  min-height: 46px;
+  white-space: normal;
+  line-height: 1.35;
+}
 
 /* ================================================================
    MAP
