@@ -8,6 +8,7 @@ import {
 } from "react";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
+import { isGlobalAdminProfile } from "../lib/firebase/companyAccess";
 import {
   logoutUser,
   observeAuth,
@@ -68,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             primaryCompanyName: data.primaryCompanyName || "",
             role: data.role,
             active: data.active === true,
-            globalAdmin: data.role === "admin" && data.globalAdmin === true,
+            globalAdmin: isGlobalAdminProfile(data),
           });
 
           setRole(data.role ?? "");
@@ -123,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           primaryCompanyName: data.primaryCompanyName || "",
           role: data.role,
           active: data.active === true,
-          globalAdmin: data.role === "admin" && data.globalAdmin === true,
+          globalAdmin: isGlobalAdminProfile(data),
         };
 
         if (

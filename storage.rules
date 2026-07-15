@@ -23,9 +23,22 @@ service firebase.storage {
         currentUser().get('accessStatus', '') == 'active';
     }
 
+    function hasCompanyScope(data) {
+      return (
+        data.get('primaryCompanyId', '') is string &&
+        data.get('primaryCompanyId', '').size() > 0
+      ) || (
+        data.get('companyIds', []) is list &&
+        data.get('companyIds', []).size() > 0
+      );
+    }
+
     function globalAdmin() {
       return activeUser() && currentUser().get('role', '') == 'admin' &&
-        currentUser().get('globalAdmin', false) == true;
+        (
+          currentUser().get('globalAdmin', false) == true ||
+          !hasCompanyScope(currentUser())
+        );
     }
 
     function companyIds() {
@@ -42,7 +55,7 @@ service firebase.storage {
     }
 
     function userCompanyAllowed(userId) {
-      return userExists(userId) &&
+      return globalAdmin() || userExists(userId) &&
         userDoc(userId).data.get('companyIds', []).hasAny(companyIds());
     }
 

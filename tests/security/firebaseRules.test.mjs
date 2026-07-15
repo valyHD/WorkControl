@@ -33,6 +33,14 @@ const profiles = {
     primaryCompanyId: "company-a",
     companyIds: ["company-a", "company-b"],
   },
+  legacyAdmin: {
+    uid: "legacy-admin",
+    fullName: "Legacy Admin",
+    role: "admin",
+    active: true,
+    accessStatus: "active",
+    companyIds: [],
+  },
   adminA: {
     uid: "admin-a",
     fullName: "Admin A",
@@ -395,6 +403,12 @@ test("global admin has explicit cross-company access while company managers do n
   await assertSucceeds(getDocs(collection(firestore("global"), "projects")));
   await assertFails(getDoc(doc(firestore("manager-a"), "vehicles", "vehicle-b")));
   await assertFails(getDocs(collection(firestore("manager-a"), "projects")));
+});
+
+test("legacy admin without company scope keeps global access", async () => {
+  await assertSucceeds(getDocs(collection(firestore("legacy-admin"), "users")));
+  await assertSucceeds(getDoc(doc(firestore("legacy-admin"), "vehicles", "vehicle-b")));
+  await assertSucceeds(getDocs(collection(firestore("legacy-admin"), "projects")));
 });
 
 test("Storage enforces owner, company, type and size", async () => {

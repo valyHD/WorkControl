@@ -27,9 +27,22 @@ service cloud.firestore {
       return activeUser() ? userData().get('role', '') : '';
     }
 
+    function hasCompanyScope(data) {
+      return (
+        data.get('primaryCompanyId', '') is string &&
+        data.get('primaryCompanyId', '').size() > 0
+      ) || (
+        data.get('companyIds', []) is list &&
+        data.get('companyIds', []).size() > 0
+      );
+    }
+
     function globalAdmin() {
       return activeUser() && userData().get('role', '') == 'admin' &&
-        userData().get('globalAdmin', false) == true;
+        (
+          userData().get('globalAdmin', false) == true ||
+          !hasCompanyScope(userData())
+        );
     }
 
     function sameCompany(companyId) {
@@ -51,7 +64,7 @@ service cloud.firestore {
     function sharesUserCompany(data) {
       return activeUser() &&
         (
-          (userData().get('role', '') == 'admin' && userData().get('globalAdmin', false) == true) ||
+          globalAdmin() ||
           data.get('companyIds', []) is list &&
           data.get('companyIds', []).hasAny(userData().get('companyIds', []))
         );
