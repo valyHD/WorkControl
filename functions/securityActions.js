@@ -74,7 +74,7 @@ const NOTIFICATION_WINDOW_MS = 60 * 1000;
 const NOTIFICATION_MAX_PER_WINDOW = 20;
 const ALLOWED_VEHICLE_COMMANDS = new Set(['pulse_dout1', 'allow_start', 'block_start']);
 const AUDIT_ONLY_NOTIFICATION_EVENTS = new Set(['user_site_entered']);
-const MAX_ACTIVE_TIMESHEET_MS = 18 * 60 * 60 * 1000;
+const MAX_ACTIVE_TIMESHEET_MS = 12 * 60 * 60 * 1000;
 
 function cleanText(value, maxLength = 200) {
   return String(value ?? '').trim().slice(0, maxLength);
@@ -927,8 +927,11 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       .get();
     const lockRef = db.collection('activeTimesheets').doc(actor.uid);
     const createdRef = db.collection('timesheets').doc();
-    const now = Number.isFinite(Number(input.occurredAt))
-      ? Math.min(Date.now(), Math.max(Date.now() - 24 * 60 * 60 * 1000, Number(input.occurredAt)))
+    const startSource = cleanText(input.startSource, 20) === 'android' ? 'android' : 'web';
+    const clientOccurredAt = Number(input.occurredAt);
+    const allowClientOccurredAt = input.offlineReplay === true || startSource === 'android';
+    const now = allowClientOccurredAt && Number.isFinite(clientOccurredAt)
+      ? Math.min(Date.now(), Math.max(Date.now() - 24 * 60 * 60 * 1000, clientOccurredAt))
       : Date.now();
     const parts = getBucharestDateParts(now);
     const project = projectSnap.data() || {};
@@ -1026,7 +1029,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         workedMinutes: 0,
         startLocation: normalizeLocation(input.startLocation),
         stopLocation: null,
-        startSource: cleanText(input.startSource, 20) === 'android' ? 'android' : 'web',
+        startSource,
         stopSource: '',
         workDate: parts.workDate,
         yearMonth: parts.yearMonth,

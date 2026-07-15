@@ -151,7 +151,7 @@ export function isStaleActiveTimesheet(item: TimesheetItem | null | undefined, n
   if (!item || item.status !== "activ") return false;
   const todayKey = getLocalDateKey(nowTs);
   if (!item.startAt) return isValidDateKey(item.workDate) && item.workDate < todayKey;
-  if (nowTs - item.startAt <= 18 * 60 * 60 * 1000) return false;
+  if (nowTs - item.startAt <= 12 * 60 * 60 * 1000) return false;
   return (
     getLocalDateKey(item.startAt) !== todayKey ||
     (isValidDateKey(item.workDate) && item.workDate < todayKey)

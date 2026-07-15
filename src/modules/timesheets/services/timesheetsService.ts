@@ -328,6 +328,7 @@ export type StartTimesheetParams = {
   startPolicyFlag?: string;
   startExpectedTime?: string;
   occurredAt?: number;
+  offlineReplay?: boolean;
 };
 
 export type StartTimesheetResult = {
@@ -352,6 +353,7 @@ export async function startTimesheetDetailed(
       startPolicyFlag?: string;
       startExpectedTime?: string;
       occurredAt?: number;
+      offlineReplay?: boolean;
       startSource: "web";
     },
     { timesheetId: string; duplicate: boolean }
@@ -363,42 +365,46 @@ export async function startTimesheetDetailed(
     startExplanation: params.startExplanation,
     startPolicyFlag: params.startPolicyFlag,
     startExpectedTime: params.startExpectedTime ?? "",
-    occurredAt: params.occurredAt,
+    occurredAt: params.offlineReplay === true ? params.occurredAt : undefined,
+    offlineReplay: params.offlineReplay === true ? true : undefined,
     startSource: "web",
   });
   const timesheetId = response.data.timesheetId;
   if (!timesheetId) throw new Error("Pontajul nu a returnat un identificator valid.");
+  const duplicate = response.data.duplicate === true;
 
-  await dispatchNotificationEvent({
-    module: "timesheets",
-    eventType: "timesheet_started",
-    entityId: timesheetId,
-    title: "Pontaj pornit",
-    message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
-    directUserId: params.userId,
-    ownerUserId: params.userId,
-    actorUserId: params.userId,
-    actorUserName: params.userName,
-    actorUserThemeKey: params.userThemeKey ?? null,
-    metadata: {
-      fieldsText: [
-        `User: ${params.userName}`,
-        `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
-        `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
-        `Explicatie start: ${params.startExplanation || "-"}`,
-        `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
-      ],
-      fieldsCount: 5,
-    },
-    companyId,
-    idempotencyKey: `timesheet-started-${timesheetId}`,
-  });
+  if (!duplicate) {
+    await dispatchNotificationEvent({
+      module: "timesheets",
+      eventType: "timesheet_started",
+      entityId: timesheetId,
+      title: "Pontaj pornit",
+      message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
+      directUserId: params.userId,
+      ownerUserId: params.userId,
+      actorUserId: params.userId,
+      actorUserName: params.userName,
+      actorUserThemeKey: params.userThemeKey ?? null,
+      metadata: {
+        fieldsText: [
+          `User: ${params.userName}`,
+          `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
+          `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
+          `Explicatie start: ${params.startExplanation || "-"}`,
+          `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
+        ],
+        fieldsCount: 5,
+      },
+      companyId,
+      idempotencyKey: `timesheet-started-${timesheetId}`,
+    });
+  }
 
   notifyTimesheetsChanged({ userId: params.userId, reason: "start" });
 
   return {
     timesheetId,
-    duplicate: response.data.duplicate === true,
+    duplicate,
   };
 }
 

@@ -6378,19 +6378,22 @@ li,
   }
 }
 .app-update-banner {
-  position: sticky;
-  top: 0;
-  z-index: 45;
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  z-index: 260;
+  width: min(720px, calc(100vw - 32px));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin: 12px clamp(14px, 2vw, 24px) 0;
+  margin: 0;
   padding: 12px 14px;
   border: 1px solid rgba(37, 99, 235, 0.32);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 92%, #dbeafe);
   box-shadow: var(--shadow-sm);
+  transform: translateX(-50%);
 }
 
 .app-update-banner div {

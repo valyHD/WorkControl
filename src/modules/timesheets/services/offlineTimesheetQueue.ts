@@ -113,6 +113,7 @@ export function flushOfflineTimesheetQueue(userId: string) {
         const result = await startTimesheetDetailed({
           ...action.payload,
           occurredAt: action.occurredAt,
+          offlineReplay: true,
         });
         if (result.duplicate) {
           const active = await getActiveTimesheetForUser(action.payload.userId);

@@ -57,6 +57,12 @@ describe("offline timesheet queue", () => {
 
     await expect(flushOfflineTimesheetQueue("user-1")).resolves.toBe(2);
     expect(serviceMocks.startTimesheetDetailed).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.startTimesheetDetailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: startAction.occurredAt,
+        offlineReplay: true,
+      })
+    );
     expect(serviceMocks.stopTimesheet).toHaveBeenCalledWith(expect.objectContaining({ timesheetId: "timesheet-1" }));
     expect(serviceMocks.getActiveTimesheetForUser).not.toHaveBeenCalled();
     expect(getOfflineTimesheetQueue("user-1")).toEqual([]);

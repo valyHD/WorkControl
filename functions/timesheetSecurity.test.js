@@ -248,6 +248,94 @@ describe("timesheet secure start", () => {
     assert.equal(db.store.get(`timesheets/${result.timesheetId}`).workDate, "2026-07-15");
   });
 
+  test("uses server time for live web starts when the client sends a stale timestamp", async () => {
+    const now = new Date("2026-07-15T07:18:39+03:00").getTime();
+    const staleClientTime = new Date("2026-07-14T18:59:41+03:00").getTime();
+    const { db, handlers } = createFixture();
+
+    const result = await withMockedNow(now, () =>
+      handlers.startTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          companyId: "company-1",
+          projectId: "project-1",
+          startLocation: { label: "Splaiul Unirii" },
+          occurredAt: staleClientTime,
+          startSource: "web",
+        },
+      })
+    );
+
+    const created = db.store.get(`timesheets/${result.timesheetId}`);
+    assert.equal(created.workDate, "2026-07-15");
+    assert.equal(created.startAt, now);
+    assert.equal(created.startSource, "web");
+  });
+
+  test("keeps the queued offline start timestamp only when offline replay is explicit", async () => {
+    const now = new Date("2026-07-15T12:00:00+03:00").getTime();
+    const offlineStart = new Date("2026-07-14T18:59:41+03:00").getTime();
+    const { db, handlers } = createFixture();
+
+    const result = await withMockedNow(now, () =>
+      handlers.startTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          companyId: "company-1",
+          projectId: "project-1",
+          startLocation: { label: "Offline" },
+          occurredAt: offlineStart,
+          offlineReplay: true,
+          startSource: "web",
+        },
+      })
+    );
+
+    const created = db.store.get(`timesheets/${result.timesheetId}`);
+    assert.equal(created.workDate, "2026-07-14");
+    assert.equal(created.startAt, offlineStart);
+  });
+
+  test("replaces a previous-day active timesheet after twelve hours", async () => {
+    const now = new Date("2026-07-15T07:18:39+03:00").getTime();
+    const previousEveningStart = new Date("2026-07-14T18:59:41+03:00").getTime();
+    const { db, handlers } = createFixture({
+      "timesheets/previous-evening-active": {
+        companyId: "company-1",
+        userId: "user-test",
+        userName: "Utilizator Test",
+        projectId: "project-1",
+        projectName: "Service si Mentenanta",
+        status: "activ",
+        startAt: previousEveningStart,
+        stopAt: null,
+        workedMinutes: 0,
+        workDate: "2026-07-14",
+      },
+      "activeTimesheets/user-test": {
+        companyId: "company-1",
+        userId: "user-test",
+        timesheetId: "previous-evening-active",
+      },
+    });
+
+    const result = await withMockedNow(now, () =>
+      handlers.startTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          companyId: "company-1",
+          projectId: "project-1",
+          startLocation: { label: "Splaiul Unirii" },
+          startSource: "web",
+        },
+      })
+    );
+
+    assert.equal(result.duplicate, false);
+    assert.equal(db.store.get("timesheets/previous-evening-active").status, "neinchis");
+    assert.equal(db.store.get(`timesheets/${result.timesheetId}`).workDate, "2026-07-15");
+  });
+
   test("closes every stale active timesheet returned by the active query", async () => {
     const now = new Date("2026-07-15T12:36:00+03:00").getTime();
     const staleStart = new Date("2026-07-14T07:18:00+03:00").getTime();

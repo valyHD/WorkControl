@@ -51,6 +51,7 @@ import {
   getTimesheetsList,
   getTimesheetsManagementList,
   startTimesheet,
+  startTimesheetDetailed,
   stopTimesheet,
 } from "./timesheetsService";
 import type { TimesheetItem } from "../../../types/timesheet";
@@ -118,6 +119,7 @@ describe("timesheetsService critical rules", () => {
     ).resolves.toBe("active-timesheet");
     expect(callableMocks.startTimesheetSecure).toHaveBeenCalledTimes(1);
     expect(firestoreMocks.addDoc).not.toHaveBeenCalled();
+    expect(notificationMocks.dispatchNotificationEvent).not.toHaveBeenCalled();
   });
 
   it("stores the elapsed minutes when a timesheet is stopped", async () => {
@@ -151,6 +153,31 @@ describe("timesheetsService critical rules", () => {
     expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
   });
 
+  it("ignores client start timestamps for live web starts", async () => {
+    callableMocks.startTimesheetSecure.mockResolvedValue({
+      data: { timesheetId: "live-timesheet", duplicate: false },
+    });
+    notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
+
+    const staleClientTime = Date.parse("2026-07-14T18:59:41.000+03:00");
+    await startTimesheet({
+      userId: "user-test",
+      userName: "Utilizator Test",
+      projectId: "project-test",
+      projectCode: "",
+      projectName: "Proiect Test",
+      startLocation: { lat: null, lng: null, label: "Live" },
+      occurredAt: staleClientTime,
+    });
+
+    expect(callableMocks.startTimesheetSecure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: undefined,
+        offlineReplay: undefined,
+      })
+    );
+  });
+
   it("preserves valid offline start and stop timestamps", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-10T10:00:00.000Z"));
@@ -163,7 +190,7 @@ describe("timesheetsService critical rules", () => {
     notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
     const startedAt = Date.parse("2026-07-10T08:15:00.000Z");
-    await startTimesheet({
+    await startTimesheetDetailed({
       userId: "user-test",
       userName: "Utilizator Test",
       projectId: "project-test",
@@ -171,10 +198,12 @@ describe("timesheetsService critical rules", () => {
       projectName: "Proiect Test",
       startLocation: { lat: null, lng: null, label: "Offline" },
       occurredAt: startedAt,
+      offlineReplay: true,
     });
     expect(callableMocks.startTimesheetSecure).toHaveBeenCalledWith(
       expect.objectContaining({
         occurredAt: startedAt,
+        offlineReplay: true,
       })
     );
 
