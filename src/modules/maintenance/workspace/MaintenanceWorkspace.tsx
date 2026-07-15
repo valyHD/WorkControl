@@ -413,6 +413,19 @@ function buildAddressLiftGroups(client: MaintenanceClient): AddressLiftGroup[] {
   return groups;
 }
 
+function isMissingGmailClientIdError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.includes("VITE_GOOGLE_CLIENT_ID");
+}
+
+function getGmailAuthorizationErrorMessage(error: unknown) {
+  if (isMissingGmailClientIdError(error)) {
+    return "Autorizarea Gmail nu este configurata in build. Lipseste VITE_GOOGLE_CLIENT_ID; seteaza client ID-ul Google OAuth si redeploy.";
+  }
+
+  return "Autorizarea Gmail a fost blocata sau nu a putut porni. Pe mobil foloseste Autentificare mobil si, daca browserul blocheaza redirectarea, apasa Deschide Google.";
+}
+
 export default function MaintenanceWorkspace() {
   const { role, user } = useAuth();
   const navigate = useNavigate();
@@ -473,6 +486,7 @@ export default function MaintenanceWorkspace() {
   const [gmailAuthLoading, setGmailAuthLoading] = useState(false);
   const [gmailAuthReady, setGmailAuthReady] = useState(false);
   const [gmailRedirectRequired, setGmailRedirectRequired] = useState(false);
+  const [gmailRedirectUrl, setGmailRedirectUrl] = useState("");
   const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
   const shouldLoadBranding = activeMaintenanceTab === "report" || activeMaintenanceTab === "companies";
   const shouldLoadReportOverview = ["dashboard", "history", "checks"].includes(activeMaintenanceTab);
@@ -1385,11 +1399,20 @@ export default function MaintenanceWorkspace() {
       setReportError("Completeaza contul Gmail expeditor.");
       return;
     }
-    saveGmailReportDraftForRedirect(senderEmail);
-    setGmailRedirectRequired(false);
-    setReportError("");
-    setReportMessage("Se deschide autorizarea Gmail in aceeasi fereastra...");
-    startGmailRedirectAuthorization(senderEmail);
+    try {
+      saveGmailReportDraftForRedirect(senderEmail);
+      const redirectUrl = startGmailRedirectAuthorization(senderEmail);
+      setGmailRedirectUrl(redirectUrl);
+      setGmailRedirectRequired(false);
+      setReportError("");
+      setReportMessage("Se deschide autorizarea Gmail. Daca ramai in pagina, apasa Deschide Google.");
+    } catch (err) {
+      console.error(err);
+      setGmailRedirectUrl("");
+      setGmailRedirectRequired(false);
+      setReportMessage("");
+      setReportError(getGmailAuthorizationErrorMessage(err));
+    }
   }
 
   function handleGmailSenderEmailChange(value: string) {
@@ -1397,6 +1420,7 @@ export default function MaintenanceWorkspace() {
     setGmailAccessToken("");
     setGmailAuthorizedEmail("");
     setGmailRedirectRequired(false);
+    setGmailRedirectUrl("");
   }
 
   async function authorizeGmailSender(): Promise<string> {
@@ -1419,10 +1443,9 @@ export default function MaintenanceWorkspace() {
       return token;
     } catch (err) {
       console.error(err);
-      setGmailRedirectRequired(true);
-      setReportError(
-        "Autorizarea Gmail prin popup a fost blocata sau refuzata. Foloseste autentificarea pentru mobil in aceeasi fereastra."
-      );
+      setGmailRedirectUrl("");
+      setGmailRedirectRequired(!isMissingGmailClientIdError(err));
+      setReportError(getGmailAuthorizationErrorMessage(err));
       setReportMessage("");
       return "";
     } finally {
@@ -1753,7 +1776,21 @@ export default function MaintenanceWorkspace() {
             )}
           </div>
         )}
-        {reportMessage && <div className="tool-message success-message">{reportMessage}</div>}
+        {reportMessage && (
+          <div className="tool-message success-message maintenance-gmail-auth-message">
+            <span>{reportMessage}</span>
+            {gmailRedirectUrl ? (
+              <a
+                className="secondary-btn"
+                data-assistant-action="maintenance-open-gmail-auth"
+                href={gmailRedirectUrl}
+                onClick={() => saveGmailReportDraftForRedirect()}
+              >
+                Deschide Google
+              </a>
+            ) : null}
+          </div>
+        )}
 
         {lastGeneratedReport && (
           <div className="panel maintenance-generated-report">

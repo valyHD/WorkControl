@@ -26,6 +26,10 @@ export type GmailRedirectAuthorization = {
   expiresIn: number | null;
 };
 
+export type GmailRedirectAuthorizationRequest = GmailRedirectState & {
+  url: string;
+};
+
 type GoogleIdentityServices = {
   accounts: {
     oauth2: {
@@ -157,18 +161,10 @@ export function shouldUseGmailRedirectAuthorization(): boolean {
   return isMobileBrowser || isNarrowViewport;
 }
 
-export function startGmailRedirectAuthorization(senderEmail: string): void {
+export function createGmailRedirectAuthorizationRequest(senderEmail: string): GmailRedirectAuthorizationRequest {
   const clientId = getGoogleClientId();
   const redirectUri = `${window.location.origin}${window.location.pathname}${window.location.search}`;
   const state = `wc_gmail_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const redirectState: GmailRedirectState = {
-    state,
-    senderEmail,
-    redirectUri,
-    createdAt: Date.now(),
-  };
-  window.sessionStorage.setItem(GMAIL_REDIRECT_STATE_KEY, JSON.stringify(redirectState));
-
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -182,7 +178,30 @@ export function startGmailRedirectAuthorization(senderEmail: string): void {
     params.set("login_hint", senderEmail);
   }
 
-  window.location.assign(`${GOOGLE_OAUTH_AUTHORIZE_URL}?${params.toString()}`);
+  return {
+    state,
+    senderEmail,
+    redirectUri,
+    createdAt: Date.now(),
+    url: `${GOOGLE_OAUTH_AUTHORIZE_URL}?${params.toString()}`,
+  };
+}
+
+export function storeGmailRedirectAuthorizationRequest(request: GmailRedirectAuthorizationRequest): void {
+  const redirectState: GmailRedirectState = {
+    state: request.state,
+    senderEmail: request.senderEmail,
+    redirectUri: request.redirectUri,
+    createdAt: request.createdAt,
+  };
+  window.sessionStorage.setItem(GMAIL_REDIRECT_STATE_KEY, JSON.stringify(redirectState));
+}
+
+export function startGmailRedirectAuthorization(senderEmail: string): string {
+  const request = createGmailRedirectAuthorizationRequest(senderEmail);
+  storeGmailRedirectAuthorizationRequest(request);
+  window.location.href = request.url;
+  return request.url;
 }
 
 export function consumeGmailRedirectAuthorization(): GmailRedirectAuthorization | null {

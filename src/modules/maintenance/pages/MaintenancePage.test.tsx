@@ -40,7 +40,7 @@ const gmailMocks = vi.hoisted(() => ({
   preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
   requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
   sendGmailMessageWithPdfAttachment: vi.fn(),
-  startGmailRedirectAuthorization: vi.fn(),
+  startGmailRedirectAuthorization: vi.fn(() => "https://accounts.google.com/o/oauth2/v2/auth?test=1"),
 }));
 
 vi.mock("../../../providers/AuthProvider", () => ({
@@ -84,6 +84,9 @@ describe("MaintenancePage client form", () => {
     gmailMocks.consumeGmailRedirectAuthorization.mockReturnValue(null);
     gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
     gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
+    gmailMocks.startGmailRedirectAuthorization.mockReturnValue(
+      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
+    );
   });
 
   it("uses one bounded overview subscription instead of one listener per client", async () => {
@@ -167,7 +170,29 @@ describe("MaintenancePage client form", () => {
     await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
 
     expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(await screen.findByRole("link", { name: "Deschide Google" })).toHaveAttribute(
+      "href",
+      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
+    );
     expect(gmailMocks.requestGmailAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("shows a clear setup error when Gmail OAuth client id is missing", async () => {
+    gmailMocks.startGmailRedirectAuthorization.mockImplementation(() => {
+      throw new Error("Lipseste VITE_GOOGLE_CLIENT_ID din .env.");
+    });
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
+
+    expect(await screen.findByText(/Lipseste VITE_GOOGLE_CLIENT_ID/)).toBeInTheDocument();
+    expect(screen.queryByText("Se deschide autorizarea Gmail in aceeasi fereastra...")).not.toBeInTheDocument();
   });
 
   it("shows a mobile redirect action when Gmail popup authorization is blocked", async () => {
