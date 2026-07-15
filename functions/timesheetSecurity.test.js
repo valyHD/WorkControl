@@ -207,6 +207,97 @@ describe("timesheet secure start", () => {
     assert.equal(db.store.get("activeTimesheets/user-test").timesheetId, result.timesheetId);
   });
 
+  test("marks a legacy active timesheet with only workDate as incomplete", async () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const { db, handlers } = createFixture({
+      "timesheets/legacy-active": {
+        companyId: "company-1",
+        userId: "user-test",
+        userName: "Utilizator Test",
+        projectId: "project-1",
+        projectName: "Service si Mentenanta",
+        status: "activ",
+        stopAt: null,
+        workedMinutes: 0,
+        workDate: "2026-07-14",
+        yearMonth: "2026-07",
+        weekKey: "2026-W29",
+      },
+      "activeTimesheets/user-test": {
+        companyId: "company-1",
+        userId: "user-test",
+        timesheetId: "legacy-active",
+      },
+    });
+
+    const result = await withMockedNow(now, () =>
+      handlers.startTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          companyId: "company-1",
+          projectId: "project-1",
+          startLocation: { label: "Bucuresti" },
+          occurredAt: now,
+        },
+      })
+    );
+
+    assert.equal(result.duplicate, false);
+    assert.notEqual(result.timesheetId, "legacy-active");
+    assert.equal(db.store.get("timesheets/legacy-active").status, "neinchis");
+    assert.equal(db.store.get(`timesheets/${result.timesheetId}`).workDate, "2026-07-15");
+  });
+
+  test("closes every stale active timesheet returned by the active query", async () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const staleStart = new Date("2026-07-14T07:18:00+03:00").getTime();
+    const { db, handlers } = createFixture({
+      "timesheets/stale-active-a": {
+        companyId: "company-1",
+        userId: "user-test",
+        projectId: "project-1",
+        projectName: "Service si Mentenanta",
+        status: "activ",
+        startAt: staleStart,
+        stopAt: null,
+        workedMinutes: 0,
+        workDate: "2026-07-14",
+      },
+      "timesheets/stale-active-b": {
+        companyId: "company-1",
+        userId: "user-test",
+        projectId: "project-1",
+        projectName: "Service si Mentenanta",
+        status: "activ",
+        stopAt: null,
+        workedMinutes: 0,
+        workDate: "2026-07-13",
+      },
+      "activeTimesheets/user-test": {
+        companyId: "company-1",
+        userId: "user-test",
+        timesheetId: "stale-active-a",
+      },
+    });
+
+    const result = await withMockedNow(now, () =>
+      handlers.startTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          companyId: "company-1",
+          projectId: "project-1",
+          startLocation: { label: "Bucuresti" },
+          occurredAt: now,
+        },
+      })
+    );
+
+    assert.equal(result.duplicate, false);
+    assert.equal(db.store.get("timesheets/stale-active-a").status, "neinchis");
+    assert.equal(db.store.get("timesheets/stale-active-b").status, "neinchis");
+    assert.equal(db.store.get(`timesheets/${result.timesheetId}`).status, "activ");
+  });
+
   test("keeps a legitimate overnight active timesheet as the duplicate active record", async () => {
     const now = new Date("2026-07-15T06:00:00+03:00").getTime();
     const overnightStart = new Date("2026-07-14T23:00:00+03:00").getTime();

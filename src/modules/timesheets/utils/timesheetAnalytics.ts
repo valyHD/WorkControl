@@ -143,10 +143,19 @@ export function getEffectiveWorkedMinutes(item: TimesheetItem, nowTs = Date.now(
   return item.workedMinutes || 0;
 }
 
+function isValidDateKey(value: string | null | undefined) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
 export function isStaleActiveTimesheet(item: TimesheetItem | null | undefined, nowTs = Date.now()) {
-  if (!item || item.status !== "activ" || !item.startAt) return false;
+  if (!item || item.status !== "activ") return false;
+  const todayKey = getLocalDateKey(nowTs);
+  if (!item.startAt) return isValidDateKey(item.workDate) && item.workDate < todayKey;
   if (nowTs - item.startAt <= 18 * 60 * 60 * 1000) return false;
-  return getLocalDateKey(item.startAt) !== getLocalDateKey(nowTs);
+  return (
+    getLocalDateKey(item.startAt) !== todayKey ||
+    (isValidDateKey(item.workDate) && item.workDate < todayKey)
+  );
 }
 
 export function sumTimesheetMinutes(items: TimesheetItem[], nowTs = Date.now()) {

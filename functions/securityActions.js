@@ -150,12 +150,34 @@ function getBucharestDateParts(nowMs) {
   };
 }
 
+function getTimestampMillis(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.toMillis === 'function') {
+    const millis = Number(value.toMillis());
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (Number.isFinite(Number(value?._seconds))) {
+    return Number(value._seconds) * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1_000_000);
+  }
+  return null;
+}
+
+function isValidWorkDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(cleanText(value, 20));
+}
+
 function isStaleActiveTimesheet(data, nowMs) {
   if (!data || data.status !== 'activ') return false;
-  const startAt = Number(data.startAt);
-  if (!Number.isFinite(startAt) || startAt <= 0) return false;
+  const todayKey = getBucharestDateParts(nowMs).workDate;
+  const workDate = cleanText(data.workDate, 20);
+  const startAt = getTimestampMillis(data.startAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) {
+    return isValidWorkDateKey(workDate) && workDate < todayKey;
+  }
   if (nowMs - startAt <= MAX_ACTIVE_TIMESHEET_MS) return false;
-  return getBucharestDateParts(startAt).workDate !== getBucharestDateParts(nowMs).workDate;
+  const startDateKey = getBucharestDateParts(startAt).workDate;
+  return startDateKey !== todayKey || (isValidWorkDateKey(workDate) && workDate < todayKey);
 }
 
 function buildStaleActiveTimesheetPatch(fieldValue, nowMs) {
@@ -901,7 +923,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     const preexisting = await db.collection('timesheets')
       .where('userId', '==', actor.uid)
       .where('status', '==', 'activ')
-      .limit(1)
+      .limit(10)
       .get();
     const lockRef = db.collection('activeTimesheets').doc(actor.uid);
     const createdRef = db.collection('timesheets').doc();
@@ -949,8 +971,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
           }
         }
       }
-      if (!preexisting.empty) {
-        const activeDoc = preexisting.docs[0];
+      for (const activeDoc of preexisting.docs) {
         const activeId = cleanText(activeDoc.id || activeDoc.ref?.id, 160);
         if (activeId && !closedStaleActiveIds.has(activeId)) {
           const activeRef = db.collection('timesheets').doc(activeId);

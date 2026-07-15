@@ -48,6 +48,7 @@ vi.mock("../../notifications/services/notificationsService", () => notificationM
 
 import {
   computeTimesheetStats,
+  getTimesheetsList,
   getTimesheetsManagementList,
   startTimesheet,
   stopTimesheet,
@@ -105,14 +106,16 @@ describe("timesheetsService critical rules", () => {
     });
     notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
-    await expect(startTimesheet({
+    await expect(
+      startTimesheet({
         userId: "user-test",
         userName: "Utilizator Test",
         projectId: "project-test",
         projectCode: "P-TEST",
         projectName: "Proiect Test",
         startLocation: { lat: null, lng: null, label: "Test" },
-      })).resolves.toBe("active-timesheet");
+      })
+    ).resolves.toBe("active-timesheet");
     expect(callableMocks.startTimesheetSecure).toHaveBeenCalledTimes(1);
     expect(firestoreMocks.addDoc).not.toHaveBeenCalled();
   });
@@ -138,11 +141,13 @@ describe("timesheetsService critical rules", () => {
       stopLocation: { lat: null, lng: null, label: "Test" },
     });
 
-    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
-      timesheetId: "timesheet-1",
-      occurredAt: undefined,
-      stopExplanation: "Test oprire",
-    }));
+    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timesheetId: "timesheet-1",
+        occurredAt: undefined,
+        stopExplanation: "Test oprire",
+      })
+    );
     expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
   });
 
@@ -167,9 +172,11 @@ describe("timesheetsService critical rules", () => {
       startLocation: { lat: null, lng: null, label: "Offline" },
       occurredAt: startedAt,
     });
-    expect(callableMocks.startTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
-      occurredAt: startedAt,
-    }));
+    expect(callableMocks.startTimesheetSecure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: startedAt,
+      })
+    );
 
     firestoreMocks.getDoc.mockResolvedValue({
       exists: () => true,
@@ -182,9 +189,11 @@ describe("timesheetsService critical rules", () => {
       stopLocation: { lat: null, lng: null, label: "Offline" },
       occurredAt: stoppedAt,
     });
-    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(expect.objectContaining({
-      occurredAt: stoppedAt,
-    }));
+    expect(callableMocks.stopTimesheetSecure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: stoppedAt,
+      })
+    );
   });
 
   it("bounds the manager list query", async () => {
@@ -199,5 +208,35 @@ describe("timesheetsService critical rules", () => {
       expect.objectContaining({ orderBy: ["startAt", "desc"] }),
       expect.objectContaining({ limit: 1500 })
     );
+  });
+
+  it("maps Firestore timestamp fields without replacing missing startAt with current time", async () => {
+    const createdAt = Date.parse("2026-07-14T07:18:00.000Z");
+    firestoreMocks.getDocs.mockResolvedValue({
+      docs: [
+        {
+          id: "legacy-active",
+          data: () => ({
+            userId: "user-test",
+            userName: "Utilizator Test",
+            projectId: "project-test",
+            projectName: "Service",
+            status: "activ",
+            createdAt: { toMillis: () => createdAt },
+            updatedAt: { _seconds: createdAt / 1000 },
+            startAt: undefined,
+            stopAt: null,
+            workedMinutes: 0,
+            workDate: "2026-07-14",
+          }),
+        },
+      ],
+    });
+
+    const result = await getTimesheetsList();
+
+    expect(result[0].startAt).toBe(createdAt);
+    expect(result[0].createdAt).toBe(createdAt);
+    expect(result[0].updatedAt).toBe(createdAt);
   });
 });

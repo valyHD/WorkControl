@@ -164,4 +164,25 @@ describe("timesheet operational analytics", () => {
       false
     );
   });
+
+  it("detects legacy stale active timesheets using workDate when startAt is missing", () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const legacyStale = timesheet({
+      status: "activ",
+      startAt: 0,
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+    });
+    const todayLegacy = timesheet({
+      status: "activ",
+      startAt: 0,
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-15",
+    });
+
+    expect(isStaleActiveTimesheet(legacyStale, now)).toBe(true);
+    expect(isStaleActiveTimesheet(todayLegacy, now)).toBe(false);
+  });
 });

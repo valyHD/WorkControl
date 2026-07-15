@@ -45,6 +45,21 @@ const projectAuditFields: AuditFieldDescriptor<ProjectFormValues>[] = [
   { key: "status", label: "Status" },
 ];
 
+function toMillis(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value === "object" && "toMillis" in value) {
+    const millis = Number((value as { toMillis: () => number }).toMillis());
+    return Number.isFinite(millis) ? millis : fallback;
+  }
+  if (value && typeof value === "object" && "_seconds" in value) {
+    const seconds = Number((value as { _seconds?: number })._seconds);
+    const nanos = Number((value as { _nanoseconds?: number })._nanoseconds || 0);
+    if (Number.isFinite(seconds)) return seconds * 1000 + Math.floor(nanos / 1_000_000);
+  }
+  return fallback;
+}
+
 function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
   return {
     id,
@@ -60,6 +75,10 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
 function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
   const rawStatus = (data.status ?? "activ") as TimesheetItem["status"];
   const normalizedStatus = rawStatus === "neinchis" && data.stopAt ? "corectat" : rawStatus;
+  const createdAt = toMillis(data.createdAt, 0);
+  const updatedAt = toMillis(data.updatedAt, createdAt || 0);
+  const startAt = toMillis(data.startAt, createdAt || 0);
+  const stopAt = data.stopAt == null ? null : toMillis(data.stopAt, 0);
 
   return {
     id,
@@ -80,8 +99,8 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     stopExpectedMinutes:
       typeof data.stopExpectedMinutes === "number" ? data.stopExpectedMinutes : null,
 
-    startAt: data.startAt ?? Date.now(),
-    stopAt: data.stopAt ?? null,
+    startAt,
+    stopAt,
     workedMinutes: Number(data.workedMinutes ?? 0),
 
     startLocation: {
@@ -104,8 +123,8 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     yearMonth: data.yearMonth ?? "",
     weekKey: data.weekKey ?? "",
 
-    createdAt: data.createdAt ?? Date.now(),
-    updatedAt: data.updatedAt ?? Date.now(),
+    createdAt,
+    updatedAt,
     companyId: data.companyId ?? "",
   };
 }
@@ -138,17 +157,11 @@ function getProjectDisplayName(projectName?: string, projectCode?: string): stri
 
 export async function getProjectsList(maxItems?: number): Promise<ProjectItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const constraints = [
-    ...buildCompanyScopeConstraints(context),
-    orderBy("name", "asc"),
-  ];
+  const constraints = [...buildCompanyScopeConstraints(context), orderBy("name", "asc")];
   if (Number.isFinite(maxItems)) {
     constraints.push(limit(Math.min(250, Math.max(1, Math.floor(maxItems as number)))));
   }
-  const snap = await getDocs(query(
-    projectsCollection,
-    ...constraints
-  ));
+  const snap = await getDocs(query(projectsCollection, ...constraints));
   return snap.docs.map((docItem) => mapProjectDoc(docItem.id, docItem.data()));
 }
 
@@ -465,11 +478,13 @@ export async function stopTimesheet(params: {
 
 export async function getTimesheetsList(): Promise<TimesheetItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const snap = await getDocs(query(
-    timesheetsCollection,
-    ...buildCompanyScopeConstraints(context),
-    orderBy("startAt", "desc")
-  ));
+  const snap = await getDocs(
+    query(
+      timesheetsCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("startAt", "desc")
+    )
+  );
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
 
