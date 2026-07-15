@@ -48,10 +48,12 @@ test.describe("Product Experience public shell", () => {
   test("login visual baseline is stable on mobile and desktop", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/login");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page).toHaveScreenshot("login-mobile.png", { animations: "disabled", fullPage: true });
 
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.goto("/login");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page).toHaveScreenshot("login-desktop.png", { animations: "disabled", fullPage: true });
   });
 });

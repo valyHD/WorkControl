@@ -30,7 +30,11 @@ import {
   uploadMaintenanceBrandingAsset,
 } from "../services/maintenanceService";
 import { getAllUsers } from "../../users/services/usersService";
-import { requestGmailAccessToken, sendGmailMessageWithPdfAttachment } from "../services/gmailDraftService";
+import {
+  preloadGmailAuthorization,
+  requestGmailAccessToken,
+  sendGmailMessageWithPdfAttachment,
+} from "../services/gmailDraftService";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
 import { generateReportId, reviewStandardText } from "../utils/reportUtils";
 import type {
@@ -448,6 +452,10 @@ export default function MaintenanceWorkspace() {
   const assistantClientFormKeyRef = useRef("");
   const technicianDefaultInitializedRef = useRef(false);
   const [gmailSenderEmail, setGmailSenderEmail] = useState("liftultau@gmail.com");
+  const [gmailAccessToken, setGmailAccessToken] = useState("");
+  const [gmailAuthorizedEmail, setGmailAuthorizedEmail] = useState("");
+  const [gmailAuthLoading, setGmailAuthLoading] = useState(false);
+  const [gmailAuthReady, setGmailAuthReady] = useState(false);
   const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
   const shouldLoadBranding = activeMaintenanceTab === "report" || activeMaintenanceTab === "companies";
   const shouldLoadReportOverview = ["dashboard", "history", "checks"].includes(activeMaintenanceTab);
@@ -585,6 +593,22 @@ export default function MaintenanceWorkspace() {
       setGmailSenderEmail(user.email);
     }
   }, [gmailSenderEmail, user?.email]);
+
+  useEffect(() => {
+    if (!shouldLoadTechnicians) return undefined;
+    let active = true;
+    preloadGmailAuthorization()
+      .then(() => {
+        if (active) setGmailAuthReady(true);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (active) setGmailAuthReady(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [shouldLoadTechnicians]);
 
   useEffect(() => {
     setActiveMaintenanceTab(getMaintenanceTabFromLocation(location.pathname, new URLSearchParams(location.search)));
@@ -1275,6 +1299,41 @@ export default function MaintenanceWorkspace() {
     technicianDefaultInitializedRef.current = Boolean(defaultTechnician);
   }
 
+  function handleGmailSenderEmailChange(value: string) {
+    setGmailSenderEmail(value);
+    setGmailAccessToken("");
+    setGmailAuthorizedEmail("");
+  }
+
+  async function authorizeGmailSender(): Promise<string> {
+    const senderEmail = gmailSenderEmail.trim();
+    if (!senderEmail) {
+      setReportError("Completeaza contul Gmail expeditor.");
+      return "";
+    }
+
+    setGmailAuthLoading(true);
+    setReportError("");
+    setReportMessage("Se deschide autentificarea Gmail...");
+
+    try {
+      const token = await requestGmailAccessToken(senderEmail);
+      setGmailAccessToken(token);
+      setGmailAuthorizedEmail(senderEmail);
+      setReportMessage("Gmail este autorizat pentru raportul curent.");
+      return token;
+    } catch (err) {
+      console.error(err);
+      setReportError(
+        "Autorizarea Gmail a fost blocata sau refuzata. Pe mobil apasa Autorizeaza Gmail, permite popup-uri/ferestre noi pentru WorkControl si selecteaza contul Gmail."
+      );
+      setReportMessage("");
+      return "";
+    } finally {
+      setGmailAuthLoading(false);
+    }
+  }
+
   function getClientEmail(client: MaintenanceClient): string {
     return (client.emails?.[0] || client.email || "").trim();
   }
@@ -1328,14 +1387,14 @@ export default function MaintenanceWorkspace() {
     setReportMessage("Se cere autorizarea Gmail...");
     setLastGeneratedReport(null);
 
-    let gmailAccessToken = "";
-    try {
-      gmailAccessToken = await requestGmailAccessToken(gmailSenderEmail.trim());
-    } catch (err) {
-      console.error(err);
+    const senderEmail = gmailSenderEmail.trim();
+    let reportGmailAccessToken =
+      gmailAccessToken && gmailAuthorizedEmail === senderEmail ? gmailAccessToken : "";
+    if (!reportGmailAccessToken) {
+      reportGmailAccessToken = await authorizeGmailSender();
+    }
+    if (!reportGmailAccessToken) {
       setReportGenerating(false);
-      setReportError("Autorizarea Gmail a fost blocata sau refuzata. Permite popup-uri si selecteaza contul Gmail.");
-      setReportMessage("");
       return;
     }
 
@@ -1407,8 +1466,8 @@ export default function MaintenanceWorkspace() {
       });
 
       const sentMessage = await sendGmailMessageWithPdfAttachment({
-        accessToken: gmailAccessToken,
-        senderEmail: gmailSenderEmail.trim(),
+        accessToken: reportGmailAccessToken,
+        senderEmail,
         recipientEmail: clientEmail,
         subject: emailDraft.subject,
         body: emailDraft.body,
@@ -1424,7 +1483,7 @@ export default function MaintenanceWorkspace() {
       const shareInfo: GeneratedReportShare = {
         clientName: selectedClient.name || "",
         clientEmail,
-        senderEmail: gmailSenderEmail.trim(),
+        senderEmail,
         reportType: fileType,
         dateText,
         timeText,
@@ -1737,10 +1796,19 @@ export default function MaintenanceWorkspace() {
             </div>
             <div className="tool-form-block">
               <label className="tool-form-label">Cont Gmail expeditor</label>
-              <input className="tool-input" data-assistant-field="maintenance-report-sender" value={gmailSenderEmail} onChange={(e) => setGmailSenderEmail(e.target.value)} placeholder="exemplu@gmail.com" />
-              <div className="simple-list-subtitle">Gmail se va deschide pe acest cont daca este deja logat in browser.</div>
+              <input className="tool-input" data-assistant-field="maintenance-report-sender" value={gmailSenderEmail} onChange={(e) => handleGmailSenderEmailChange(e.target.value)} placeholder="exemplu@gmail.com" />
+              <div className="simple-list-subtitle">
+                {gmailAuthorizedEmail === gmailSenderEmail.trim()
+                  ? `Gmail autorizat pentru ${gmailAuthorizedEmail}.`
+                  : gmailAuthReady
+                    ? "Pe mobil autorizeaza Gmail inainte de generare."
+                    : "Se pregateste autentificarea Gmail."}
+              </div>
             </div>
             <div className="tool-form-actions">
+              <button className="secondary-btn" data-assistant-action="maintenance-authorize-gmail" type="button" title="Autorizeaza contul Gmail pentru trimiterea raportului" onClick={() => void authorizeGmailSender()} disabled={reportGenerating || gmailAuthLoading}>
+                {gmailAuthLoading ? "Se autorizeaza..." : "Autorizeaza Gmail"}
+              </button>
               <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF si il trimite pe email" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport revizie"}
               </button>

@@ -62,6 +62,10 @@ function loadGoogleIdentityServices(): Promise<void> {
   return gisLoadPromise;
 }
 
+export function preloadGmailAuthorization(): Promise<void> {
+  return loadGoogleIdentityServices();
+}
+
 export function requestGmailAccessToken(senderEmail: string): Promise<string> {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   if (!clientId) {

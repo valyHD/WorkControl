@@ -35,6 +35,12 @@ const usersMocks = vi.hoisted(() => ({
   getAllUsers: vi.fn().mockResolvedValue([]),
 }));
 
+const gmailMocks = vi.hoisted(() => ({
+  preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
+  requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
+  sendGmailMessageWithPdfAttachment: vi.fn(),
+}));
+
 vi.mock("../../../providers/AuthProvider", () => ({
   useAuth: () => ({
     role: "admin",
@@ -49,10 +55,7 @@ vi.mock("../../../providers/AuthProvider", () => ({
 }));
 vi.mock("../services/maintenanceService", () => maintenanceMocks);
 vi.mock("../../users/services/usersService", () => usersMocks);
-vi.mock("../services/gmailDraftService", () => ({
-  requestGmailAccessToken: vi.fn(),
-  sendGmailMessageWithPdfAttachment: vi.fn(),
-}));
+vi.mock("../services/gmailDraftService", () => gmailMocks);
 vi.mock("../services/maintenancePdf", () => ({
   buildMaintenancePdfBlob: vi.fn(),
   resolveBrandingForCompany: vi.fn(() => null),
@@ -76,6 +79,8 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     usersMocks.getAllUsers.mockResolvedValue([]);
+    gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
+    gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
   });
 
   it("uses one bounded overview subscription instead of one listener per client", async () => {
@@ -129,6 +134,22 @@ describe("MaintenancePage client form", () => {
 
     expect(await screen.findByDisplayValue("Admin Test")).toBeInTheDocument();
     expect(usersMocks.getAllUsers).toHaveBeenCalledTimes(1);
+    expect(gmailMocks.preloadGmailAuthorization).toHaveBeenCalledTimes(1);
+  });
+
+  it("authorizes Gmail from an explicit report action", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
+
+    expect(gmailMocks.requestGmailAccessToken).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(await screen.findByText("Gmail autorizat pentru liftultau@gmail.com.")).toBeInTheDocument();
   });
 
   it("keeps a manual technician for the current report and restores the default on return", async () => {
