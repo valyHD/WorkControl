@@ -1,7 +1,7 @@
 const COMPANY_ISOLATION_READS_FLAG = "VITE_COMPANY_ISOLATION_READS";
 
 export function areCompanyIsolationReadsEnabled(): boolean {
-  return import.meta.env.VITE_COMPANY_ISOLATION_READS === "true";
+  return import.meta.env.VITE_COMPANY_ISOLATION_READS !== "false";
 }
 
 export function getUserDirectoryCollectionName(): "users" | "userOperationalViews" {

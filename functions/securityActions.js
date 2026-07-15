@@ -250,7 +250,7 @@ async function loadActor(db, uid, HttpsError) {
   return {
     uid,
     role,
-    globalAdmin: data.globalAdmin === true,
+    globalAdmin: data.globalAdmin === true || (role === 'admin' && userCompanyIds(data).length === 0),
     companyIds: userCompanyIds(data),
     primaryCompanyId: cleanText(data.primaryCompanyId, 120),
     fullName: cleanText(data.fullName || data.email || uid, 160),

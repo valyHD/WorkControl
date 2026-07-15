@@ -47,10 +47,10 @@ describe("companyAccess", () => {
     expect(requireCompanyScope({ ...scopedContext, globalAdmin: true })).toEqual([]);
   });
 
-  it("nu aplica filtre company-aware inainte de activarea explicita a rollout-ului", () => {
-    expect(buildCompanyScopeConstraints(scopedContext)).toEqual([]);
-
-    vi.stubEnv("VITE_COMPANY_ISOLATION_READS", "true");
+  it("aplica filtre company-aware implicit si permite dezactivarea explicita", () => {
     expect(buildCompanyScopeConstraints(scopedContext)).toHaveLength(1);
+
+    vi.stubEnv("VITE_COMPANY_ISOLATION_READS", "false");
+    expect(buildCompanyScopeConstraints(scopedContext)).toEqual([]);
   });
 });
