@@ -38,7 +38,7 @@ import type {
   MaintenanceCompanyBranding,
   MaintenanceReportHistoryItem,
 } from "../../../types/maintenance";
-import type { AppUserItem } from "../../../types/user";
+import type { AppUserItem, UserRole } from "../../../types/user";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
@@ -446,11 +446,16 @@ export default function MaintenanceWorkspace() {
   const [lastGeneratedReport, setLastGeneratedReport] = useState<GeneratedReportShare | null>(null);
   const assistantReportKeyRef = useRef("");
   const assistantClientFormKeyRef = useRef("");
+  const technicianDefaultInitializedRef = useRef(false);
   const [gmailSenderEmail, setGmailSenderEmail] = useState("liftultau@gmail.com");
   const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
   const shouldLoadBranding = activeMaintenanceTab === "report" || activeMaintenanceTab === "companies";
   const shouldLoadReportOverview = ["dashboard", "history", "checks"].includes(activeMaintenanceTab);
   const shouldLoadTechnicians = activeMaintenanceTab === "report";
+  const currentTechnicianId = user?.uid || "";
+  const currentTechnicianName = (user?.displayName || user?.email || "Utilizator").trim();
+  const currentTechnicianEmail = user?.email || "";
+  const currentTechnicianRole: UserRole = role === "admin" || role === "manager" ? role : "angajat";
 
   useEffect(() => {
     if (!shouldLoadClients) {
@@ -518,11 +523,40 @@ export default function MaintenanceWorkspace() {
   useEffect(() => {
     if (!shouldLoadTechnicians) return undefined;
     let active = true;
+    const currentTechnician: AppUserItem | null = currentTechnicianId
+      ? {
+          id: currentTechnicianId,
+          uid: currentTechnicianId,
+          fullName: currentTechnicianName,
+          email: currentTechnicianEmail,
+          active: true,
+          role: currentTechnicianRole,
+        }
+      : null;
 
     getAllUsers()
       .then((items) => {
         if (!active) return;
-        setTechnicians(items.filter((item) => item.active && item.fullName.trim()));
+        const availableTechnicians = items.filter((item) => item.active && item.fullName.trim());
+        if (
+          currentTechnician &&
+          !availableTechnicians.some(
+            (item) => item.id === currentTechnician.id || item.uid === currentTechnician.uid
+          )
+        ) {
+          availableTechnicians.unshift(currentTechnician);
+        }
+        setTechnicians(availableTechnicians);
+        if (!technicianDefaultInitializedRef.current && currentTechnician) {
+          const defaultTechnician = availableTechnicians.find(
+            (item) => item.id === currentTechnician.id || item.uid === currentTechnician.uid
+          );
+          if (defaultTechnician) {
+            setSelectedTechnicianId(defaultTechnician.id);
+            setTechnicianSearch(defaultTechnician.fullName);
+            technicianDefaultInitializedRef.current = true;
+          }
+        }
       })
       .catch((err) => {
         console.error(err);
@@ -532,6 +566,18 @@ export default function MaintenanceWorkspace() {
     return () => {
       active = false;
     };
+  }, [
+    currentTechnicianEmail,
+    currentTechnicianId,
+    currentTechnicianName,
+    currentTechnicianRole,
+    shouldLoadTechnicians,
+  ]);
+
+  useEffect(() => {
+    if (!shouldLoadTechnicians) {
+      technicianDefaultInitializedRef.current = false;
+    }
   }, [shouldLoadTechnicians]);
 
   useEffect(() => {
@@ -1119,6 +1165,8 @@ export default function MaintenanceWorkspace() {
       .filter((user) => `${user.fullName} ${user.email}`.toLowerCase().includes(query))
       .slice(0, 8);
   }, [technicians, technicianSearch]);
+  const technicianSuggestionsOpen =
+    technicianSuggestions.length > 0 && technicianSearch.trim().length >= 2 && !selectedTechnician;
 
   useEffect(() => {
     if (!selectedClient) {
@@ -1216,6 +1264,15 @@ export default function MaintenanceWorkspace() {
     setTechnicianSearch(user.fullName);
     setReportMessage("");
     setReportError("");
+  }
+
+  function resetTechnicianToCurrentUser() {
+    const defaultTechnician = technicians.find(
+      (item) => item.id === currentTechnicianId || item.uid === currentTechnicianId
+    );
+    setSelectedTechnicianId(defaultTechnician?.id || "");
+    setTechnicianSearch(defaultTechnician?.fullName || "");
+    technicianDefaultInitializedRef.current = Boolean(defaultTechnician);
   }
 
   function getClientEmail(client: MaintenanceClient): string {
@@ -1378,6 +1435,7 @@ export default function MaintenanceWorkspace() {
 
       setLastGeneratedReport(shareInfo);
       setReportImageFiles([]);
+      resetTechnicianToCurrentUser();
 
       setReportMessage(`Raportul ${fileType} a fost generat si emailul a fost trimis cu PDF atasat.`);
     } catch (err) {
@@ -1623,7 +1681,10 @@ export default function MaintenanceWorkspace() {
             </div>
           </div>
 
-          <div className="panel maintenance-step-card" data-assistant-step="report-details">
+          <div
+            className={`panel maintenance-step-card ${technicianSuggestionsOpen ? "maintenance-step-card--overlay-open" : ""}`}
+            data-assistant-step="report-details"
+          >
             <div className="maintenance-step-card__head">
               <span>Pas 3</span>
               <h2>Detalii raport</h2>
@@ -1652,13 +1713,13 @@ export default function MaintenanceWorkspace() {
                 <input className="tool-input" data-assistant-field="maintenance-report-photos" type="file" accept="image/*" multiple onChange={(e) => setReportImageFiles(Array.from(e.target.files || []))} />
                 <div className="simple-list-subtitle">{reportImageFiles.length ? `${reportImageFiles.length} poze selectate` : "Nu ai selectat poze."}</div>
               </div>
-              <div className="tool-form-block" style={{ position: "relative" }}>
+              <div className="tool-form-block maintenance-technician-picker">
                 <label className="tool-form-label">Tehnician</label>
                 <input className="tool-input" data-assistant-field="maintenance-report-technician" value={technicianSearch} onChange={handleTechnicianSearchChange} placeholder="Ex: Ion / Popescu" />
-                {technicianSuggestions.length > 0 && technicianSearch.trim().length >= 2 && !selectedTechnician && (
-                  <div className="maintenance-suggestion-list">
+                {technicianSuggestionsOpen && (
+                  <div className="maintenance-suggestion-list" role="listbox" aria-label="Sugestii tehnician">
                     {technicianSuggestions.map((technician) => (
-                      <button key={`technician_suggestion_${technician.id}`} type="button" onClick={() => selectTechnician(technician)}>
+                      <button key={`technician_suggestion_${technician.id}`} type="button" role="option" aria-selected="false" onClick={() => selectTechnician(technician)}>
                         <strong>{technician.fullName}</strong>
                         <small>{technician.email || "-"}</small>
                       </button>
