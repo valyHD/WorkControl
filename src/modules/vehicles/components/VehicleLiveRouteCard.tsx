@@ -56,6 +56,7 @@ import {
   splitVisibleRealGpsSegments,
 } from "../utils/vehicleRouteVisibility";
 import { loadSelectedDayRouteWithRecovery } from "../utils/vehicleRouteRecovery";
+import { selectStopItemsForRender } from "../utils/vehicleStopRender";
 import VehicleGpsStatsCard from "./VehicleGpsStatsCard";
 import VehicleTripTimeline from "./VehicleTripTimeline";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -2708,9 +2709,7 @@ export default function VehicleLiveRouteCard({
   );
 
   const renderedStopItems = useMemo(() => {
-    if (distinctStopItems.length <= stopRenderLimit) return distinctStopItems;
-    const stride = Math.ceil(distinctStopItems.length / stopRenderLimit);
-    return distinctStopItems.filter((_, index) => index % stride === 0);
+    return selectStopItemsForRender(distinctStopItems, stopRenderLimit);
   }, [distinctStopItems, stopRenderLimit]);
 
   const timelinePositions = useMemo(() => {
