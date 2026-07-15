@@ -27,6 +27,7 @@ const {
   requestAssistantTranscription,
 } = require('./assistantTranscription');
 const { createSecurityHandlers } = require('./securityActions');
+const { createDocumentIntelligenceHandlers } = require('./documentIntelligence');
 const {
   buildVehicleOperationalView,
   VEHICLE_OPERATIONAL_VIEW_VERSION,
@@ -59,6 +60,22 @@ const SECURITY_CALLABLE_OPTIONS = {
   region: 'europe-west1',
   enforceAppCheck: process.env.WORKCONTROL_ENFORCE_APP_CHECK === 'true',
 };
+const DOCUMENT_CALLABLE_OPTIONS = {
+  ...SECURITY_CALLABLE_OPTIONS,
+  timeoutSeconds: 120,
+  memory: '512MiB',
+};
+const documentIntelligenceHandlers = createDocumentIntelligenceHandlers({
+  db,
+  bucket: admin.storage().bucket(),
+  fieldValue: FieldValue,
+  HttpsError,
+  logger,
+  openaiApiKey,
+  assertActiveInternalRequest,
+  canAccessCompany: internalContextCanAccessCompany,
+  buildAuditPayload,
+});
 const VEHICLE_POSITION_ARCHIVE_RETENTION_DAYS = 30;
 const VEHICLE_POSITION_ARCHIVE_MAX_DAYS_PER_RUN = 80;
 const FIRESTORE_DELETE_BATCH_SIZE = 450;
@@ -115,6 +132,41 @@ exports.acceptToolTransfer = onCall(
   securityHandlers.acceptToolTransfer
 );
 exports.claimTool = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimTool);
+exports.createVehicleDocumentIngestionJob = onCall(
+  DOCUMENT_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.createVehicleDocumentIngestionJob
+);
+exports.getVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.getVehicleDocumentIngestionJob
+);
+exports.retryVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.retryVehicleDocumentIngestionJob
+);
+exports.applyVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.applyVehicleDocumentIngestionJob
+);
+exports.rejectVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.rejectVehicleDocumentIngestionJob
+);
+exports.rollbackVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.rollbackVehicleDocumentIngestionJob
+);
+exports.processDocumentIngestionJob = onDocumentWritten(
+  {
+    document: 'documentIngestionJobs/{jobId}',
+    region: 'europe-west1',
+    timeoutSeconds: 120,
+    memory: '1GiB',
+    secrets: [openaiApiKey],
+    retry: false,
+  },
+  documentIntelligenceHandlers.processDocumentIngestionJob
+);
 
 exports.syncVehicleOperationalView = onDocumentWritten(
   {

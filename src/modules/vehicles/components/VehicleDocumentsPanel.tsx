@@ -1,6 +1,30 @@
-import { ExternalLink, Download, FileText, Trash2 } from "lucide-react";
-import type { VehicleDocumentCategory, VehicleDocumentItem } from "../../../types/vehicle";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  Download,
+  ExternalLink,
+  FileSearch,
+  FileText,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  X,
+} from "lucide-react";
+import type {
+  VehicleDocumentCategory,
+  VehicleDocumentIngestionJob,
+  VehicleDocumentItem,
+  VehicleDocumentIntelligenceStatus,
+} from "../../../types/vehicle";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import {
+  applyVehicleDocumentIngestionJob,
+  getVehicleDocumentIngestionJob,
+  rejectVehicleDocumentIngestionJob,
+  retryVehicleDocumentIngestionJob,
+  rollbackVehicleDocumentIngestionJob,
+} from "../services/vehiclesService";
+import "../styles/vehicle-documents.css";
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
   service: "Service + facturi",
@@ -13,7 +37,19 @@ const categoryLabels: Record<VehicleDocumentCategory, string> = {
   other: "Altele",
 };
 
+const intelligenceLabels: Record<VehicleDocumentIntelligenceStatus, string> = {
+  queued: "În așteptare",
+  processing: "Se citește",
+  needs_review: "Necesită verificare",
+  applied: "Confirmat",
+  rejected: "Respins",
+  failed: "Analiză eșuată",
+};
+
+const DOCUMENT_JOB_POLL_DELAYS_MS = [5_000, 10_000, 20_000, 30_000, 30_000];
+
 type Props = {
+  vehicleId: string;
   documents: VehicleDocumentItem[];
   isOwner: boolean;
   deletingDocumentId?: string | null;
@@ -34,14 +70,167 @@ function getPreviewKind(contentType: string): "image" | "embed" | "none" {
   return "none";
 }
 
+function confidenceLabel(value?: number) {
+  return `${Math.round(Math.max(0, Math.min(1, Number(value || 0))) * 100)}%`;
+}
+
+function getEffectiveStatus(item: VehicleDocumentItem, job?: VehicleDocumentIngestionJob) {
+  if (item.intelligenceStatus === "applied" || item.intelligenceStatus === "rejected") {
+    return item.intelligenceStatus;
+  }
+  if (job?.decision === "applied") return "applied";
+  if (job?.decision === "rejected") return "rejected";
+  if (job?.decision === "rolled_back") return "needs_review";
+  return job?.status || item.intelligenceStatus;
+}
+
 export default function VehicleDocumentsPanel({
+  vehicleId,
   documents,
   isOwner,
   deletingDocumentId,
   onDelete,
 }: Props) {
+  const [jobsByDocument, setJobsByDocument] = useState<Record<string, VehicleDocumentIngestionJob>>(
+    {}
+  );
+  const [busyDocumentId, setBusyDocumentId] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const pollCountRef = useRef(0);
+
+  const reviewableDocuments = useMemo(
+    () =>
+      documents.filter(
+        (item) =>
+          item.intelligenceJobId && !["applied", "rejected"].includes(item.intelligenceStatus || "")
+      ),
+    [documents]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    pollCountRef.current = 0;
+
+    async function refreshJobs() {
+      if (!reviewableDocuments.length || document.visibilityState === "hidden") return;
+      const entries = await Promise.all(
+        reviewableDocuments.map(async (item) => {
+          try {
+            const job = await getVehicleDocumentIngestionJob({
+              vehicleId,
+              documentId: item.id,
+              jobId: item.intelligenceJobId || "",
+            });
+            return [item.id, job] as const;
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (cancelled) return;
+      const nextJobs = Object.fromEntries(
+        entries.filter((entry): entry is readonly [string, VehicleDocumentIngestionJob] =>
+          Boolean(entry)
+        )
+      );
+      setJobsByDocument((current) => ({ ...current, ...nextJobs }));
+      const stillProcessing = Object.values(nextJobs).some((job) =>
+        ["queued", "processing"].includes(job.status)
+      );
+      if (
+        stillProcessing &&
+        document.visibilityState === "visible" &&
+        pollCountRef.current < DOCUMENT_JOB_POLL_DELAYS_MS.length
+      ) {
+        const delay = DOCUMENT_JOB_POLL_DELAYS_MS[pollCountRef.current];
+        pollCountRef.current += 1;
+        timer = setTimeout(() => void refreshJobs(), delay);
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") {
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+        return;
+      }
+      pollCountRef.current = 0;
+      void refreshJobs();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    void refreshJobs();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [reviewableDocuments, vehicleId]);
+
   async function handleDownloadDocument(item: VehicleDocumentItem) {
     await downloadFileFromUrl({ url: item.url, fileName: item.name });
+  }
+
+  function jobReference(item: VehicleDocumentItem) {
+    return {
+      vehicleId,
+      documentId: item.id,
+      jobId: item.intelligenceJobId || "",
+    };
+  }
+
+  async function runDocumentAction(
+    item: VehicleDocumentItem,
+    action: "apply" | "reject" | "retry" | "rollback"
+  ) {
+    if (!item.intelligenceJobId || busyDocumentId) return;
+    setBusyDocumentId(item.id);
+    setActionMessage("");
+    try {
+      if (action === "apply") {
+        const result = jobsByDocument[item.id]?.result;
+        const acceptedFields: Array<"documentType" | "expiryDate"> = [];
+        if (result?.documentType.value && result.documentType.value !== "unknown")
+          acceptedFields.push("documentType");
+        if (result?.expiryDate.value) acceptedFields.push("expiryDate");
+        if (!acceptedFields.length)
+          throw new Error("Analiza nu conține câmpuri sigure de aplicat.");
+        await applyVehicleDocumentIngestionJob(jobReference(item), acceptedFields);
+        setJobsByDocument((current) => ({
+          ...current,
+          [item.id]: { ...current[item.id], decision: "applied" },
+        }));
+        setActionMessage("Datele documentului au fost confirmate și salvate.");
+      } else if (action === "reject") {
+        await rejectVehicleDocumentIngestionJob(jobReference(item));
+        setJobsByDocument((current) => ({
+          ...current,
+          [item.id]: { ...current[item.id], decision: "rejected" },
+        }));
+        setActionMessage("Sugestiile AI au fost respinse. Datele mașinii nu au fost schimbate.");
+      } else if (action === "retry") {
+        await retryVehicleDocumentIngestionJob(jobReference(item));
+        setJobsByDocument((current) => ({
+          ...current,
+          [item.id]: { ...current[item.id], status: "queued", errorCode: undefined },
+        }));
+        setActionMessage("Analiza documentului a fost repornită.");
+      } else {
+        await rollbackVehicleDocumentIngestionJob(jobReference(item));
+        setJobsByDocument((current) => ({
+          ...current,
+          [item.id]: { ...current[item.id], decision: "rolled_back" },
+        }));
+        setActionMessage("Aplicarea a fost anulată. Valorile anterioare au fost restaurate.");
+      }
+    } catch (error) {
+      setActionMessage(
+        error instanceof Error ? error.message : "Acțiunea nu a putut fi finalizată."
+      );
+    } finally {
+      setBusyDocumentId("");
+    }
   }
 
   if (!documents.length) {
@@ -74,6 +263,11 @@ export default function VehicleDocumentsPanel({
 
   return (
     <div className="vehicle-doc-sections">
+      {actionMessage ? (
+        <div className="vehicle-doc-action-message" aria-live="polite">
+          {actionMessage}
+        </div>
+      ) : null}
       {(Object.entries(groupedDocuments) as [VehicleDocumentCategory, VehicleDocumentItem[]][])
         .filter(([, items]) => items.length > 0)
         .map(([category, items]) => (
@@ -86,6 +280,10 @@ export default function VehicleDocumentsPanel({
             <div className="vehicle-doc-grid">
               {items.map((item) => {
                 const previewKind = getPreviewKind(item.contentType);
+                const job = jobsByDocument[item.id];
+                const intelligenceStatus = getEffectiveStatus(item, job);
+                const extraction = job?.result;
+                const isBusy = busyDocumentId === item.id;
                 return (
                   <article key={item.id} className="vehicle-doc-card">
                     <div className="vehicle-doc-card__header">
@@ -93,17 +291,30 @@ export default function VehicleDocumentsPanel({
                       <div>
                         <div className="vehicle-doc-card__name">{item.name}</div>
                         <div className="vehicle-doc-card__meta">
-                          {(item.sizeBytes / 1024).toFixed(1)} KB · {item.extension.toUpperCase() || "document"}
-                          {item.expiryDate ? ` · expira ${item.expiryDate}` : ""}
+                          {(item.sizeBytes / 1024).toFixed(1)} KB ·{" "}
+                          {item.extension.toUpperCase() || "document"}
+                          {item.expiryDate ? ` · expiră ${item.expiryDate}` : ""}
                           {item.aiAnalysis?.confidence
-                             ? ` · AI ${Math.round(item.aiAnalysis.confidence * 100)}%`
+                            ? ` · AI ${confidenceLabel(item.aiAnalysis.confidence)}`
                             : ""}
                         </div>
                       </div>
+                      {intelligenceStatus ? (
+                        <span
+                          className={`vehicle-doc-intelligence-status is-${intelligenceStatus}`}
+                        >
+                          {intelligenceLabels[intelligenceStatus]}
+                        </span>
+                      ) : null}
                     </div>
 
                     {previewKind === "image" ? (
-                      <a href={item.url} rel="noreferrer" className="vehicle-doc-preview" title="Preview document">
+                      <a
+                        href={item.url}
+                        rel="noreferrer"
+                        className="vehicle-doc-preview"
+                        title="Preview document"
+                      >
                         <img src={item.url} alt={item.name} loading="lazy" />
                       </a>
                     ) : previewKind === "embed" ? (
@@ -112,10 +323,72 @@ export default function VehicleDocumentsPanel({
                       </div>
                     ) : (
                       <div className="vehicle-doc-preview__placeholder">
-                        <FileText size={16} />
-                        Preview indisponibil pentru acest tip de fișier
+                        <FileText size={16} /> Preview indisponibil pentru acest tip de fișier
                       </div>
                     )}
+
+                    {intelligenceStatus === "needs_review" && extraction && isOwner ? (
+                      <div className="vehicle-doc-review" aria-label="Verificare date extrase">
+                        <div className="vehicle-doc-review__title">
+                          <FileSearch size={16} /> Verifică înainte de aplicare
+                        </div>
+                        <div className="vehicle-doc-review__grid">
+                          <div>
+                            <span>Tip document</span>
+                            <strong>{extraction.documentType.value || "Necunoscut"}</strong>
+                            <small>{confidenceLabel(extraction.documentType.confidence)}</small>
+                          </div>
+                          <div>
+                            <span>Expirare</span>
+                            <strong>{extraction.expiryDate.value || "Nedetectată"}</strong>
+                            <small>{confidenceLabel(extraction.expiryDate.confidence)}</small>
+                          </div>
+                          <div>
+                            <span>Emitent</span>
+                            <strong>{extraction.providerName.value || "Nedetectat"}</strong>
+                            <small>{confidenceLabel(extraction.providerName.confidence)}</small>
+                          </div>
+                          <div>
+                            <span>Număr document</span>
+                            <strong>{extraction.policyNumber.value || "Nedetectat"}</strong>
+                            <small>{confidenceLabel(extraction.policyNumber.confidence)}</small>
+                          </div>
+                        </div>
+                        {extraction.notes ? <p>{extraction.notes}</p> : null}
+                        <div className="vehicle-doc-review__actions">
+                          <button
+                            className="primary-btn"
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void runDocumentAction(item, "apply")}
+                          >
+                            <Check size={15} /> Aplică datele
+                          </button>
+                          <button
+                            className="secondary-btn"
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void runDocumentAction(item, "reject")}
+                          >
+                            <X size={15} /> Respinge
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {intelligenceStatus === "failed" && isOwner ? (
+                      <div className="vehicle-doc-review vehicle-doc-review--error">
+                        <span>Documentul nu a putut fi citit automat.</span>
+                        <button
+                          className="secondary-btn"
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void runDocumentAction(item, "retry")}
+                        >
+                          <RefreshCw size={15} /> Reîncearcă
+                        </button>
+                      </div>
+                    ) : null}
 
                     <div className="vehicle-doc-card__actions">
                       <a className="secondary-btn" href={item.url} target="_blank" rel="noreferrer">
@@ -132,14 +405,24 @@ export default function VehicleDocumentsPanel({
                       >
                         <Download size={14} /> Download
                       </a>
+                      {intelligenceStatus === "applied" && isOwner ? (
+                        <button
+                          className="secondary-btn"
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void runDocumentAction(item, "rollback")}
+                        >
+                          <RotateCcw size={14} /> Anulează aplicarea
+                        </button>
+                      ) : null}
                       {isOwner && onDelete ? (
                         <button
                           className="danger-btn"
                           type="button"
-                          disabled={deletingDocumentId === item.id}
+                          disabled={deletingDocumentId === item.id || isBusy}
                           onClick={() => void onDelete(item.id)}
                         >
-                          <Trash2 size={14} /> {deletingDocumentId === item.id ? "..." : "Sterge"}
+                          <Trash2 size={14} /> {deletingDocumentId === item.id ? "..." : "Șterge"}
                         </button>
                       ) : null}
                     </div>

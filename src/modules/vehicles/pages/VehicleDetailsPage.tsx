@@ -967,6 +967,7 @@ export default function VehicleDetailsPage() {
         </div>
 
         <VehicleDocumentsPanel
+          vehicleId={vehicle.id}
           documents={vehicle.documents}
           isOwner={canManageVehicle}
           deletingDocumentId={deletingDocumentId}
