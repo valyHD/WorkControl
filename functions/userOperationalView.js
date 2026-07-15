@@ -1,4 +1,4 @@
-const USER_OPERATIONAL_VIEW_VERSION = 2;
+const USER_OPERATIONAL_VIEW_VERSION = 3;
 
 function cleanIds(values, primaryCompanyId) {
   const ids = Array.isArray(values)
@@ -24,6 +24,10 @@ function buildUserOperationalView(userId, companyId, source) {
     themeKey: data.themeKey || null,
     avatarUrl: String(data.avatarUrl || ''),
     avatarThumbUrl: String(data.avatarThumbUrl || data.avatarUrl || ''),
+    isOnline: data.isOnline === true,
+    lastSeenAt: data.lastSeenAt || data.lastSeenAtServer || null,
+    lastActiveAt: data.lastActiveAt || data.lastActiveAtServer || null,
+    lastSiteEnteredAt: data.lastSiteEnteredAt || data.lastSiteEnteredAtServer || null,
     createdAt: data.createdAt || null,
   };
 }

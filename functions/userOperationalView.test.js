@@ -12,6 +12,9 @@ test('user operational view contains directory fields without privileged profile
     email: 'a@example.test',
     role: 'angajat',
     active: true,
+    isOnline: true,
+    lastSeenAt: 100,
+    lastActiveAt: 120,
     companyIds: ['company-a'],
     globalAdmin: true,
     permissions: ['secret'],
@@ -20,6 +23,9 @@ test('user operational view contains directory fields without privileged profile
   assert.equal(view.uid, 'user-a');
   assert.equal(view.companyId, 'company-a');
   assert.equal(view.active, true);
+  assert.equal(view.isOnline, true);
+  assert.equal(view.lastSeenAt, 100);
+  assert.equal(view.lastActiveAt, 120);
   assert.equal(Object.hasOwn(view, 'globalAdmin'), false);
   assert.equal(Object.hasOwn(view, 'permissions'), false);
   assert.equal(Object.hasOwn(view, 'timesheetDefaultProjectId'), false);
@@ -33,7 +39,7 @@ test('company IDs are normalized and view IDs are deterministic', () => {
   assert.equal(userOperationalViewId('company-a', 'user-a'), 'company-a__user-a');
 });
 
-test('presence-only updates do not change the user operational payload', () => {
+test('presence fields are included in the user operational payload', () => {
   const base = {
     fullName: 'User A',
     role: 'angajat',
@@ -50,8 +56,12 @@ test('presence-only updates do not change the user operational payload', () => {
     updatedAt: 200,
   };
 
-  assert.deepEqual(
-    buildUserOperationalView('user-a', 'company-a', base),
-    buildUserOperationalView('user-a', 'company-a', next)
-  );
+  const before = buildUserOperationalView('user-a', 'company-a', base);
+  const after = buildUserOperationalView('user-a', 'company-a', next);
+
+  assert.equal(before.isOnline, true);
+  assert.equal(before.lastSeenAt, 100);
+  assert.equal(after.isOnline, false);
+  assert.equal(after.lastSeenAt, 200);
+  assert.equal(after.lastActiveAt, 200);
 });

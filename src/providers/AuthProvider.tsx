@@ -29,6 +29,18 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
 });
 
+function getCompanyNames(data: Record<string, unknown>): string[] {
+  return Array.isArray(data.companyNames)
+    ? data.companyNames.filter((value: unknown): value is string => typeof value === "string" && Boolean(value.trim()))
+    : [];
+}
+
+function getPrimaryCompanyName(data: Record<string, unknown>, companyNames: string[]): string {
+  return typeof data.primaryCompanyName === "string" && data.primaryCompanyName.trim()
+    ? data.primaryCompanyName.trim()
+    : companyNames[0] || "";
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppAuthUser | null>(null);
   const [role, setRole] = useState("");
@@ -48,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (snap.exists()) {
           const data = snap.data();
+          const companyNames = getCompanyNames(data);
 
           setUser({
             ...nextUser,
@@ -64,9 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             roleTitle: data.roleTitle || "",
             department: data.department || "",
             companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
-            companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
+            companyNames,
             primaryCompanyId: data.primaryCompanyId || "",
-            primaryCompanyName: data.primaryCompanyName || "",
+            primaryCompanyName: getPrimaryCompanyName(data, companyNames),
             role: data.role,
             active: data.active === true,
             globalAdmin: isGlobalAdminProfile(data),
@@ -92,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user?.uid) return undefined;
     return startUserPresence(user);
-  }, [user?.uid]);
+  }, [user]);
 
   useEffect(() => {
     if (!user?.uid) return undefined;
@@ -103,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = snap.data();
+      const companyNames = getCompanyNames(data);
       if (!evaluateInternalAccessProfile(data).allowed) {
         void logoutUser();
         return;
@@ -119,9 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           roleTitle: data.roleTitle || "",
           department: data.department || "",
           companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
-          companyNames: Array.isArray(data.companyNames) ? data.companyNames.filter(Boolean) : [],
+          companyNames,
           primaryCompanyId: data.primaryCompanyId || "",
-          primaryCompanyName: data.primaryCompanyName || "",
+          primaryCompanyName: getPrimaryCompanyName(data, companyNames),
           role: data.role,
           active: data.active === true,
           globalAdmin: isGlobalAdminProfile(data),

@@ -113,6 +113,9 @@ class FakeFirestore {
         const current = this.store.get(ref.path) || {};
         this.store.set(ref.path, { ...current, ...data });
       },
+      delete: (ref) => {
+        this.store.delete(ref.path);
+      },
     };
     return callback(transaction);
   }
@@ -424,5 +427,47 @@ describe("timesheet secure start", () => {
     assert.equal(result.duplicate, true);
     assert.equal(result.timesheetId, "overnight-active");
     assert.equal(db.store.get("timesheets/overnight-active").status, "activ");
+  });
+});
+
+describe("timesheet secure stop", () => {
+  test("uses server time when the client stop timestamp is not after start", async () => {
+    const now = new Date("2026-07-15T17:20:00+03:00").getTime();
+    const startAt = new Date("2026-07-15T15:03:18+03:00").getTime();
+    const { db, handlers } = createFixture({
+      "timesheets/stale-stop": {
+        companyId: "company-1",
+        userId: "user-test",
+        userName: "Utilizator Test",
+        projectId: "project-1",
+        projectName: "Service si Mentenanta",
+        status: "activ",
+        startAt,
+        stopAt: null,
+        workedMinutes: 0,
+        workDate: "2026-07-15",
+      },
+      "activeTimesheets/user-test": {
+        companyId: "company-1",
+        userId: "user-test",
+        timesheetId: "stale-stop",
+      },
+    });
+
+    const result = await withMockedNow(now, () =>
+      handlers.stopTimesheet({
+        auth: { uid: "user-test" },
+        data: {
+          timesheetId: "stale-stop",
+          occurredAt: startAt,
+        },
+      })
+    );
+    const saved = db.store.get("timesheets/stale-stop");
+
+    assert.equal(result.duplicate, false);
+    assert.equal(saved.stopAt, now);
+    assert.equal(saved.workedMinutes, 137);
+    assert.equal(db.store.has("activeTimesheets/user-test"), false);
   });
 });

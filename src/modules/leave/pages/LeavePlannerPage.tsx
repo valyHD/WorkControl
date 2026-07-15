@@ -200,6 +200,10 @@ function assistantLeaveField(fields: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
+function getProfileCompanyName(user: ReturnType<typeof useAuth>["user"]): string {
+  return user?.primaryCompanyName?.trim() || user?.companyNames?.find((name) => name.trim())?.trim() || "";
+}
+
 export default function LeavePlannerPage() {
   const { user, role } = useAuth();
   const location = useLocation();
@@ -224,7 +228,7 @@ export default function LeavePlannerPage() {
   const [drawingSignature, setDrawingSignature] = useState(false);
   const [formValues, setFormValues] = useState<LeaveRequestFormValues>(
     {
-      ...defaultForm(user?.displayName || user?.email || "", user?.email || "", user?.primaryCompanyName || ""),
+      ...defaultForm(user?.displayName || user?.email || "", user?.email || "", getProfileCompanyName(user)),
       roleTitle: user?.roleTitle || "",
       department: user?.department || "",
     }
@@ -232,13 +236,13 @@ export default function LeavePlannerPage() {
   const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const signatureStrokeRef = useRef<SignaturePoint[]>([]);
   const signatureStrokesRef = useRef<SignaturePoint[][]>([]);
-  const previousProfileCompanyNameRef = useRef(user?.primaryCompanyName || "");
+  const previousProfileCompanyNameRef = useRef(getProfileCompanyName(user));
   const previousProfileRoleTitleRef = useRef(user?.roleTitle || "");
   const previousProfileDepartmentRef = useRef(user?.department || "");
   const assistantLeaveKeyRef = useRef("");
 
   useEffect(() => {
-    const profileCompanyName = user?.primaryCompanyName || "";
+    const profileCompanyName = getProfileCompanyName(user);
     const previousProfileCompanyName = previousProfileCompanyNameRef.current;
     const profileRoleTitle = user?.roleTitle || "";
     const previousProfileRoleTitle = previousProfileRoleTitleRef.current;
@@ -267,7 +271,7 @@ export default function LeavePlannerPage() {
     previousProfileRoleTitleRef.current = profileRoleTitle;
     previousProfileDepartmentRef.current = profileDepartment;
     signatureStrokesRef.current = [];
-  }, [user?.department, user?.displayName, user?.email, user?.primaryCompanyName, user?.roleTitle]);
+  }, [user, user?.companyNames, user?.department, user?.displayName, user?.email, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -280,7 +284,7 @@ export default function LeavePlannerPage() {
 
     setFormValues((prev) => ({
       ...prev,
-      companyName: user?.primaryCompanyName || prev.companyName,
+      companyName: getProfileCompanyName(user) || prev.companyName,
       roleTitle: user?.roleTitle || prev.roleTitle,
       department: user?.department || prev.department,
       requestType: "concediu_odihna",
@@ -291,7 +295,7 @@ export default function LeavePlannerPage() {
     window.setTimeout(() => {
       document.getElementById("leave-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 150);
-  }, [location.search, user?.department, user?.primaryCompanyName, user?.roleTitle]);
+  }, [location.search, user, user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     const handleAssistantLeaveFill = (detail: Readonly<Record<string, unknown>>) => {
@@ -316,7 +320,7 @@ export default function LeavePlannerPage() {
       setSuccess("Asistentul a completat perioada. Verifica semnatura si trimite cererea.");
       setFormValues((prev) => ({
         ...prev,
-        companyName: user?.primaryCompanyName || prev.companyName,
+        companyName: getProfileCompanyName(user) || prev.companyName,
         roleTitle: user?.roleTitle || prev.roleTitle,
         department: user?.department || prev.department,
         requestType:
@@ -342,7 +346,7 @@ export default function LeavePlannerPage() {
     };
 
     return registerAssistantFormDraftAdapter(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
-  }, [user?.department, user?.primaryCompanyName, user?.roleTitle]);
+  }, [user, user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     if (!showYearCalendar) return undefined;
@@ -682,7 +686,7 @@ export default function LeavePlannerPage() {
       setExpandedUserId(user.uid);
       setSuccess("Cererea a fost trimisa si apare mai jos in Cererile mele.");
       setFormValues((prev) => ({
-        ...defaultForm(user.displayName || user.email || "", user.email || "", user.primaryCompanyName || prev.companyName),
+        ...defaultForm(user.displayName || user.email || "", user.email || "", getProfileCompanyName(user) || prev.companyName),
         roleTitle: user.roleTitle || prev.roleTitle,
         department: user.department || prev.department,
       }));

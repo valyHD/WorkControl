@@ -1082,10 +1082,12 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       if (!Number.isFinite(startAt) || startAt <= 0) {
         throw new HttpsError('failed-precondition', 'Pontajul nu are o ora valida de start.');
       }
+      const now = Date.now();
       const occurredAt = Number(input.occurredAt);
-      const stopAt = Number.isFinite(occurredAt)
-        ? Math.max(startAt, Math.min(Date.now(), occurredAt))
-        : Date.now();
+      const hasValidClientStop = Number.isFinite(occurredAt) && occurredAt > startAt;
+      const stopAt = hasValidClientStop
+        ? Math.max(startAt, Math.min(now, occurredAt))
+        : now;
       const workedMinutes = Math.max(1, Math.round((stopAt - startAt) / 60000));
       const status = workedMinutes < 8 * 60 || workedMinutes > 9 * 60 ? 'corectat' : 'inchis';
       const stopExplanation = cleanText(input.stopExplanation || input.explanation, 1000);
