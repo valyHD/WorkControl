@@ -370,6 +370,15 @@ test("clients cannot forge audit, AI, system logs or notifications", async () =>
     userId: "manager-a",
     title: "spam",
   }));
+  await assertFails(setDoc(doc(db, "notificationSchedules", "fake"), {
+    companyId: "company-a",
+    status: "scheduled",
+    nextRunAt: Date.now(),
+  }));
+  await assertFails(setDoc(doc(db, "notificationDeliveries", "fake"), {
+    companyId: "company-a",
+    recipientCount: 1,
+  }));
 });
 
 test("GPS points are readable only for assigned users and company managers", async () => {

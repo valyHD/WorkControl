@@ -475,6 +475,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /notificationSchedules/{scheduleId} {
+      allow read, write: if false;
+    }
+
+    match /notificationDeliveries/{deliveryId} {
+      allow read, write: if false;
+    }
+
     match /timesheetReminderMarkers/{markerId} {
       allow read, write: if false;
     }

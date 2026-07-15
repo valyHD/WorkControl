@@ -23,6 +23,7 @@
     "timesheets:recovery:dry-run": "node scripts/recover-timesheets-from-audit.mjs --mode dry-run --project workcontrol-53b1d",
     "vehicle-runtime:dry-run": "node scripts/backfill-vehicle-runtime-live.mjs --mode dry-run",
     "projections:dry-run": "node scripts/backfill-operational-projections.mjs --mode dry-run",
+    "expiry-schedules:dry-run": "node scripts/backfill-vehicle-alert-schedules.mjs --mode dry-run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

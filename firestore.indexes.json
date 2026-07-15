@@ -175,6 +175,17 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "notificationSchedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerType", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextRunAt", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "aiCommandLogs",
       "queryScope": "COLLECTION",
       "fields": [
@@ -579,6 +590,12 @@
     },
     {
       "collectionGroup": "aiCommandLogs",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "notificationDeliveries",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

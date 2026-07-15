@@ -15,6 +15,10 @@ import StatusBadge from "../../../components/StatusBadge";
 import SavedViewsBar from "../../../components/product/SavedViewsBar";
 import { useFeatureFlags } from "../../../lib/productIntelligence";
 import { useAuth } from "../../../providers/AuthProvider";
+import {
+  getVehicleDocumentAttentionItems,
+  getVehicleDocumentExpiryItems,
+} from "../utils/vehicleDocumentExpiry";
 
 type VehicleSavedView = {
   search: string;
@@ -105,12 +109,7 @@ function getGpsFreshness(vehicle: VehicleItem, now = Date.now()) {
 }
 
 function hasVehicleDocumentAlert(vehicle: VehicleItem, now = Date.now()) {
-  const threshold = now + 30 * 24 * 60 * 60 * 1000;
-  return (vehicle.documents || []).some((document) => {
-    if (!document.expiryDate) return false;
-    const expiry = Date.parse(`${document.expiryDate}T00:00:00`);
-    return Number.isFinite(expiry) && expiry <= threshold;
-  });
+  return getVehicleDocumentExpiryItems(vehicle, new Date(now)).some((item) => item.daysLeft <= 30);
 }
 
 function hasVehicleServiceAlert(vehicle: VehicleItem) {
@@ -215,6 +214,10 @@ export default function VehiclesPage() {
 
   const total = vehicles.length;
   const activeCount = vehicles.filter((v) => v.status === "activa").length;
+  const documentAttentionItems = useMemo(
+    () => getVehicleDocumentAttentionItems(vehicles),
+    [vehicles]
+  );
   const tableColumns = useMemo<DataTableColumn<VehicleItem>[]>(
     () => [
       {
@@ -319,6 +322,47 @@ export default function VehiclesPage() {
           },
         ]}
       />
+
+      {!loading && documentAttentionItems.length > 0 ? (
+        <section className="panel" aria-labelledby="vehicle-document-attention-title">
+          <div className="tools-header tools-header--compact">
+            <div>
+              <h2 className="panel-title" id="vehicle-document-attention-title">
+                Documente care necesită atenție
+              </h2>
+              <p className="tools-subtitle">
+                Expirate sau cu cel mult 30 de zile rămase. Lista folosește datele flotei deja încărcate.
+              </p>
+            </div>
+            <StatusBadge tone="orange">{documentAttentionItems.length}</StatusBadge>
+          </div>
+          <div className="simple-list">
+            {documentAttentionItems.slice(0, 8).map((item) => {
+              const urgent = item.status === "expired" || item.status === "today" || item.status === "critical";
+              const statusLabel = item.daysLeft < 0
+                ? `Expirat de ${Math.abs(item.daysLeft)} zile`
+                : item.daysLeft === 0
+                  ? "Expiră astăzi"
+                  : item.daysLeft === 1
+                    ? "Expiră mâine"
+                    : `${item.daysLeft} zile rămase`;
+              return (
+                <Link
+                  key={item.id}
+                  className="simple-list-item"
+                  to={`/vehicles/${item.vehicleId}`}
+                >
+                  <div className="simple-list-text">
+                    <span className="simple-list-label">{item.plateNumber} · {item.label}</span>
+                    <span className="simple-list-subtitle">Expirare: {item.expiryDate}</span>
+                  </div>
+                  <StatusBadge tone={urgent ? "red" : "orange"}>{statusLabel}</StatusBadge>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <div className="panel">
         <div className="tools-header tools-header--compact">
