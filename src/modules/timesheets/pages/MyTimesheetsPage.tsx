@@ -69,11 +69,26 @@ function getProjectDisplayName(projectName?: string, projectCode?: string): stri
   return name || code || "Fara proiect";
 }
 
+function formatActiveStartLabel(item: TimesheetItem, todayKey: string) {
+  const time = new Date(item.startAt).toLocaleTimeString("ro-RO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (getLocalDateKey(item.startAt) === todayKey) return `pornit la ${time}`;
+  const date = new Date(item.startAt).toLocaleDateString("ro-RO", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return `pornit pe ${date} la ${time}`;
+}
+
 function getTimesheetProjectStorageKey(userId: string): string {
   return `workcontrol:last-timesheet-project:${userId}`;
 }
 
-function buildOfflineActiveTimesheet(action: Extract<OfflineTimesheetAction, { type: "start" }>): TimesheetItem {
+function buildOfflineActiveTimesheet(
+  action: Extract<OfflineTimesheetAction, { type: "start" }>
+): TimesheetItem {
   const workDate = getLocalDateKey(action.occurredAt);
   return {
     id: `offline:${action.id}`,
@@ -289,9 +304,12 @@ export default function MyTimesheetsPage() {
         setLeaveRequests(leaveData);
         setPreferredProjectId(nextPreferredProjectId);
 
-        const optionalFailures = [projectsResult, activeResult, savedProjectResult, leaveResult].filter(
-          (result) => result.status === "rejected"
-        ).length;
+        const optionalFailures = [
+          projectsResult,
+          activeResult,
+          savedProjectResult,
+          leaveResult,
+        ].filter((result) => result.status === "rejected").length;
         if (optionalFailures) {
           setLoadWarning(
             "Pontajele disponibile au fost incarcate, dar unele date auxiliare nu au raspuns. Reincearca actualizarea."
@@ -299,11 +317,7 @@ export default function MyTimesheetsPage() {
         }
       } catch (error) {
         console.error("[MyTimesheetsPage][load]", error);
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Nu am putut incarca pontajele."
-        );
+        setLoadError(error instanceof Error ? error.message : "Nu am putut incarca pontajele.");
       } finally {
         loadInProgress.current = false;
         setLoading(false);
@@ -318,11 +332,13 @@ export default function MyTimesheetsPage() {
     const queuedStart = getPendingOfflineTimesheetStart(user.uid);
     setOfflineQueueCount(queue.length);
     if (queuedStart) {
-      setActiveTimesheet((current) => current && !current.id.startsWith("offline:")
-        ? current
-        : buildOfflineActiveTimesheet(queuedStart));
+      setActiveTimesheet((current) =>
+        current && !current.id.startsWith("offline:")
+          ? current
+          : buildOfflineActiveTimesheet(queuedStart)
+      );
     } else {
-      setActiveTimesheet((current) => current?.id.startsWith("offline:") ? null : current);
+      setActiveTimesheet((current) => (current?.id.startsWith("offline:") ? null : current));
     }
   }, [user?.uid]);
 
@@ -505,17 +521,16 @@ export default function MyTimesheetsPage() {
   }, [timesheets]);
   const todayKey = getLocalDateKey(attentionClock);
   const todayTimesheets = useMemo(
-    () => timesheets.filter(
-      (item) => item.workDate === todayKey ||
-        getTimesheetMinutesForDay(item, todayKey, attentionClock) > 0
-    ),
+    () =>
+      timesheets.filter(
+        (item) =>
+          item.workDate === todayKey ||
+          getTimesheetMinutesForDay(item, todayKey, attentionClock) > 0
+      ),
     [attentionClock, timesheets, todayKey]
   );
   const liveTodayTimesheets = useMemo(() => {
-    if (
-      !activeTimesheet ||
-      todayTimesheets.some((item) => item.id === activeTimesheet.id)
-    ) {
+    if (!activeTimesheet || todayTimesheets.some((item) => item.id === activeTimesheet.id)) {
       return todayTimesheets;
     }
 
@@ -538,9 +553,19 @@ export default function MyTimesheetsPage() {
     () => timesheets.filter((item) => item.status === "neinchis" || item.status === "activ"),
     [timesheets]
   );
-  const activeMinutes = activeTimesheet
+  const activeTotalMinutes = activeTimesheet
     ? getEffectiveWorkedMinutes(activeTimesheet, attentionClock)
     : 0;
+  const activeTodayMinutes = activeTimesheet
+    ? getTimesheetMinutesForDay(activeTimesheet, todayKey, attentionClock)
+    : 0;
+  const activeStartedToday = activeTimesheet
+    ? getLocalDateKey(activeTimesheet.startAt) === todayKey
+    : false;
+  const monthRange = useMemo(
+    () => getTimesheetPeriodRange("month", undefined, undefined, attentionClock),
+    [attentionClock]
+  );
   const nextApprovedLeave = useMemo(() => {
     const today = getLocalDateKey(attentionClock);
     return (
@@ -554,7 +579,10 @@ export default function MyTimesheetsPage() {
         title: "Lucrezi acum",
         label: "Activ",
         tone: "blue" as const,
-        subtitle: `${getProjectDisplayName(activeTimesheet.projectName, activeTimesheet.projectCode)} - pornit la ${new Date(activeTimesheet.startAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}`,
+        subtitle: `${getProjectDisplayName(
+          activeTimesheet.projectName,
+          activeTimesheet.projectCode
+        )} - ${formatActiveStartLabel(activeTimesheet, todayKey)}`,
       }
     : todayClosedTimesheet
       ? {
@@ -585,7 +613,10 @@ export default function MyTimesheetsPage() {
   if (loading) {
     return (
       <PageLayout className="my-timesheets-modern-page">
-        <LoadingState title="Se incarca pontajul tau" description="Verificam statusul curent si ultimele inregistrari." />
+        <LoadingState
+          title="Se incarca pontajul tau"
+          description="Verificam statusul curent si ultimele inregistrari."
+        />
       </PageLayout>
     );
   }
@@ -641,7 +672,11 @@ export default function MyTimesheetsPage() {
       ) : null}
       {offlineQueueCount || offlineStatus ? (
         <div className="wc-offline-queue-status" role="status">
-          <strong>{offlineQueueCount ? `${offlineQueueCount} actiuni de pontaj in asteptare` : "Pontaj sincronizat"}</strong>
+          <strong>
+            {offlineQueueCount
+              ? `${offlineQueueCount} actiuni de pontaj in asteptare`
+              : "Pontaj sincronizat"}
+          </strong>
           <span>{offlineStatus || "Sincronizarea porneste automat cand revine internetul."}</span>
         </div>
       ) : null}
@@ -670,9 +705,15 @@ export default function MyTimesheetsPage() {
               </strong>
             </div>
             <div>
-              <span>Durata live</span>
-              <strong>{formatMinutes(activeMinutes)}</strong>
+              <span>Durata azi</span>
+              <strong>{formatMinutes(activeTodayMinutes)}</strong>
             </div>
+            {!activeStartedToday ? (
+              <div>
+                <span>Total sesiune</span>
+                <strong>{formatMinutes(activeTotalMinutes)}</strong>
+              </div>
+            ) : null}
             <div>
               <span>Locatie start</span>
               <strong>{formatTimesheetLocation(activeTimesheet.startLocation) || "-"}</strong>
@@ -805,9 +846,12 @@ export default function MyTimesheetsPage() {
         <TimesheetChartCard
           title="Ore lucrate pe zile"
           subtitle="Istoricul personal"
-          bars={buildDayMinuteBuckets(timesheets.slice(0, 40))}
+          bars={buildDayMinuteBuckets(timesheets.slice(0, 40), attentionClock)}
         />
-        <TimesheetChartCard title="Ore pe proiecte" bars={buildProjectMinuteBuckets(timesheets)} />
+        <TimesheetChartCard
+          title="Ore pe proiecte"
+          bars={buildProjectMinuteBuckets(timesheets, attentionClock, 6, monthRange)}
+        />
       </div>
 
       <div className="panel">

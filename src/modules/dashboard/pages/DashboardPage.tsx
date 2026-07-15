@@ -41,7 +41,6 @@ import { ProductContentLayout, ProductQuickActions } from "../../../components/p
 import { ErrorState, LoadingState, PageHeader, PageLayout } from "../../../components/experience";
 import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
-  getEffectiveWorkedMinutes,
   getLocalDateKey,
   getProjectLabel,
   getTimesheetMinutesForDay,
@@ -181,9 +180,7 @@ export default function DashboardPage() {
         console.error("[DashboardPage][load]", error);
         if (mountedRef.current && !silent) {
           setLoadError(
-            error instanceof Error
-              ? error.message
-              : "Datele operationale nu au putut fi incarcate."
+            error instanceof Error ? error.message : "Datele operationale nu au putut fi incarcate."
           );
         }
       } finally {
@@ -235,13 +232,14 @@ export default function DashboardPage() {
     }
   }, [navigate, navigatingVehicle, user?.uid]);
 
-  const todayKey = getLocalDateKey();
+  const todayKey = getLocalDateKey(liveClock);
   const activeUsers = useMemo(() => users.filter((item) => item.active !== false), [users]);
   const todayTimesheets = useMemo(
-    () => timesheets.filter(
-      (item) => item.workDate === todayKey ||
-        getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
-    ),
+    () =>
+      timesheets.filter(
+        (item) =>
+          item.workDate === todayKey || getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
+      ),
     [liveClock, timesheets, todayKey]
   );
   const activeTimesheetsNow = useMemo(
@@ -253,10 +251,7 @@ export default function DashboardPage() {
     const timer = window.setInterval(() => setLiveClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, [activeTimesheetsNow.length]);
-  const currentTeamTimesheets = useMemo(
-    () => todayTimesheets,
-    [todayTimesheets]
-  );
+  const currentTeamTimesheets = useMemo(() => todayTimesheets, [todayTimesheets]);
   const todayMinutes = useMemo(
     () => sumTimesheetMinutesForDay(currentTeamTimesheets, todayKey, liveClock),
     [currentTeamTimesheets, liveClock, todayKey]
@@ -285,7 +280,8 @@ export default function DashboardPage() {
     [vehicles]
   );
   const importantAlertsCount =
-    todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length +
+    todayTimesheets.filter((item) => getTimesheetMinutesForDay(item, todayKey, liveClock) > 8 * 60)
+      .length +
     todayTimesheets.filter((item) => !item.projectId && !item.projectName).length +
     vehiclesWithoutDriver.length +
     problemVehicles.length +
@@ -377,7 +373,9 @@ export default function DashboardPage() {
         key: "duration",
         header: "Durata",
         render: (row) =>
-          row.timesheet ? formatMinutes(getEffectiveWorkedMinutes(row.timesheet)) : "-",
+          row.timesheet
+            ? formatMinutes(getTimesheetMinutesForDay(row.timesheet, todayKey, liveClock))
+            : "-",
       },
       {
         key: "status",
@@ -412,13 +410,16 @@ export default function DashboardPage() {
           ),
       },
     ],
-    []
+    [liveClock, todayKey]
   );
 
   if (loading) {
     return (
       <PageLayout className="dashboard-modern-page">
-        <LoadingState title="Se incarca centrul operational" description="Pregatim indicatorii relevanti pentru rolul tau." />
+        <LoadingState
+          title="Se incarca centrul operational"
+          description="Pregatim indicatorii relevanti pentru rolul tau."
+        />
       </PageLayout>
     );
   }
@@ -489,10 +490,10 @@ export default function DashboardPage() {
             leave.isPartial
               ? "date incomplete; reincearca actualizarea"
               : leave.activeToday
-              ? `${leave.activeToday} in desfasurare`
-              : leave.pending
-                ? `${leave.pending} in asteptare`
-                : "niciun concediu activ azi"
+                ? `${leave.activeToday} in desfasurare`
+                : leave.pending
+                  ? `${leave.pending} in asteptare`
+                  : "niciun concediu activ azi"
           }
           tone={leave.isPartial || leave.pending ? "orange" : "green"}
           icon={CalendarClock}
@@ -659,8 +660,9 @@ export default function DashboardPage() {
                 >
                   <strong>
                     {
-                      todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60)
-                        .length
+                      todayTimesheets.filter(
+                        (item) => getTimesheetMinutesForDay(item, todayKey, liveClock) > 8 * 60
+                      ).length
                     }
                   </strong>
                   <span>pontaje peste 8 ore</span>

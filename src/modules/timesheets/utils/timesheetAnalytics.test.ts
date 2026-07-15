@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { TimesheetItem } from "../../../types/timesheet";
 import {
+  buildDayMinuteBuckets,
+  buildProjectMinuteBuckets,
   getActiveUsersNow,
   getTimesheetMinutesForDay,
+  getTimesheetMinutesForRange,
+  getTimesheetPeriodRange,
+  isTimesheetInRange,
   sumTimesheetMinutesForDay,
 } from "./timesheetAnalytics";
 
@@ -86,5 +91,53 @@ describe("timesheet operational analytics", () => {
     });
 
     expect(getTimesheetMinutesForDay(closed, "2026-07-14")).toBe(150);
+  });
+
+  it("uses only the selected day slice for active cross-day timesheets", () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const active = timesheet({
+      status: "activ",
+      startAt: new Date("2026-07-14T07:18:00+03:00").getTime(),
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+    });
+    const todayRange = getTimesheetPeriodRange("today", undefined, undefined, now);
+
+    expect(getTimesheetMinutesForRange(active, todayRange, now)).toBe(756);
+    expect(isTimesheetInRange(active, todayRange, now)).toBe(true);
+  });
+
+  it("splits active cross-day chart buckets by calendar day", () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const active = timesheet({
+      status: "activ",
+      startAt: new Date("2026-07-14T07:18:00+03:00").getTime(),
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+    });
+
+    expect(buildDayMinuteBuckets([active], now)).toEqual([
+      { label: "07-14", value: 1002, displayValue: "16h 42m" },
+      { label: "07-15", value: 756, displayValue: "12h 36m" },
+    ]);
+  });
+
+  it("uses selected range minutes for project totals", () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const active = timesheet({
+      status: "activ",
+      startAt: new Date("2026-07-14T07:18:00+03:00").getTime(),
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+      projectName: "Service si Mentenanta",
+    });
+    const todayRange = getTimesheetPeriodRange("today", undefined, undefined, now);
+
+    expect(buildProjectMinuteBuckets([active], now, 6, todayRange)).toEqual([
+      { label: "Service si Mentenanta", value: 756, displayValue: "12h 36m" },
+    ]);
   });
 });
