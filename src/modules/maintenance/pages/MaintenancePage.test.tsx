@@ -36,9 +36,11 @@ const usersMocks = vi.hoisted(() => ({
 }));
 
 const gmailMocks = vi.hoisted(() => ({
+  consumeGmailRedirectAuthorization: vi.fn(() => null),
   preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
   requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
   sendGmailMessageWithPdfAttachment: vi.fn(),
+  startGmailRedirectAuthorization: vi.fn(),
 }));
 
 vi.mock("../../../providers/AuthProvider", () => ({
@@ -79,6 +81,7 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     usersMocks.getAllUsers.mockResolvedValue([]);
+    gmailMocks.consumeGmailRedirectAuthorization.mockReturnValue(null);
     gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
     gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
   });
@@ -150,6 +153,38 @@ describe("MaintenancePage client form", () => {
 
     expect(gmailMocks.requestGmailAccessToken).toHaveBeenCalledWith("liftultau@gmail.com");
     expect(await screen.findByText("Gmail autorizat pentru liftultau@gmail.com.")).toBeInTheDocument();
+  });
+
+  it("offers explicit same-window Gmail authorization for mobile browsers", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
+
+    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(gmailMocks.requestGmailAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("shows a mobile redirect action when Gmail popup authorization is blocked", async () => {
+    gmailMocks.requestGmailAccessToken.mockRejectedValue(new Error("popup blocked"));
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
+    const mobileButton = await screen.findByRole("button", { name: "Autentificare Gmail pe mobil" });
+    await user.click(mobileButton);
+
+    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
   });
 
   it("keeps a manual technician for the current report and restores the default on return", async () => {

@@ -95,6 +95,19 @@
   gap: 16px;
 }
 
+.maintenance-gmail-auth-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.maintenance-gmail-auth-message > span {
+  min-width: min(100%, 260px);
+  flex: 1;
+}
+
 .maintenance-dashboard-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

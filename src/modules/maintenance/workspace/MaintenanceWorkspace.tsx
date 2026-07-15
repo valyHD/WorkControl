@@ -31,9 +31,11 @@ import {
 } from "../services/maintenanceService";
 import { getAllUsers } from "../../users/services/usersService";
 import {
+  consumeGmailRedirectAuthorization,
   preloadGmailAuthorization,
   requestGmailAccessToken,
   sendGmailMessageWithPdfAttachment,
+  startGmailRedirectAuthorization,
 } from "../services/gmailDraftService";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
 import { generateReportId, reviewStandardText } from "../utils/reportUtils";
@@ -112,6 +114,20 @@ type GeneratedReportShare = {
 };
 
 type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "lifts" | "companies" | "history" | "checks";
+
+type GmailReportRedirectDraft = {
+  selectedClientId: string;
+  reportSearch: string;
+  reportAddress: string;
+  reportLift: string;
+  reportTypeDraft: ReportType;
+  reportComments: string;
+  technicianSearch: string;
+  selectedTechnicianId: string;
+  gmailSenderEmail: string;
+};
+
+const GMAIL_REPORT_DRAFT_STORAGE_KEY = "workcontrol.maintenance.gmailReportDraft.v1";
 
 const MAINTENANCE_TABS: Array<{
   id: MaintenanceTab;
@@ -456,6 +472,7 @@ export default function MaintenanceWorkspace() {
   const [gmailAuthorizedEmail, setGmailAuthorizedEmail] = useState("");
   const [gmailAuthLoading, setGmailAuthLoading] = useState(false);
   const [gmailAuthReady, setGmailAuthReady] = useState(false);
+  const [gmailRedirectRequired, setGmailRedirectRequired] = useState(false);
   const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
   const shouldLoadBranding = activeMaintenanceTab === "report" || activeMaintenanceTab === "companies";
   const shouldLoadReportOverview = ["dashboard", "history", "checks"].includes(activeMaintenanceTab);
@@ -609,6 +626,30 @@ export default function MaintenanceWorkspace() {
       active = false;
     };
   }, [shouldLoadTechnicians]);
+
+  useEffect(() => {
+    if (!shouldLoadTechnicians) return;
+    try {
+      const authorization = consumeGmailRedirectAuthorization();
+      if (!authorization) return;
+      restoreGmailReportDraftAfterRedirect();
+      const senderEmail = authorization.senderEmail || gmailSenderEmail.trim();
+      if (senderEmail) {
+        setGmailSenderEmail(senderEmail);
+        setGmailAuthorizedEmail(senderEmail);
+      }
+      setGmailAccessToken(authorization.accessToken);
+      setGmailRedirectRequired(false);
+      setReportError("");
+      setReportMessage("Gmail este autorizat. Verifica raportul si apasa din nou Genereaza raport.");
+    } catch (err) {
+      console.error(err);
+      restoreGmailReportDraftAfterRedirect();
+      setGmailRedirectRequired(true);
+      setReportMessage("");
+      setReportError("Autorizarea Gmail nu a fost finalizata. Apasa Autentificare Gmail pe mobil si selecteaza contul Gmail.");
+    }
+  }, [gmailSenderEmail, shouldLoadTechnicians]);
 
   useEffect(() => {
     setActiveMaintenanceTab(getMaintenanceTabFromLocation(location.pathname, new URLSearchParams(location.search)));
@@ -1299,10 +1340,63 @@ export default function MaintenanceWorkspace() {
     technicianDefaultInitializedRef.current = Boolean(defaultTechnician);
   }
 
+  function saveGmailReportDraftForRedirect(senderEmail = gmailSenderEmail.trim()) {
+    const draft: GmailReportRedirectDraft = {
+      selectedClientId,
+      reportSearch,
+      reportAddress,
+      reportLift,
+      reportTypeDraft,
+      reportComments,
+      technicianSearch,
+      selectedTechnicianId,
+      gmailSenderEmail: senderEmail,
+    };
+    window.sessionStorage.setItem(GMAIL_REPORT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }
+
+  function restoreGmailReportDraftAfterRedirect() {
+    try {
+      const rawDraft = window.sessionStorage.getItem(GMAIL_REPORT_DRAFT_STORAGE_KEY);
+      if (!rawDraft) return;
+      const draft = JSON.parse(rawDraft) as Partial<GmailReportRedirectDraft>;
+      if (typeof draft.selectedClientId === "string") setSelectedClientId(draft.selectedClientId);
+      if (typeof draft.reportSearch === "string") setReportSearch(draft.reportSearch);
+      if (typeof draft.reportAddress === "string") setReportAddress(draft.reportAddress);
+      if (typeof draft.reportLift === "string") setReportLift(draft.reportLift);
+      if (draft.reportTypeDraft === "revizie" || draft.reportTypeDraft === "interventie") {
+        setReportTypeDraft(draft.reportTypeDraft);
+      }
+      if (typeof draft.reportComments === "string") setReportComments(draft.reportComments);
+      if (typeof draft.technicianSearch === "string") setTechnicianSearch(draft.technicianSearch);
+      if (typeof draft.selectedTechnicianId === "string") setSelectedTechnicianId(draft.selectedTechnicianId);
+      if (typeof draft.gmailSenderEmail === "string" && draft.gmailSenderEmail) {
+        setGmailSenderEmail(draft.gmailSenderEmail);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      window.sessionStorage.removeItem(GMAIL_REPORT_DRAFT_STORAGE_KEY);
+    }
+  }
+
+  function startMobileGmailAuthorization(senderEmail = gmailSenderEmail.trim()) {
+    if (!senderEmail) {
+      setReportError("Completeaza contul Gmail expeditor.");
+      return;
+    }
+    saveGmailReportDraftForRedirect(senderEmail);
+    setGmailRedirectRequired(false);
+    setReportError("");
+    setReportMessage("Se deschide autorizarea Gmail in aceeasi fereastra...");
+    startGmailRedirectAuthorization(senderEmail);
+  }
+
   function handleGmailSenderEmailChange(value: string) {
     setGmailSenderEmail(value);
     setGmailAccessToken("");
     setGmailAuthorizedEmail("");
+    setGmailRedirectRequired(false);
   }
 
   async function authorizeGmailSender(): Promise<string> {
@@ -1320,12 +1414,14 @@ export default function MaintenanceWorkspace() {
       const token = await requestGmailAccessToken(senderEmail);
       setGmailAccessToken(token);
       setGmailAuthorizedEmail(senderEmail);
+      setGmailRedirectRequired(false);
       setReportMessage("Gmail este autorizat pentru raportul curent.");
       return token;
     } catch (err) {
       console.error(err);
+      setGmailRedirectRequired(true);
       setReportError(
-        "Autorizarea Gmail a fost blocata sau refuzata. Pe mobil apasa Autorizeaza Gmail, permite popup-uri/ferestre noi pentru WorkControl si selecteaza contul Gmail."
+        "Autorizarea Gmail prin popup a fost blocata sau refuzata. Foloseste autentificarea pentru mobil in aceeasi fereastra."
       );
       setReportMessage("");
       return "";
@@ -1641,7 +1737,22 @@ export default function MaintenanceWorkspace() {
   function renderReportSection() {
     return (
       <div id="maintenance-report-generator" className="maintenance-tab-panel" data-assistant-section="maintenance-report-generator">
-        {reportError && <div className="tool-message">{reportError}</div>}
+        {reportError && (
+          <div className="tool-message maintenance-gmail-auth-message" role="alert">
+            <span>{reportError}</span>
+            {gmailRedirectRequired && (
+              <button
+                className="secondary-btn"
+                data-assistant-action="maintenance-authorize-gmail-mobile"
+                type="button"
+                onClick={() => startMobileGmailAuthorization()}
+                disabled={reportGenerating || gmailAuthLoading}
+              >
+                Autentificare Gmail pe mobil
+              </button>
+            )}
+          </div>
+        )}
         {reportMessage && <div className="tool-message success-message">{reportMessage}</div>}
 
         {lastGeneratedReport && (
@@ -1808,6 +1919,16 @@ export default function MaintenanceWorkspace() {
             <div className="tool-form-actions">
               <button className="secondary-btn" data-assistant-action="maintenance-authorize-gmail" type="button" title="Autorizeaza contul Gmail pentru trimiterea raportului" onClick={() => void authorizeGmailSender()} disabled={reportGenerating || gmailAuthLoading}>
                 {gmailAuthLoading ? "Se autorizeaza..." : "Autorizeaza Gmail"}
+              </button>
+              <button
+                className="secondary-btn"
+                data-assistant-action="maintenance-authorize-gmail-mobile"
+                type="button"
+                title="Autorizeaza Gmail in aceeasi fereastra pentru browsere mobile"
+                onClick={() => startMobileGmailAuthorization()}
+                disabled={reportGenerating || gmailAuthLoading}
+              >
+                Autentificare mobil
               </button>
               <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF si il trimite pe email" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport revizie"}
