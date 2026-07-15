@@ -43,6 +43,7 @@ import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
   getLocalDateKey,
   getProjectLabel,
+  isStaleActiveTimesheet,
   getTimesheetMinutesForDay,
   sumTimesheetMinutesForDay,
   getTimesheetStatusLabel,
@@ -233,14 +234,18 @@ export default function DashboardPage() {
   }, [navigate, navigatingVehicle, user?.uid]);
 
   const todayKey = getLocalDateKey(liveClock);
+  const operationalTimesheets = useMemo(
+    () => timesheets.filter((item) => !isStaleActiveTimesheet(item, liveClock)),
+    [liveClock, timesheets]
+  );
   const activeUsers = useMemo(() => users.filter((item) => item.active !== false), [users]);
   const todayTimesheets = useMemo(
     () =>
-      timesheets.filter(
+      operationalTimesheets.filter(
         (item) =>
           item.workDate === todayKey || getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
       ),
-    [liveClock, timesheets, todayKey]
+    [liveClock, operationalTimesheets, todayKey]
   );
   const activeTimesheetsNow = useMemo(
     () => timesheets.filter((item) => item.status === "activ"),

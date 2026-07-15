@@ -74,6 +74,7 @@ const NOTIFICATION_WINDOW_MS = 60 * 1000;
 const NOTIFICATION_MAX_PER_WINDOW = 20;
 const ALLOWED_VEHICLE_COMMANDS = new Set(['pulse_dout1', 'allow_start', 'block_start']);
 const AUDIT_ONLY_NOTIFICATION_EVENTS = new Set(['user_site_entered']);
+const MAX_ACTIVE_TIMESHEET_MS = 18 * 60 * 60 * 1000;
 
 function cleanText(value, maxLength = 200) {
   return String(value ?? '').trim().slice(0, maxLength);
@@ -146,6 +147,26 @@ function getBucharestDateParts(nowMs) {
     workDate,
     yearMonth: `${parts.year}-${parts.month}`,
     weekKey: `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`,
+  };
+}
+
+function isStaleActiveTimesheet(data, nowMs) {
+  if (!data || data.status !== 'activ') return false;
+  const startAt = Number(data.startAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) return false;
+  if (nowMs - startAt <= MAX_ACTIVE_TIMESHEET_MS) return false;
+  return getBucharestDateParts(startAt).workDate !== getBucharestDateParts(nowMs).workDate;
+}
+
+function buildStaleActiveTimesheetPatch(fieldValue, nowMs) {
+  return {
+    status: 'neinchis',
+    stopAt: null,
+    stopSource: 'system',
+    stopPolicyFlag: 'stale_active_replaced',
+    stopExplanation: 'Pontaj activ vechi marcat automat ca neinchis pentru a permite pornirea pontajului curent.',
+    updatedAt: nowMs,
+    updatedAtServer: fieldValue.serverTimestamp(),
   };
 }
 
@@ -891,26 +912,74 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     const project = projectSnap.data() || {};
 
     return db.runTransaction(async (tx) => {
+      const closedStaleActiveIds = new Set();
+      const closeStaleActive = (activeRef, activeId, activeData) => {
+        const staleCompanyId = cleanText(activeData.companyId, 120) || companyId;
+        tx.update(activeRef, buildStaleActiveTimesheetPatch(fieldValue, now));
+        tx.create(db.collection('auditLogs').doc(), buildAuditPayload(fieldValue, actor, {
+          companyId: staleCompanyId,
+          category: 'timesheets',
+          action: 'timesheet_stale_active_replaced',
+          title: 'Pontaj vechi mutat la incomplete',
+          message: 'Pontaj activ vechi marcat automat ca neinchis la pornirea pontajului curent.',
+          entityId: activeId,
+          metadata: {
+            replacementWorkDate: parts.workDate,
+            staleWorkDate: cleanText(activeData.workDate, 20),
+          },
+          before: activeData,
+          after: buildStaleActiveTimesheetPatch(fieldValue, now),
+        }));
+        closedStaleActiveIds.add(activeId);
+      };
+
       const lock = await tx.get(lockRef);
       if (lock.exists) {
         const activeId = cleanText(lock.get('timesheetId'), 160);
         if (activeId) {
-          const activeSnap = await tx.get(db.collection('timesheets').doc(activeId));
+          const activeRef = db.collection('timesheets').doc(activeId);
+          const activeSnap = await tx.get(activeRef);
           if (activeSnap.exists && activeSnap.get('status') === 'activ') {
-            return { timesheetId: activeId, duplicate: true };
+            const activeData = activeSnap.data() || {};
+            if (isStaleActiveTimesheet(activeData, now)) {
+              closeStaleActive(activeRef, activeId, activeData);
+            } else {
+              return { timesheetId: activeId, duplicate: true };
+            }
           }
         }
       }
       if (!preexisting.empty) {
-        const activeId = preexisting.docs[0].id;
-        tx.set(lockRef, {
-          companyId,
-          userId: actor.uid,
-          timesheetId: activeId,
-          updatedAt: Date.now(),
-          updatedAtServer: fieldValue.serverTimestamp(),
-        });
-        return { timesheetId: activeId, duplicate: true };
+        const activeDoc = preexisting.docs[0];
+        const activeId = cleanText(activeDoc.id || activeDoc.ref?.id, 160);
+        if (activeId && !closedStaleActiveIds.has(activeId)) {
+          const activeRef = db.collection('timesheets').doc(activeId);
+          const activeSnap = await tx.get(activeRef);
+          const activeData = activeSnap.data() || activeDoc.data();
+          if (activeSnap.exists && activeSnap.get('status') === 'activ') {
+            if (isStaleActiveTimesheet(activeData, now)) {
+              closeStaleActive(activeRef, activeId, activeData);
+            } else {
+              tx.set(lockRef, {
+                companyId,
+                userId: actor.uid,
+                timesheetId: activeId,
+                updatedAt: Date.now(),
+                updatedAtServer: fieldValue.serverTimestamp(),
+              });
+              return { timesheetId: activeId, duplicate: true };
+            }
+          } else if (activeDoc.get('status') === 'activ') {
+            tx.set(lockRef, {
+              companyId,
+              userId: actor.uid,
+              timesheetId: activeId,
+              updatedAt: Date.now(),
+              updatedAtServer: fieldValue.serverTimestamp(),
+            });
+            return { timesheetId: activeId, duplicate: true };
+          }
+        }
       }
 
       const startExplanation = cleanText(input.startExplanation, 1000);

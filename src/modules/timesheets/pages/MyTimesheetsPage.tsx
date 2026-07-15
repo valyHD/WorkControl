@@ -40,6 +40,7 @@ import {
   getEffectiveWorkedMinutes,
   getLocalDateKey,
   getMissingWorkdaysForUser,
+  isStaleActiveTimesheet,
   getTimesheetMinutesForDay,
   getTimesheetPeriodRange,
   getTimesheetStatusLabel,
@@ -503,13 +504,27 @@ export default function MyTimesheetsPage() {
     }
   }
 
+  const staleActiveTimesheet = useMemo(
+    () => (isStaleActiveTimesheet(activeTimesheet, attentionClock) ? activeTimesheet : null),
+    [activeTimesheet, attentionClock]
+  );
+  const currentActiveTimesheet = staleActiveTimesheet ? null : activeTimesheet;
+  const operationalTimesheets = useMemo(
+    () =>
+      staleActiveTimesheet
+        ? timesheets.filter((item) => item.id !== staleActiveTimesheet.id)
+        : timesheets,
+    [staleActiveTimesheet, timesheets]
+  );
+
   const stats = useMemo(
-    () => computeTimesheetStats(timesheets, attentionClock),
-    [attentionClock, timesheets]
+    () => computeTimesheetStats(operationalTimesheets, attentionClock),
+    [attentionClock, operationalTimesheets]
   );
   const historicalTimesheets = useMemo(
-    () => timesheets.filter((item) => item.status !== "activ"),
-    [timesheets]
+    () =>
+      timesheets.filter((item) => item.status !== "activ" || item.id === staleActiveTimesheet?.id),
+    [staleActiveTimesheet?.id, timesheets]
   );
   const recentTimesheets = useMemo(
     () => historicalTimesheets.slice(0, historyLimit),
@@ -517,25 +532,28 @@ export default function MyTimesheetsPage() {
   );
   const lastSevenTimesheets = useMemo(() => {
     const from = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return timesheets.filter((item) => (item.startAt || 0) >= from).slice(0, 12);
-  }, [timesheets]);
+    return operationalTimesheets.filter((item) => (item.startAt || 0) >= from).slice(0, 12);
+  }, [operationalTimesheets]);
   const todayKey = getLocalDateKey(attentionClock);
   const todayTimesheets = useMemo(
     () =>
-      timesheets.filter(
+      operationalTimesheets.filter(
         (item) =>
           item.workDate === todayKey ||
           getTimesheetMinutesForDay(item, todayKey, attentionClock) > 0
       ),
-    [attentionClock, timesheets, todayKey]
+    [attentionClock, operationalTimesheets, todayKey]
   );
   const liveTodayTimesheets = useMemo(() => {
-    if (!activeTimesheet || todayTimesheets.some((item) => item.id === activeTimesheet.id)) {
+    if (
+      !currentActiveTimesheet ||
+      todayTimesheets.some((item) => item.id === currentActiveTimesheet.id)
+    ) {
       return todayTimesheets;
     }
 
-    return [activeTimesheet, ...todayTimesheets];
-  }, [activeTimesheet, todayTimesheets]);
+    return [currentActiveTimesheet, ...todayTimesheets];
+  }, [currentActiveTimesheet, todayTimesheets]);
   const todayLiveMinutes = useMemo(
     () => sumTimesheetMinutesForDay(liveTodayTimesheets, todayKey, attentionClock),
     [attentionClock, liveTodayTimesheets, todayKey]
@@ -546,21 +564,26 @@ export default function MyTimesheetsPage() {
   );
   const weekRange = useMemo(() => getTimesheetPeriodRange("week"), []);
   const missingWeekDays = useMemo(
-    () => getMissingWorkdaysForUser(timesheets, weekRange),
-    [timesheets, weekRange]
+    () => getMissingWorkdaysForUser(operationalTimesheets, weekRange),
+    [operationalTimesheets, weekRange]
   );
   const incompleteTimesheets = useMemo(
-    () => timesheets.filter((item) => item.status === "neinchis" || item.status === "activ"),
-    [timesheets]
+    () =>
+      timesheets.filter(
+        (item) =>
+          item.status === "neinchis" ||
+          (item.status === "activ" && item.id !== currentActiveTimesheet?.id)
+      ),
+    [currentActiveTimesheet?.id, timesheets]
   );
-  const activeTotalMinutes = activeTimesheet
-    ? getEffectiveWorkedMinutes(activeTimesheet, attentionClock)
+  const activeTotalMinutes = currentActiveTimesheet
+    ? getEffectiveWorkedMinutes(currentActiveTimesheet, attentionClock)
     : 0;
-  const activeTodayMinutes = activeTimesheet
-    ? getTimesheetMinutesForDay(activeTimesheet, todayKey, attentionClock)
+  const activeTodayMinutes = currentActiveTimesheet
+    ? getTimesheetMinutesForDay(currentActiveTimesheet, todayKey, attentionClock)
     : 0;
-  const activeStartedToday = activeTimesheet
-    ? getLocalDateKey(activeTimesheet.startAt) === todayKey
+  const activeStartedToday = currentActiveTimesheet
+    ? getLocalDateKey(currentActiveTimesheet.startAt) === todayKey
     : false;
   const monthRange = useMemo(
     () => getTimesheetPeriodRange("month", undefined, undefined, attentionClock),
@@ -574,40 +597,47 @@ export default function MyTimesheetsPage() {
         .sort((a, b) => a.periodStart.localeCompare(b.periodStart))[0] ?? null
     );
   }, [attentionClock, leaveRequests]);
-  const currentStatus = activeTimesheet
+  const currentStatus = currentActiveTimesheet
     ? {
         title: "Lucrezi acum",
         label: "Activ",
         tone: "blue" as const,
         subtitle: `${getProjectDisplayName(
-          activeTimesheet.projectName,
-          activeTimesheet.projectCode
-        )} - ${formatActiveStartLabel(activeTimesheet, todayKey)}`,
+          currentActiveTimesheet.projectName,
+          currentActiveTimesheet.projectCode
+        )} - ${formatActiveStartLabel(currentActiveTimesheet, todayKey)}`,
       }
-    : todayClosedTimesheet
+    : staleActiveTimesheet
       ? {
-          title: "Pontaj inchis azi",
-          label: "Inchis",
-          tone: "green" as const,
-          subtitle: `${getProjectDisplayName(todayClosedTimesheet.projectName, todayClosedTimesheet.projectCode)} - ${formatMinutes(todayClosedTimesheet.workedMinutes)}`,
-        }
-      : {
-          title: "Nu ai pontaj pornit",
-          label: "Nepornit",
+          title: "Pontaj vechi neinchis",
+          label: "Verifica",
           tone: "orange" as const,
-          subtitle:
-            new Date(attentionClock).getHours() >= 8
-              ? "Ai intarziat pornirea pontajului. Va fi ceruta explicatie."
-              : "Alege proiectul si porneste pontajul cand incepi lucrul.",
-        };
+          subtitle: "Pontajul vechi va fi marcat neinchis cand pornesti pontajul de azi.",
+        }
+      : todayClosedTimesheet
+        ? {
+            title: "Pontaj inchis azi",
+            label: "Inchis",
+            tone: "green" as const,
+            subtitle: `${getProjectDisplayName(todayClosedTimesheet.projectName, todayClosedTimesheet.projectCode)} - ${formatMinutes(todayClosedTimesheet.workedMinutes)}`,
+          }
+        : {
+            title: "Nu ai pontaj pornit",
+            label: "Nepornit",
+            tone: "orange" as const,
+            subtitle:
+              new Date(attentionClock).getHours() >= 8
+                ? "Ai intarziat pornirea pontajului. Va fi ceruta explicatie."
+                : "Alege proiectul si porneste pontajul cand incepi lucrul.",
+          };
   const timesheetAttentionActive = useMemo(
     () =>
       isTimesheetAttentionTime(
         notificationRules,
-        activeTimesheet ? "stop" : "start",
+        currentActiveTimesheet ? "stop" : "start",
         attentionClock
       ),
-    [activeTimesheet, attentionClock, notificationRules]
+    [currentActiveTimesheet, attentionClock, notificationRules]
   );
 
   if (loading) {
@@ -639,12 +669,14 @@ export default function MyTimesheetsPage() {
         eyebrow="Spațiul meu de lucru"
         title="Pontajul meu"
         description={
-          activeTimesheet
+          currentActiveTimesheet
             ? "Cronometrul este activ și se actualizează în timp real."
             : "Alege proiectul și pornește pontajul când începi lucrul."
         }
         meta={
-          <StatusBadge tone={activeTimesheet ? "green" : "muted"}>
+          <StatusBadge
+            tone={currentActiveTimesheet ? "green" : staleActiveTimesheet ? "orange" : "muted"}
+          >
             {currentStatus.label}
           </StatusBadge>
         }
@@ -687,18 +719,21 @@ export default function MyTimesheetsPage() {
         tone={currentStatus.tone}
         dataAssistantSection="my-timesheet-status"
       >
-        {activeTimesheet ? (
+        {currentActiveTimesheet ? (
           <div className="my-timesheet-live-grid">
             <div>
               <span>Proiect curent</span>
               <strong>
-                {getProjectDisplayName(activeTimesheet.projectName, activeTimesheet.projectCode)}
+                {getProjectDisplayName(
+                  currentActiveTimesheet.projectName,
+                  currentActiveTimesheet.projectCode
+                )}
               </strong>
             </div>
             <div>
               <span>Ora start</span>
               <strong>
-                {new Date(activeTimesheet.startAt).toLocaleTimeString("ro-RO", {
+                {new Date(currentActiveTimesheet.startAt).toLocaleTimeString("ro-RO", {
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
@@ -716,8 +751,16 @@ export default function MyTimesheetsPage() {
             ) : null}
             <div>
               <span>Locatie start</span>
-              <strong>{formatTimesheetLocation(activeTimesheet.startLocation) || "-"}</strong>
+              <strong>
+                {formatTimesheetLocation(currentActiveTimesheet.startLocation) || "-"}
+              </strong>
             </div>
+          </div>
+        ) : null}
+        {staleActiveTimesheet ? (
+          <div className="tool-message warning-message" role="status">
+            Pontajul din {staleActiveTimesheet.workDate || "ziua anterioara"} este inca activ.
+            Porneste pontajul de azi, iar sistemul il va muta automat la incomplete.
           </div>
         ) : null}
       </TimesheetStatusCard>
@@ -771,7 +814,7 @@ export default function MyTimesheetsPage() {
       <div className="content-grid">
         <TimesheetForm
           projects={projects}
-          activeTimesheet={activeTimesheet}
+          activeTimesheet={currentActiveTimesheet}
           onStart={handleStart}
           onStop={handleStop}
           loading={loading}
@@ -840,17 +883,17 @@ export default function MyTimesheetsPage() {
         </div>
       </div>
 
-      <TimesheetCalendar timesheets={timesheets} userThemeKey={user?.themeKey} />
+      <TimesheetCalendar timesheets={operationalTimesheets} userThemeKey={user?.themeKey} />
 
       <div className="content-grid timesheet-chart-grid">
         <TimesheetChartCard
           title="Ore lucrate pe zile"
           subtitle="Istoricul personal"
-          bars={buildDayMinuteBuckets(timesheets.slice(0, 40), attentionClock)}
+          bars={buildDayMinuteBuckets(operationalTimesheets.slice(0, 40), attentionClock)}
         />
         <TimesheetChartCard
           title="Ore pe proiecte"
-          bars={buildProjectMinuteBuckets(timesheets, attentionClock, 6, monthRange)}
+          bars={buildProjectMinuteBuckets(operationalTimesheets, attentionClock, 6, monthRange)}
         />
       </div>
 

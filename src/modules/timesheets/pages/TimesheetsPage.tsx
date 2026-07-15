@@ -60,6 +60,7 @@ import {
   getUserDisplayName,
   getUserTimesheetSummary,
   isIncompleteTimesheet,
+  isStaleActiveTimesheet,
   isTimesheetInRange,
   sumTimesheetMinutes,
   sumTimesheetMinutesForDay,
@@ -306,6 +307,10 @@ export default function TimesheetsPage() {
     () => getTimesheetPeriodRange(period, customFrom, customTo),
     [customFrom, customTo, period]
   );
+  const operationalTimesheets = useMemo(
+    () => timesheets.filter((item) => !isStaleActiveTimesheet(item, liveClock)),
+    [liveClock, timesheets]
+  );
   const displayRange = period === "all" ? undefined : periodRange;
   const getDisplayMinutesForTimesheet = useCallback(
     (item: TimesheetItem) =>
@@ -317,12 +322,12 @@ export default function TimesheetsPage() {
 
   const allProjects = useMemo(() => {
     const map = new Map<string, string>();
-    for (const item of timesheets) {
+    for (const item of operationalTimesheets) {
       const key = item.projectId || item.projectName || item.projectCode || "__no_project__";
       map.set(key, getProjectLabel(item));
     }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [timesheets]);
+  }, [operationalTimesheets]);
 
   const departments = useMemo(
     () =>
@@ -337,7 +342,7 @@ export default function TimesheetsPage() {
   const filteredTimesheets = useMemo(() => {
     const q = normalizeSearchText(search);
 
-    return timesheets.filter((item) => {
+    return operationalTimesheets.filter((item) => {
       const userItem = getUserMeta(usersById, item);
       const department = userItem?.department || "";
       const projectKey = item.projectId || item.projectName || item.projectCode || "__no_project__";
@@ -369,7 +374,7 @@ export default function TimesheetsPage() {
     projectFilter,
     search,
     statusFilter,
-    timesheets,
+    operationalTimesheets,
     userFilter,
     usersById,
   ]);
@@ -419,18 +424,24 @@ export default function TimesheetsPage() {
   const monthKey = getLocalMonthKey(liveClock);
   const todayItems = useMemo(
     () =>
-      timesheets.filter(
+      operationalTimesheets.filter(
         (item) =>
           item.workDate === todayKey || getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
       ),
-    [liveClock, timesheets, todayKey]
+    [liveClock, operationalTimesheets, todayKey]
   );
   const monthItems = useMemo(
-    () => timesheets.filter((item) => item.yearMonth === monthKey),
-    [monthKey, timesheets]
+    () => operationalTimesheets.filter((item) => item.yearMonth === monthKey),
+    [monthKey, operationalTimesheets]
   );
-  const activeNow = useMemo(() => getActiveTimesheetsNow(timesheets), [timesheets]);
-  const activeUsersNow = useMemo(() => getActiveUsersNow(timesheets), [timesheets]);
+  const activeNow = useMemo(
+    () => getActiveTimesheetsNow(operationalTimesheets),
+    [operationalTimesheets]
+  );
+  const activeUsersNow = useMemo(
+    () => getActiveUsersNow(operationalTimesheets),
+    [operationalTimesheets]
+  );
   const todayOperationalItems = useMemo(() => {
     const byId = new Map(todayItems.map((item) => [item.id, item]));
     activeNow.forEach((item) => byId.set(item.id, item));

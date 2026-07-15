@@ -7,6 +7,7 @@ import {
   getTimesheetMinutesForDay,
   getTimesheetMinutesForRange,
   getTimesheetPeriodRange,
+  isStaleActiveTimesheet,
   isTimesheetInRange,
   sumTimesheetMinutesForDay,
 } from "./timesheetAnalytics";
@@ -139,5 +140,28 @@ describe("timesheet operational analytics", () => {
     expect(buildProjectMinuteBuckets([active], now, 6, todayRange)).toEqual([
       { label: "Service si Mentenanta", value: 756, displayValue: "12h 36m" },
     ]);
+  });
+
+  it("detects stale active timesheets without blocking legitimate overnight work", () => {
+    const now = new Date("2026-07-15T12:36:00+03:00").getTime();
+    const stale = timesheet({
+      status: "activ",
+      startAt: new Date("2026-07-14T07:18:00+03:00").getTime(),
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+    });
+    const overnight = timesheet({
+      status: "activ",
+      startAt: new Date("2026-07-14T23:00:00+03:00").getTime(),
+      stopAt: null,
+      workedMinutes: 0,
+      workDate: "2026-07-14",
+    });
+
+    expect(isStaleActiveTimesheet(stale, now)).toBe(true);
+    expect(isStaleActiveTimesheet(overnight, new Date("2026-07-15T06:00:00+03:00").getTime())).toBe(
+      false
+    );
   });
 });

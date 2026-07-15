@@ -143,6 +143,12 @@ export function getEffectiveWorkedMinutes(item: TimesheetItem, nowTs = Date.now(
   return item.workedMinutes || 0;
 }
 
+export function isStaleActiveTimesheet(item: TimesheetItem | null | undefined, nowTs = Date.now()) {
+  if (!item || item.status !== "activ" || !item.startAt) return false;
+  if (nowTs - item.startAt <= 18 * 60 * 60 * 1000) return false;
+  return getLocalDateKey(item.startAt) !== getLocalDateKey(nowTs);
+}
+
 export function sumTimesheetMinutes(items: TimesheetItem[], nowTs = Date.now()) {
   return items.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item, nowTs), 0);
 }
