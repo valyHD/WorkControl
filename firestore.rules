@@ -232,6 +232,13 @@ service cloud.firestore {
             'images', 'imageUrls', 'coverImageUrl', 'coverThumbUrl',
             'updatedAt', 'updatedAtServer'
           ])
+        ) ||
+        (
+          globalAdmin() && immutableCompany() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasAny(['gpsSim', 'gpsSimHistory']) &&
+          changedOnly(['gpsSim', 'gpsSimHistory', 'currentKm', 'updatedAt', 'updatedAtServer']) &&
+          request.resource.data.get('currentKm', 0) is number &&
+          request.resource.data.get('currentKm', 0) >= 0
         );
       allow delete: if adminFor(resource.data.get('companyId', ''));
 

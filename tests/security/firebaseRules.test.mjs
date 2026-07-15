@@ -333,6 +333,44 @@ test("manager cannot bypass server functions for assignments or mileage", async 
   }));
 });
 
+test("global admin may persist GPS simulation mileage without opening normal GPS writes", async () => {
+  await assertFails(updateDoc(doc(firestore("manager-a"), "vehicles", "vehicle-a"), {
+    gpsSimHistory: [{
+      id: "sim-1",
+      startedAt: 1,
+      stoppedAt: 2,
+      totalDistanceKm: 10,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6200, ts: 1, speedKmh: 0, angle: 0, ignitionOn: false }],
+    }],
+    currentKm: 6210,
+    updatedAt: 2,
+  }));
+
+  await assertSucceeds(updateDoc(doc(firestore("global"), "vehicles", "vehicle-a"), {
+    gpsSim: {
+      active: true,
+      status: "running",
+      startedAt: 3,
+      resumedAt: 3,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6210, ts: 3, speedKmh: 20, angle: 0, ignitionOn: true }],
+    },
+    gpsSimHistory: [{
+      id: "sim-1",
+      startedAt: 1,
+      stoppedAt: 2,
+      totalDistanceKm: 10,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6200, ts: 1, speedKmh: 0, angle: 0, ignitionOn: false }],
+    }],
+    currentKm: 6210,
+    updatedAt: 3,
+  }));
+
+  await assertFails(setDoc(doc(firestore("global"), "vehicles", "vehicle-a", "positionDays", "2026-07-15", "points", "sim"), {
+    lat: 44.4,
+    lng: 26.1,
+  }));
+});
+
 test("employee can update safe profile fields and manager cannot change roles", async () => {
   await assertSucceeds(updateDoc(doc(firestore("employee-a"), "users", "employee-a"), {
     fullName: "Employee A Updated",
