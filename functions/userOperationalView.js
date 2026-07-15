@@ -1,4 +1,4 @@
-const USER_OPERATIONAL_VIEW_VERSION = 3;
+const USER_OPERATIONAL_VIEW_VERSION = 4;
 
 function cleanIds(values, primaryCompanyId) {
   const ids = Array.isArray(values)
@@ -9,11 +9,24 @@ function cleanIds(values, primaryCompanyId) {
   return [...new Set(ids)];
 }
 
+function cleanNames(values, primaryCompanyName) {
+  const names = Array.isArray(values)
+    ? values.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  const primary = String(primaryCompanyName || '').trim();
+  if (primary && !names.includes(primary)) names.unshift(primary);
+  return [...new Set(names)];
+}
+
 function buildUserOperationalView(userId, companyId, source) {
   const data = source || {};
+  const companyNames = cleanNames(data.companyNames, data.primaryCompanyName);
   return {
     uid: userId,
     companyId,
+    primaryCompanyId: String(data.primaryCompanyId || data.companyId || companyId || ''),
+    primaryCompanyName: String(data.primaryCompanyName || companyNames[0] || ''),
+    companyNames,
     fullName: String(data.fullName || ''),
     email: String(data.email || ''),
     active: data.active === true,
@@ -39,6 +52,7 @@ function userOperationalViewId(companyId, userId) {
 module.exports = {
   buildUserOperationalView,
   cleanIds,
+  cleanNames,
   userOperationalViewId,
   USER_OPERATIONAL_VIEW_VERSION,
 };

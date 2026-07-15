@@ -16,6 +16,10 @@ import {
   type AppAuthUser,
 } from "../modules/auth/services/authService";
 import { evaluateInternalAccessProfile } from "../modules/auth/services/internalAccessPolicy";
+import {
+  getProfileCompanyFields,
+  getResolvedProfileCompanyFields,
+} from "../modules/auth/services/profileCompanyFields";
 
 type AuthContextValue = {
   user: AppAuthUser | null;
@@ -28,18 +32,6 @@ const AuthContext = createContext<AuthContextValue>({
   role: "",
   loading: true,
 });
-
-function getCompanyNames(data: Record<string, unknown>): string[] {
-  return Array.isArray(data.companyNames)
-    ? data.companyNames.filter((value: unknown): value is string => typeof value === "string" && Boolean(value.trim()))
-    : [];
-}
-
-function getPrimaryCompanyName(data: Record<string, unknown>, companyNames: string[]): string {
-  return typeof data.primaryCompanyName === "string" && data.primaryCompanyName.trim()
-    ? data.primaryCompanyName.trim()
-    : companyNames[0] || "";
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppAuthUser | null>(null);
@@ -60,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (snap.exists()) {
           const data = snap.data();
-          const companyNames = getCompanyNames(data);
+          const companyFields = await getResolvedProfileCompanyFields(data);
 
           setUser({
             ...nextUser,
@@ -76,10 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             themeKey: data.themeKey ?? null,
             roleTitle: data.roleTitle || "",
             department: data.department || "",
-            companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
-            companyNames,
-            primaryCompanyId: data.primaryCompanyId || "",
-            primaryCompanyName: getPrimaryCompanyName(data, companyNames),
+            companyIds: companyFields.companyIds,
+            companyNames: companyFields.companyNames,
+            primaryCompanyId: companyFields.primaryCompanyId,
+            primaryCompanyName: companyFields.primaryCompanyName,
             role: data.role,
             active: data.active === true,
             globalAdmin: isGlobalAdminProfile(data),
@@ -116,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = snap.data();
-      const companyNames = getCompanyNames(data);
+      const companyFields = getProfileCompanyFields(data);
       if (!evaluateInternalAccessProfile(data).allowed) {
         void logoutUser();
         return;
@@ -124,6 +116,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser((prev) => {
         if (!prev || prev.uid !== user.uid) return prev;
+        const effectiveCompanyFields =
+          companyFields.primaryCompanyName ||
+          !companyFields.primaryCompanyId ||
+          companyFields.primaryCompanyId !== prev.primaryCompanyId
+            ? companyFields
+            : {
+                ...companyFields,
+                companyNames: companyFields.companyNames.length
+                  ? companyFields.companyNames
+                  : prev.companyNames || [],
+                primaryCompanyName: prev.primaryCompanyName || "",
+              };
         const nextUser: AppAuthUser = {
           ...prev,
           displayName: data.fullName || prev.displayName,
@@ -132,10 +136,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           themeKey: data.themeKey ?? null,
           roleTitle: data.roleTitle || "",
           department: data.department || "",
-          companyIds: Array.isArray(data.companyIds) ? data.companyIds.filter(Boolean) : [],
-          companyNames,
-          primaryCompanyId: data.primaryCompanyId || "",
-          primaryCompanyName: getPrimaryCompanyName(data, companyNames),
+          companyIds: effectiveCompanyFields.companyIds,
+          companyNames: effectiveCompanyFields.companyNames,
+          primaryCompanyId: effectiveCompanyFields.primaryCompanyId,
+          primaryCompanyName: effectiveCompanyFields.primaryCompanyName,
           role: data.role,
           active: data.active === true,
           globalAdmin: isGlobalAdminProfile(data),

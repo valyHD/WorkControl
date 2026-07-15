@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   buildUserOperationalView,
   cleanIds,
+  cleanNames,
   userOperationalViewId,
 } = require('./userOperationalView');
 
@@ -16,12 +17,18 @@ test('user operational view contains directory fields without privileged profile
     lastSeenAt: 100,
     lastActiveAt: 120,
     companyIds: ['company-a'],
+    primaryCompanyId: 'company-a',
+    primaryCompanyName: 'Company A',
+    companyNames: ['Company A'],
     globalAdmin: true,
     permissions: ['secret'],
     timesheetDefaultProjectId: 'secret-project',
   });
   assert.equal(view.uid, 'user-a');
   assert.equal(view.companyId, 'company-a');
+  assert.equal(view.primaryCompanyId, 'company-a');
+  assert.equal(view.primaryCompanyName, 'Company A');
+  assert.deepEqual(view.companyNames, ['Company A']);
   assert.equal(view.active, true);
   assert.equal(view.isOnline, true);
   assert.equal(view.lastSeenAt, 100);
@@ -37,6 +44,19 @@ test('company IDs are normalized and view IDs are deterministic', () => {
     'company-a',
   ]);
   assert.equal(userOperationalViewId('company-a', 'user-a'), 'company-a__user-a');
+});
+
+test('company names are normalized for legacy user projections', () => {
+  assert.deepEqual(cleanNames(['Company B', 'Company A', 'Company B'], 'Company A'), [
+    'Company B',
+    'Company A',
+  ]);
+  const view = buildUserOperationalView('user-a', 'company-a', {
+    companyId: 'company-a',
+    primaryCompanyName: 'Company A',
+  });
+  assert.equal(view.primaryCompanyName, 'Company A');
+  assert.deepEqual(view.companyNames, ['Company A']);
 });
 
 test('presence fields are included in the user operational payload', () => {

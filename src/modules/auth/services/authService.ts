@@ -24,6 +24,7 @@ import {
   USER_PRESENCE_HEARTBEAT_MS,
   type PresenceWriteState,
 } from "./presencePolicy";
+import { getResolvedProfileCompanyFields } from "./profileCompanyFields";
 
 export type AppAuthUser = {
   uid: string;
@@ -180,6 +181,7 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       callback(null);
       return;
     }
+    const companyFields = await getResolvedProfileCompanyFields(profile);
 
     callback({
       uid: firebaseUser.uid,
@@ -196,14 +198,10 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       themeKey: typeof profile.themeKey === "string" ? profile.themeKey : null,
       roleTitle: String(profile.roleTitle ?? ""),
       department: String(profile.department ?? ""),
-      companyIds: Array.isArray(profile.companyIds)
-        ? profile.companyIds.filter((value): value is string => typeof value === "string")
-        : [],
-      companyNames: Array.isArray(profile.companyNames)
-        ? profile.companyNames.filter((value): value is string => typeof value === "string")
-        : [],
-      primaryCompanyId: String(profile.primaryCompanyId ?? ""),
-      primaryCompanyName: String(profile.primaryCompanyName ?? ""),
+      companyIds: companyFields.companyIds,
+      companyNames: companyFields.companyNames,
+      primaryCompanyId: companyFields.primaryCompanyId,
+      primaryCompanyName: companyFields.primaryCompanyName,
       role: profile.role as AppAuthUser["role"],
       active: true,
       globalAdmin: profile.globalAdmin === true,

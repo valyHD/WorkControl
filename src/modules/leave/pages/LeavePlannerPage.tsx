@@ -382,6 +382,10 @@ export default function LeavePlannerPage() {
       snap.docs.forEach((docItem) => {
         const data = docItem.data();
         const uid = data.uid ?? docItem.id;
+        const companyNames = Array.isArray(data.companyNames)
+          ? data.companyNames.map((name: unknown) => String(name || "").trim()).filter(Boolean)
+          : [];
+        const primaryCompanyName = String(data.primaryCompanyName || companyNames[0] || "").trim();
         mappedByUser.set(uid, {
           id: uid,
           uid,
@@ -393,11 +397,14 @@ export default function LeavePlannerPage() {
           department: data.department ?? "",
           themeKey: data.themeKey ?? undefined,
           companyIds: [data.companyId].filter(Boolean),
-          companyNames: [],
-          primaryCompanyId: data.companyId ?? "",
-          primaryCompanyName: "",
+          companyNames,
+          primaryCompanyId: data.primaryCompanyId ?? data.companyId ?? "",
+          primaryCompanyName,
           createdAt: Number(data.createdAt ?? 0),
           updatedAt: Number(data.updatedAt ?? 0),
+          isOnline: data.isOnline === true,
+          lastSeenAt: Number(data.lastSeenAt ?? 0),
+          lastActiveAt: Number(data.lastActiveAt ?? 0),
         } as AppUserItem);
       });
       const mapped = [...mappedByUser.values()];
