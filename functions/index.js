@@ -41,6 +41,7 @@ const {
 } = require('./userOperationalView');
 const { writeProjectionIfChanged } = require('./projectionPayload');
 const { GLOBAL_RUNTIME_OPTIONS } = require('./runtimeOptions');
+const { createSharedGmailHandlers } = require('./sharedGmail');
 const {
   buildDeliveryKey,
   buildNotificationForSchedule,
@@ -65,6 +66,9 @@ const securityHandlers = createSecurityHandlers({
   logger,
 });
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const gmailOAuthClientId = defineSecret('GMAIL_OAUTH_CLIENT_ID');
+const gmailOAuthClientSecret = defineSecret('GMAIL_OAUTH_CLIENT_SECRET');
+const gmailOAuthRefreshToken = defineSecret('GMAIL_OAUTH_REFRESH_TOKEN');
 const SECURITY_CALLABLE_OPTIONS = {
   region: 'europe-west1',
   enforceAppCheck: process.env.WORKCONTROL_ENFORCE_APP_CHECK === 'true',
@@ -74,6 +78,27 @@ const DOCUMENT_CALLABLE_OPTIONS = {
   timeoutSeconds: 120,
   memory: '512MiB',
 };
+const SHARED_GMAIL_CALLABLE_OPTIONS = {
+  ...SECURITY_CALLABLE_OPTIONS,
+  timeoutSeconds: 120,
+  memory: '512MiB',
+  secrets: [gmailOAuthClientId, gmailOAuthClientSecret, gmailOAuthRefreshToken],
+};
+const sharedGmailHandlers = createSharedGmailHandlers({
+  db,
+  bucket: admin.storage().bucket(),
+  FieldValue,
+  HttpsError,
+  logger,
+  assertActiveInternalRequest,
+  canAccessCompany: internalContextCanAccessCompany,
+  buildAuditPayload,
+  getCredentials: () => ({
+    clientId: gmailOAuthClientId.value(),
+    clientSecret: gmailOAuthClientSecret.value(),
+    refreshToken: gmailOAuthRefreshToken.value(),
+  }),
+});
 const documentIntelligenceHandlers = createDocumentIntelligenceHandlers({
   db,
   bucket: admin.storage().bucket(),
@@ -105,6 +130,10 @@ exports.assignUsersToCompany = onCall(
   securityHandlers.assignUsersToCompany
 );
 exports.recordAuditEvent = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.recordAuditEvent);
+exports.sendSharedMaintenanceEmail = onCall(
+  SHARED_GMAIL_CALLABLE_OPTIONS,
+  sharedGmailHandlers.sendSharedMaintenanceEmail
+);
 exports.dispatchNotificationEvent = onCall(
   SECURITY_CALLABLE_OPTIONS,
   securityHandlers.dispatchNotificationEvent

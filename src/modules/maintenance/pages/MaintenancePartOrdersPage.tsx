@@ -14,14 +14,13 @@ import { subscribeMaintenanceClients } from "../services/maintenanceService";
 import {
   createMaintenancePartOrder,
   deleteMaintenancePartOrder,
-  markClientOfferEmailSent,
   markMaintenancePartOrderResolved,
   markMaintenancePartOrderSeen,
-  markSupplierEmailSent,
   markSupplierQuoteReceived,
   subscribeMaintenancePartOrders,
   updateMaintenancePartOrder,
 } from "../services/partOrdersService";
+import { sendSharedMaintenancePartOrderEmail, SHARED_GMAIL_SENDER_EMAIL } from "../services/sharedGmailService";
 import { subscribeUsers } from "../../users/services/usersService";
 
 const statusOptions: Array<{ value: MaintenancePartOrderStatus; label: string }> = [
@@ -131,63 +130,6 @@ function getUserDisplayName(user: AppUserItem) {
   return user.fullName || user.email || user.id;
 }
 
-function encodeMailTo(to: string, subject: string, body: string) {
-  return `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}
-
-function getOrderEmailTitle(order: MaintenancePartOrder) {
-  return order.title || [order.clientName, order.liftSerialNumber].filter(Boolean).join(" - ") || "Comanda piese";
-}
-
-function buildPartsText(order: MaintenancePartOrder) {
-  return order.lines
-    .map((line, index) => `${index + 1}. ${line.name || "Piesa"}${line.code ? `, cod ${line.code}` : ""}, cantitate ${line.quantity} ${line.unit || "buc"}${line.notes ? `, observatii: ${line.notes}` : ""}`)
-    .join("\n");
-}
-
-function buildSupplierEmail(order: MaintenancePartOrder) {
-  const title = getOrderEmailTitle(order);
-  return {
-    subject: `Cerere oferta piese - ${title}`,
-    body: [
-      "Buna ziua,",
-      "",
-      "Va rog sa ne trimiteti oferta pentru urmatoarele piese:",
-      "",
-      buildPartsText(order),
-      "",
-      `Client/locatie: ${order.clientName || "-"}${order.addressLabel ? `, ${order.addressLabel}` : ""}`,
-      `Lift/echipament: ${order.liftSerialNumber || "-"}`,
-      order.neededByDate ? `Necesar pana la: ${order.neededByDate}` : "",
-      order.notes ? `Observatii: ${order.notes}` : "",
-      "",
-      "Va multumesc.",
-    ].filter(Boolean).join("\n"),
-  };
-}
-
-function buildClientOfferEmail(order: MaintenancePartOrder) {
-  const amount = order.clientOfferAmount || order.supplierOfferAmount || order.totalEstimated;
-  return {
-    subject: `Oferta piese - ${getOrderEmailTitle(order)}`,
-    body: [
-      "Buna ziua,",
-      "",
-      `Va transmitem oferta pentru piesele necesare la ${order.liftSerialNumber || "echipamentul mentionat"}.`,
-      "",
-      buildPartsText(order),
-      "",
-      amount ? `Valoare oferta: ${formatMoney(amount)}` : "",
-      order.clientOfferNotes ? `Observatii: ${order.clientOfferNotes}` : "",
-      order.addressLabel ? `Locatie: ${order.addressLabel}` : "",
-      "",
-      "Va rugam sa ne confirmati daca aprobati oferta.",
-      "",
-      "Multumim.",
-    ].filter(Boolean).join("\n"),
-  };
-}
-
 function getClientLiftOptions(client: MaintenanceClient | null) {
   if (!client) return [];
   const fromAddresses = client.addresses.flatMap((address) =>
@@ -239,6 +181,7 @@ export default function MaintenancePartOrdersPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sendingEmailKey, setSendingEmailKey] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
@@ -428,10 +371,19 @@ export default function MaintenancePartOrdersPage() {
       setError("Completeaza emailul furnizorului in comanda.");
       return;
     }
-    const content = buildSupplierEmail(order);
-    window.location.href = encodeMailTo(email, content.subject, content.body);
-    await markSupplierEmailSent(order, currentUser);
-    setStatus("Emailul catre furnizor a fost deschis si comanda a fost marcata ca Oferta ceruta.");
+    if (!window.confirm(`Trimiti cererea de oferta catre ${email}, din ${SHARED_GMAIL_SENDER_EMAIL}?`)) return;
+    const key = `${order.id}:supplier`;
+    setSendingEmailKey(key);
+    setError("");
+    try {
+      await sendSharedMaintenancePartOrderEmail({ orderId: order.id, target: "supplier" });
+      setStatus(`Cererea de oferta a fost trimisa din ${SHARED_GMAIL_SENDER_EMAIL}.`);
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][supplier-email]", err);
+      setError("Emailul catre furnizor nu a putut fi trimis.");
+    } finally {
+      setSendingEmailKey("");
+    }
   }
 
   async function handleQuoteReceived(order: MaintenancePartOrder) {
@@ -459,10 +411,19 @@ export default function MaintenancePartOrdersPage() {
       setError("Completeaza emailul clientului in comanda.");
       return;
     }
-    const content = buildClientOfferEmail(order);
-    window.location.href = encodeMailTo(order.clientEmail, content.subject, content.body);
-    await markClientOfferEmailSent(order, currentUser);
-    setStatus("Emailul catre client a fost deschis si comanda a fost actualizata.");
+    if (!window.confirm(`Trimiti oferta catre ${order.clientEmail}, din ${SHARED_GMAIL_SENDER_EMAIL}?`)) return;
+    const key = `${order.id}:client`;
+    setSendingEmailKey(key);
+    setError("");
+    try {
+      await sendSharedMaintenancePartOrderEmail({ orderId: order.id, target: "client" });
+      setStatus(`Oferta a fost trimisa clientului din ${SHARED_GMAIL_SENDER_EMAIL}.`);
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][client-email]", err);
+      setError("Emailul cu oferta nu a putut fi trimis clientului.");
+    } finally {
+      setSendingEmailKey("");
+    }
   }
 
   async function handleResolved(order: MaintenancePartOrder) {
@@ -808,17 +769,17 @@ export default function MaintenancePartOrdersPage() {
                         Am vazut
                       </button>
                     )}
-                    <button className="secondary-btn" type="button" onClick={() => void handleSupplierEmail(order)}>
+                    <button className="secondary-btn" type="button" onClick={() => void handleSupplierEmail(order)} disabled={Boolean(sendingEmailKey)}>
                       <Send size={15} />
-                      Cere oferta furnizor
+                      {sendingEmailKey === `${order.id}:supplier` ? "Se trimite..." : "Cere oferta furnizor"}
                     </button>
                     <button className="secondary-btn" type="button" onClick={() => void handleQuoteReceived(order)}>
                       <CheckCircle2 size={15} />
                       Oferta primita
                     </button>
-                    <button className="secondary-btn" type="button" onClick={() => void handleClientOfferEmail(order)}>
+                    <button className="secondary-btn" type="button" onClick={() => void handleClientOfferEmail(order)} disabled={Boolean(sendingEmailKey)}>
                       <Mail size={15} />
-                      Trimite oferta client
+                      {sendingEmailKey === `${order.id}:client` ? "Se trimite..." : "Trimite oferta client"}
                     </button>
                     <button className="primary-btn" type="button" onClick={() => void handleResolved(order)} disabled={order.status === "installed"}>
                       <CheckCircle2 size={15} />
