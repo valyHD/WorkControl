@@ -37,8 +37,7 @@ const usersMocks = vi.hoisted(() => ({
 }));
 
 const gmailMocks = vi.hoisted(() => ({
-  createSharedMaintenanceGmailDraft: vi.fn(),
-  openGmailDraft: vi.fn(),
+  sendSharedMaintenanceGmailReport: vi.fn(),
 }));
 
 const pdfMocks = vi.hoisted(() => ({
@@ -100,10 +99,10 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     usersMocks.getAllUsers.mockResolvedValue([]);
-    gmailMocks.createSharedMaintenanceGmailDraft.mockResolvedValue({
-      draftId: "gmail-draft-test",
+    gmailMocks.sendSharedMaintenanceGmailReport.mockResolvedValue({
       messageId: "message-test",
-      gmailUrl: "https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test",
+      threadId: "thread-test",
+      sent: true,
       senderEmail: "liftultau@gmail.com",
     });
     maintenanceMocks.saveMaintenanceReportHistory.mockResolvedValue({
@@ -188,7 +187,7 @@ describe("MaintenancePage client form", () => {
     );
 
     expect(await screen.findByDisplayValue("liftultau@gmail.com")).toBeInTheDocument();
-    expect(screen.getByText(/Draftul Gmail este creat pe server/)).toBeInTheDocument();
+    expect(screen.getByText(/Emailul este trimis automat de server/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Autorizeaza Gmail" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Autentificare mobil" })).not.toBeInTheDocument();
   });
@@ -250,7 +249,7 @@ describe("MaintenancePage client form", () => {
     expect(screen.queryByRole("listbox", { name: "Sugestii client" })).not.toBeInTheDocument();
   });
 
-  it("creates a Gmail draft with the generated PDF attached before opening Gmail", async () => {
+  it("sends the Gmail report directly with the generated PDF attached", async () => {
     maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
       onData([createMaintenanceClientTest("client-gmail-test", "Client Gmail Test")]);
       return vi.fn();
@@ -268,23 +267,23 @@ describe("MaintenancePage client form", () => {
     await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
 
     await waitFor(() => {
-      expect(gmailMocks.createSharedMaintenanceGmailDraft).toHaveBeenCalledWith(expect.objectContaining({
+      expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(expect.objectContaining({
         companyId: "company-test",
         clientId: "client-gmail-test",
         recipientEmail: "client@example.test",
         pdfPath: "maintenance-reports/client-gmail-test/report.pdf",
         fileName: "report.pdf",
       }));
-      expect(gmailMocks.openGmailDraft).toHaveBeenCalledWith("https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test");
     });
+    expect(await screen.findByText(/Raportul revizie a fost trimis catre client@example\.test/)).toBeInTheDocument();
   });
 
-  it("replaces the progress message with the Gmail error when draft creation fails", async () => {
+  it("replaces the progress message with the Gmail error when direct sending fails", async () => {
     maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
       onData([createMaintenanceClientTest("client-gmail-error", "Client Gmail Error")]);
       return vi.fn();
     });
-    gmailMocks.createSharedMaintenanceGmailDraft.mockRejectedValueOnce(new Error("Gmail indisponibil"));
+    gmailMocks.sendSharedMaintenanceGmailReport.mockRejectedValueOnce(new Error("Gmail indisponibil"));
     const user = userEvent.setup();
     render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
 
@@ -293,7 +292,6 @@ describe("MaintenancePage client form", () => {
     await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Gmail indisponibil");
-    expect(screen.queryByText(/PDF-ul este salvat\. Se creeaza draftul Gmail/)).not.toBeInTheDocument();
-    expect(gmailMocks.openGmailDraft).not.toHaveBeenCalled();
+    expect(screen.queryByText(/PDF-ul este salvat\. Se trimite emailul/)).not.toBeInTheDocument();
   });
 });

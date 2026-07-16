@@ -8,6 +8,7 @@ const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const { OAuth2Client } = require('google-auth-library');
 const { createGmailMimeBoundary } = require('./gmailMime');
+const { sendRawGmailMessage } = require('./gmailApi');
 const {
   getEcbRates,
   refreshBillingMetrics: refreshBillingMetricsCache,
@@ -199,7 +200,7 @@ exports.createMaintenanceGmailDraft = onCall(
     memory: '512MiB',
     secrets: [gmailOAuthClientId, gmailOAuthClientSecret, gmailOAuthRefreshToken],
   },
-  createMaintenanceGmailDraft
+  sendMaintenanceGmailReport
 );
 exports.processDocumentIngestionJob = onDocumentWritten(
   {
@@ -1197,7 +1198,7 @@ async function getSharedGmailAccessToken() {
   }
 }
 
-async function createMaintenanceGmailDraft(request) {
+async function sendMaintenanceGmailReport(request) {
   const context = await assertActiveInternalRequest(request);
   const input = request.data || {};
   const companyId = cleanText(input.companyId, 120) || context.companyId;
@@ -1237,18 +1238,11 @@ async function createMaintenanceGmailDraft(request) {
     attachments,
   });
   const accessToken = await getSharedGmailAccessToken();
-  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ message: { raw } }),
-  });
+  const response = await sendRawGmailMessage({ accessToken, raw });
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    logger.error('Nu am putut crea draft Gmail mentenanta.', {
+    logger.error('Nu am putut trimite emailul Gmail de mentenanta.', {
       status: response.status,
       statusText: response.statusText,
       actorUserId: context.userSnap.id,
@@ -1262,36 +1256,43 @@ async function createMaintenanceGmailDraft(request) {
         'Gmail a refuzat autorizarea contului liftultau@gmail.com. Reautorizeaza refresh token-ul cu scope Gmail compose.'
       );
     }
-    throw new HttpsError('internal', 'Nu am putut crea draftul Gmail.');
+    throw new HttpsError('internal', 'Nu am putut trimite emailul Gmail.');
   }
 
-  const draft = await response.json();
-  const messageId = draft?.message?.id ? `/${encodeURIComponent(draft.message.id)}` : '';
-  const gmailUrl = `https://mail.google.com/mail/?authuser=${encodeURIComponent(SHARED_MAINTENANCE_GMAIL_SENDER)}#drafts${messageId}`;
-  await createAuditLog({
-    companyId,
-    category: 'maintenance',
-    action: 'maintenance_gmail_draft_created',
-    title: 'Draft Gmail mentenanta creat',
-    message: `Draft Gmail creat pentru ${recipientEmail}.`,
-    actorUserId: context.userSnap.id,
-    actorUserName: context.user.fullName || context.user.email || 'Utilizator',
-    entityId: cleanText(input.reportId || input.clientId, 120),
-    entityLabel: sanitizeHeaderValue(input.clientName || subject, 160),
-    path: '/maintenance?tab=report',
-    pageTitle: 'Mentenanta',
-    metadata: {
-      clientId: cleanText(input.clientId, 120),
+  const sentMessage = await response.json();
+  try {
+    await createAuditLog({
+      companyId,
+      category: 'maintenance',
+      action: 'maintenance_gmail_email_sent',
+      title: 'Raport mentenanta trimis prin Gmail',
+      message: `Email Gmail trimis catre ${recipientEmail}.`,
+      actorUserId: context.userSnap.id,
+      actorUserName: context.user.fullName || context.user.email || 'Utilizator',
+      entityId: cleanText(input.reportId || input.clientId, 120),
+      entityLabel: sanitizeHeaderValue(input.clientName || subject, 160),
+      path: '/maintenance?tab=report',
+      pageTitle: 'Mentenanta',
+      metadata: {
+        clientId: cleanText(input.clientId, 120),
+        reportId: cleanText(input.reportId, 120),
+        attachments: attachments.length,
+        totalAttachmentBytes,
+      },
+    });
+  } catch (auditError) {
+    logger.error('Emailul Gmail a fost trimis, dar auditul nu a putut fi salvat.', {
+      actorUserId: context.userSnap.id,
+      companyId,
       reportId: cleanText(input.reportId, 120),
-      attachments: attachments.length,
-      totalAttachmentBytes,
-    },
-  });
+      errorMessage: auditError instanceof Error ? auditError.message : String(auditError || ''),
+    });
+  }
 
   return {
-    draftId: draft.id || '',
-    messageId: draft?.message?.id || '',
-    gmailUrl,
+    messageId: sentMessage?.id || '',
+    threadId: sentMessage?.threadId || '',
+    sent: true,
     senderEmail: SHARED_MAINTENANCE_GMAIL_SENDER,
   };
 }

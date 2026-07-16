@@ -39,7 +39,7 @@ export type SharedMaintenanceGmailAttachment = {
   contentType?: string;
 };
 
-export type SharedMaintenanceGmailDraftInput = {
+export type SharedMaintenanceGmailSendInput = {
   companyId?: string;
   clientId: string;
   clientName?: string;
@@ -52,10 +52,10 @@ export type SharedMaintenanceGmailDraftInput = {
   attachments?: SharedMaintenanceGmailAttachment[];
 };
 
-export type SharedMaintenanceGmailDraftResult = {
-  draftId: string;
-  messageId?: string;
-  gmailUrl: string;
+export type SharedMaintenanceGmailSendResult = {
+  messageId: string;
+  threadId?: string;
+  sent: boolean;
   senderEmail: string;
 };
 
@@ -394,18 +394,18 @@ export function openGmailDraft(gmailUrl: string): void {
   window.location.assign(url.toString());
 }
 
-export async function createSharedMaintenanceGmailDraft(
-  input: SharedMaintenanceGmailDraftInput
-): Promise<SharedMaintenanceGmailDraftResult> {
-  const createDraft = httpsCallable<SharedMaintenanceGmailDraftInput, SharedMaintenanceGmailDraftResult>(
+export async function sendSharedMaintenanceGmailReport(
+  input: SharedMaintenanceGmailSendInput
+): Promise<SharedMaintenanceGmailSendResult> {
+  const sendReport = httpsCallable<SharedMaintenanceGmailSendInput, SharedMaintenanceGmailSendResult>(
     functions,
     "createMaintenanceGmailDraft"
   );
-  const result = await createDraft(input);
+  const result = await sendReport(input);
   const data = result.data;
 
-  if (!data?.gmailUrl || !data?.senderEmail) {
-    throw new Error("Nu am putut crea draftul Gmail pe server.");
+  if (!data?.sent || !data?.messageId || !data?.senderEmail) {
+    throw new Error("Nu am putut confirma trimiterea emailului Gmail.");
   }
 
   return data;

@@ -14,7 +14,6 @@ import {
   PackageSearch,
   PlusCircle,
   Search,
-  Send,
   Trash2,
   UsersRound,
 } from "lucide-react";
@@ -30,10 +29,7 @@ import {
   uploadMaintenanceBrandingAsset,
 } from "../services/maintenanceService";
 import { getAllUsers } from "../../users/services/usersService";
-import {
-  createSharedMaintenanceGmailDraft,
-  openGmailDraft,
-} from "../services/gmailDraftService";
+import { sendSharedMaintenanceGmailReport } from "../services/gmailDraftService";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
 import { generateReportId, reviewStandardText } from "../utils/reportUtils";
 import type {
@@ -107,7 +103,6 @@ type GeneratedReportShare = {
   timeText: string;
   maintenanceCompany: string;
   pdfUrl: string;
-  gmailUrl: string;
 };
 
 type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "lifts" | "companies" | "history" | "checks";
@@ -1335,7 +1330,7 @@ export default function MaintenanceWorkspace() {
 
     try {
       setReportError("");
-      setReportMessage("Se genereaza PDF-ul si se pregateste draftul Gmail cu atasamente...");
+      setReportMessage("Se genereaza PDF-ul si se pregateste emailul cu atasamente...");
 
       const now = new Date();
       const dateText = now.toLocaleDateString("ro-RO");
@@ -1398,8 +1393,8 @@ export default function MaintenanceWorkspace() {
         timeText,
       });
 
-      setReportMessage("PDF-ul este salvat. Se creeaza draftul Gmail cu PDF-ul si pozele atasate...");
-      const gmailDraft = await createSharedMaintenanceGmailDraft({
+      setReportMessage("PDF-ul este salvat. Se trimite emailul cu PDF-ul si pozele atasate...");
+      const gmailResult = await sendSharedMaintenanceGmailReport({
         companyId: historyItem.companyId,
         clientId: selectedClient.id,
         clientName: selectedClient.name || "",
@@ -1421,26 +1416,24 @@ export default function MaintenanceWorkspace() {
       const shareInfo: GeneratedReportShare = {
         clientName: selectedClient.name || "",
         clientEmail,
-        senderEmail: gmailDraft.senderEmail || gmailSenderEmail,
+        senderEmail: gmailResult.senderEmail || gmailSenderEmail,
         reportType: fileType,
         dateText,
         timeText,
         maintenanceCompany: selectedClient.maintenanceCompany,
         pdfUrl: historyItem.pdfUrl,
-        gmailUrl: gmailDraft.gmailUrl,
       };
 
       setLastGeneratedReport(shareInfo);
       setReportImageFiles([]);
       resetTechnicianToCurrentUser();
 
-      setReportMessage(`Raportul ${fileType} este pregatit in Gmail cu PDF-ul si pozele atasate. Verifica si apasa Trimite.`);
-      openGmailDraft(gmailDraft.gmailUrl);
+      setReportMessage(`Raportul ${fileType} a fost trimis catre ${clientEmail} de pe ${gmailResult.senderEmail || gmailSenderEmail}, cu PDF-ul si pozele atasate.`);
     } catch (err) {
       console.error(err);
       const errorMessage = err instanceof Error ? err.message : "";
       setReportMessage("");
-      setReportError(`Nu am putut genera PDF-ul sau crea draftul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
+      setReportError(`Nu am putut genera PDF-ul sau trimite emailul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
     } finally {
       setReportGenerating(false);
     }
@@ -1595,8 +1588,8 @@ export default function MaintenanceWorkspace() {
         {lastGeneratedReport && (
           <div className="panel maintenance-generated-report">
             <div>
-              <h2 className="panel-title">Draft Gmail pregatit pentru {lastGeneratedReport.clientName || "client"}</h2>
-              <p className="tools-subtitle">Destinatar: {lastGeneratedReport.clientEmail || "-"} · PDF atasat efectiv.</p>
+              <h2 className="panel-title">Email trimis catre {lastGeneratedReport.clientName || "client"}</h2>
+              <p className="tools-subtitle">Destinatar: {lastGeneratedReport.clientEmail || "-"} · Expeditor: {lastGeneratedReport.senderEmail} · PDF si poze atasate.</p>
             </div>
             <div className="maintenance-actions">
               {lastGeneratedReport.pdfUrl ? (
@@ -1613,9 +1606,6 @@ export default function MaintenanceWorkspace() {
                   <Download size={15} /> Download PDF
                 </button>
               ) : null}
-              <button className="primary-btn" type="button" onClick={() => openGmailDraft(lastGeneratedReport.gmailUrl)}>
-                <Send size={15} /> Deschide draftul Gmail
-              </button>
             </div>
           </div>
         )}
@@ -1747,14 +1737,14 @@ export default function MaintenanceWorkspace() {
               <label className="tool-form-label">Cont Gmail expeditor</label>
               <input className="tool-input" data-assistant-field="maintenance-report-sender" value={gmailSenderEmail} readOnly />
               <div className="simple-list-subtitle">
-                Draftul Gmail este creat pe server prin contul comun autorizat. Nu mai este necesara autentificarea pe telefon.
+                Emailul este trimis automat de server prin contul comun autorizat. Nu este necesara autentificarea Gmail pe telefon.
               </div>
             </div>
             <div className="tool-form-actions">
-              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF-ul si deschide draftul Gmail cu atasament" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
+              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF-ul si trimite automat emailul cu atasamente" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport revizie"}
               </button>
-              <button className="secondary-btn" data-assistant-action="maintenance-generate-intervention-report" type="button" title="Genereaza raportul de interventie si deschide draftul Gmail" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
+              <button className="secondary-btn" data-assistant-action="maintenance-generate-intervention-report" type="button" title="Genereaza raportul de interventie si trimite automat emailul" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport interventie"}
               </button>
               <button className="secondary-btn" data-assistant-action="maintenance-generate-selected-report" type="button" title="Genereaza raportul pentru tipul selectat" onClick={() => void handleGenerateReport(reportTypeDraft)} disabled={reportGenerating}>
