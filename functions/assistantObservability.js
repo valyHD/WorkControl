@@ -257,6 +257,32 @@ function normalizeAssistantOutcomePayload(data) {
   };
 }
 
+function buildLocalAssistantTraceInterpretation(details) {
+  const value = details && typeof details === "object" && !Array.isArray(details) ? details : {};
+  const toolId = toBoundedString(value.toolId, 100);
+  const module = toBoundedString(value.module, 80);
+  const risk = ["low", "medium", "high"].includes(value.risk) ? value.risk : "low";
+  const fieldNames = stringList(value.fieldNames, 40, 80);
+  return {
+    version: "3",
+    commandType: toolId ? "form_fill" : "unknown",
+    intent: toolId || "local_controlled_action",
+    targetModule: module,
+    entityType: "none",
+    risk,
+    confidence: 1,
+    missingInformation: [],
+    toolCalls: toolId
+      ? [
+          {
+            id: toolId,
+            input: { fields: Object.fromEntries(fieldNames.map((name) => [name, true])) },
+          },
+        ]
+      : [],
+  };
+}
+
 function isAssistantOutcomeTransitionAllowed(currentStatus, nextStatus) {
   const current = toBoundedString(currentStatus, 40);
   if (!ASSISTANT_OUTCOME_STATUSES.has(nextStatus)) return false;
@@ -269,6 +295,7 @@ function isAssistantOutcomeTransitionAllowed(currentStatus, nextStatus) {
 
 module.exports = {
   ASSISTANT_TRACE_RETENTION_DAYS,
+  buildLocalAssistantTraceInterpretation,
   buildAssistantTraceDocument,
   estimateModelCostUsd,
   extractModelTokenUsage,

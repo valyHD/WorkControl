@@ -374,6 +374,61 @@ describe("MaintenancePage client form", () => {
     );
   });
 
+  it("never sends when the assistant client query matches multiple clients", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([
+        createMaintenanceClientTest("client-vali-one", "Vali Service"),
+        createMaintenanceClientTest("client-vali-two", "Vali Lift"),
+      ]);
+      return vi.fn();
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "Vali",
+        reportType: "revizie",
+        observations: "",
+        submitMode: "send",
+        waitForPhotos: false,
+      });
+    });
+
+    expect(
+      await screen.findByText(/Am gasit mai multi clienti.*raportul nu a fost trimis/i)
+    ).toBeInTheDocument();
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).not.toHaveBeenCalled();
+  });
+
+  it("never auto-sends from only one approximate client match", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-vali-service", "Vali Service")]);
+      return vi.fn();
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "Vali",
+        reportType: "revizie",
+        observations: "",
+        submitMode: "send",
+        waitForPhotos: false,
+      });
+    });
+
+    expect(await screen.findByText(/Clientul nu a putut fi confirmat exact/i)).toBeInTheDocument();
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).not.toHaveBeenCalled();
+  });
+
   it("sends the Gmail report directly with the generated PDF attached", async () => {
     maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
       onData([createMaintenanceClientTest("client-gmail-test", "Client Gmail Test")]);

@@ -84,4 +84,25 @@ describe("Assistant V3 presentational UI", () => {
     await user.click(consent);
     expect(onConsentChange).toHaveBeenCalledWith(true);
   });
+
+  it("hides the composer while a compact confirmation is pending", () => {
+    render(
+      <AssistantPanel
+        state="confirming"
+        showComposer={false}
+        onClose={vi.fn()}
+        onListenStart={vi.fn()}
+        onListenEnd={vi.fn()}
+        manualValue=""
+        onManualChange={vi.fn()}
+        onManualSubmit={vi.fn()}
+      >
+        <p>Confirmare</p>
+      </AssistantPanel>
+    );
+
+    expect(screen.getByText("Confirmare")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ține apăsat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Trimite comanda" })).not.toBeInTheDocument();
+  });
 });

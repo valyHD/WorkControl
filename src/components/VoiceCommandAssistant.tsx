@@ -101,6 +101,41 @@ function outcomeRisk(
 }
 
 function outcomeRows(outcome: AssistantOrchestratorResult): AssistantConfirmationRow[] {
+  const reportCall = outcome.contract?.toolCalls.find((call) =>
+    call.id.startsWith("maintenance.report.")
+  );
+  const reportFields =
+    reportCall?.input.fields &&
+    typeof reportCall.input.fields === "object" &&
+    !Array.isArray(reportCall.input.fields)
+      ? (reportCall.input.fields as Record<string, unknown>)
+      : null;
+  if (reportFields) {
+    return [
+      {
+        id: "maintenance-report-client",
+        label: "Client",
+        oldValue: "",
+        newValue: valueLabel(reportFields.clientQuery),
+      },
+      {
+        id: "maintenance-report-type",
+        label: "Tip raport",
+        oldValue: "",
+        newValue: reportFields.reportType === "interventie" ? "Interventie" : "Revizie",
+      },
+      ...(reportFields.observations
+        ? [
+            {
+              id: "maintenance-report-observations",
+              label: "Observatii",
+              oldValue: "",
+              newValue: valueLabel(reportFields.observations),
+            },
+          ]
+        : []),
+    ];
+  }
   if (outcome.changes?.length) {
     return outcome.changes.map((change) => ({
       id: change.id,
@@ -461,6 +496,11 @@ export default function VoiceCommandAssistant() {
   const planSteps = lastOutcome?.contract
     ? buildAssistantExecutionSteps(lastOutcome.contract, uiState === "executing", registry)
     : [];
+  const pendingReportCall = pending?.contract.toolCalls.find((call) =>
+    call.id.startsWith("maintenance.report.")
+  );
+  const pendingReportSend = pendingReportCall?.id === "maintenance.report.send";
+  const debugEnabled = new URLSearchParams(location.search).get("assistantDebug") === "1";
   const debugEntries = lastOutcome
     ? [
         { id: "status", label: "Status", value: lastOutcome.status },
@@ -516,18 +556,26 @@ export default function VoiceCommandAssistant() {
         serverFallbackAvailable={audioCapture.supported}
         serverFallbackConsent={serverAudioConsent}
         onServerFallbackConsentChange={setServerAudioConsent}
+        showComposer={!pending}
       >
         {pending ? (
           <ConfirmationCard
-            summary={pending.outcome.previews.join(" ") || pending.outcome.message}
+            title={pendingReportSend ? "Confirma trimiterea" : undefined}
+            summary={
+              pendingReportCall
+                ? undefined
+                : pending.outcome.previews.join(" ") || pending.outcome.message
+            }
             rows={outcomeRows(pending.outcome)}
             risk={outcomeRisk(pending.outcome, registry)}
-            confidence={pending.contract.confidence}
+            confidence={pendingReportCall ? undefined : pending.contract.confidence}
             reason={
-              pending.contract.confirmationRequired
+              pending.contract.confirmationRequired && !pendingReportCall
                 ? "Actiunea modifica date si necesita acord explicit."
                 : undefined
             }
+            confirmLabel={pendingReportSend ? "Genereaza si trimite" : undefined}
+            compact={Boolean(pendingReportCall)}
             busy={uiState === "executing"}
             onConfirm={() => void confirmPending()}
             onCancel={cancelPending}
@@ -545,9 +593,13 @@ export default function VoiceCommandAssistant() {
             }}
           />
         ) : null}
-        {planSteps.length ? <ExecutionPlan steps={planSteps} /> : null}
-        {role === "admin" && debugEntries.length ? <DebugPanel entries={debugEntries} /> : null}
-        {history.length ? (
+        {!pending && !choices.length && planSteps.length > 1 ? (
+          <ExecutionPlan steps={planSteps} />
+        ) : null}
+        {!pending && !choices.length && role === "admin" && debugEnabled && debugEntries.length ? (
+          <DebugPanel entries={debugEntries} />
+        ) : null}
+        {!pending && !choices.length && history.length ? (
           <section aria-label="Ultimele comenzi AI">
             {history.slice(0, 3).map((item) => (
               <p key={item.id}>

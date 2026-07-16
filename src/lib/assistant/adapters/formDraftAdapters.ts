@@ -161,7 +161,7 @@ function createMaintenanceReportTool(mode: "prepare" | "send") {
       additionalProperties: false,
     },
     outputSchema: ASSISTANT_TOOL_OUTPUT_SCHEMA,
-    risk: mode === "send" ? "high" : "medium",
+    risk: mode === "send" ? "high" : "low",
     permission: authenticatedPermission,
     resolve: readMaintenanceReportDraftInput,
     validate: (input) => {

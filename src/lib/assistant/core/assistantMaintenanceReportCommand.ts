@@ -100,7 +100,10 @@ export function buildLocalMaintenanceReportContract(command: string): AssistantV
     waitsForUpload || /\b(?:dau|apas|trimit)\s+eu\b[^.]{0,40}\b(?:send|trimite)\b/.test(normalized);
   const explicitSend =
     !waitForPhotos && /\b(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/.test(normalized);
-  const submitMode = explicitSend ? "send" : "prepare";
+  const explicitPrepare =
+    /\b(?:pregateste|completeaza|deschide)\b/.test(normalized) ||
+    /\b(?:fara|nu)\s+(?:sa\s+)?(?:trimite|expedia|transmite)\b/.test(normalized);
+  const submitMode = waitForPhotos || (explicitPrepare && !explicitSend) ? "prepare" : "send";
   const targetPage = "/maintenance?tab=report&assistant=report";
 
   if (!clientQuery) {
@@ -141,12 +144,12 @@ export function buildLocalMaintenanceReportContract(command: string): AssistantV
     entityReferences: [{ type: "maintenanceClient", query: clientQuery, id: "" }],
     missingInformation: [],
     confidence: 0.98,
-    confirmationRequired: true,
+    confirmationRequired: submitMode === "send",
     response:
       submitMode === "send"
-        ? `Voi genera raportul de ${reportLabel} pentru ${clientQuery} si il voi trimite automat. Confirma trimiterea.`
+        ? `Trimite raportul de ${reportLabel} pentru ${clientQuery}?`
         : waitForPhotos
           ? `Deschid raportul de ${reportLabel} pentru ${clientQuery}, completez datele si astept sa atasezi pozele.`
-          : `Deschid si completez raportul de ${reportLabel} pentru ${clientQuery}. Confirma pregatirea draftului.`,
+          : `Deschid si completez raportul de ${reportLabel} pentru ${clientQuery}.`,
   };
 }

@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
+  buildLocalAssistantTraceInterpretation,
   buildAssistantTraceDocument,
   estimateModelCostUsd,
   extractModelTokenUsage,
@@ -10,6 +11,31 @@ const {
   normalizeAssistantOutcomePayload,
   redactText,
 } = require("./assistantObservability");
+
+test("builds a safe server trace for deterministic local assistant actions", () => {
+  const interpreted = buildLocalAssistantTraceInterpretation({
+    toolId: "maintenance.report.send",
+    module: "maintenance",
+    risk: "high",
+    fieldNames: ["clientQuery", "reportType", "submitMode"],
+  });
+  const trace = buildAssistantTraceDocument({
+    ownerUserId: "user-1",
+    transcript: "Genereaza raport revizie pentru Vali",
+    interpreted,
+    model: "local-deterministic",
+    openAiResponse: null,
+    latencyMs: 0,
+  });
+
+  assert.equal(trace.outcome.status, "interpreted");
+  assert.equal(trace.interpretation.toolCalls[0].id, "maintenance.report.send");
+  assert.deepEqual(trace.interpretation.toolCalls[0].fieldNames, [
+    "clientQuery",
+    "reportType",
+    "submitMode",
+  ]);
+});
 
 test("redacts transcript identifiers and never adds raw audio to a trace", () => {
   const transcript =
@@ -122,6 +148,7 @@ test("integration keeps Firestore writes server-owned and OpenAI bodies out of l
   const indexes = fs.readFileSync(path.resolve(__dirname, "..", "firestore.indexes.json"), "utf8");
 
   assert.match(indexSource, /exports\.recordAssistantTraceOutcome = onCall/);
+  assert.match(indexSource, /buildLocalAssistantTraceInterpretation\(payload\.details\)/);
   assert.match(indexSource, /trace\.get\('ownerUserId'\) !== request\.auth\.uid/);
   assert.doesNotMatch(
     indexSource,

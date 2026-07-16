@@ -18,6 +18,7 @@ export type ConfirmationCardProps = {
   reason?: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  compact?: boolean;
   busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -32,6 +33,7 @@ export function ConfirmationCard({
   reason,
   confirmLabel = "Confirmă",
   cancelLabel = "Anulează",
+  compact = false,
   busy = false,
   onConfirm,
   onCancel,
@@ -41,7 +43,7 @@ export function ConfirmationCard({
     confidence === undefined ? null : Math.round(Math.min(1, Math.max(0, confidence)) * 100);
 
   return (
-    <section className={styles.card} aria-labelledby={titleId}>
+    <section className={styles.card} aria-labelledby={titleId} data-compact={compact || undefined}>
       <div className={styles.cardHeader}>
         <div>
           <h3 id={titleId}>{title}</h3>

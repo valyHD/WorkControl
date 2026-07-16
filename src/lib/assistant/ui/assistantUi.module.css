@@ -29,6 +29,10 @@
   border-color: var(--danger-line, #fecaca);
 }
 
+.panel[data-composer="hidden"] {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .panelHeader,
 .panelFooter {
   position: relative;
@@ -391,9 +395,42 @@
 }
 
 .cardActions {
+  position: sticky;
+  bottom: -12px;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 0 -12px -12px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line, #e2e8f0);
+  background: var(--surface, #ffffff);
+}
+
+.cardActions .primaryButton {
+  flex: 1 1 180px;
+}
+
+.card[data-compact="true"] {
+  gap: 9px;
+  padding-bottom: 12px;
+}
+
+.card[data-compact="true"] .changeList {
+  gap: 6px;
+}
+
+.card[data-compact="true"] .changeRow dd {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.card[data-compact="true"] .oldValue,
+.card[data-compact="true"] .changeRow dd > svg {
+  display: none;
+}
+
+.card[data-compact="true"] .newValue {
+  padding: 7px 9px;
 }
 
 .secondaryButton {
@@ -628,6 +665,15 @@
 
   .holdButton {
     width: 100%;
+  }
+
+  .cardActions {
+    bottom: -10px;
+  }
+
+  .cardActions .primaryButton,
+  .cardActions .secondaryButton {
+    min-height: 48px;
   }
 }
 

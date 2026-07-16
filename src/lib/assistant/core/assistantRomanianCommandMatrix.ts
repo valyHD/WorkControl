@@ -757,7 +757,7 @@ export const ASSISTANT_ROMANIAN_COMMAND_MATRIX: readonly AssistantRomanianComman
     "Genereaza raportul de revizie pentru Isomat",
     "form_fill",
     "open_maintenance_report",
-    ["maintenance.report.prepare"],
+    ["maintenance.report.send"],
     ["standard"]
   ),
   confirmation(

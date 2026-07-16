@@ -231,6 +231,25 @@ function findMaintenanceClientsForAssistant(clients: MaintenanceClient[], client
   return matches.map((item) => item.client);
 }
 
+function isExactMaintenanceClientAssistantMatch(
+  client: MaintenanceClient,
+  clientQuery: string
+) {
+  const needle = normalizeMaintenanceAssistantText(clientQuery);
+  if (!needle) return false;
+  const exactValues = [
+    client.name,
+    client.liftNumber,
+    ...(client.liftNumbers || []),
+    ...(client.addresses || []).flatMap((address) =>
+      (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+    ),
+  ]
+    .filter(Boolean)
+    .map(normalizeMaintenanceAssistantText);
+  return exactValues.includes(needle);
+}
+
 function getMissingMonthlyReviews(
   clients: MaintenanceClient[],
   reports: MaintenanceReportHistoryItem[]
@@ -1314,20 +1333,28 @@ export default function MaintenanceWorkspace() {
     if (!assistantReportRequest || assistantReportRequest.resolvedClientId || loading) return;
 
     const matches = findMaintenanceClientsForAssistant(clients, assistantReportRequest.clientQuery);
-    if (matches.length !== 1) {
+    const safeMatches =
+      assistantReportRequest.submitMode === "send"
+        ? matches.filter((client) =>
+            isExactMaintenanceClientAssistantMatch(client, assistantReportRequest.clientQuery)
+          )
+        : matches;
+    if (safeMatches.length !== 1) {
       setSelectedClientId("");
       setReportSearch(assistantReportRequest.clientQuery);
       setReportSuggestionsOpen(matches.length > 0);
       setReportMessage(
-        matches.length > 1
+        safeMatches.length > 1 || matches.length > 1
           ? "Am gasit mai multi clienti. Selecteaza clientul corect; raportul nu a fost trimis."
-          : "Nu am gasit clientul. Verifica numele; raportul nu a fost trimis."
+          : matches.length === 1 && assistantReportRequest.submitMode === "send"
+            ? "Clientul nu a putut fi confirmat exact. Selecteaza-l din lista; raportul nu a fost trimis."
+            : "Nu am gasit clientul. Verifica numele; raportul nu a fost trimis."
       );
       setAssistantReportRequest(null);
       return;
     }
 
-    const client = matches[0];
+    const client = safeMatches[0];
     setSelectedClientId(client.id);
     setReportSearch(client.name || client.address || client.liftNumber || "");
     setReportSuggestionsOpen(false);

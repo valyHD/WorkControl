@@ -20,6 +20,7 @@ const {
   saveFirestoreCostControl,
 } = require('./firestoreCostControl');
 const {
+  buildLocalAssistantTraceInterpretation,
   buildAssistantTraceDocument,
   fingerprintAssistantTranscript,
   isAssistantOutcomeTransitionAllowed,
@@ -2594,9 +2595,9 @@ function buildWorkControlAssistantExamples() {
     '72. "adauga client mentenanta Isomat cu firma ISL Elevator" => create_maintenance_client fields maintenanceCompany.',
     '73. "adauga doua lifturi 123 si 456 la client Isomat" => create_maintenance_client fields {"name":"Isomat","liftNumbers":["123","456"]}.',
     '74. "deschide clientul Isomat" => navigation/open_page sau open_page /maintenance cu entityQuery Isomat.',
-    '75. "genereaza raport revizie pentru Isomat" => form_fill/open_maintenance_report cu maintenance.report.prepare si fields {"clientQuery":"Isomat","reportType":"revizie","observations":"","submitMode":"prepare","waitForPhotos":false}.',
+    '75. "genereaza raport revizie pentru Isomat" => form_fill/open_maintenance_report cu maintenance.report.send si fields {"clientQuery":"Isomat","reportType":"revizie","observations":"","submitMode":"send","waitForPhotos":false}, confirmationRequired true.',
     '76. "genereaza raport interventie pentru clientul X cu observatia usa nu se inchide si asteapta sa atasez pozele" => form_fill/open_maintenance_report cu maintenance.report.prepare si fields {"clientQuery":"X","reportType":"interventie","observations":"usa nu se inchide","submitMode":"prepare","waitForPhotos":true}, fara trimitere.',
-    '76b. "genereaza raport revizie pentru clientul Isomat si trimite-l" => form_fill/open_maintenance_report cu maintenance.report.send, aceleasi campuri cu submitMode "send", confirmationRequired true si risk high.',
+    '76b. "genereaza raport revizie pentru clientul Isomat" => form_fill/open_maintenance_report cu maintenance.report.send, aceleasi campuri cu submitMode "send", confirmationRequired true si risk high. Verbul genereaza implica trimiterea daca utilizatorul nu cere explicit doar pregatirea.',
     '77. "deschide piese la mentenanta" => navigation/open_page /maintenance?tab=parts.',
     '78. "adauga client mentenanta" fara nume => create_entity cu confidence sub 0.85 si missingFields ["name","liftNumbers"].',
     '79. "deschide firme branding" => navigation/open_page /maintenance?tab=companies.',
@@ -2737,7 +2738,7 @@ function buildAssistantPrompt(today, context) {
     'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
     'entity_update inseamna update prin servicii Firestore dupa resolve entity, nu prin formular si nu prin DOM.',
     'form_fill inseamna trimitere de obiect catre schema formularului, fara salvare automata.',
-    'Pentru raport de mentenanta foloseste maintenance.report.prepare cand utilizatorul cere pregatire, completare sau asteptarea pozelor. Foloseste maintenance.report.send numai cand cere explicit trimiterea; aceasta necesita confirmationRequired true.',
+    'Pentru raport de mentenanta, genereaza/creeaza/fa raport inseamna generare si trimitere cu maintenance.report.send si confirmationRequired true. Foloseste maintenance.report.prepare numai cand utilizatorul cere explicit pregatire, completare, fara trimitere sau asteptarea pozelor.',
     'create_entity inseamna creare dupa confirmare sau completare formular controlat, nu click arbitrar.',
     'timesheet_action porneste/opreste pontaj doar daca exista verb explicit: porneste, start, incepe, opreste, stop, inchide.',
     'Pentru rezultate multiple sau entitati slabe, confidence sub 0.85 si missingFields ["entity"].',
@@ -2784,7 +2785,7 @@ exports.interpretAssistantCommand = onCall(
     secrets: [openaiApiKey],
   },
   async (request) => {
-    await assertActiveInternalRequest(request);
+    const context = await assertActiveInternalRequest(request);
 
     const startedAtMs = Date.now();
     const command = toSafeString(request.data?.command).slice(0, 600);
@@ -3084,7 +3085,24 @@ exports.recordAssistantTraceOutcome = onCall(
     }
 
     if (!traceRef) {
-      throw new HttpsError('not-found', 'Urma asistentului nu a fost gasita.');
+      if (!context.companyId) {
+        return { status: 'skipped', reason: 'company_missing' };
+      }
+      traceRef = db.collection('aiCommandLogs').doc();
+      const localTrace = buildAssistantTraceDocument({
+        ownerUserId: request.auth.uid,
+        transcript: payload.transcript,
+        interpreted: buildLocalAssistantTraceInterpretation(payload.details),
+        model: 'local-deterministic',
+        openAiResponse: null,
+        latencyMs: 0,
+      });
+      await traceRef.set({
+        ...localTrace,
+        companyId: context.companyId,
+        createdAtServer: FieldValue.serverTimestamp(),
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
     }
 
     await db.runTransaction(async (transaction) => {

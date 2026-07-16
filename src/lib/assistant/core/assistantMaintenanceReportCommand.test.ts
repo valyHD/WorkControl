@@ -12,9 +12,7 @@ function reportFields(command: string) {
 
 describe("local maintenance report command contract", () => {
   it("requires confirmation before generating and sending a revision report", () => {
-    const { contract, fields } = reportFields(
-      "Genereaza raport revizie pentru clientul Isomat si trimite-l"
-    );
+    const { contract, fields } = reportFields("Genereaza raport revizie pentru clientul Isomat");
 
     expect(contract).toMatchObject({
       commandType: "form_fill",
@@ -38,7 +36,7 @@ describe("local maintenance report command contract", () => {
     );
 
     expect(contract).toMatchObject({
-      confirmationRequired: true,
+      confirmationRequired: false,
       toolCalls: [{ id: "maintenance.report.prepare" }],
     });
     expect(fields).toEqual({
@@ -48,6 +46,16 @@ describe("local maintenance report command contract", () => {
       submitMode: "prepare",
       waitForPhotos: true,
     });
+  });
+
+  it("keeps explicit draft preparation separate from sending", () => {
+    const { contract, fields } = reportFields("Pregateste raport de revizie pentru Vali");
+
+    expect(contract).toMatchObject({
+      confirmationRequired: false,
+      toolCalls: [{ id: "maintenance.report.prepare" }],
+    });
+    expect(fields).toMatchObject({ clientQuery: "Vali", submitMode: "prepare" });
   });
 
   it("uses a lift number as the client lookup query", () => {

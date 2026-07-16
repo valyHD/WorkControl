@@ -51,6 +51,7 @@ export type AssistantPanelProps = {
   serverFallbackAvailable?: boolean;
   serverFallbackConsent?: boolean;
   onServerFallbackConsentChange?: (value: boolean) => void;
+  showComposer?: boolean;
 };
 
 export function AssistantPanel({
@@ -75,6 +76,7 @@ export function AssistantPanel({
   serverFallbackAvailable = false,
   serverFallbackConsent = false,
   onServerFallbackConsentChange,
+  showComposer = true,
 }: AssistantPanelProps) {
   const titleId = useId();
   const statusId = useId();
@@ -147,6 +149,7 @@ export function AssistantPanel({
       aria-labelledby={titleId}
       aria-describedby={statusId}
       aria-busy={busy}
+      data-composer={showComposer ? "visible" : "hidden"}
     >
       <header className={styles.panelHeader}>
         <div className={styles.panelTitleGroup}>
@@ -193,66 +196,68 @@ export function AssistantPanel({
         {children}
       </div>
 
-      <footer className={styles.panelFooter}>
-        <button
-          className={styles.holdButton}
-          type="button"
-          disabled={holdDisabled}
-          onPointerDown={handlePointerDown}
-          onPointerUp={finishHold}
-          onPointerCancel={cancelHold}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
-          onBlur={cancelHold}
-          onClick={(event) => event.preventDefault()}
-          onContextMenu={(event) => event.preventDefault()}
-          aria-pressed={state === "listening"}
-          aria-describedby={statusId}
-        >
-          {state === "listening" ? (
-            <Mic size={18} aria-hidden="true" />
-          ) : (
-            <Bot size={18} aria-hidden="true" />
-          )}
-          <span>{state === "listening" ? "Ascult..." : holdToTalkLabel}</span>
-        </button>
+      {showComposer ? (
+        <footer className={styles.panelFooter}>
+          <button
+            className={styles.holdButton}
+            type="button"
+            disabled={holdDisabled}
+            onPointerDown={handlePointerDown}
+            onPointerUp={finishHold}
+            onPointerCancel={cancelHold}
+            onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onBlur={cancelHold}
+            onClick={(event) => event.preventDefault()}
+            onContextMenu={(event) => event.preventDefault()}
+            aria-pressed={state === "listening"}
+            aria-describedby={statusId}
+          >
+            {state === "listening" ? (
+              <Mic size={18} aria-hidden="true" />
+            ) : (
+              <Bot size={18} aria-hidden="true" />
+            )}
+            <span>{state === "listening" ? "Ascult..." : holdToTalkLabel}</span>
+          </button>
 
-        {manualValue !== undefined && onManualChange && onManualSubmit ? (
-          <form className={styles.manualForm} onSubmit={submitManual}>
-            <label className={styles.visuallyHidden} htmlFor={`${titleId}-manual`}>
-              Comandă scrisă
+          {manualValue !== undefined && onManualChange && onManualSubmit ? (
+            <form className={styles.manualForm} onSubmit={submitManual}>
+              <label className={styles.visuallyHidden} htmlFor={`${titleId}-manual`}>
+                Comandă scrisă
+              </label>
+              <input
+                id={`${titleId}-manual`}
+                value={manualValue}
+                onChange={(event) => onManualChange(event.target.value)}
+                placeholder={manualPlaceholder}
+                disabled={busy}
+              />
+              <button
+                type="submit"
+                disabled={busy || !manualValue.trim()}
+                aria-label="Trimite comanda"
+                title="Trimite"
+              >
+                <Send size={17} aria-hidden="true" />
+              </button>
+            </form>
+          ) : null}
+          {serverFallbackAvailable && onServerFallbackConsentChange ? (
+            <label className={styles.audioConsent}>
+              <input
+                type="checkbox"
+                checked={serverFallbackConsent}
+                onChange={(event) => onServerFallbackConsentChange(event.target.checked)}
+                disabled={busy || state === "listening"}
+              />
+              <span>
+                Permite trimiterea audio catre OpenAI numai cand transcrierea din browser esueaza.
+              </span>
             </label>
-            <input
-              id={`${titleId}-manual`}
-              value={manualValue}
-              onChange={(event) => onManualChange(event.target.value)}
-              placeholder={manualPlaceholder}
-              disabled={busy}
-            />
-            <button
-              type="submit"
-              disabled={busy || !manualValue.trim()}
-              aria-label="Trimite comanda"
-              title="Trimite"
-            >
-              <Send size={17} aria-hidden="true" />
-            </button>
-          </form>
-        ) : null}
-        {serverFallbackAvailable && onServerFallbackConsentChange ? (
-          <label className={styles.audioConsent}>
-            <input
-              type="checkbox"
-              checked={serverFallbackConsent}
-              onChange={(event) => onServerFallbackConsentChange(event.target.checked)}
-              disabled={busy || state === "listening"}
-            />
-            <span>
-              Permite trimiterea audio catre OpenAI numai cand transcrierea din browser esueaza.
-            </span>
-          </label>
-        ) : null}
-      </footer>
+          ) : null}
+        </footer>
+      ) : null}
     </section>
   );
 }
