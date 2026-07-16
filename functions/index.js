@@ -1080,6 +1080,10 @@ const MAX_GMAIL_ATTACHMENTS = 8;
 const MAX_GMAIL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
 const MAX_GMAIL_TOTAL_ATTACHMENT_BYTES = 30 * 1024 * 1024;
 
+function cleanText(value, maxLength = 1000) {
+  return toSafeString(value).replace(/\0/g, '').slice(0, maxLength);
+}
+
 function cleanEmail(value) {
   const email = cleanText(value, 320).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '';
@@ -1173,12 +1177,23 @@ async function getSharedGmailAccessToken() {
 
   const oauthClient = new OAuth2Client(clientId, clientSecret);
   oauthClient.setCredentials({ refresh_token: refreshToken });
-  const tokenResponse = await oauthClient.getAccessToken();
-  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
-  if (!token) {
-    throw new HttpsError('failed-precondition', 'Gmail nu a returnat token de acces.');
+  try {
+    const tokenResponse = await oauthClient.getAccessToken();
+    const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+    if (!token) {
+      throw new HttpsError('failed-precondition', 'Gmail nu a returnat token de acces.');
+    }
+    return token;
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    logger.error('Nu am putut reimprospata tokenul Gmail.', {
+      errorMessage: error instanceof Error ? error.message : String(error || ''),
+    });
+    throw new HttpsError(
+      'failed-precondition',
+      'Gmail nu este autorizat corect pe server. Reautorizeaza contul liftultau@gmail.com cu acces Gmail compose.'
+    );
   }
-  return token;
 }
 
 async function createMaintenanceGmailDraft(request) {
@@ -1240,6 +1255,12 @@ async function createMaintenanceGmailDraft(request) {
       clientId: cleanText(input.clientId, 120),
       responseSnippet: text.slice(0, 300),
     });
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Gmail a refuzat autorizarea contului liftultau@gmail.com. Reautorizeaza refresh token-ul cu scope Gmail compose.'
+      );
+    }
     throw new HttpsError('internal', 'Nu am putut crea draftul Gmail.');
   }
 
