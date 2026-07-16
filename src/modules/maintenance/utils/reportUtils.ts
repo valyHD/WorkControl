@@ -25,6 +25,9 @@ export function generateReportId(now = new Date()): string {
   return `RPT_${buildReportFolderDate(now)}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
+export const INTERVENTION_REPORT_STANDARD_TEXT =
+  "S-a efectuat interventia conform sesizarii clientului. Instalatia a fost verificata si s-au constatat urmatoarele:";
+
 export function reviewStandardText(liftNumber: string, revisionType?: string): string {
   const normalizedType = (revisionType || "").toUpperCase();
   const firstChar = liftNumber.trim()[0] ?? "";

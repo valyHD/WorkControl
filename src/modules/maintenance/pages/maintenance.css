@@ -304,6 +304,73 @@
   padding-inline: 18px;
 }
 
+.maintenance-report-progress {
+  display: grid;
+  gap: 14px;
+  border-color: rgba(37, 99, 235, 0.3);
+  background: #f8fbff;
+}
+
+.maintenance-report-progress__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.maintenance-report-progress__head strong {
+  color: #2563eb;
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.maintenance-report-progress__eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.maintenance-report-progress__track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbe6f6;
+}
+
+.maintenance-report-progress__track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 320ms ease;
+}
+
+.maintenance-report-progress__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.maintenance-report-progress__steps span {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  padding: 7px 8px;
+  color: var(--text-soft);
+  background: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.maintenance-report-progress__steps span.is-active {
+  border-color: rgba(37, 99, 235, 0.36);
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
 .maintenance-generated-report,
 .maintenance-parts-bridge,
 .maintenance-clients-head {
@@ -607,6 +674,16 @@
   .maintenance-clients-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .maintenance-report-progress__head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .maintenance-report-progress__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .maintenance-page .simple-list-item,

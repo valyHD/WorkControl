@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  SHARED_GMAIL_DISPLAY_NAME,
   SHARED_GMAIL_SENDER,
   buildPartOrderEmail,
   buildRawMimeMessage,
@@ -87,7 +88,7 @@ test('builds a Gmail MIME message with the fixed sender and a real PDF attachmen
   });
 
   const decoded = Buffer.from(result.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-  assert.match(decoded, new RegExp(`From: WorkControl <${SHARED_GMAIL_SENDER}>`));
+  assert.match(decoded, new RegExp(`From: ${SHARED_GMAIL_DISPLAY_NAME} <${SHARED_GMAIL_SENDER}>`));
   assert.match(decoded, /Content-Disposition: attachment; filename="raport.pdf"/);
   assert.match(decoded, /Content-Type: application\/pdf/);
 });

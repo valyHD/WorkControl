@@ -25,6 +25,7 @@ import type {
   MaintenancePartOrderPriority,
   MaintenancePartOrderStatus,
 } from "../../../types/maintenance";
+import { normalizeMaintenancePartOrderStatus } from "../utils/partOrderStatus";
 
 const partOrdersCollection = collection(db, "maintenancePartOrders");
 const ORDERS_PATH = "/maintenance/orders";
@@ -39,11 +40,7 @@ function toNumber(value: unknown, fallback = 0) {
 }
 
 function normalizeStatus(value: unknown): MaintenancePartOrderStatus {
-  const safe = toText(value);
-  if (["draft", "requested", "quote_requested", "quote_received", "ordered", "partial", "received", "installed", "cancelled"].includes(safe)) {
-    return safe as MaintenancePartOrderStatus;
-  }
-  return "requested";
+  return normalizeMaintenancePartOrderStatus(value);
 }
 
 function normalizePriority(value: unknown): MaintenancePartOrderPriority {
@@ -275,6 +272,45 @@ export async function updateMaintenancePartOrder(
     metadata: {
       fieldsText: buildFieldsText(savedOrder),
       changesText: statusChanged ? [`Status: ${previousStatus} -> ${savedOrder.status}`] : buildFieldsText(savedOrder),
+    },
+  });
+}
+
+export async function updateMaintenancePartOrderStatus(
+  order: MaintenancePartOrder,
+  nextStatus: MaintenancePartOrderStatus,
+  actor: AppUser | null
+): Promise<void> {
+  const status = normalizeMaintenancePartOrderStatus(nextStatus);
+  if (status === order.status) return;
+
+  const now = Date.now();
+  const isResolved = status === "installed";
+  const stopsReminders = isResolved || status === "cancelled";
+  await updateDoc(doc(partOrdersCollection, order.id), {
+    status,
+    nextReminderAt: stopsReminders ? null : order.nextReminderAt ?? null,
+    resolvedAt: isResolved ? now : null,
+    resolvedByUserId: isResolved ? actor?.id || actor?.uid || "" : "",
+    resolvedByUserName: isResolved ? actorName(actor) : "",
+    updatedAt: now,
+    updatedAtServer: serverTimestamp(),
+  });
+
+  await dispatchNotificationEvent({
+    module: "maintenance",
+    eventType: "maintenance_part_order_status_changed",
+    entityId: order.id,
+    title: "Status comanda piese schimbat",
+    message: `${actorName(actor)} a schimbat comanda ${orderLabel(order)} din ${order.status} in ${status}.`,
+    notificationPath: ORDERS_PATH,
+    ownerUserId: order.requestedByUserId,
+    actorUserId: actor?.id || actor?.uid || "",
+    actorUserName: actorName(actor),
+    actorUserThemeKey: actor?.themeKey ?? null,
+    metadata: {
+      fieldsText: buildFieldsText({ ...order, status }),
+      changesText: [`Status: ${order.status} -> ${status}`],
     },
   });
 }

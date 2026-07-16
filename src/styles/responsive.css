@@ -279,6 +279,28 @@
   background: #f8fafc;
 }
 
+.maintenance-order-status-control {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(180px, 280px) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.maintenance-order-status-control label {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.maintenance-order-status-control span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
 .maintenance-order-part {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -360,6 +382,10 @@
   .maintenance-order-workflow .secondary-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .maintenance-order-status-control {
+    grid-template-columns: 1fr;
   }
 }
 

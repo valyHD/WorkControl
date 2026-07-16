@@ -265,4 +265,59 @@ describe("MaintenancePage client form", () => {
       expect(screen.getByText(/a fost trimis din liftultau@gmail\.com/)).toBeInTheDocument();
     });
   });
+
+  it("uses the approved intervention wording in the generated PDF", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-intervention-test", "Client Interventie")]);
+      return vi.fn();
+    });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+
+    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Interventie");
+    await user.click(await screen.findByRole("option", { name: /Client Interventie/ }));
+    await user.click(screen.getByRole("button", { name: "Genereaza si trimite interventia" }));
+
+    await waitFor(() => {
+      expect(pdfMocks.buildMaintenancePdfBlob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          report: expect.objectContaining({
+            continutRaport:
+              "S-a efectuat interventia conform sesizarii clientului. Instalatia a fost verificata si s-au constatat urmatoarele:",
+          }),
+        })
+      );
+    });
+  });
+
+  it("shows sending progress instead of a false email failure", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-progress-test", "Client Progres")]);
+      return vi.fn();
+    });
+    let resolveSend: ((value: { status: "sent"; senderEmail: string; messageId: string }) => void) | undefined;
+    sharedGmailMocks.sendSharedMaintenanceReportEmail.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve;
+      })
+    );
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+
+    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Progres");
+    await user.click(await screen.findByRole("option", { name: /Client Progres/ }));
+    await user.click(screen.getByRole("button", { name: "Genereaza si trimite revizia" }));
+
+    expect(await screen.findByText(/Raport salvat, trimitere in curs/)).toBeInTheDocument();
+    expect(screen.queryByText(/email netrimis/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Progres trimitere raport" })).toHaveAttribute(
+      "aria-valuenow",
+      "76"
+    );
+
+    await act(async () => {
+      resolveSend?.({ status: "sent", senderEmail: "liftultau@gmail.com", messageId: "progress-message" });
+    });
+    expect(await screen.findByText(/Raport trimis pentru Client Progres/)).toBeInTheDocument();
+  });
 });

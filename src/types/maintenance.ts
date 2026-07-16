@@ -87,6 +87,7 @@ export type MaintenancePartOrderStatus =
   | "quote_requested"
   | "quote_received"
   | "ordered"
+  | "paid"
   | "partial"
   | "received"
   | "installed"

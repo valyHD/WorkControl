@@ -19,21 +19,16 @@ import {
   markSupplierQuoteReceived,
   subscribeMaintenancePartOrders,
   updateMaintenancePartOrder,
+  updateMaintenancePartOrderStatus,
 } from "../services/partOrdersService";
 import { sendSharedMaintenancePartOrderEmail, SHARED_GMAIL_SENDER_EMAIL } from "../services/sharedGmailService";
 import { subscribeUsers } from "../../users/services/usersService";
+import {
+  getMaintenancePartOrderStatusLabel,
+  MAINTENANCE_PART_ORDER_STATUS_OPTIONS,
+} from "../utils/partOrderStatus";
 
-const statusOptions: Array<{ value: MaintenancePartOrderStatus; label: string }> = [
-  { value: "draft", label: "Draft" },
-  { value: "requested", label: "Ceruta" },
-  { value: "quote_requested", label: "Oferta ceruta" },
-  { value: "quote_received", label: "Oferta primita" },
-  { value: "ordered", label: "Comandata" },
-  { value: "partial", label: "Primita partial" },
-  { value: "received", label: "Primita" },
-  { value: "installed", label: "Montata" },
-  { value: "cancelled", label: "Anulata" },
-];
+const statusOptions = MAINTENANCE_PART_ORDER_STATUS_OPTIONS;
 
 const priorityOptions: Array<{ value: MaintenancePartOrderPriority; label: string }> = [
   { value: "low", label: "Scazuta" },
@@ -182,6 +177,7 @@ export default function MaintenancePartOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sendingEmailKey, setSendingEmailKey] = useState("");
+  const [statusUpdatingOrderId, setStatusUpdatingOrderId] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
@@ -430,6 +426,24 @@ export default function MaintenancePartOrdersPage() {
     if (!window.confirm("Marchezi comanda ca rezolvata, piesa primita si montata?")) return;
     await markMaintenancePartOrderResolved(order, currentUser);
     setStatus("Comanda a fost marcata ca rezolvata / montata.");
+  }
+
+  async function handleQuickStatusChange(
+    order: MaintenancePartOrder,
+    nextStatus: MaintenancePartOrderStatus
+  ) {
+    if (nextStatus === order.status) return;
+    setStatusUpdatingOrderId(order.id);
+    setError("");
+    try {
+      await updateMaintenancePartOrderStatus(order, nextStatus, currentUser);
+      setStatus(`Comanda a fost marcata: ${getMaintenancePartOrderStatusLabel(nextStatus)}.`);
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][status]", err);
+      setError("Nu am putut schimba statusul comenzii.");
+    } finally {
+      setStatusUpdatingOrderId("");
+    }
   }
 
   return (
@@ -732,7 +746,7 @@ export default function MaintenancePartOrdersPage() {
                   <span className="simple-list-text">
                     <span className="simple-list-label">{order.title || "Comanda piese"} - {order.clientName || "fara client"}</span>
                     <span className="simple-list-subtitle">
-                      {order.status} / {order.priority} - {order.lines.length} piese - {formatMoney(order.totalEstimated)} - {formatDateTime(order.updatedAt)}
+                      {getMaintenancePartOrderStatusLabel(order.status)} / {order.priority} - {order.lines.length} piese - {formatMoney(order.totalEstimated)} - {formatDateTime(order.updatedAt)}
                     </span>
                   </span>
                   <span className="maintenance-order-actions">
@@ -762,6 +776,26 @@ export default function MaintenancePartOrdersPage() {
                   <div><strong>Oferta furnizor:</strong> {order.supplierQuoteReceivedAt ? `${formatMoney(order.supplierOfferAmount)} - ${formatDateTime(order.supplierQuoteReceivedAt)}` : "-"}</div>
                   <div><strong>Oferta client:</strong> {order.clientOfferEmailSentAt ? `${formatMoney(order.clientOfferAmount || order.supplierOfferAmount)} - trimisa ${formatDateTime(order.clientOfferEmailSentAt)}` : "-"}</div>
                   {order.notes && <p>{order.notes}</p>}
+                  <div className="maintenance-order-status-control">
+                    <label htmlFor={`order-status-${order.id}`}>Status comanda</label>
+                    <select
+                      id={`order-status-${order.id}`}
+                      className="tool-input"
+                      value={order.status}
+                      onChange={(event) => void handleQuickStatusChange(
+                        order,
+                        event.target.value as MaintenancePartOrderStatus
+                      )}
+                      disabled={statusUpdatingOrderId === order.id}
+                    >
+                      {statusOptions.map((option) => (
+                        <option key={`${order.id}-${option.value}`} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span>{statusUpdatingOrderId === order.id ? "Se salveaza..." : "Actualizare rapida"}</span>
+                  </div>
                   <div className="maintenance-order-workflow">
                     {order.notifyUserId && !order.notificationSeenAt && (
                       <button className="secondary-btn" type="button" onClick={() => void handleSeen(order)}>

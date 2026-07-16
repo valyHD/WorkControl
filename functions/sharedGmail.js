@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const { OAuth2Client } = require('google-auth-library');
 
 const SHARED_GMAIL_SENDER = 'liftultau@gmail.com';
+const SHARED_GMAIL_DISPLAY_NAME = 'Service si Mentenanta Lift';
 const DISPATCH_LEASE_MS = 2 * 60 * 1000;
 const MAX_ATTACHMENT_BYTES = 18 * 1024 * 1024;
 const MAX_TEXT_LENGTH = 12_000;
@@ -45,7 +46,7 @@ function buildRawMimeMessage(input) {
   const boundary = `workcontrol_${crypto.randomBytes(12).toString('hex')}`;
   const messageId = `<${input.dispatchId}@workcontrol-53b1d.firebaseapp.com>`;
   const lines = [
-    `From: WorkControl <${SHARED_GMAIL_SENDER}>`,
+    `From: ${SHARED_GMAIL_DISPLAY_NAME} <${SHARED_GMAIL_SENDER}>`,
     `To: ${sanitizeHeader(input.to)}`,
     `Subject: ${encodeHeader(input.subject)}`,
     `Date: ${new Date(input.sentAt).toUTCString()}`,
@@ -455,6 +456,7 @@ function createSharedGmailHandlers(dependencies) {
 }
 
 module.exports = {
+  SHARED_GMAIL_DISPLAY_NAME,
   SHARED_GMAIL_SENDER,
   buildPartOrderEmail,
   buildRawMimeMessage,

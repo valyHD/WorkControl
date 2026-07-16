@@ -35,7 +35,11 @@ import {
   SHARED_GMAIL_SENDER_EMAIL,
 } from "../services/sharedGmailService";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
-import { generateReportId, reviewStandardText } from "../utils/reportUtils";
+import {
+  generateReportId,
+  INTERVENTION_REPORT_STANDARD_TEXT,
+  reviewStandardText,
+} from "../utils/reportUtils";
 import type {
   MaintenanceClient,
   MaintenanceCompanyBranding,
@@ -109,7 +113,13 @@ type GeneratedReportShare = {
   timeText: string;
   maintenanceCompany: string;
   pdfUrl: string;
-  emailSent: boolean;
+  emailStatus: "sending" | "sent" | "failed";
+};
+
+type ReportSendProgress = {
+  percent: number;
+  label: string;
+  detail: string;
 };
 
 type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "lifts" | "companies" | "history" | "checks";
@@ -433,6 +443,7 @@ export default function MaintenanceWorkspace() {
   const [technicians, setTechnicians] = useState<AppUserItem[]>([]);
   const [selectedTechnicianId, setSelectedTechnicianId] = useState(() => user?.uid || "");
   const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportSendProgress, setReportSendProgress] = useState<ReportSendProgress | null>(null);
   const [reportMessage, setReportMessage] = useState("");
   const [reportError, setReportError] = useState("");
   const [monthlyReviewChecking, setMonthlyReviewChecking] = useState(false);
@@ -1313,14 +1324,21 @@ export default function MaintenanceWorkspace() {
 
     setReportGenerating(true);
     setReportError("");
-    setReportMessage("Se genereaza PDF-ul si se trimite prin Gmail...");
+    setReportMessage("");
+    setReportSendProgress({
+      percent: 12,
+      label: "Construim raportul PDF",
+      detail: reportImageFiles.length
+        ? `Pregatim documentul si cele ${reportImageFiles.length} poze selectate.`
+        : "Pregatim documentul pentru arhivare si trimitere.",
+    });
     setLastGeneratedReport(null);
 
     const branding = resolveBrandingForCompany(selectedClient.maintenanceCompany || "", brandingItems);
+    let savedShareInfo: GeneratedReportShare | null = null;
 
     try {
       setReportError("");
-      setReportMessage("Se genereaza PDF-ul, se salveaza istoricul si se trimite emailul...");
 
       const now = new Date();
       const dateText = now.toLocaleDateString("ro-RO");
@@ -1350,9 +1368,17 @@ export default function MaintenanceWorkspace() {
           technicianComments: commentsValue,
           continutRaport:
             type === "interventie"
-              ? "S-a efectuat interventia conform sesizarii clientului. Instalatia a fost verificata si readusa in stare de functionare in siguranta."
+              ? INTERVENTION_REPORT_STANDARD_TEXT
               : reviewStandardText(liftValue, selectedLiftRevisionType),
         },
+      });
+
+      setReportSendProgress({
+        percent: 38,
+        label: "PDF pregatit",
+        detail: reportImageFiles.length
+          ? "Incarcam PDF-ul si pozele in arhiva raportului."
+          : "Incarcam PDF-ul in arhiva raportului.",
       });
 
       const fileType = type === "interventie" ? "interventie" : "revizie";
@@ -1376,6 +1402,12 @@ export default function MaintenanceWorkspace() {
         timeText,
       });
 
+      setReportSendProgress({
+        percent: 76,
+        label: "Raport salvat in istoric",
+        detail: "Trimitem emailul din contul comun Gmail. Fereastra poate ramane deschisa.",
+      });
+
       const shareInfo: GeneratedReportShare = {
         clientId: selectedClient.id,
         reportId: historyItem.id,
@@ -1387,15 +1419,21 @@ export default function MaintenanceWorkspace() {
         timeText,
         maintenanceCompany: selectedClient.maintenanceCompany,
         pdfUrl: historyItem.pdfUrl,
-        emailSent: false,
+        emailStatus: "sending",
       };
 
+      savedShareInfo = shareInfo;
       setLastGeneratedReport(shareInfo);
       await sendSharedMaintenanceReportEmail({
         clientId: selectedClient.id,
         reportId: historyItem.id,
       });
-      setLastGeneratedReport({ ...shareInfo, emailSent: true });
+      setReportSendProgress({
+        percent: 100,
+        label: "Email trimis",
+        detail: "Gmail a confirmat trimiterea PDF-ului si a atasamentelor.",
+      });
+      setLastGeneratedReport({ ...shareInfo, emailStatus: "sent" });
       setReportImageFiles([]);
       resetTechnicianToCurrentUser();
 
@@ -1403,6 +1441,10 @@ export default function MaintenanceWorkspace() {
     } catch (err) {
       console.error(err);
       const errorMessage = err instanceof Error ? err.message : "";
+      if (savedShareInfo) {
+        setLastGeneratedReport({ ...savedShareInfo, emailStatus: "failed" });
+      }
+      setReportSendProgress(null);
       setReportError(`Raportul nu a putut fi trimis prin Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
     } finally {
       setReportGenerating(false);
@@ -1410,20 +1452,33 @@ export default function MaintenanceWorkspace() {
   }
 
   async function retryLastReportEmail() {
-    if (!lastGeneratedReport || lastGeneratedReport.emailSent) return;
+    if (!lastGeneratedReport || lastGeneratedReport.emailStatus !== "failed") return;
     try {
       setReportGenerating(true);
       setReportError("");
-      setReportMessage("Se reincearca trimiterea raportului...");
+      setReportMessage("");
+      setLastGeneratedReport({ ...lastGeneratedReport, emailStatus: "sending" });
+      setReportSendProgress({
+        percent: 76,
+        label: "Reluam trimiterea",
+        detail: "Raportul este deja salvat. Asteptam confirmarea Gmail.",
+      });
       await sendSharedMaintenanceReportEmail({
         clientId: lastGeneratedReport.clientId,
         reportId: lastGeneratedReport.reportId,
       });
-      setLastGeneratedReport({ ...lastGeneratedReport, emailSent: true });
+      setReportSendProgress({
+        percent: 100,
+        label: "Email trimis",
+        detail: "Gmail a confirmat trimiterea raportului.",
+      });
+      setLastGeneratedReport({ ...lastGeneratedReport, emailStatus: "sent" });
       setReportMessage(`Raportul a fost trimis din ${SHARED_GMAIL_SENDER_EMAIL}.`);
     } catch (err) {
       console.error(err);
       setReportMessage("");
+      setReportSendProgress(null);
+      setLastGeneratedReport({ ...lastGeneratedReport, emailStatus: "failed" });
       setReportError("Raportul este salvat, dar Gmail nu a confirmat trimiterea. Incearca din nou.");
     } finally {
       setReportGenerating(false);
@@ -1576,11 +1631,44 @@ export default function MaintenanceWorkspace() {
           </div>
         )}
 
+        {reportGenerating && reportSendProgress && (
+          <div className="panel maintenance-report-progress" role="status" aria-live="polite">
+            <div className="maintenance-report-progress__head">
+              <div>
+                <span className="maintenance-report-progress__eyebrow">Trimitere securizata Gmail</span>
+                <h2 className="panel-title">{reportSendProgress.label}</h2>
+                <p className="tools-subtitle">{reportSendProgress.detail}</p>
+              </div>
+              <strong>{reportSendProgress.percent}%</strong>
+            </div>
+            <div
+              className="maintenance-report-progress__track"
+              role="progressbar"
+              aria-label="Progres trimitere raport"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={reportSendProgress.percent}
+            >
+              <span style={{ width: `${reportSendProgress.percent}%` }} />
+            </div>
+            <div className="maintenance-report-progress__steps" aria-hidden="true">
+              <span className={reportSendProgress.percent >= 12 ? "is-active" : ""}>PDF</span>
+              <span className={reportSendProgress.percent >= 38 ? "is-active" : ""}>Arhivare</span>
+              <span className={reportSendProgress.percent >= 76 ? "is-active" : ""}>Gmail</span>
+              <span className={reportSendProgress.percent >= 100 ? "is-active" : ""}>Trimis</span>
+            </div>
+          </div>
+        )}
+
         {lastGeneratedReport && (
           <div className="panel maintenance-generated-report">
             <div>
               <h2 className="panel-title">
-                {lastGeneratedReport.emailSent ? "Raport trimis" : "Raport salvat, email netrimis"} pentru {lastGeneratedReport.clientName || "client"}
+                {lastGeneratedReport.emailStatus === "sent"
+                  ? "Raport trimis"
+                  : lastGeneratedReport.emailStatus === "sending"
+                    ? "Raport salvat, trimitere in curs"
+                    : "Raport salvat, trimiterea trebuie reluata"} pentru {lastGeneratedReport.clientName || "client"}
               </h2>
               <p className="tools-subtitle">
                 Destinatar: {lastGeneratedReport.clientEmail || "-"} · Expeditor: {SHARED_GMAIL_SENDER_EMAIL} · PDF atasat efectiv.
@@ -1601,7 +1689,7 @@ export default function MaintenanceWorkspace() {
                   <Download size={15} /> Download PDF
                 </button>
               ) : null}
-              {!lastGeneratedReport.emailSent ? (
+              {lastGeneratedReport.emailStatus === "failed" ? (
                 <button className="primary-btn" type="button" onClick={() => void retryLastReportEmail()} disabled={reportGenerating}>
                   <Send size={15} /> Reincearca trimiterea
                 </button>
