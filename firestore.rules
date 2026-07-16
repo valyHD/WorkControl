@@ -297,6 +297,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /documents/{documentId} {
+        allow read: if canReadVehicle(vehicleId);
+        allow write: if false;
+      }
+
       match /commands/{commandId} {
         allow read: if canReadVehicle(vehicleId);
         allow write: if false;

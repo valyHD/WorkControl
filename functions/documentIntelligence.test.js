@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildDocumentJobId,
   buildDocumentOperationId,
+  buildVehicleDocumentSummary,
   createDocumentIntelligenceHandlers,
   isValidIsoDate,
   normalizeExtraction,
@@ -28,6 +29,19 @@ test("builds a stable operation id for one vehicle document review", () => {
   const first = buildDocumentOperationId("job", "vehicle", "document");
   assert.equal(first, buildDocumentOperationId("job", "vehicle", "document"));
   assert.notEqual(first, buildDocumentOperationId("job", "vehicle", "other-document"));
+});
+
+test("builds compact vehicle document summaries", () => {
+  const summary = buildVehicleDocumentSummary([
+    { id: "expired", expiryDate: "2026-07-01", intelligenceStatus: "applied" },
+    { id: "next", expiryDate: "2026-07-20", intelligenceStatus: "needs_review" },
+    { id: "invalid", expiryDate: "2026-02-31", intelligenceStatus: "queued" },
+  ], Date.UTC(2026, 6, 15, 9, 0, 0));
+
+  assert.equal(summary.count, 3);
+  assert.equal(summary.nextExpiryAt, "2026-07-20");
+  assert.equal(summary.expiredCount, 1);
+  assert.equal(summary.needsReviewCount, 1);
 });
 
 test("normalizes field confidence and rejects invalid extracted dates", () => {

@@ -77,6 +77,11 @@ import {
   mergeVehicleSimulationState,
   type VehicleSimulationStateData,
 } from "../utils/vehicleSimulationState";
+import {
+  buildVehicleDocumentSummary,
+  isSupportedVehicleDocumentFile,
+  VEHICLE_DOCUMENT_MAX_BYTES,
+} from "../utils/vehicleDocumentSummary";
 
 const vehiclesCollection = collection(db, "vehicles");
 const vehicleOperationalViewsCollection = collection(db, "vehicleOperationalViews");
@@ -1021,6 +1026,58 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const initialRecordedKm = toSafeNumber(data.initialRecordedKm, storedCurrentKm || currentKm);
   const serviceStrategy = data.serviceStrategy === "absolute" ? "absolute" : "interval";
   const serviceIntervalKm = toSafeNumber(data.serviceIntervalKm, 15000);
+  const documents: VehicleDocumentItem[] = documentsRaw.map((item: any) => ({
+    id: toSafeString(item?.id, `${Date.now()}_${Math.random().toString(36).slice(2)}`),
+    name: toSafeString(item?.name),
+    url: toSafeString(item?.url),
+    path: toSafeString(item?.path),
+    contentType: toSafeString(item?.contentType),
+    sizeBytes: toSafeNumber(item?.sizeBytes, 0),
+    extension: toSafeString(item?.extension),
+    sha256: toSafeString(item?.sha256) || undefined,
+    dedupeKey: toSafeString(item?.dedupeKey) || undefined,
+    storageGeneration: toSafeString(item?.storageGeneration) || undefined,
+    category: ["service", "itp", "rca", "casco", "leasing_rate", "rca_itp", "rovinieta", "amenda", "other"].includes(item?.category)
+       ? item.category === "rca_itp" ? "itp" : item.category
+      : "other",
+    expiryDate: toSafeString(item?.expiryDate),
+    expirySource: ["manual", "ai_confirmed", ""].includes(item?.expirySource)
+      ? item.expirySource
+      : "",
+    intelligenceJobId: toSafeString(item?.intelligenceJobId),
+    intelligenceStatus: ["queued", "processing", "needs_review", "applied", "rejected", "failed"].includes(item?.intelligenceStatus)
+      ? item.intelligenceStatus
+      : undefined,
+    intelligenceReviewedAt: toSafeNumber(item?.intelligenceReviewedAt, 0) || undefined,
+    intelligenceReviewedByUserId: toSafeString(item?.intelligenceReviewedByUserId) || undefined,
+    aiAnalysis: item?.aiAnalysis && typeof item.aiAnalysis === "object"
+       ? {
+          documentType: ["service", "itp", "rca", "casco", "leasing_rate", "rovinieta", "amenda", "other", "unknown"].includes(item.aiAnalysis.documentType)
+             ? item.aiAnalysis.documentType
+            : undefined,
+          expiryDate: toSafeString(item.aiAnalysis.expiryDate),
+          issueDate: toSafeString(item.aiAnalysis.issueDate),
+          policyNumber: toSafeString(item.aiAnalysis.policyNumber),
+          providerName: toSafeString(item.aiAnalysis.providerName),
+          vehiclePlateNumber: toSafeString(item.aiAnalysis.vehiclePlateNumber),
+          confidence: toSafeNumber(item.aiAnalysis.confidence, 0),
+          fieldConfidence: item.aiAnalysis.fieldConfidence && typeof item.aiAnalysis.fieldConfidence === "object"
+            ? Object.fromEntries(
+                Object.entries(item.aiAnalysis.fieldConfidence)
+                  .filter(([key]) => ["documentType", "expiryDate", "issueDate", "policyNumber", "providerName", "vehiclePlateNumber"].includes(key))
+                  .map(([key, value]) => [key, toSafeNumber(value, 0)])
+              )
+            : undefined,
+          notes: toSafeString(item.aiAnalysis.notes),
+          analyzedAt: toSafeNumber(item.aiAnalysis.analyzedAt, 0),
+        }
+      : undefined,
+    createdAt: toSafeNumber(item?.createdAt, Date.now()),
+    updatedAt: toSafeNumber(item?.updatedAt, 0) || undefined,
+  }));
+  const storedDocumentSummary = data.documentSummary && typeof data.documentSummary === "object"
+    ? data.documentSummary
+    : null;
 
   return {
     id,
@@ -1067,51 +1124,16 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
       thumbUrl: toSafeString(item?.thumbUrl),
       thumbPath: toSafeString(item?.thumbPath),
     })),
-    documents: documentsRaw.map((item: any) => ({
-      id: toSafeString(item?.id, `${Date.now()}_${Math.random().toString(36).slice(2)}`),
-      name: toSafeString(item?.name),
-      url: toSafeString(item?.url),
-      path: toSafeString(item?.path),
-      contentType: toSafeString(item?.contentType),
-      sizeBytes: toSafeNumber(item?.sizeBytes, 0),
-      extension: toSafeString(item?.extension),
-      category: ["service", "itp", "rca", "casco", "leasing_rate", "rca_itp", "rovinieta", "amenda", "other"].includes(item?.category)
-         ? item.category === "rca_itp" ? "itp" : item.category
-        : "other",
-      expiryDate: toSafeString(item?.expiryDate),
-      expirySource: ["manual", "ai_confirmed", ""].includes(item?.expirySource)
-        ? item.expirySource
-        : "",
-      intelligenceJobId: toSafeString(item?.intelligenceJobId),
-      intelligenceStatus: ["queued", "processing", "needs_review", "applied", "rejected", "failed"].includes(item?.intelligenceStatus)
-        ? item.intelligenceStatus
-        : undefined,
-      intelligenceReviewedAt: toSafeNumber(item?.intelligenceReviewedAt, 0) || undefined,
-      intelligenceReviewedByUserId: toSafeString(item?.intelligenceReviewedByUserId) || undefined,
-      aiAnalysis: item?.aiAnalysis && typeof item.aiAnalysis === "object"
-         ? {
-            documentType: ["service", "itp", "rca", "casco", "leasing_rate", "rovinieta", "amenda", "other", "unknown"].includes(item.aiAnalysis.documentType)
-               ? item.aiAnalysis.documentType
-              : undefined,
-            expiryDate: toSafeString(item.aiAnalysis.expiryDate),
-            issueDate: toSafeString(item.aiAnalysis.issueDate),
-            policyNumber: toSafeString(item.aiAnalysis.policyNumber),
-            providerName: toSafeString(item.aiAnalysis.providerName),
-            vehiclePlateNumber: toSafeString(item.aiAnalysis.vehiclePlateNumber),
-            confidence: toSafeNumber(item.aiAnalysis.confidence, 0),
-            fieldConfidence: item.aiAnalysis.fieldConfidence && typeof item.aiAnalysis.fieldConfidence === "object"
-              ? Object.fromEntries(
-                  Object.entries(item.aiAnalysis.fieldConfidence)
-                    .filter(([key]) => ["documentType", "expiryDate", "issueDate", "policyNumber", "providerName", "vehiclePlateNumber"].includes(key))
-                    .map(([key, value]) => [key, toSafeNumber(value, 0)])
-                )
-              : undefined,
-            notes: toSafeString(item.aiAnalysis.notes),
-            analyzedAt: toSafeNumber(item.aiAnalysis.analyzedAt, 0),
-          }
-        : undefined,
-      createdAt: toSafeNumber(item?.createdAt, Date.now()),
-    })),
+    documents,
+    documentSummary: storedDocumentSummary
+      ? {
+          count: toSafeNumber(storedDocumentSummary.count, documents.length),
+          nextExpiryAt: toSafeString(storedDocumentSummary.nextExpiryAt),
+          expiredCount: toSafeNumber(storedDocumentSummary.expiredCount, 0),
+          needsReviewCount: toSafeNumber(storedDocumentSummary.needsReviewCount, 0),
+          updatedAt: toSafeNumber(storedDocumentSummary.updatedAt, 0),
+        }
+      : buildVehicleDocumentSummary(documents),
 
     gpsSnapshot: gpsSnapshotRaw
       ? {
@@ -2004,6 +2026,9 @@ export async function uploadVehicleDocuments(
 
   for (const item of files) {
     const file = item.file;
+    if (!isSupportedVehicleDocumentFile(file)) {
+      throw new Error("Documentele masinii trebuie sa fie PDF, JPG, PNG sau WEBP si maximum 18 MB.");
+    }
     const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() || "" : "";
     const safeBaseName = `${Date.now()}_${file.name
       .replace(/\s+/g, "_")
@@ -2011,7 +2036,13 @@ export async function uploadVehicleDocuments(
 
     const fullPath = `vehicles/${vehicleId}/documents/${item.category}/${safeBaseName}`;
     const fullRef = ref(storage, fullPath);
-    await uploadBytes(fullRef, file, { contentType: file.type || "application/octet-stream" });
+    await uploadBytes(fullRef, file, {
+      contentType: file.type || "application/octet-stream",
+      cacheControl: "private,max-age=604800",
+      customMetadata: {
+        maxBytes: String(VEHICLE_DOCUMENT_MAX_BYTES),
+      },
+    });
 
     const url = await getDownloadURL(fullRef);
 
@@ -2231,6 +2262,7 @@ export async function saveVehicleDocuments(
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
     documents: merged,
+    documentSummary: buildVehicleDocumentSummary(merged),
     ...(newestExpiryByCategory.itp ? { nextItpDate: newestExpiryByCategory.itp } : {}),
     ...(newestExpiryByCategory.rca ? { nextRcaDate: newestExpiryByCategory.rca } : {}),
     ...(newestExpiryByCategory.casco ? { nextCascoDate: newestExpiryByCategory.casco } : {}),
@@ -2271,6 +2303,7 @@ export async function removeVehicleDocument(
 
   await updateDoc(doc(db, "vehicles", vehicleId), {
     documents: updated,
+    documentSummary: buildVehicleDocumentSummary(updated),
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });
@@ -2297,6 +2330,7 @@ export async function restoreVehicleDocuments(
 ): Promise<void> {
   await updateDoc(doc(db, "vehicles", vehicleId), {
     documents,
+    documentSummary: buildVehicleDocumentSummary(documents),
     updatedAt: Date.now(),
     updatedAtServer: serverTimestamp(),
   });

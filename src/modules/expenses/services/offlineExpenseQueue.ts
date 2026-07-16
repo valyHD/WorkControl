@@ -5,7 +5,7 @@ import type { ExpenseDocumentItem } from "../../../types/expense";
 const DATABASE_NAME = "workcontrol-offline";
 const STORE_NAME = "expenseUploads";
 const DATABASE_VERSION = 1;
-const MAX_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_QUEUE_ITEMS = 10;
 let flushPromise: Promise<ExpenseDocumentItem[]> | null = null;
 
@@ -58,7 +58,7 @@ export async function getOfflineExpenseUploads() {
 
 export async function queueOfflineExpenseUpload(input: Omit<OfflineExpenseUpload, "id" | "createdAt" | "file" | "fileName" | "fileType"> & { file: File }) {
   if (input.file.size > MAX_FILE_BYTES) {
-    throw new Error("Pentru salvare offline, fisierul poate avea maximum 12 MB.");
+    throw new Error("Pentru salvare offline, fisierul poate avea maximum 15 MB.");
   }
   const current = await getOfflineExpenseUploads();
   if (current.length >= MAX_QUEUE_ITEMS) {

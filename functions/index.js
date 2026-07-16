@@ -57,6 +57,12 @@ const {
   isStaleTimesheetSchedule,
   scheduleToRule,
 } = require('./timesheetReminderSchedules');
+const {
+  EXPENSE_DOCUMENT_CACHE_SCHEMA_VERSION,
+  EXPENSE_DOCUMENT_EXTRACTION_VERSION,
+  buildExpenseDocumentCacheId,
+  sha256Buffer,
+} = require('./expenseDocumentCache');
 
 setGlobalOptions(GLOBAL_RUNTIME_OPTIONS);
 
@@ -1115,7 +1121,9 @@ async function analyzeExpenseStorageFile(params) {
       detail: 'high',
     };
   } else {
-    const [buffer] = await admin.storage().bucket().file(params.storagePath).download();
+    const buffer = Buffer.isBuffer(params.fileBuffer)
+      ? params.fileBuffer
+      : (await admin.storage().bucket().file(params.storagePath).download())[0];
     if (!buffer?.length) {
       throw new Error('Documentul nu a putut fi citit din Storage.');
     }
@@ -1271,6 +1279,9 @@ async function saveExpenseDocumentFromScanJob(jobData, analysis) {
     contentType: toSafeString(jobData.contentType),
     sizeBytes: toSafeNumber(jobData.sizeBytes, 0),
     extension: toSafeString(jobData.extension),
+    sha256: toSafeString(jobData.sha256),
+    analysisCacheId: toSafeString(jobData.analysisCacheId),
+    analysisCacheHit: jobData.analysisCacheHit === true,
     uploadedByUserId: toSafeString(jobData.uploadedByUserId),
     uploadedByUserName: toSafeString(jobData.uploadedByUserName) || 'Utilizator',
     assignedUserId: toSafeString(jobData.assignedUserId),
@@ -3255,27 +3266,71 @@ exports.processExpenseScanJob = onDocumentCreated(
         { merge: true }
       );
 
-      const analysis = await analyzeExpenseStorageFile({
-        storagePath,
-        fileName: toSafeString(jobData.fileName) || 'document',
-        contentType: inferContentType(jobData.fileName, jobData.contentType),
-        scanMode: toSafeString(jobData.scanMode) || 'full',
-        extractionMode: 'core',
-        publicUrl: toSafeString(jobData.fileUrl),
-        apiKey,
-        model,
-      });
+      const [fileBuffer] = await admin.storage().bucket().file(storagePath).download();
+      if (!fileBuffer?.length) {
+        throw new Error('Documentul nu a putut fi citit din Storage.');
+      }
+      if (fileBuffer.length > 18 * 1024 * 1024) {
+        throw new Error('Documentul este prea mare pentru analiza automata.');
+      }
+      const fileHash = sha256Buffer(fileBuffer);
+      const scanMode = toSafeString(jobData.scanMode) || 'full';
+      const analysisCacheId = buildExpenseDocumentCacheId(companyId, fileHash, scanMode);
+      const analysisCacheRef = db.collection('expenseDocumentAnalysisCache').doc(analysisCacheId);
+      const analysisCacheSnap = await analysisCacheRef.get();
+      let analysis;
+      let analysisCacheHit = false;
+
+      if (analysisCacheSnap.exists && analysisCacheSnap.data()?.analysis) {
+        analysis = analysisCacheSnap.data().analysis;
+        analysisCacheHit = true;
+      } else {
+        analysis = await analyzeExpenseStorageFile({
+          storagePath,
+          fileName: toSafeString(jobData.fileName) || 'document',
+          contentType: inferContentType(jobData.fileName, jobData.contentType),
+          scanMode,
+          extractionMode: 'core',
+          publicUrl: toSafeString(jobData.fileUrl),
+          fileBuffer,
+          apiKey,
+          model,
+        });
+
+        await analysisCacheRef.set({
+          schemaVersion: EXPENSE_DOCUMENT_CACHE_SCHEMA_VERSION,
+          extractionVersion: EXPENSE_DOCUMENT_EXTRACTION_VERSION,
+          companyId,
+          sha256: fileHash,
+          scanMode,
+          model,
+          analysis,
+          createdAt: Date.now(),
+          createdAtServer: FieldValue.serverTimestamp(),
+          updatedAt: Date.now(),
+          updatedAtServer: FieldValue.serverTimestamp(),
+          expiresAt: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000),
+        }, { merge: false });
+      }
 
       if (!hasMeaningfulExpenseExtraction(analysis)) {
         throw new Error('AI nu a putut citi valori clare din document.');
       }
 
-      const expenseDocumentId = await saveExpenseDocumentFromScanJob(jobData, analysis);
+      const expenseDocumentId = await saveExpenseDocumentFromScanJob({
+        ...jobData,
+        sha256: fileHash,
+        analysisCacheId,
+        analysisCacheHit,
+      }, analysis);
 
       await snapshot.ref.set(
         {
           status: 'completed',
           expenseDocumentId,
+          sha256: fileHash,
+          analysisCacheId,
+          analysisCacheHit,
           completedAt: Date.now(),
           updatedAt: Date.now(),
           updatedAtServer: FieldValue.serverTimestamp(),
