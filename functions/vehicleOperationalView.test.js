@@ -26,9 +26,8 @@ test('vehicle operational view excludes high-frequency GPS and tracker fields', 
   assert.equal(Object.hasOwn(view, 'tracker'), false);
   assert.equal(Object.hasOwn(view, 'gpsDataUsage'), false);
   assert.equal(Object.hasOwn(view, 'updatedAt'), false);
-  assert.deepEqual(view.gpsSimHistory, [{ points: [{ lat: 44, lng: 26, ts: 100 }] }]);
-  assert.equal(view.gpsSimHistory[0].destinationQuery, undefined);
-  assert.equal(view.gpsSimHistory[0].points[0].rawIo, undefined);
+  assert.equal(Object.hasOwn(view, 'gpsSim'), false);
+  assert.equal(Object.hasOwn(view, 'gpsSimHistory'), false);
   assert.equal(Object.hasOwn(view, 'liveDiagnostics'), false);
 });
 

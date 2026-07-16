@@ -1,12 +1,4 @@
-const VEHICLE_OPERATIONAL_VIEW_VERSION = 2;
-const SAFE_SIM_POINT_FIELDS = [
-  'lat', 'lng', 'speedKmh', 'angle', 'odometerKm', 'ts', 'ignitionOn',
-];
-const SAFE_SIM_FIELDS = [
-  'id', 'active', 'status', 'startedAt', 'stoppedAt', 'resumedAt', 'pausedAt',
-  'elapsedBeforePauseMs', 'totalDurationMs', 'totalDistanceKm', 'destinationDisplay',
-  'startLat', 'startLng', 'endLat', 'endLng',
-];
+const VEHICLE_OPERATIONAL_VIEW_VERSION = 3;
 
 function pick(source, fields) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
@@ -16,20 +8,6 @@ function pick(source, fields) {
     if (value !== undefined) result[field] = value;
   });
   return Object.keys(result).length > 0 ? result : null;
-}
-
-function sanitizeSimulation(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const result = pick(value, SAFE_SIM_FIELDS) || {};
-  result.points = Array.isArray(value.points)
-    ? value.points.map((point) => pick(point, SAFE_SIM_POINT_FIELDS)).filter(Boolean)
-    : [];
-  return result;
-}
-
-function sanitizeSimulationHistory(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map(sanitizeSimulation).filter(Boolean);
 }
 
 function sanitizeDocuments(value) {
@@ -76,8 +54,6 @@ function buildVehicleOperationalView(vehicleId, source) {
     coverImageUrl: String(data.coverImageUrl || ''),
     coverThumbUrl: String(data.coverThumbUrl || ''),
     documents: sanitizeDocuments(data.documents),
-    gpsSim: sanitizeSimulation(data.gpsSim),
-    gpsSimHistory: sanitizeSimulationHistory(data.gpsSimHistory),
     documentCount: Array.isArray(data.documents) ? data.documents.length : 0,
     createdAt: Number(data.createdAt || 0),
   };
@@ -85,7 +61,5 @@ function buildVehicleOperationalView(vehicleId, source) {
 
 module.exports = {
   buildVehicleOperationalView,
-  sanitizeSimulation,
-  sanitizeSimulationHistory,
   VEHICLE_OPERATIONAL_VIEW_VERSION,
 };

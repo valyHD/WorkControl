@@ -239,12 +239,42 @@ service cloud.firestore {
           changedOnly(['gpsSim', 'gpsSimHistory', 'currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
           request.resource.data.get('currentKm', 0) >= 0
+        ) ||
+        (
+          globalAdmin() && immutableCompany() &&
+          changedOnly(['currentKm', 'updatedAt', 'updatedAtServer']) &&
+          request.resource.data.get('currentKm', 0) is number &&
+          request.resource.data.get('currentKm', 0) >= 0 &&
+          request.resource.data.get('updatedAt', 0) > resource.data.get('updatedAt', 0) &&
+          getAfter(/databases/$(database)/documents/vehicles/$(vehicleId)/positions/_simulation).data.get('vehicleId', '') == vehicleId &&
+          getAfter(/databases/$(database)/documents/vehicles/$(vehicleId)/positions/_simulation).data.get('updatedAt', 0) == request.resource.data.get('updatedAt', 0)
         );
       allow delete: if adminFor(resource.data.get('companyId', ''));
 
       match /positions/{positionId} {
         allow read: if canReadVehicle(vehicleId);
-        allow write: if false;
+        allow create: if positionId == '_simulation' && globalAdmin() &&
+          request.resource.data.keys().hasOnly([
+            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
+          ]) &&
+          request.resource.data.get('schemaVersion', 0) == 1 &&
+          request.resource.data.get('vehicleId', '') == vehicleId &&
+          (request.resource.data.get('gpsSim', null) == null || request.resource.data.gpsSim is map) &&
+          request.resource.data.get('gpsSimHistory', []) is list &&
+          request.resource.data.get('gpsSimHistory', []).size() <= 250 &&
+          request.resource.data.get('updatedAt', 0) is number;
+        allow update: if positionId == '_simulation' && globalAdmin() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
+          ]) &&
+          request.resource.data.get('schemaVersion', 0) == 1 &&
+          request.resource.data.get('vehicleId', '') == vehicleId &&
+          (request.resource.data.get('gpsSim', null) == null || request.resource.data.gpsSim is map) &&
+          request.resource.data.get('gpsSimHistory', []) is list &&
+          request.resource.data.get('gpsSimHistory', []).size() <= 250 &&
+          request.resource.data.get('updatedAt', 0) is number &&
+          request.resource.data.get('updatedAt', 0) > resource.data.get('updatedAt', 0);
+        allow delete: if positionId == '_simulation' && globalAdmin();
       }
 
       match /positionDays/{dayKey} {
