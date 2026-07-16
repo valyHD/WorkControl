@@ -25,6 +25,7 @@
     "vehicle-simulation:dry-run": "node scripts/migrate-vehicle-simulation-state.mjs --mode dry-run",
     "projections:dry-run": "node scripts/backfill-operational-projections.mjs --mode dry-run",
     "expiry-schedules:dry-run": "node scripts/backfill-vehicle-alert-schedules.mjs --mode dry-run",
+    "timesheet-schedules:dry-run": "node scripts/backfill-timesheet-reminder-schedules.mjs --mode dry-run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",

@@ -158,6 +158,31 @@ După procesare, actualizează `nextRunAt` sau închide schedule-ul. Astfel disp
 - recalcularea zilnică a tuturor documentelor;
 - notificările duplicate generate de mai multe instanțe.
 
+### Implementare WorkControl
+
+- regulile recurente de pontaj sunt proiectate in `notificationSchedules` de triggerul
+  `syncNotificationRuleSchedules`;
+- workerul `checkTimesheetReminderAlerts` citeste numai programarile scadente, ordonate
+  dupa `nextRunAt`, cu limita 40 si lease tranzactional;
+- utilizatorii, pontajele si concediile sunt citite numai pentru compania unei programari
+  scadente; nu mai exista scanari globale la fiecare 5 minute;
+- markerii existenti `timesheetReminderMarkers` raman sursa de idempotency;
+- programarile vechi cu peste 15 minute intarziere sunt avansate fara notificari expirate;
+- workerii de remindere ruleaza intre 05:00 si 21:59, `Europe/Bucharest`. Noaptea nu
+  produc invocari Scheduler/PubSub, reads sau notificari; aplicatia si GPS raman
+  disponibile la cerere.
+
+Migrare compatibila:
+
+```text
+npm run timesheet-schedules:dry-run -- --project workcontrol-53b1d
+node scripts/backfill-timesheet-reminder-schedules.mjs --mode apply --project workcontrol-53b1d --confirm-project workcontrol-53b1d
+```
+
+Rollback: redeploy workerul anterior si sterge numai documentele cu
+`workerType=timesheet_reminders_v1`. Regulile, notificarile si pontajele nu sunt mutate.
+Aceasta faza nu modifica ingestia, istoricul, simularea sau randarea GPS.
+
 ## 7. Faza 4 - Documente și media
 
 - metadatele documentelor devin subcolecții, nu array mare pe entitate;

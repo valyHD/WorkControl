@@ -50,6 +50,13 @@ const {
   getScheduleAdvancePatch,
   stableHash,
 } = require('./expiryAutomation');
+const {
+  TIMESHEET_REMINDER_WORKER,
+  buildTimesheetScheduleSyncPlan,
+  getNextTimesheetSchedulePatch,
+  isStaleTimesheetSchedule,
+  scheduleToRule,
+} = require('./timesheetReminderSchedules');
 
 setGlobalOptions(GLOBAL_RUNTIME_OPTIONS);
 
@@ -262,6 +269,47 @@ exports.syncVehicleOperationalView = onDocumentWritten(
       }, { merge: false }));
     });
     await Promise.all(writes);
+  }
+);
+
+exports.syncNotificationRuleSchedules = onDocumentWritten(
+  {
+    document: 'notificationRules/{ruleId}',
+    region: 'europe-west1',
+  },
+  async (event) => {
+    const ruleId = event.params.ruleId;
+    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : null;
+    const afterData = event.data?.after?.exists ? event.data.after.data() || {} : null;
+    const sourceUpdatedAtMs =
+      event.data?.after?.updateTime?.toMillis?.() ||
+      Date.parse(event.time || '') ||
+      Date.now();
+    const plan = buildTimesheetScheduleSyncPlan(
+      ruleId,
+      beforeData,
+      afterData,
+      sourceUpdatedAtMs
+    );
+
+    await Promise.all(plan.map((operation) => {
+      const scheduleRef = db.collection('notificationSchedules').doc(operation.id);
+      if (operation.type === 'delete') {
+        return scheduleRef.delete().catch(() => undefined);
+      }
+      return scheduleRef.set({
+        ...operation.value,
+        createdAt: sourceUpdatedAtMs,
+        createdAtServer: FieldValue.serverTimestamp(),
+        updatedAt: sourceUpdatedAtMs,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false });
+    }));
+
+    logger.info('Programari remindere pontaj sincronizate.', {
+      ruleId,
+      operations: plan.length,
+    });
   }
 );
 
@@ -1592,20 +1640,32 @@ async function getNotificationContextForCompany(companyId) {
       .get(),
   ]);
   return {
-    users: usersSnap.docs.map((doc) => {
-      const data = doc.data() || {};
-      return {
-        id: toSafeString(data.uid) || doc.id,
-        name: toSafeString(data.fullName) || toSafeString(data.email) || 'Utilizator',
-        role: toSafeString(data.role),
-        companyIds: [safeCompanyId],
-        primaryCompanyId: safeCompanyId,
-        active: data.active === true && toSafeString(data.accessStatus) === 'active',
-        themeKey: data.themeKey || null,
-      };
-    }),
+    users: usersSnap.docs.map((doc) => mapOperationalNotificationUser(doc, safeCompanyId)),
     rules: rulesSnap.docs.map(normalizeRule),
   };
+}
+
+function mapOperationalNotificationUser(doc, companyId) {
+  const data = doc.data() || {};
+  return {
+    id: toSafeString(data.uid) || doc.id,
+    name: toSafeString(data.fullName) || toSafeString(data.email) || 'Utilizator',
+    role: toSafeString(data.role),
+    companyIds: [companyId],
+    primaryCompanyId: companyId,
+    active: data.active === true && toSafeString(data.accessStatus) === 'active',
+    themeKey: data.themeKey || null,
+  };
+}
+
+async function getNotificationUsersForCompany(companyId) {
+  const safeCompanyId = toSafeString(companyId);
+  if (!safeCompanyId) return [];
+  const usersSnap = await db.collection('userOperationalViews')
+    .where('companyId', '==', safeCompanyId)
+    .limit(250)
+    .get();
+  return usersSnap.docs.map((doc) => mapOperationalNotificationUser(doc, safeCompanyId));
 }
 
 async function dispatchNotificationEvent(input, context) {
@@ -1826,118 +1886,6 @@ async function dispatchNotificationEvent(input, context) {
   return userIds.length;
 }
 
-function getBucharestClockParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Bucharest',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-
-  const map = {};
-  parts.forEach((part) => {
-    if (part.type !== 'literal') map[part.type] = part.value;
-  });
-
-  const hour = toSafeNumber(map.hour, 0) % 24;
-  const minute = toSafeNumber(map.minute, 0);
-  const dayKey = `${map.year}-${map.month}-${map.day}`;
-  const jsWeekday = new Date(`${dayKey}T00:00:00Z`).getUTCDay();
-
-  return {
-    dayKey,
-    weekday: jsWeekday === 0 ? 7 : jsWeekday,
-    minutes: hour * 60 + minute,
-  };
-}
-
-function parseReminderScheduleMinutes(scheduleTime) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(toSafeString(scheduleTime));
-  if (!match) return 8 * 60 + 30;
-
-  const hour = Math.max(0, Math.min(23, Number(match[1]) || 0));
-  const minute = Math.max(0, Math.min(59, Number(match[2]) || 0));
-  return hour * 60 + minute;
-}
-
-function getExplicitTimesheetReminderRules(context, eventType) {
-  return context.rules.filter((rule) => rule.module === 'timesheets' && rule.eventType === eventType);
-}
-
-function getTimesheetStartReminderRules(context) {
-  return context.rules.filter(
-    (rule) =>
-      rule.module === 'timesheets' &&
-      (rule.eventType === 'timesheet_start_daily_reminder' || rule.eventType === 'timesheet_work_interval_reminder')
-  );
-}
-
-function getTimesheetStopReminderRules(context) {
-  return context.rules.filter(
-    (rule) =>
-      rule.module === 'timesheets' &&
-      (rule.eventType === 'timesheet_stop_after_8h_reminder' || rule.eventType === 'timesheet_work_interval_reminder')
-  );
-}
-
-function ruleRunsToday(rule, weekday) {
-  const weekdays = Array.isArray(rule.weekdays) && rule.weekdays.length > 0 ? rule.weekdays : [1, 2, 3, 4, 5];
-  return weekdays.includes(weekday);
-}
-
-function getReminderRepeatMinutes(rule) {
-  return Math.max(5, Math.min(720, Math.round(toSafeNumber(rule.reminderRepeatMinutes, 60))));
-}
-
-function getReminderActiveMinutes(rule) {
-  return Math.max(0, Math.min(1440, Math.round(toSafeNumber(rule.reminderActiveMinutes, 120))));
-}
-
-function getReminderSlot(clockMinutes, scheduledMinutes, repeatMinutes, activeMinutes) {
-  if (clockMinutes < scheduledMinutes) return null;
-  const elapsedMinutes = clockMinutes - scheduledMinutes;
-  const safeActiveMinutes = Math.max(0, activeMinutes);
-  if (elapsedMinutes > safeActiveMinutes) return null;
-  const safeRepeatMinutes = Math.max(5, repeatMinutes);
-  return Math.floor(elapsedMinutes / safeRepeatMinutes);
-}
-
-function getRuleReminderSlot(rule, clockMinutes, timeField) {
-  const scheduledMinutes = parseReminderScheduleMinutes(rule[timeField]);
-  const repeatMinutes = getReminderRepeatMinutes(rule);
-  const activeMinutes = getReminderActiveMinutes(rule);
-  const slot = getReminderSlot(clockMinutes, scheduledMinutes, repeatMinutes, activeMinutes);
-  if (slot === null) return null;
-
-  return {
-    slot,
-    scheduledMinutes,
-    repeatMinutes,
-    activeMinutes,
-    markerTimeKey: toSafeString(rule[timeField]).replace(/[^0-9]/g, '') || 'time',
-  };
-}
-
-async function getApprovedLeaveUserIdsForDay(dayKey) {
-  const snap = await db.collection('leaveRequests').where('status', '==', 'aprobat').get();
-  const userIds = new Set();
-
-  snap.docs.forEach((doc) => {
-    const periodStart = toSafeString(doc.get('periodStart'));
-    const periodEnd = toSafeString(doc.get('periodEnd'));
-    const userId = toSafeString(doc.get('userId'));
-    if (!userId || !periodStart || !periodEnd) return;
-    if (periodStart <= dayKey && dayKey <= periodEnd) {
-      userIds.add(userId);
-    }
-  });
-
-  return userIds;
-}
-
 function collectStartReminderUsers(rules, users) {
   const userMap = new Map(users.filter((user) => user.active !== false).map((user) => [user.id, user]));
   const recipientIds = new Set();
@@ -2077,135 +2025,205 @@ async function createTimesheetReminderNotificationsOnce(params) {
   });
 }
 
+async function loadTimesheetReminderCompanyState(companyId, dayKey) {
+  const [activeTimesheetsSnap, todayTimesheetsSnap, leaveSnap] = await Promise.all([
+    db.collection('timesheets')
+      .where('companyId', '==', companyId)
+      .where('status', '==', 'activ')
+      .limit(250)
+      .get(),
+    db.collection('timesheets')
+      .where('companyId', '==', companyId)
+      .where('workDate', '==', dayKey)
+      .limit(250)
+      .get(),
+    db.collection('leaveRequests')
+      .where('companyId', '==', companyId)
+      .where('periodEnd', '>=', dayKey)
+      .limit(250)
+      .get(),
+  ]);
+  const activeTimesheets = activeTimesheetsSnap.docs.map((doc) => ({
+    id: doc.id,
+    data: doc.data() || {},
+  }));
+  return {
+    activeTimesheets,
+    activeTimesheetUserIds: new Set(
+      activeTimesheets.map((item) => toSafeString(item.data.userId)).filter(Boolean)
+    ),
+    startedTodayUserIds: new Set(
+      todayTimesheetsSnap.docs.map((doc) => toSafeString(doc.get('userId'))).filter(Boolean)
+    ),
+    approvedLeaveUserIds: new Set(
+      leaveSnap.docs
+        .filter((doc) => {
+          const data = doc.data() || {};
+          return (
+            toSafeString(data.status) === 'aprobat' &&
+            toSafeString(data.periodStart) <= dayKey &&
+            dayKey <= toSafeString(data.periodEnd)
+          );
+        })
+        .map((doc) => toSafeString(doc.get('userId')))
+        .filter(Boolean)
+    ),
+  };
+}
+
 async function runTimesheetReminderAlertsJob() {
-  const notificationContext = await getNotificationContext();
-  const clock = getBucharestClockParts();
+  const now = Date.now();
+  const workerId = `timesheet-reminder-${now}-${stableHash(String(Math.random()), 8)}`;
+  const dueSchedules = await db.collection('notificationSchedules')
+    .where('workerType', '==', TIMESHEET_REMINDER_WORKER)
+    .where('status', '==', 'scheduled')
+    .where('nextRunAt', '<=', now)
+    .orderBy('nextRunAt', 'asc')
+    .limit(40)
+    .get();
+  const companyUsers = new Map();
+  const companyStates = new Map();
   let createdCount = 0;
-
-  const startRules = getTimesheetStartReminderRules(notificationContext).filter(
-    (rule) => ruleRunsToday(rule, clock.weekday) && getRuleReminderSlot(rule, clock.minutes, 'scheduleTime') !== null
-  );
-
-  const stopRules = getTimesheetStopReminderRules(notificationContext).filter(
-    (rule) => ruleRunsToday(rule, clock.weekday) && getRuleReminderSlot(rule, clock.minutes, 'stopTime') !== null
-  );
-
-  const approvedLeaveUserIds =
-    startRules.length > 0 || stopRules.length > 0
-      ? await getApprovedLeaveUserIdsForDay(clock.dayKey)
-      : new Set();
-  const activeTimesheetsSnap =
-    startRules.length > 0 || stopRules.length > 0
-      ? await db.collection('timesheets').where('status', '==', 'activ').get()
-      : null;
-  const todayTimesheetsSnap =
-    startRules.length > 0
-      ? await db.collection('timesheets').where('workDate', '==', clock.dayKey).get()
-      : null;
-  const activeTimesheetUserIds = new Set(
-    activeTimesheetsSnap?.docs
-      .map((doc) => toSafeString(doc.get('userId')))
-      .filter(Boolean) || []
-  );
-  const startedTodayUserIds = new Set(
-    todayTimesheetsSnap?.docs
-      .map((doc) => toSafeString(doc.get('userId')))
-      .filter(Boolean) || []
-  );
-
-  if (startRules.length > 0) {
-    for (const rule of startRules) {
-      const reminderSlot = getRuleReminderSlot(rule, clock.minutes, 'scheduleTime');
-      if (!reminderSlot) continue;
-
-      const usersToRemind = collectStartReminderUsers([rule], notificationContext.users).filter(
-        (user) =>
-          (user.primaryCompanyId === rule.companyId || user.companyIds.includes(rule.companyId)) &&
-          !startedTodayUserIds.has(user.id) &&
-          !activeTimesheetUserIds.has(user.id) &&
-          !approvedLeaveUserIds.has(user.id)
-      );
-
-      for (const user of usersToRemind) {
-        const created = await createTimesheetReminderNotificationsOnce({
-          companyId: rule.companyId,
-          markerId: `timesheet_start_${clock.dayKey}_${user.id}_${reminderSlot.markerTimeKey}_${reminderSlot.slot}`,
-          type: 'timesheet_start_daily_reminder',
-          dateKey: clock.dayKey,
-          ruleId: rule.id,
-          reminderSlot: reminderSlot.slot,
-          repeatMinutes: reminderSlot.repeatMinutes,
-          recipients: [user],
-          title: 'Porneste pontajul',
-          message: `Nu ai pontaj pornit astazi. Reminder setat de la ora ${rule.scheduleTime || '08:30'}, repetare la ${reminderSlot.repeatMinutes} min, maximum ${reminderSlot.activeMinutes} min.`,
-          eventType: 'timesheet_start_daily_reminder',
-          notificationPath: '/my-timesheets',
-          soundEnabled: rule.soundEnabled !== false,
-        });
-        if (created) createdCount += 1;
-      }
-    }
-  }
-
+  let claimedCount = 0;
+  let completedCount = 0;
+  let failedCount = 0;
+  let staleSkippedCount = 0;
   let activeTimesheetsChecked = 0;
 
-  if (stopRules.length > 0 && activeTimesheetsSnap) {
-    activeTimesheetsChecked = activeTimesheetsSnap.size;
+  for (const scheduleDoc of dueSchedules.docs) {
+    const scheduleRef = scheduleDoc.ref;
+    let claimed = null;
+    try {
+      claimed = await claimVehicleAlertSchedule(scheduleRef, workerId, now);
+      if (!claimed) continue;
+      claimedCount += 1;
+      const rule = scheduleToRule(claimed);
+      const companyId = toSafeString(claimed.companyId);
+      const dayKey = toSafeString(claimed.deliveryDateKey);
+      const nextPatch = getNextTimesheetSchedulePatch(claimed, now);
+      if (!companyId || !dayKey || !rule.enabled || rule.module !== 'timesheets') {
+        await completeVehicleAlertSchedule(
+          scheduleRef,
+          claimed,
+          workerId,
+          { ...nextPatch, status: 'invalid', nextRunAt: null, lastErrorCode: 'invalid_schedule' },
+          0,
+          now
+        );
+        continue;
+      }
+      if (isStaleTimesheetSchedule(claimed, now)) {
+        staleSkippedCount += 1;
+        await completeVehicleAlertSchedule(scheduleRef, claimed, workerId, nextPatch, 0, now);
+        completedCount += 1;
+        continue;
+      }
 
-    for (const timesheetDoc of activeTimesheetsSnap.docs) {
-      const timesheet = timesheetDoc.data() || {};
-      const startAt = toSafeNumber(timesheet.startAt, 0);
-      const timesheetUserId = toSafeString(timesheet.userId);
-      if (!startAt || !timesheetUserId) continue;
-      if (approvedLeaveUserIds.has(timesheetUserId)) continue;
+      if (!companyUsers.has(companyId)) {
+        companyUsers.set(companyId, await getNotificationUsersForCompany(companyId));
+      }
+      const notificationUsers = companyUsers.get(companyId);
+      const stateKey = `${companyId}:${dayKey}`;
+      if (!companyStates.has(stateKey)) {
+        companyStates.set(stateKey, await loadTimesheetReminderCompanyState(companyId, dayKey));
+      }
+      const state = companyStates.get(stateKey);
+      const reminderSlot = Math.max(0, Math.round(toSafeNumber(claimed.reminderSlot, 0)));
+      let scheduleCreatedCount = 0;
 
-      const dueRules = stopRules.filter((rule) => {
-        if (rule.companyId !== toSafeString(timesheet.companyId)) return false;
-        if (!ruleAppliesToTimesheet(rule, timesheetDoc.id, timesheet)) return false;
-        return true;
+      if (toSafeString(claimed.scheduleKind) === 'timesheet_start_reminder') {
+        const usersToRemind = collectStartReminderUsers([rule], notificationUsers).filter(
+          (user) =>
+            !state.startedTodayUserIds.has(user.id) &&
+            !state.activeTimesheetUserIds.has(user.id) &&
+            !state.approvedLeaveUserIds.has(user.id)
+        );
+        for (const user of usersToRemind) {
+          const created = await createTimesheetReminderNotificationsOnce({
+            companyId,
+            markerId: `timesheet_start_${dayKey}_${user.id}_${rule.id}_${reminderSlot}`,
+            type: 'timesheet_start_daily_reminder',
+            dateKey: dayKey,
+            ruleId: rule.id,
+            reminderSlot,
+            repeatMinutes: rule.reminderRepeatMinutes,
+            recipients: [user],
+            title: 'Porneste pontajul',
+            message: `Nu ai pontaj pornit astazi. Reminder setat de la ora ${rule.scheduleTime || '08:30'}, repetare la ${rule.reminderRepeatMinutes} min, maximum ${rule.reminderActiveMinutes} min.`,
+            eventType: 'timesheet_start_daily_reminder',
+            notificationPath: '/my-timesheets',
+            soundEnabled: rule.soundEnabled !== false,
+          });
+          if (created) scheduleCreatedCount += 1;
+        }
+      } else {
+        activeTimesheetsChecked += state.activeTimesheets.length;
+        for (const timesheetDoc of state.activeTimesheets) {
+          const timesheet = timesheetDoc.data;
+          const timesheetUserId = toSafeString(timesheet.userId);
+          if (!timesheetUserId || state.approvedLeaveUserIds.has(timesheetUserId)) continue;
+          if (!ruleAppliesToTimesheet(rule, timesheetDoc.id, timesheet)) continue;
+          const recipients = collectStopReminderRecipients([rule], notificationUsers, timesheetUserId);
+          const created = await createTimesheetReminderNotificationsOnce({
+            companyId,
+            markerId: `timesheet_stop_${dayKey}_${timesheetDoc.id}_${rule.id}_${reminderSlot}`,
+            type: 'timesheet_stop_after_8h_reminder',
+            dateKey: dayKey,
+            entityId: timesheetDoc.id,
+            ruleId: rule.id,
+            reminderSlot,
+            repeatMinutes: rule.reminderRepeatMinutes,
+            recipients,
+            title: 'Opreste pontajul',
+            message: `Ai pontaj activ dupa ora ${rule.stopTime || '17:00'}. Reminderul se repeta la ${rule.reminderRepeatMinutes} min, maximum ${rule.reminderActiveMinutes} min.`,
+            eventType: 'timesheet_stop_after_8h_reminder',
+            notificationPath: '/my-timesheets',
+            soundEnabled: rule.soundEnabled !== false,
+          });
+          if (created) scheduleCreatedCount += 1;
+        }
+      }
+
+      createdCount += scheduleCreatedCount;
+      await completeVehicleAlertSchedule(
+        scheduleRef,
+        claimed,
+        workerId,
+        { ...nextPatch, lastDeliveredAt: now },
+        scheduleCreatedCount,
+        now
+      );
+      completedCount += 1;
+    } catch (error) {
+      failedCount += 1;
+      logger.error('[checkTimesheetReminderAlerts][schedule]', {
+        scheduleId: scheduleRef.id,
+        error,
       });
-
-      if (dueRules.length === 0) continue;
-
-      for (const rule of dueRules) {
-        const reminderSlot = getRuleReminderSlot(rule, clock.minutes, 'stopTime');
-        if (!reminderSlot) continue;
-
-        const recipients = collectStopReminderRecipients([rule], notificationContext.users, timesheetUserId);
-        const stopTime = toSafeString(rule.stopTime) || '17:00';
-
-        const created = await createTimesheetReminderNotificationsOnce({
-          companyId: rule.companyId,
-          markerId: `timesheet_stop_${clock.dayKey}_${timesheetDoc.id}_${reminderSlot.markerTimeKey}_${reminderSlot.slot}`,
-          type: 'timesheet_stop_after_8h_reminder',
-          dateKey: clock.dayKey,
-          entityId: timesheetDoc.id,
-          ruleId: rule.id,
-          reminderSlot: reminderSlot.slot,
-          repeatMinutes: reminderSlot.repeatMinutes,
-          recipients,
-          title: 'Opreste pontajul',
-          message: `Ai pontaj activ dupa ora ${stopTime}. Reminderul se repeta la ${reminderSlot.repeatMinutes} min, maximum ${reminderSlot.activeMinutes} min.`,
-          eventType: 'timesheet_stop_after_8h_reminder',
-          notificationPath: '/my-timesheets',
-          soundEnabled: rule.soundEnabled !== false,
-        });
-        if (created) createdCount += 1;
+      if (claimed) {
+        await failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, error)
+          .catch((releaseError) => logger.error('[checkTimesheetReminderAlerts][release]', {
+            scheduleId: scheduleRef.id,
+            error: releaseError,
+          }));
       }
     }
   }
 
   return {
+    dueCount: dueSchedules.size,
+    claimedCount,
+    completedCount,
+    failedCount,
+    staleSkippedCount,
     createdCount,
-    startRulesChecked: startRules.length,
-    stopRulesChecked: stopRules.length,
-    activeUsersCount: activeTimesheetUserIds.size,
-    startedTodayUsersCount: startedTodayUserIds.size,
-    leaveUsersSkipped: approvedLeaveUserIds.size,
+    companyUserSetsLoaded: companyUsers.size,
+    companyStatesLoaded: companyStates.size,
     activeTimesheetsChecked,
-    dateKey: clock.dayKey,
-    weekday: clock.weekday,
-    minuteOfDay: clock.minutes,
+    fullRuleScans: 0,
+    fullUserScans: 0,
+    fullTimesheetScans: 0,
+    fullLeaveScans: 0,
   };
 }
 
@@ -3284,7 +3302,7 @@ exports.processExpenseScanJob = onDocumentCreated(
 
 exports.checkTimesheetReminderAlerts = onSchedule(
   {
-    schedule: 'every 5 minutes',
+    schedule: '*/5 5-21 * * *',
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
@@ -3360,7 +3378,7 @@ async function failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, err
 
 exports.checkVehicleMaintenanceAlerts = onSchedule(
   {
-    schedule: 'every 15 minutes',
+    schedule: '*/15 5-21 * * *',
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
@@ -3463,7 +3481,7 @@ function getPartOrderLabel(order, orderId) {
 
 exports.checkMaintenancePartOrderReminders = onSchedule(
   {
-    schedule: 'every 5 minutes',
+    schedule: '*/5 5-21 * * *',
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
