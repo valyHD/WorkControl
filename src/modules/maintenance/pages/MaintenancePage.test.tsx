@@ -278,4 +278,22 @@ describe("MaintenancePage client form", () => {
       expect(gmailMocks.openGmailDraft).toHaveBeenCalledWith("https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test");
     });
   });
+
+  it("replaces the progress message with the Gmail error when draft creation fails", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-gmail-error", "Client Gmail Error")]);
+      return vi.fn();
+    });
+    gmailMocks.createSharedMaintenanceGmailDraft.mockRejectedValueOnce(new Error("Gmail indisponibil"));
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+
+    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Gmail Error");
+    await user.click(await screen.findByRole("option", { name: /Client Gmail Error/ }));
+    await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Gmail indisponibil");
+    expect(screen.queryByText(/PDF-ul este salvat\. Se creeaza draftul Gmail/)).not.toBeInTheDocument();
+    expect(gmailMocks.openGmailDraft).not.toHaveBeenCalled();
+  });
 });

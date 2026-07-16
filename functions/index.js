@@ -7,6 +7,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
 const { OAuth2Client } = require('google-auth-library');
+const { createGmailMimeBoundary } = require('./gmailMime');
 const {
   getEcbRates,
   refreshBillingMetrics: refreshBillingMetricsCache,
@@ -1135,7 +1136,7 @@ async function readStorageAttachment(input) {
 }
 
 function buildRawGmailMessage(input) {
-  const boundary = `workcontrol_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+  const boundary = createGmailMimeBoundary();
   const messageLines = [
     `From: "Service si Mentenanta Lift" <${SHARED_MAINTENANCE_GMAIL_SENDER}>`,
     `To: ${input.to}`,

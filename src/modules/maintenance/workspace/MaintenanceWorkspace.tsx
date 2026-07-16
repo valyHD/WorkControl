@@ -1439,6 +1439,7 @@ export default function MaintenanceWorkspace() {
     } catch (err) {
       console.error(err);
       const errorMessage = err instanceof Error ? err.message : "";
+      setReportMessage("");
       setReportError(`Nu am putut genera PDF-ul sau crea draftul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
     } finally {
       setReportGenerating(false);
