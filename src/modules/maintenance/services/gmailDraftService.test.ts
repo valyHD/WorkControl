@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createGmailDraftWithPdfAttachment, openGmailDraft } from "./gmailDraftService";
+import {
+  createGmailDraftWithPdfAttachment,
+  createGmailRedirectAuthorizationRequest,
+  openGmailDraft,
+} from "./gmailDraftService";
 
 function decodeBase64Url(value: string): string {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
@@ -49,6 +53,20 @@ describe("gmailDraftService", () => {
   it("rejects non-Gmail destinations before navigation", () => {
     expect(() => openGmailDraft("https://example.test/fake-draft")).toThrow(
       "Linkul draftului Gmail nu este valid."
+    );
+  });
+
+  it("uses one stable maintenance callback and requests only Gmail Compose", () => {
+    vi.stubEnv("VITE_GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com");
+    window.history.replaceState(null, "", "/maintenance?tab=report&assistant=report");
+
+    const request = createGmailRedirectAuthorizationRequest("sender@example.test");
+    const authorizationUrl = new URL(request.url);
+
+    expect(request.redirectUri).toBe(`${window.location.origin}/maintenance?tab=report`);
+    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(request.redirectUri);
+    expect(authorizationUrl.searchParams.get("scope")).toBe(
+      "https://www.googleapis.com/auth/gmail.compose"
     );
   });
 });
