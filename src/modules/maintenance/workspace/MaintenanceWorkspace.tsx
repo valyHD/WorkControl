@@ -1540,7 +1540,7 @@ export default function MaintenanceWorkspace() {
         {liveStatsError && <div className="tool-message">{liveStatsError}</div>}
 
         <div className="maintenance-dashboard-split">
-          <div className="panel maintenance-action-panel">
+          <div className="panel maintenance-action-panel maintenance-dashboard-quick-actions">
             <h2 className="panel-title">Actiuni rapide</h2>
             <div className="maintenance-action-grid">
               <button className="maintenance-action-card" type="button" onClick={() => openMaintenanceTab("report")}>
@@ -1741,14 +1741,14 @@ export default function MaintenanceWorkspace() {
               </div>
             </div>
             <div className="tool-form-actions">
-              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF-ul si trimite automat emailul cu atasamente" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
-                {reportGenerating ? "Se genereaza..." : "Genereaza raport revizie"}
+              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-selected-report" type="button" title="Genereaza si trimite raportul pentru tipul selectat" onClick={() => void handleGenerateReport(reportTypeDraft)} disabled={reportGenerating}>
+                {reportGenerating ? "Se genereaza..." : "Genereaza tipul selectat"}
+              </button>
+              <button className="secondary-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF-ul si trimite automat emailul cu atasamente" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
+                Genereaza raport revizie
               </button>
               <button className="secondary-btn" data-assistant-action="maintenance-generate-intervention-report" type="button" title="Genereaza raportul de interventie si trimite automat emailul" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
-                {reportGenerating ? "Se genereaza..." : "Genereaza raport interventie"}
-              </button>
-              <button className="secondary-btn" data-assistant-action="maintenance-generate-selected-report" type="button" title="Genereaza raportul pentru tipul selectat" onClick={() => void handleGenerateReport(reportTypeDraft)} disabled={reportGenerating}>
-                Genereaza tipul selectat
+                Genereaza raport interventie
               </button>
             </div>
           </div>
@@ -2224,6 +2224,7 @@ export default function MaintenanceWorkspace() {
       />
 
       <PageQuickActions
+        className="maintenance-page-quick-actions"
         actions={[
           {
             label: "Genereaza raport",

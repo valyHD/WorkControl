@@ -192,6 +192,26 @@ describe("MaintenancePage client form", () => {
     expect(screen.queryByRole("button", { name: "Autentificare mobil" })).not.toBeInTheDocument();
   });
 
+  it("keeps the selected report type as the first and primary send action", async () => {
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    const selectedTypeButton = await screen.findByRole("button", { name: "Genereaza tipul selectat" });
+    const reviewButton = screen.getByRole("button", { name: "Genereaza raport revizie" });
+    const interventionButton = screen.getByRole("button", { name: "Genereaza raport interventie" });
+    const actionGroup = selectedTypeButton.parentElement;
+
+    expect(actionGroup?.children[0]).toBe(selectedTypeButton);
+    expect(actionGroup?.children[1]).toBe(reviewButton);
+    expect(actionGroup?.children[2]).toBe(interventionButton);
+    expect(selectedTypeButton).toHaveClass("primary-btn");
+    expect(reviewButton).toHaveClass("secondary-btn");
+    expect(interventionButton).toHaveClass("secondary-btn");
+  });
+
   it("uses a mobile-safe technician selector and restores the signed-in user on return", async () => {
     usersMocks.getAllUsers.mockResolvedValue([
       {

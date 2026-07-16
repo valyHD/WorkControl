@@ -578,6 +578,12 @@
 }
 
 @media (max-width: 980px) {
+  .maintenance-page .action-bar__actions,
+  .maintenance-page .maintenance-page-quick-actions,
+  .maintenance-page .maintenance-dashboard-quick-actions {
+    display: none;
+  }
+
   .maintenance-dashboard-grid,
   .maintenance-dashboard-split,
   .maintenance-report-steps,
