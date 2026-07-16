@@ -1178,7 +1178,7 @@ export default function VehicleGpsMapsPage() {
     const unsubscribe = subscribeVehiclesList((items) => {
       setVehicles(keepFleetOrderStable(items ?? []));
       setLoading(false);
-    });
+    }, { includeGpsSimulation: true });
 
     return () => {
       try {

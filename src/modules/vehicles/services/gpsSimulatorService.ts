@@ -2,12 +2,12 @@
  * GPS Simulator Service
  *
  * Strategie:
- *  - Scriem traseul complet in vehicles/{id}.gpsSim, separat de GPS-ul fizic.
+ *  - Scriem traseul complet in vehicles/{id}/positions/_simulation, separat de GPS-ul fizic.
  *  - Pozitia afisata este calculata din timp: continua si daca pagina este inchisa.
  *  - Nu atingem positionDays si nu rescriem gpsSnapshot-ul trackerului fizic.
  */
 
-import { deleteField, doc, runTransaction, updateDoc } from 'firebase/firestore';
+import { doc, runTransaction, writeBatch } from 'firebase/firestore';
 import { db } from '../../../lib/firebase/firebase';
 
 export interface RoutePoint {
@@ -71,6 +71,57 @@ export interface GpsRouteStateSnapshot {
   gpsSim?: PersistedGpsSimulation | null;
   gpsSimHistory?: PersistedGpsSimulation[];
   currentKm?: number;
+}
+
+const SIMULATION_STATE_SCHEMA_VERSION = 1;
+
+function simulationStateRef(vehicleId: string) {
+  return doc(db, 'vehicles', vehicleId, 'positions', '_simulation');
+}
+
+function buildSimulationStatePayload(
+  vehicleId: string,
+  gpsSim: PersistedGpsSimulation | null,
+  gpsSimHistory: PersistedGpsSimulation[],
+  updatedAt: number
+) {
+  return {
+    schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
+    vehicleId,
+    gpsSim,
+    gpsSimHistory,
+    updatedAt,
+  };
+}
+
+async function updateSimulationStatus(
+  vehicleId: string,
+  update: (current: PersistedGpsSimulation) => PersistedGpsSimulation
+) {
+  const simulationRef = simulationStateRef(vehicleId);
+  const vehicleRef = doc(db, 'vehicles', vehicleId);
+  await runTransaction(db, async (transaction) => {
+    const simulationSnap = await transaction.get(simulationRef);
+    const vehicleSnap = simulationSnap.exists() ? null : await transaction.get(vehicleRef);
+    const storedState: Record<string, unknown> = simulationSnap.exists()
+      ? simulationSnap.data()
+      : vehicleSnap?.exists()
+        ? vehicleSnap.data()
+        : {};
+    const current = storedState.gpsSim && typeof storedState.gpsSim === 'object'
+      ? storedState.gpsSim as PersistedGpsSimulation
+      : null;
+    if (!current) throw new Error('Traseul activ nu mai este disponibil. Reincarca pagina.');
+    const now = Date.now();
+    transaction.set(simulationRef, buildSimulationStatePayload(
+      vehicleId,
+      update(current),
+      Array.isArray(storedState.gpsSimHistory)
+        ? storedState.gpsSimHistory as PersistedGpsSimulation[]
+        : [],
+      now
+    ));
+  });
 }
 
 function clampElapsed(ms: number, totalMs: number) {
@@ -432,9 +483,9 @@ export function buildSimulationConfig(
 }
 
 /**
- * Scrie tot traseul de test pe vehicles/{id}.gpsSim
- * - Permis de Firestore Rules (acelasi updateDoc ca editarea vehiculului)
- * - Vazut INSTANT de toti userii prin onSnapshot existent
+ * Scrie tot traseul de test pe documentul dedicat positions/_simulation.
+ * - Permis numai administratorului global prin Firestore Rules
+ * - Vazut instant prin adaptorul de simulare al serviciului de vehicule
  * - Ramane dupa oprire (active=false) ca dovada in istoric
  */
 export async function startGpsSimOnFirestore(
@@ -478,28 +529,35 @@ export async function startGpsSimOnFirestore(
   };
 
   const vehicleRef = doc(db, 'vehicles', config.vehicleId);
+  const simulationRef = simulationStateRef(config.vehicleId);
   await runTransaction(db, async (transaction) => {
     const snap = await transaction.get(vehicleRef);
+    const simulationSnap = await transaction.get(simulationRef);
     const data = snap.exists() ? snap.data() as Record<string, any> : {};
-    const existingHistory = Array.isArray(data.gpsSimHistory)
-       ? data.gpsSimHistory as PersistedGpsSimulation[]
+    const storedState = simulationSnap.exists()
+      ? simulationSnap.data() as Record<string, any>
+      : data;
+    const existingHistory = Array.isArray(storedState.gpsSimHistory)
+       ? storedState.gpsSimHistory as PersistedGpsSimulation[]
       : [];
     const activeSimulation =
-      data.gpsSim && typeof data.gpsSim === 'object'
-         ? data.gpsSim as PersistedGpsSimulation
+      storedState.gpsSim && typeof storedState.gpsSim === 'object'
+         ? storedState.gpsSim as PersistedGpsSimulation
         : null;
     const previousHistoryEntry = buildHistoryEntry(activeSimulation);
     const traveledKm = previousHistoryEntry?.totalDistanceKm || 0;
-    const updatePayload: Record<string, unknown> = {
-      gpsSim: nextGpsSim,
-      gpsSimHistory: mergeSimulationHistory(existingHistory, previousHistoryEntry),
-      updatedAt: startedAt,
-    };
+    transaction.set(simulationRef, buildSimulationStatePayload(
+      config.vehicleId,
+      nextGpsSim,
+      mergeSimulationHistory(existingHistory, previousHistoryEntry),
+      startedAt
+    ));
     if (traveledKm > 0) {
-      updatePayload.currentKm = addDistanceToVehicleKm(data, traveledKm);
+      transaction.update(vehicleRef, {
+        currentKm: addDistanceToVehicleKm(data, traveledKm),
+        updatedAt: startedAt,
+      });
     }
-
-    transaction.update(vehicleRef, updatePayload);
   });
 
   return nextGpsSim;
@@ -513,22 +571,22 @@ export async function pauseGpsSimOnFirestore(
 ): Promise<void> {
   const now = Date.now();
   const elapsed = clampElapsed(elapsedBeforePauseMs + Math.max(0, now - resumedAt), totalDurationMs);
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    'gpsSim.status': 'paused',
-    'gpsSim.pausedAt': now,
-    'gpsSim.elapsedBeforePauseMs': elapsed,
-    updatedAt: now,
-  });
+  await updateSimulationStatus(vehicleId, (current) => ({
+    ...current,
+    status: 'paused',
+    pausedAt: now,
+    elapsedBeforePauseMs: elapsed,
+  }));
 }
 
 export async function resumeGpsSimOnFirestore(vehicleId: string): Promise<void> {
   const now = Date.now();
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    'gpsSim.status': 'running',
-    'gpsSim.resumedAt': now,
-    'gpsSim.pausedAt': null,
-    updatedAt: now,
-  });
+  await updateSimulationStatus(vehicleId, (current) => ({
+    ...current,
+    status: 'running',
+    resumedAt: now,
+    pausedAt: null,
+  }));
 }
 
 export async function stopGpsSimOnFirestore(
@@ -536,29 +594,36 @@ export async function stopGpsSimOnFirestore(
 ): Promise<void> {
   const now = Date.now();
   const vehicleRef = doc(db, 'vehicles', vehicleId);
+  const simulationRef = simulationStateRef(vehicleId);
 
   await runTransaction(db, async (transaction) => {
     const snap = await transaction.get(vehicleRef);
+    const simulationSnap = await transaction.get(simulationRef);
     const data = snap.exists() ? snap.data() as Record<string, any> : {};
-    const existingHistory = Array.isArray(data.gpsSimHistory)
-       ? data.gpsSimHistory as PersistedGpsSimulation[]
+    const storedState = simulationSnap.exists()
+      ? simulationSnap.data() as Record<string, any>
+      : data;
+    const existingHistory = Array.isArray(storedState.gpsSimHistory)
+       ? storedState.gpsSimHistory as PersistedGpsSimulation[]
       : [];
     const activeSimulation =
-      data.gpsSim && typeof data.gpsSim === 'object'
-         ? data.gpsSim as PersistedGpsSimulation
+      storedState.gpsSim && typeof storedState.gpsSim === 'object'
+         ? storedState.gpsSim as PersistedGpsSimulation
         : null;
     const historyEntry = buildHistoryEntry(activeSimulation);
     const traveledKm = historyEntry?.totalDistanceKm || 0;
-    const updatePayload: Record<string, unknown> = {
-      gpsSim: deleteField(),
-      gpsSimHistory: mergeSimulationHistory(existingHistory, historyEntry),
-      updatedAt: now,
-    };
+    transaction.set(simulationRef, buildSimulationStatePayload(
+      vehicleId,
+      null,
+      mergeSimulationHistory(existingHistory, historyEntry),
+      now
+    ));
     if (traveledKm > 0) {
-      updatePayload.currentKm = addDistanceToVehicleKm(data, traveledKm);
+      transaction.update(vehicleRef, {
+        currentKm: addDistanceToVehicleKm(data, traveledKm),
+        updatedAt: now,
+      });
     }
-
-    transaction.update(vehicleRef, updatePayload);
   });
 }
 
@@ -567,12 +632,16 @@ export async function clearGpsSimHistoryOnFirestore(
   realBaseKm = 0
 ): Promise<void> {
   const now = Date.now();
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    gpsSim: deleteField(),
-    gpsSimHistory: [],
+  const batch = writeBatch(db);
+  batch.set(
+    simulationStateRef(vehicleId),
+    buildSimulationStatePayload(vehicleId, null, [], now)
+  );
+  batch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: Number((realBaseKm || 0).toFixed(2)),
     updatedAt: now,
   });
+  await batch.commit();
 }
 
 export async function deleteGpsSimHistoryEntryOnFirestore(
@@ -586,11 +655,18 @@ export async function deleteGpsSimHistoryEntryOnFirestore(
   );
   const normalized = normalizeHistoryOdometers(realBaseKm, nextHistory);
   const now = Date.now();
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    gpsSimHistory: normalized.history,
+  const batch = writeBatch(db);
+  batch.set(simulationStateRef(vehicleId), {
+      schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
+      vehicleId,
+      gpsSimHistory: normalized.history,
+      updatedAt: now,
+    }, { merge: true });
+  batch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: normalized.currentKm,
     updatedAt: now,
   });
+  await batch.commit();
 }
 
 export async function updateGpsSimHistoryDistanceOnFirestore(
@@ -607,11 +683,18 @@ export async function updateGpsSimHistoryDistanceOnFirestore(
   );
   const normalized = normalizeHistoryOdometers(realBaseKm, nextHistory);
   const now = Date.now();
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    gpsSimHistory: normalized.history,
+  const batch = writeBatch(db);
+  batch.set(simulationStateRef(vehicleId), {
+      schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
+      vehicleId,
+      gpsSimHistory: normalized.history,
+      updatedAt: now,
+    }, { merge: true });
+  batch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: normalized.currentKm,
     updatedAt: now,
   });
+  await batch.commit();
 }
 
 export async function restoreGpsRouteStateOnFirestore(
@@ -619,10 +702,19 @@ export async function restoreGpsRouteStateOnFirestore(
   snapshot: GpsRouteStateSnapshot
 ): Promise<void> {
   const now = Date.now();
-  await updateDoc(doc(db, 'vehicles', vehicleId), {
-    gpsSim: snapshot.gpsSim ? snapshot.gpsSim : deleteField(),
-    gpsSimHistory: snapshot.gpsSimHistory ?? [],
+  const batch = writeBatch(db);
+  batch.set(
+    simulationStateRef(vehicleId),
+    buildSimulationStatePayload(
+      vehicleId,
+      snapshot.gpsSim ?? null,
+      snapshot.gpsSimHistory ?? [],
+      now
+    )
+  );
+  batch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: Number((snapshot.currentKm || 0).toFixed(2)),
     updatedAt: now,
   });
+  await batch.commit();
 }

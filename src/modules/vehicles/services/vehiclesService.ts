@@ -73,6 +73,10 @@ import {
   mergeVehicleRuntimeLive,
   type VehicleRuntimeLiveData,
 } from "../utils/vehicleRuntimeLive";
+import {
+  mergeVehicleSimulationState,
+  type VehicleSimulationStateData,
+} from "../utils/vehicleSimulationState";
 
 const vehiclesCollection = collection(db, "vehicles");
 const vehicleOperationalViewsCollection = collection(db, "vehicleOperationalViews");
@@ -87,6 +91,10 @@ function vehicleRuntimeLiveRef(vehicleId: string) {
   return doc(db, "vehicles", vehicleId, "positions", "_runtime");
 }
 
+function vehicleSimulationStateRef(vehicleId: string) {
+  return doc(db, "vehicles", vehicleId, "positions", "_simulation");
+}
+
 function mapRuntimeLive(data: DocumentData | undefined): VehicleRuntimeLiveData | null {
   return data && typeof data === "object" ? data as VehicleRuntimeLiveData : null;
 }
@@ -96,21 +104,36 @@ type RuntimeVehicleListCoordinator = {
   stop: () => void;
 };
 
+export type VehiclesListSubscriptionOptions = {
+  includeGpsSimulation?: boolean;
+};
+
 function createRuntimeVehicleListCoordinator(
-  onData: (items: VehicleItem[]) => void
+  onData: (items: VehicleItem[]) => void,
+  options: VehiclesListSubscriptionOptions = {}
 ): RuntimeVehicleListCoordinator {
   let baseItems = new Map<string, VehicleItem>();
   const runtimeItems = new Map<string, VehicleRuntimeLiveData>();
+  const simulationItems = new Map<string, VehicleSimulationStateData>();
   const runtimeStops = new Map<string, () => void>();
+  const simulationStops = new Map<string, () => void>();
+  const simulationLoaded = new Set<string>();
   let emitQueued = false;
   let stopped = false;
 
   const emit = () => {
     emitQueued = false;
     if (stopped) return;
+    if (
+      options.includeGpsSimulation &&
+      [...baseItems.keys()].some((vehicleId) => !simulationLoaded.has(vehicleId))
+    ) return;
     onData(
       [...baseItems.values()]
-        .map((item) => mergeVehicleRuntimeLive(item, runtimeItems.get(item.id)))
+        .map((item) => mergeVehicleSimulationState(
+          mergeVehicleRuntimeLive(item, runtimeItems.get(item.id)),
+          simulationItems.get(item.id)
+        ))
         .sort((left, right) => left.plateNumber.localeCompare(right.plateNumber))
     );
   };
@@ -128,6 +151,13 @@ function createRuntimeVehicleListCoordinator(
         stop();
         runtimeStops.delete(vehicleId);
         runtimeItems.delete(vehicleId);
+      }
+      for (const [vehicleId, stop] of simulationStops.entries()) {
+        if (baseItems.has(vehicleId)) continue;
+        stop();
+        simulationStops.delete(vehicleId);
+        simulationItems.delete(vehicleId);
+        simulationLoaded.delete(vehicleId);
       }
       if (VEHICLE_RUNTIME_LIVE_READS_ENABLED) {
         for (const vehicleId of baseItems.keys()) {
@@ -148,6 +178,31 @@ function createRuntimeVehicleListCoordinator(
           runtimeStops.set(vehicleId, stop);
         }
       }
+      if (options.includeGpsSimulation) {
+        for (const vehicleId of baseItems.keys()) {
+          if (simulationStops.has(vehicleId)) continue;
+          const stop = onSnapshot(
+            vehicleSimulationStateRef(vehicleId),
+            (snapshot) => {
+              if (snapshot.exists()) {
+                const state = mapVehicleSimulationState(snapshot.data());
+                if (state) simulationItems.set(vehicleId, state);
+              } else {
+                simulationItems.delete(vehicleId);
+              }
+              simulationLoaded.add(vehicleId);
+              scheduleEmit();
+            },
+            (error) => {
+              console.warn(`[vehicle-simulation][list][${vehicleId}]`, error);
+              simulationItems.delete(vehicleId);
+              simulationLoaded.add(vehicleId);
+              scheduleEmit();
+            }
+          );
+          simulationStops.set(vehicleId, stop);
+        }
+      }
       scheduleEmit();
     },
     stop() {
@@ -155,6 +210,10 @@ function createRuntimeVehicleListCoordinator(
       runtimeStops.forEach((stop) => stop());
       runtimeStops.clear();
       runtimeItems.clear();
+      simulationStops.forEach((stop) => stop());
+      simulationStops.clear();
+      simulationItems.clear();
+      simulationLoaded.clear();
       baseItems.clear();
     },
   };
@@ -1171,6 +1230,24 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   };
 }
 
+function mapVehicleSimulationState(
+  data: DocumentData | undefined
+): VehicleSimulationStateData | null {
+  if (!data || typeof data !== "object") return null;
+  const vehicleId = toSafeString(data.vehicleId);
+  const mapped = mapVehicleDoc(vehicleId || "_simulation", data);
+
+  return {
+    schemaVersion: toSafeNumber(data.schemaVersion, 1),
+    vehicleId,
+    ...(Object.hasOwn(data, "gpsSim") ? { gpsSim: mapped.gpsSim } : {}),
+    ...(Object.hasOwn(data, "gpsSimHistory")
+      ? { gpsSimHistory: mapped.gpsSimHistory }
+      : {}),
+    updatedAt: toSafeNumber(data.updatedAt, 0),
+  };
+}
+
 async function resizeImage(
   file: File,
   options: { maxWidth: number; maxHeight: number; quality: number }
@@ -1291,10 +1368,13 @@ export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
   return [...unique.values()].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber));
 }
 
-export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): () => void {
+export function subscribeVehiclesList(
+  onData: (items: VehicleItem[]) => void,
+  options: VehiclesListSubscriptionOptions = {}
+): () => void {
   let unsubscribe: () => void = () => {};
   let cancelled = false;
-  const coordinator = createRuntimeVehicleListCoordinator(onData);
+  const coordinator = createRuntimeVehicleListCoordinator(onData, options);
   void getCurrentCompanyAccessContext()
     .then((context) => {
       if (cancelled) return;
@@ -1358,17 +1438,21 @@ export function subscribeVehiclesList(onData: (items: VehicleItem[]) => void): (
 export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
   if (!vehicleId) return null;
 
-  const [snap, runtimeSnap] = await Promise.all([
+  const [snap, runtimeSnap, simulationSnap] = await Promise.all([
     getDoc(doc(db, "vehicles", vehicleId)),
     VEHICLE_RUNTIME_LIVE_READS_ENABLED
       ? getDoc(vehicleRuntimeLiveRef(vehicleId)).catch(() => null)
       : Promise.resolve(null),
+    getDoc(vehicleSimulationStateRef(vehicleId)).catch(() => null),
   ]);
   if (!snap.exists()) return null;
 
-  return mergeVehicleRuntimeLive(
-    mapVehicleDoc(snap.id, snap.data()),
-    runtimeSnap?.exists() ? mapRuntimeLive(runtimeSnap.data()) : null
+  return mergeVehicleSimulationState(
+    mergeVehicleRuntimeLive(
+      mapVehicleDoc(snap.id, snap.data()),
+      runtimeSnap?.exists() ? mapRuntimeLive(runtimeSnap.data()) : null
+    ),
+    simulationSnap?.exists() ? mapVehicleSimulationState(simulationSnap.data()) : null
   );
 }
 
@@ -1416,10 +1500,17 @@ export function subscribeVehicleById(
 
   let baseVehicle: VehicleItem | null = null;
   let runtimeLive: VehicleRuntimeLiveData | null = null;
+  let simulationState: VehicleSimulationStateData | null = null;
   let baseLoaded = false;
+  let simulationLoaded = false;
   const emit = () => {
-    if (!baseLoaded) return;
-    onData(baseVehicle ? mergeVehicleRuntimeLive(baseVehicle, runtimeLive) : null);
+    if (!baseLoaded || !simulationLoaded) return;
+    onData(baseVehicle
+      ? mergeVehicleSimulationState(
+          mergeVehicleRuntimeLive(baseVehicle, runtimeLive),
+          simulationState
+        )
+      : null);
   };
 
   const stopVehicle = onSnapshot(
@@ -1453,10 +1544,25 @@ export function subscribeVehicleById(
         }
       )
     : () => undefined;
+  const stopSimulation = onSnapshot(
+    vehicleSimulationStateRef(vehicleId),
+    (snapshot) => {
+      simulationState = snapshot.exists() ? mapVehicleSimulationState(snapshot.data()) : null;
+      simulationLoaded = true;
+      emit();
+    },
+    (error) => {
+      console.warn(`[vehicle-simulation][detail][${vehicleId}]`, error);
+      simulationState = null;
+      simulationLoaded = true;
+      emit();
+    }
+  );
 
   return () => {
     stopVehicle();
     stopRuntime();
+    stopSimulation();
   };
 }
 

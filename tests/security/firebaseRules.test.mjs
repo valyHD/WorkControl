@@ -16,6 +16,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
@@ -364,6 +365,52 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
     currentKm: 6210,
     updatedAt: 3,
   }));
+
+  const simulationState = {
+    schemaVersion: 1,
+    vehicleId: "vehicle-a",
+    gpsSim: {
+      active: true,
+      status: "running",
+      startedAt: 4,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6210, ts: 4, speedKmh: 20, angle: 0, ignitionOn: true }],
+    },
+    gpsSimHistory: [],
+    updatedAt: 4,
+  };
+  await assertFails(setDoc(
+    doc(firestore("manager-a"), "vehicles", "vehicle-a", "positions", "_simulation"),
+    simulationState
+  ));
+  await assertSucceeds(setDoc(
+    doc(firestore("global"), "vehicles", "vehicle-a", "positions", "_simulation"),
+    simulationState
+  ));
+  await assertSucceeds(getDoc(
+    doc(firestore("employee-a"), "vehicles", "vehicle-a", "positions", "_simulation")
+  ));
+  await assertFails(updateDoc(
+    doc(firestore("global"), "vehicles", "vehicle-a", "positions", "_simulation"),
+    { gpsSimHistory: Array.from({ length: 251 }, (_, index) => ({ id: `sim-${index}` })) }
+  ));
+  await assertFails(updateDoc(doc(firestore("global"), "vehicles", "vehicle-a"), {
+    currentKm: 6211,
+    updatedAt: 5,
+  }));
+  const globalDb = firestore("global");
+  const batch = writeBatch(globalDb);
+  batch.update(doc(globalDb, "vehicles", "vehicle-a", "positions", "_simulation"), {
+    updatedAt: 5,
+  });
+  batch.update(doc(globalDb, "vehicles", "vehicle-a"), {
+    currentKm: 6211,
+    updatedAt: 5,
+  });
+  await assertSucceeds(batch.commit());
+  await assertFails(updateDoc(
+    doc(globalDb, "vehicles", "vehicle-a", "positions", "_simulation"),
+    { updatedAt: 4 }
+  ));
 
   await assertFails(setDoc(doc(firestore("global"), "vehicles", "vehicle-a", "positionDays", "2026-07-15", "points", "sim"), {
     lat: 44.4,
