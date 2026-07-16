@@ -22,6 +22,7 @@ import {
   getCurrentCompanyAccessContext,
   requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type { AppUser } from "../../../types/tool";
@@ -230,15 +231,17 @@ function mapExpenseDoc(id: string, data: Record<string, any>): ExpenseDocumentIt
   };
 }
 
-export async function getExpenseUsers(): Promise<AppUser[]> {
+export async function getExpenseUsers(maxItems = 150): Promise<AppUser[]> {
   const context = await getCurrentCompanyAccessContext();
+  const safeLimit = clampQueryLimit(maxItems, 150, 250);
   const source = getUserDirectoryCollectionName() === "userOperationalViews"
     ? userOperationalViewsCollection
     : usersCollection;
   const snap = await getDocs(query(
     source,
     ...buildUserDirectoryConstraints(context),
-    orderBy("fullName", "asc")
+    orderBy("fullName", "asc"),
+    limit(safeLimit)
   ));
   const users = new Map<string, AppUser>();
   snap.docs.forEach((docItem) => {

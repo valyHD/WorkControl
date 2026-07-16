@@ -239,6 +239,20 @@ describe("timesheetsService critical rules", () => {
     );
   });
 
+  it("bounds the generic timesheet list query used by overview snapshots", async () => {
+    firestoreMocks.getDocs.mockResolvedValue({ docs: [] });
+
+    await getTimesheetsList(5000);
+
+    expect(firestoreMocks.limit).toHaveBeenCalledWith(250);
+    expect(firestoreMocks.query).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ where: ["companyId", "==", "company-test"] }),
+      expect.objectContaining({ orderBy: ["startAt", "desc"] }),
+      expect.objectContaining({ limit: 250 })
+    );
+  });
+
   it("maps Firestore timestamp fields without replacing missing startAt with current time", async () => {
     const createdAt = Date.parse("2026-07-14T07:18:00.000Z");
     firestoreMocks.getDocs.mockResolvedValue({
