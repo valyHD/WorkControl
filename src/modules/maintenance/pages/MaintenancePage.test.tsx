@@ -47,6 +47,11 @@ vi.mock("../../users/services/usersService", () => ({
   getAllUsers: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../services/gmailDraftService", () => ({
+  openGmailCompose: vi.fn(() => ({
+    gmailUrl: "https://mail.google.com/mail/?view=cm",
+    opened: true,
+  })),
+  prepareGmailComposeWindow: vi.fn(() => null),
   requestGmailAccessToken: vi.fn(),
   sendGmailMessageWithPdfAttachment: vi.fn(),
 }));

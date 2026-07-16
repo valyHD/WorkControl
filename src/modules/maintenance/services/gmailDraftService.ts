@@ -32,6 +32,80 @@ declare global {
 
 let gisLoadPromise: Promise<void> | null = null;
 
+export type GmailComposeInput = {
+  senderEmail?: string;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+};
+
+export function buildGmailComposeUrl(input: GmailComposeInput): string {
+  const params = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    tf: "1",
+    to: input.recipientEmail.trim(),
+    su: input.subject,
+    body: input.body,
+  });
+  const senderEmail = input.senderEmail?.trim();
+  if (senderEmail) {
+    params.set("authuser", senderEmail);
+  }
+
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+export function prepareGmailComposeWindow(): Window | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const preparedWindow = window.open("", "_blank");
+  if (!preparedWindow) {
+    return null;
+  }
+
+  try {
+    preparedWindow.document.title = "WorkControl Gmail";
+    preparedWindow.document.body.style.fontFamily = "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+    preparedWindow.document.body.style.padding = "24px";
+    preparedWindow.document.body.textContent = "Se pregateste Gmail...";
+  } catch {
+    // Some browsers restrict the temporary window document. Gmail navigation still works.
+  }
+
+  return preparedWindow;
+}
+
+export function openGmailCompose(
+  input: GmailComposeInput,
+  preparedWindow?: Window | null
+): { gmailUrl: string; opened: boolean } {
+  const gmailUrl = buildGmailComposeUrl(input);
+
+  if (preparedWindow && !preparedWindow.closed) {
+    try {
+      preparedWindow.location.href = gmailUrl;
+      return { gmailUrl, opened: true };
+    } catch {
+      // Fall through to opening Gmail directly.
+    }
+  }
+
+  if (typeof window === "undefined") {
+    return { gmailUrl, opened: false };
+  }
+
+  const openedWindow = window.open(gmailUrl, "_blank", "noopener,noreferrer");
+  if (!openedWindow) {
+    window.location.assign(gmailUrl);
+    return { gmailUrl, opened: false };
+  }
+
+  return { gmailUrl, opened: true };
+}
+
 function loadGoogleIdentityServices(): Promise<void> {
   if (window.google?.accounts?.oauth2) {
     return Promise.resolve();
