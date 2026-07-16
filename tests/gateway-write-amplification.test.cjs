@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const {
+  buildRuntimeRootPayload,
   computeConsolidatedMileage,
   normalizeRuntimeLiveConfig,
   shouldUseRuntimeLive,
@@ -24,12 +25,39 @@ test("runtime live rollout is disabled unless an explicit tracker is selected", 
     runtimeLive: { enabled: true, trackerImeis: ["tracker-a"], dualWriteRoot: false },
   });
   assert.equal(runtimeOnly.dualWriteRoot, false);
+
+  const allTrackers = normalizeRuntimeLiveConfig({
+    runtimeLive: { enabled: true, allTrackers: true, dualWriteRoot: false },
+  });
+  assert.equal(shouldUseRuntimeLive(allTrackers, "new-tracker"), true);
 });
 
 test("runtime consolidation keeps pending mileage exactly once", () => {
   assert.equal(computeConsolidatedMileage(6200, 6200, 1.25), 6201.25);
   assert.equal(computeConsolidatedMileage(6201.25, 6201.25, 0), 6201.25);
   assert.equal(computeConsolidatedMileage(6300, 6200, 1.25), 6301.25);
+});
+
+test("runtime root fallback preserves the live snapshot without copying simulation state", () => {
+  const payload = buildRuntimeRootPayload(
+    { currentKm: 6200, gpsSim: { active: true } },
+    {
+      mileageBaseKm: 6200,
+      pendingCurrentKm: 1.25,
+      gpsSnapshot: { lat: 44.4, lng: 26.1, gpsTimestamp: 100 },
+      liveDiagnostics: { updatedAt: 100 },
+      tracker: { imei: "tracker-a", lastSeenAt: 100 },
+      gpsSim: { active: false },
+      gpsSimHistory: [{ id: "must-not-be-copied" }],
+    },
+    200
+  );
+
+  assert.equal(payload.currentKm, 6201.25);
+  assert.deepEqual(payload.gpsSnapshot, { lat: 44.4, lng: 26.1, gpsTimestamp: 100 });
+  assert.deepEqual(payload.liveDiagnostics, { updatedAt: 100 });
+  assert.equal(Object.hasOwn(payload, "gpsSim"), false);
+  assert.equal(Object.hasOwn(payload, "gpsSimHistory"), false);
 });
 
 test("day metadata writes are throttled while point writes remain independent", () => {

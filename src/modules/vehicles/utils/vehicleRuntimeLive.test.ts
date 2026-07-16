@@ -84,4 +84,44 @@ describe("vehicle runtime live adapter", () => {
     });
     expect(mergeVehicleRuntimeLive(legacy, null)).toBe(legacy);
   });
+
+  it("keeps the existing simulation state while applying the real live snapshot", () => {
+    const simulation: NonNullable<VehicleItem["gpsSim"]> = {
+      active: true,
+      points: [{
+        lat: 44,
+        lng: 26,
+        speedKmh: 20,
+        angle: 0,
+        odometerKm: 6200,
+        ts: 100,
+        ignitionOn: true,
+      }],
+      startedAt: 100,
+      totalDistanceKm: 0,
+    };
+    const history: NonNullable<VehicleItem["gpsSimHistory"]> = [{
+      ...simulation,
+      id: "saved-route",
+      active: false,
+      status: "done",
+      stoppedAt: 200,
+    }];
+    const merged = mergeVehicleRuntimeLive(
+      vehicle({
+        gpsSim: simulation,
+        gpsSimHistory: history,
+        gpsSnapshot: { lat: 44, lng: 26, gpsTimestamp: 100, serverTimestamp: 100 },
+      }),
+      {
+        vehicleId: "vehicle-a",
+        updatedAt: 200,
+        gpsSnapshot: { lat: 44.1, lng: 26.1, gpsTimestamp: 200, serverTimestamp: 200 },
+      }
+    );
+
+    expect(merged.gpsSim).toBe(simulation);
+    expect(merged.gpsSimHistory).toBe(history);
+    expect(merged.gpsSnapshot?.lat).toBe(44.1);
+  });
 });

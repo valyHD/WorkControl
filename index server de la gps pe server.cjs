@@ -7,7 +7,7 @@ const admin = require("firebase-admin");
 const { exec } = require("child_process");
 const util = require("util");
 const {
-  computeConsolidatedMileage,
+  buildRuntimeRootPayload,
   normalizeRuntimeLiveConfig,
   shouldUseRuntimeLive,
   shouldWriteDayMetadata,
@@ -1857,23 +1857,11 @@ async function flushVehicleRuntimeToRoot(
     const vehicleData = vehicleSnap.exists ? vehicleSnap.data() || {} : {};
     const runtimeData = runtimeSnap.data() || {};
     const pendingCurrentKm = Math.max(0, Number(runtimeData.pendingCurrentKm || 0));
-    const consolidatedKm = computeConsolidatedMileage(
-      vehicleData.currentKm,
-      runtimeData.mileageBaseKm,
-      pendingCurrentKm
-    );
+    const rootPayload = buildRuntimeRootPayload(vehicleData, runtimeData, now);
+    const consolidatedKm = rootPayload.currentKm;
     const tracker = runtimeData.tracker && typeof runtimeData.tracker === "object"
       ? runtimeData.tracker
       : {};
-    const rootPayload = {
-      currentKm: consolidatedKm,
-      ...(runtimeData.gpsDataUsage ? { gpsDataUsage: runtimeData.gpsDataUsage } : {}),
-      "tracker.imei": tracker.imei || "",
-      "tracker.lastSeenAt": Number(tracker.lastSeenAt || now),
-      "tracker.updatedAt": Number(tracker.updatedAt || now),
-      "tracker.protocol": tracker.protocol || "teltonika_codec_8e_tcp",
-      updatedAt: now,
-    };
 
     if (vehicleSnap.exists) {
       transaction.update(vehicleRef, rootPayload);
