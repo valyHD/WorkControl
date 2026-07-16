@@ -482,7 +482,7 @@ export default function ExpenseInvoicesPage() {
                 </span>
                 <input
                   type="file"
-                  accept="image/*,.pdf,.txt,.doc,.docx,application/pdf"
+                  accept="application/pdf,image/jpeg,image/png,image/webp"
                   onChange={(event) => handleFileChange(event.target.files?.[0] || null)}
                   disabled={busy}
                 />

@@ -3,6 +3,10 @@ import type { ChangeEvent } from "react";
 import type { VehicleDocumentCategory } from "../../../types/vehicle";
 import { VEHICLE_DOCUMENT_CATEGORIES } from "../../../types/vehicle";
 import { FileText, Trash2 } from "lucide-react";
+import {
+  isSupportedVehicleDocumentFile,
+  VEHICLE_DOCUMENT_ACCEPT,
+} from "../utils/vehicleDocumentSummary";
 
 export type VehiclePendingDocument = {
   id: string;
@@ -33,10 +37,17 @@ export default function VehicleDocumentUploader({
 }: Props) {
   const [category, setCategory] = useState<VehicleDocumentCategory>("service");
   const [expiryDate, setExpiryDate] = useState("");
+  const [error, setError] = useState("");
 
   function handleFilesSelect(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
+    const invalidFile = files.find((file) => !isSupportedVehicleDocumentFile(file));
+    if (invalidFile) {
+      setError(`${invalidFile.name} nu este acceptat. Foloseste PDF, JPG, PNG sau WEBP de maximum 18 MB.`);
+      event.target.value = "";
+      return;
+    }
 
     const pending = files.map((file) => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -46,6 +57,7 @@ export default function VehicleDocumentUploader({
     }));
 
     onDocumentsChange([...selectedDocuments, ...pending]);
+    setError("");
     event.target.value = "";
   }
 
@@ -101,11 +113,13 @@ export default function VehicleDocumentUploader({
           <input
             type="file"
             multiple
+            accept={VEHICLE_DOCUMENT_ACCEPT}
             onChange={handleFilesSelect}
             style={{ display: "none" }}
           />
         </label>
       </div>
+      {error && <p className="form-error">{error}</p>}
 
       {selectedDocuments.length > 0 ? (
         <div className="vehicle-doc-list">
@@ -134,7 +148,7 @@ export default function VehicleDocumentUploader({
         </div>
       ) : (
         <p className="tools-subtitle" style={{ marginTop: 8 }}>
-          Acceptă orice tip de fișier (PDF, Word, Excel, imagini etc.).
+          Accepta PDF, JPG, PNG sau WEBP, maximum 18 MB per document.
         </p>
       )}
 

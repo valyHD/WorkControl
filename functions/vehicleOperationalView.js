@@ -17,8 +17,28 @@ function sanitizeDocuments(value) {
   ])).filter(Boolean);
 }
 
+function sanitizeDocumentSummary(value, documents) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return {
+      count: Number(value.count || 0),
+      nextExpiryAt: String(value.nextExpiryAt || ''),
+      expiredCount: Number(value.expiredCount || 0),
+      needsReviewCount: Number(value.needsReviewCount || 0),
+      updatedAt: Number(value.updatedAt || 0),
+    };
+  }
+  return {
+    count: documents.length,
+    nextExpiryAt: '',
+    expiredCount: 0,
+    needsReviewCount: 0,
+    updatedAt: Number(Date.now()),
+  };
+}
+
 function buildVehicleOperationalView(vehicleId, source) {
   const data = source || {};
+  const documents = sanitizeDocuments(data.documents);
   return {
     vehicleId,
     companyId: String(data.companyId || ''),
@@ -53,8 +73,9 @@ function buildVehicleOperationalView(vehicleId, source) {
     nextOilServiceKm: Number(data.nextOilServiceKm || 0),
     coverImageUrl: String(data.coverImageUrl || ''),
     coverThumbUrl: String(data.coverThumbUrl || ''),
-    documents: sanitizeDocuments(data.documents),
-    documentCount: Array.isArray(data.documents) ? data.documents.length : 0,
+    documents,
+    documentSummary: sanitizeDocumentSummary(data.documentSummary, documents),
+    documentCount: Number(data.documentSummary?.count || documents.length),
     createdAt: Number(data.createdAt || 0),
   };
 }

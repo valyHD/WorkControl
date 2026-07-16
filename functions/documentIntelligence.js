@@ -183,6 +183,66 @@ function timestampToMillis(value) {
   return Number(value) || 0;
 }
 
+function bucharestDateKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Bucharest",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const values = Object.fromEntries(
+    parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value])
+  );
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function buildVehicleDocumentSummary(documents, nowMs = Date.now()) {
+  const today = bucharestDateKey(new Date(nowMs));
+  const expiryDates = (Array.isArray(documents) ? documents : [])
+    .map((item) => cleanText(item?.expiryDate, 10))
+    .filter(isValidIsoDate)
+    .sort();
+  return {
+    count: Array.isArray(documents) ? documents.length : 0,
+    nextExpiryAt: expiryDates.find((dateKey) => dateKey >= today) || "",
+    expiredCount: expiryDates.filter((dateKey) => dateKey < today).length,
+    needsReviewCount: (Array.isArray(documents) ? documents : []).filter(
+      (item) => cleanText(item?.intelligenceStatus, 40) === "needs_review"
+    ).length,
+    updatedAt: nowMs,
+  };
+}
+
+function compactVehicleDocumentMetadata(vehicleId, companyId, document, nowMs, patch = {}) {
+  const result = {
+    schemaVersion: 1,
+    companyId: cleanText(companyId, 120),
+    vehicleId: cleanText(vehicleId, 160),
+    documentId: cleanText(document?.id, 160),
+    name: cleanText(document?.name, 240),
+    category: normalizeDocumentType(document?.category) === "unknown"
+      ? "other"
+      : normalizeDocumentType(document?.category),
+    expiryDate: cleanText(document?.expiryDate, 10),
+    expirySource: cleanText(document?.expirySource, 40),
+    storagePath: cleanText(document?.path, 800),
+    contentType: cleanText(document?.contentType, 120),
+    sizeBytes: Number(document?.sizeBytes || 0),
+    extension: cleanText(document?.extension, 20),
+    sha256: cleanText(document?.sha256 || patch.sha256, 128),
+    dedupeKey: cleanText(document?.dedupeKey || patch.dedupeKey, 320),
+    storageGeneration: cleanText(document?.storageGeneration || patch.storageGeneration, 80),
+    intelligenceJobId: cleanText(document?.intelligenceJobId || patch.intelligenceJobId, 160),
+    intelligenceStatus: cleanText(document?.intelligenceStatus || patch.intelligenceStatus, 40),
+    intelligenceReviewedAt: Number(document?.intelligenceReviewedAt || 0),
+    intelligenceReviewedByUserId: cleanText(document?.intelligenceReviewedByUserId, 160),
+    createdAt: Number(document?.createdAt || 0),
+    updatedAt: nowMs,
+  };
+  if (patch.updatedAtServer) result.updatedAtServer = patch.updatedAtServer;
+  return result;
+}
+
 function sanitizeJob(jobId, data, decision = null) {
   return {
     jobId,
@@ -310,13 +370,26 @@ function createDocumentIntelligenceHandlers(dependencies) {
     }
     const [buffer] = await file.download();
     const fileHash = sha256(buffer);
+    const dedupeKey = `${companyId}:${fileHash}:${DOCUMENT_EXTRACTION_VERSION}:${DOCUMENT_JOB_SCHEMA_VERSION}`;
     const jobId = buildDocumentJobId(companyId, fileHash);
     const jobRef = db.collection("documentIngestionJobs").doc(jobId);
+    const now = Date.now();
+    const sourceDocument = (Array.isArray(vehicle.documents) ? vehicle.documents : []).find(
+      (item) => cleanText(item?.id, 160) === documentId
+    ) || {
+      id: documentId,
+      name: fileName,
+      path: storagePath,
+      contentType,
+      sizeBytes,
+      category: "other",
+      createdAt: now,
+    };
+    const metadataRef = db.collection("vehicles").doc(vehicleId).collection("documents").doc(documentId);
     const rateBucket = new Date().toISOString().slice(0, 13).replace(/[-T:]/g, "");
     const rateRef = db
       .collection("documentIngestionRateLimits")
       .doc(`${request.auth.uid}_${rateBucket}`);
-    const now = Date.now();
 
     const outcome = await db.runTransaction(async (tx) => {
       const [existingSnap, rateSnap] = await Promise.all([tx.get(jobRef), tx.get(rateRef)]);
@@ -342,7 +415,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
         contentType,
         sizeBytes,
         sha256: fileHash,
-        dedupeKey: `${companyId}:${fileHash}:${DOCUMENT_EXTRACTION_VERSION}:${DOCUMENT_JOB_SCHEMA_VERSION}`,
+        dedupeKey,
         status: "queued",
         attempts: existingSnap.exists ? Number(existingSnap.data()?.attempts || 0) : 0,
         createdByUserId: request.auth.uid,
@@ -357,6 +430,17 @@ function createDocumentIntelligenceHandlers(dependencies) {
         errorCode: "",
       };
       tx.set(jobRef, jobData, { merge: false });
+      tx.set(
+        metadataRef,
+        compactVehicleDocumentMetadata(vehicleId, companyId, sourceDocument, now, {
+          sha256: fileHash,
+          dedupeKey,
+          intelligenceJobId: jobId,
+          intelligenceStatus: "queued",
+          updatedAtServer: fieldValue.serverTimestamp(),
+        }),
+        { merge: true }
+      );
       tx.set(
         rateRef,
         {
@@ -614,6 +698,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
     );
     const operationRef = db.collection("documentApplyOperations").doc(operationId);
     const decisionRef = db.collection("documentReviewDecisions").doc(operationId);
+    const metadataRef = db.collection("vehicles").doc(context.vehicleId).collection("documents").doc(context.documentId);
     const jobRef = context.jobSnap.ref;
     const now = Date.now();
 
@@ -664,6 +749,9 @@ function createDocumentIntelligenceHandlers(dependencies) {
         intelligenceStatus: "applied",
         intelligenceReviewedAt: now,
         intelligenceReviewedByUserId: request.auth.uid,
+        sha256: cleanText(job.sha256, 128) || beforeDocument.sha256,
+        dedupeKey: cleanText(job.dedupeKey, 320) || beforeDocument.dedupeKey,
+        updatedAt: now,
       };
       documents[documentIndex] = afterDocument;
       const expiryFieldByCategory = {
@@ -678,11 +766,23 @@ function createDocumentIntelligenceHandlers(dependencies) {
       const beforeExpiryValue = expiryField ? cleanText(vehicle[expiryField], 10) : "";
       const vehicleUpdate = {
         documents,
+        documentSummary: buildVehicleDocumentSummary(documents, now),
         updatedAt: now,
         updatedAtServer: fieldValue.serverTimestamp(),
       };
       if (expiryField && nextExpiry) vehicleUpdate[expiryField] = nextExpiry;
       tx.update(context.vehicleRef, vehicleUpdate);
+      tx.set(
+        metadataRef,
+        compactVehicleDocumentMetadata(context.vehicleId, cleanText(vehicle.companyId, 120), afterDocument, now, {
+          sha256: cleanText(job.sha256, 128),
+          dedupeKey: cleanText(job.dedupeKey, 320),
+          intelligenceJobId: context.jobId,
+          intelligenceStatus: "applied",
+          updatedAtServer: fieldValue.serverTimestamp(),
+        }),
+        { merge: true }
+      );
       tx.set(operationRef, {
         companyId: cleanText(vehicle.companyId, 120),
         jobId: context.jobId,
@@ -750,6 +850,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
       context.documentId
     );
     const decisionRef = db.collection("documentReviewDecisions").doc(decisionId);
+    const metadataRef = db.collection("vehicles").doc(context.vehicleId).collection("documents").doc(context.documentId);
     const now = Date.now();
     await db.runTransaction(async (tx) => {
       const vehicleSnap = await tx.get(context.vehicleRef);
@@ -759,17 +860,29 @@ function createDocumentIntelligenceHandlers(dependencies) {
       if (index < 0 || cleanText(documents[index]?.intelligenceJobId, 80) !== context.jobId) {
         throw new HttpsError("failed-precondition", "Documentul s-a schimbat intre timp.");
       }
-      documents[index] = {
+      const rejectedDocument = {
         ...documents[index],
         intelligenceStatus: "rejected",
         intelligenceReviewedAt: now,
         intelligenceReviewedByUserId: request.auth.uid,
+        updatedAt: now,
       };
+      documents[index] = rejectedDocument;
       tx.update(context.vehicleRef, {
         documents,
+        documentSummary: buildVehicleDocumentSummary(documents, now),
         updatedAt: now,
         updatedAtServer: fieldValue.serverTimestamp(),
       });
+      tx.set(
+        metadataRef,
+        compactVehicleDocumentMetadata(context.vehicleId, cleanText(vehicle.companyId, 120), rejectedDocument, now, {
+          intelligenceJobId: context.jobId,
+          intelligenceStatus: "rejected",
+          updatedAtServer: fieldValue.serverTimestamp(),
+        }),
+        { merge: true }
+      );
       tx.set(decisionRef, {
         companyId: cleanText(vehicle.companyId, 120),
         jobId: context.jobId,
@@ -815,6 +928,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
     );
     const operationRef = db.collection("documentApplyOperations").doc(operationId);
     const decisionRef = db.collection("documentReviewDecisions").doc(operationId);
+    const metadataRef = db.collection("vehicles").doc(context.vehicleId).collection("documents").doc(context.documentId);
     const now = Date.now();
     await db.runTransaction(async (tx) => {
       const [vehicleSnap, operationSnap] = await Promise.all([
@@ -841,17 +955,29 @@ function createDocumentIntelligenceHandlers(dependencies) {
           "Data a fost modificata ulterior si nu poate fi suprascrisa prin rollback."
         );
       }
-      documents[index] = {
+      const rollbackDocument = {
         ...(operation.beforeDocument || documents[index]),
         intelligenceStatus: "needs_review",
+        updatedAt: now,
       };
+      documents[index] = rollbackDocument;
       const vehicleUpdate = {
         documents,
+        documentSummary: buildVehicleDocumentSummary(documents, now),
         updatedAt: now,
         updatedAtServer: fieldValue.serverTimestamp(),
       };
       if (expiryField) vehicleUpdate[expiryField] = cleanText(operation.beforeExpiryValue, 10);
       tx.update(context.vehicleRef, vehicleUpdate);
+      tx.set(
+        metadataRef,
+        compactVehicleDocumentMetadata(context.vehicleId, cleanText(vehicle.companyId, 120), rollbackDocument, now, {
+          intelligenceJobId: context.jobId,
+          intelligenceStatus: "needs_review",
+          updatedAtServer: fieldValue.serverTimestamp(),
+        }),
+        { merge: true }
+      );
       tx.update(operationRef, {
         status: "rolled_back",
         rolledBackByUserId: request.auth.uid,
@@ -906,6 +1032,7 @@ module.exports = {
   DOCUMENT_EXTRACTION_VERSION,
   DOCUMENT_JOB_SCHEMA_VERSION,
   VEHICLE_DOCUMENT_EXTRACTION_SCHEMA,
+  buildVehicleDocumentSummary,
   buildDocumentJobId,
   buildDocumentOperationId,
   createDocumentIntelligenceHandlers,

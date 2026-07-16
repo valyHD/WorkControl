@@ -76,6 +76,9 @@ export interface VehicleDocumentItem {
   contentType: string;
   sizeBytes: number;
   extension: string;
+  sha256?: string;
+  dedupeKey?: string;
+  storageGeneration?: string;
   category: VehicleDocumentCategory;
   expiryDate?: string;
   expirySource?: "manual" | "ai_confirmed" | "";
@@ -99,6 +102,15 @@ export interface VehicleDocumentItem {
     analyzedAt?: number;
   };
   createdAt: number;
+  updatedAt?: number;
+}
+
+export interface VehicleDocumentSummary {
+  count: number;
+  nextExpiryAt: string;
+  expiredCount: number;
+  needsReviewCount: number;
+  updatedAt: number;
 }
 
 export interface VehicleGpsSnapshot {
@@ -395,6 +407,7 @@ export interface VehicleItem {
   coverThumbUrl: string;
   images: VehicleImageItem[];
   documents: VehicleDocumentItem[];
+  documentSummary?: VehicleDocumentSummary;
 
   gpsSnapshot?: VehicleGpsSnapshot | null;
   liveDiagnostics?: VehicleLiveDiagnostics | null;

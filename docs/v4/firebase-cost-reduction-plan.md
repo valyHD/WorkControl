@@ -195,6 +195,27 @@ Aceasta faza nu modifica ingestia, istoricul, simularea sau randarea GPS.
 - PDF/image limits aliniate între UI, Storage Rules și Functions (astăzi 20 MB vs 18 MB
   pentru vehicule).
 
+### Implementare 2026-07-16
+
+- `vehicles.documents` rămâne compatibil pentru UI-ul existent, dar fiecare salvare, ștergere,
+  restaurare și decizie AI scrie și `documentSummary`.
+- Functions scrie metadate compacte în `vehicles/{vehicleId}/documents/{documentId}` cu write
+  server-side only; clientul poate citi subcolecția doar dacă are acces la vehicul.
+- `vehicleOperationalViews` expune `documentSummary`, astfel listele viitoare pot evita citirea
+  array-ului mare de documente.
+- limita documentelor vehicul este aliniată la 18 MB în UI, Storage Rules și Functions.
+- uploadul de documente vehicul acceptă doar PDF, JPG, PNG și WEBP.
+- uploadul offline de bonuri este aliniat cu limita online de 15 MB.
+- scanarea bonurilor cache-uiește rezultatul AI după `companyId + sha256 + scanMode +
+  extractionVersion + schemaVersion`; duplicatele refolosesc analiza fără apel OpenAI nou.
+
+Rămase pentru increment separat:
+
+- backfill `documentSummary` și subcolecții compacte pentru toate documentele istorice;
+- migrarea listelor mari să citească doar `documentSummary`, după backfill verificat;
+- cleanup Storage prin outbox/job idempotent pentru documentele șterse;
+- lifecycle/retention configurabil pentru originale, cache și joburi vechi.
+
 ## 8. Cost AI document intelligence
 
 Modelul curent implicit este `gpt-4.1-mini`. La tarifele oficiale consultate:

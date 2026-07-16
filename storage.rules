@@ -140,7 +140,7 @@ service firebase.storage {
     match /vehicles/{vehicleId}/documents/{category}/{fileName} {
       allow read: if canReadVehicle(vehicleId);
       allow create, update: if vehicleExists(vehicleId) &&
-        managerFor(vehicleDoc(vehicleId).data.get('companyId', '')) && safeDocumentWrite(20 * 1024 * 1024);
+        managerFor(vehicleDoc(vehicleId).data.get('companyId', '')) && safeDocumentWrite(18 * 1024 * 1024);
       allow delete: if vehicleExists(vehicleId) && managerFor(vehicleDoc(vehicleId).data.get('companyId', ''));
     }
 
