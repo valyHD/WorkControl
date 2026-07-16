@@ -6,6 +6,7 @@ const { logger } = require('firebase-functions');
 const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const { FieldValue } = require('firebase-admin/firestore');
+const { OAuth2Client } = require('google-auth-library');
 const {
   getEcbRates,
   refreshBillingMetrics: refreshBillingMetricsCache,
@@ -87,6 +88,9 @@ const securityHandlers = createSecurityHandlers({
   logger,
 });
 const openaiApiKey = defineSecret('OPENAI_API_KEY');
+const gmailOAuthClientId = defineSecret('GMAIL_OAUTH_CLIENT_ID');
+const gmailOAuthClientSecret = defineSecret('GMAIL_OAUTH_CLIENT_SECRET');
+const gmailOAuthRefreshToken = defineSecret('GMAIL_OAUTH_REFRESH_TOKEN');
 const SECURITY_CALLABLE_OPTIONS = {
   region: 'europe-west1',
   enforceAppCheck: process.env.WORKCONTROL_ENFORCE_APP_CHECK === 'true',
@@ -186,6 +190,15 @@ exports.rejectVehicleDocumentIngestionJob = onCall(
 exports.rollbackVehicleDocumentIngestionJob = onCall(
   SECURITY_CALLABLE_OPTIONS,
   documentIntelligenceHandlers.rollbackVehicleDocumentIngestionJob
+);
+exports.createMaintenanceGmailDraft = onCall(
+  {
+    ...SECURITY_CALLABLE_OPTIONS,
+    timeoutSeconds: 120,
+    memory: '512MiB',
+    secrets: [gmailOAuthClientId, gmailOAuthClientSecret, gmailOAuthRefreshToken],
+  },
+  createMaintenanceGmailDraft
 );
 exports.processDocumentIngestionJob = onDocumentWritten(
   {
@@ -1060,6 +1073,205 @@ function inferContentType(fileName, contentType) {
     return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   }
   return 'application/octet-stream';
+}
+
+const SHARED_MAINTENANCE_GMAIL_SENDER = 'liftultau@gmail.com';
+const MAX_GMAIL_ATTACHMENTS = 8;
+const MAX_GMAIL_ATTACHMENT_BYTES = 24 * 1024 * 1024;
+const MAX_GMAIL_TOTAL_ATTACHMENT_BYTES = 30 * 1024 * 1024;
+
+function cleanEmail(value) {
+  const email = cleanText(value, 320).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return '';
+  return email;
+}
+
+function sanitizeHeaderValue(value, maxLength = 240) {
+  return cleanText(value, maxLength).replace(/[\r\n]+/g, ' ');
+}
+
+function encodeMimeHeader(value) {
+  const header = sanitizeHeaderValue(value, 240);
+  if (/^[\x00-\x7F]*$/.test(header)) return header;
+  return `=?UTF-8?B?${Buffer.from(header, 'utf8').toString('base64')}?=`;
+}
+
+function foldBase64(value) {
+  return value.match(/.{1,76}/g)?.join('\r\n') || value;
+}
+
+function base64UrlEncodeBuffer(buffer) {
+  return buffer
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function normalizeGmailAttachmentInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const path = cleanText(value.path, 600);
+  if (!path || !path.startsWith('maintenance-reports/')) return null;
+  return {
+    path,
+    fileName: sanitizeHeaderValue(value.fileName || path.split('/').pop() || 'atasament', 180),
+    contentType: inferContentType(value.fileName || path, value.contentType),
+  };
+}
+
+async function readStorageAttachment(input) {
+  const [buffer] = await admin.storage().bucket().file(input.path).download();
+  if (buffer.length > MAX_GMAIL_ATTACHMENT_BYTES) {
+    throw new HttpsError('invalid-argument', `Atasamentul ${input.fileName} este prea mare pentru Gmail.`);
+  }
+  return {
+    ...input,
+    buffer,
+  };
+}
+
+function buildRawGmailMessage(input) {
+  const boundary = `workcontrol_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+  const messageLines = [
+    `From: "Service si Mentenanta Lift" <${SHARED_MAINTENANCE_GMAIL_SENDER}>`,
+    `To: ${input.to}`,
+    `Subject: ${encodeMimeHeader(input.subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    input.body,
+    '',
+  ];
+
+  for (const attachment of input.attachments) {
+    messageLines.push(
+      `--${boundary}`,
+      `Content-Type: ${attachment.contentType}; name="${sanitizeHeaderValue(attachment.fileName, 180)}"`,
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${sanitizeHeaderValue(attachment.fileName, 180)}"`,
+      '',
+      foldBase64(attachment.buffer.toString('base64')),
+      ''
+    );
+  }
+
+  messageLines.push(`--${boundary}--`);
+  return base64UrlEncodeBuffer(Buffer.from(messageLines.join('\r\n'), 'utf8'));
+}
+
+async function getSharedGmailAccessToken() {
+  const clientId = gmailOAuthClientId.value();
+  const clientSecret = gmailOAuthClientSecret.value();
+  const refreshToken = gmailOAuthRefreshToken.value();
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new HttpsError('failed-precondition', 'Gmail nu este configurat pe server.');
+  }
+
+  const oauthClient = new OAuth2Client(clientId, clientSecret);
+  oauthClient.setCredentials({ refresh_token: refreshToken });
+  const tokenResponse = await oauthClient.getAccessToken();
+  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+  if (!token) {
+    throw new HttpsError('failed-precondition', 'Gmail nu a returnat token de acces.');
+  }
+  return token;
+}
+
+async function createMaintenanceGmailDraft(request) {
+  const context = await assertActiveInternalRequest(request);
+  const input = request.data || {};
+  const companyId = cleanText(input.companyId, 120) || context.companyId;
+  if (companyId && !internalContextCanAccessCompany(context, companyId)) {
+    throw new HttpsError('permission-denied', 'Nu ai acces la firma raportului.');
+  }
+
+  const recipientEmail = cleanEmail(input.recipientEmail);
+  if (!recipientEmail) {
+    throw new HttpsError('invalid-argument', 'Destinatarul Gmail nu este valid.');
+  }
+
+  const pdfAttachment = normalizeGmailAttachmentInput({
+    path: input.pdfPath,
+    fileName: input.fileName,
+    contentType: 'application/pdf',
+  });
+  if (!pdfAttachment) {
+    throw new HttpsError('invalid-argument', 'PDF-ul raportului nu este valid.');
+  }
+
+  const extraAttachments = Array.isArray(input.attachments)
+    ? input.attachments.map(normalizeGmailAttachmentInput).filter(Boolean).slice(0, MAX_GMAIL_ATTACHMENTS)
+    : [];
+  const attachments = await Promise.all([pdfAttachment, ...extraAttachments].map(readStorageAttachment));
+  const totalAttachmentBytes = attachments.reduce((total, attachment) => total + attachment.buffer.length, 0);
+  if (totalAttachmentBytes > MAX_GMAIL_TOTAL_ATTACHMENT_BYTES) {
+    throw new HttpsError('invalid-argument', 'Atasamentele raportului depasesc limita Gmail.');
+  }
+
+  const subject = sanitizeHeaderValue(input.subject, 180) || 'Raport mentenanta';
+  const body = cleanText(input.body, 8000) || 'Buna ziua,\n\nAveti atasat raportul de mentenanta.';
+  const raw = buildRawGmailMessage({
+    to: recipientEmail,
+    subject,
+    body,
+    attachments,
+  });
+  const accessToken = await getSharedGmailAccessToken();
+  const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: { raw } }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    logger.error('Nu am putut crea draft Gmail mentenanta.', {
+      status: response.status,
+      statusText: response.statusText,
+      actorUserId: context.userSnap.id,
+      companyId,
+      clientId: cleanText(input.clientId, 120),
+      responseSnippet: text.slice(0, 300),
+    });
+    throw new HttpsError('internal', 'Nu am putut crea draftul Gmail.');
+  }
+
+  const draft = await response.json();
+  const messageId = draft?.message?.id ? `/${encodeURIComponent(draft.message.id)}` : '';
+  const gmailUrl = `https://mail.google.com/mail/?authuser=${encodeURIComponent(SHARED_MAINTENANCE_GMAIL_SENDER)}#drafts${messageId}`;
+  await createAuditLog({
+    companyId,
+    category: 'maintenance',
+    action: 'maintenance_gmail_draft_created',
+    title: 'Draft Gmail mentenanta creat',
+    message: `Draft Gmail creat pentru ${recipientEmail}.`,
+    actorUserId: context.userSnap.id,
+    actorUserName: context.user.fullName || context.user.email || 'Utilizator',
+    entityId: cleanText(input.reportId || input.clientId, 120),
+    entityLabel: sanitizeHeaderValue(input.clientName || subject, 160),
+    path: '/maintenance?tab=report',
+    pageTitle: 'Mentenanta',
+    metadata: {
+      clientId: cleanText(input.clientId, 120),
+      reportId: cleanText(input.reportId, 120),
+      attachments: attachments.length,
+      totalAttachmentBytes,
+    },
+  });
+
+  return {
+    draftId: draft.id || '',
+    messageId: draft?.message?.id || '',
+    gmailUrl,
+    senderEmail: SHARED_MAINTENANCE_GMAIL_SENDER,
+  };
 }
 
 function isSupportedDocumentMime(contentType) {

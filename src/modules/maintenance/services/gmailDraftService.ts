@@ -1,3 +1,6 @@
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../../../lib/firebase/firebase";
+
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -28,6 +31,32 @@ export type GmailRedirectAuthorization = {
 
 export type GmailRedirectAuthorizationRequest = GmailRedirectState & {
   url: string;
+};
+
+export type SharedMaintenanceGmailAttachment = {
+  path: string;
+  fileName: string;
+  contentType?: string;
+};
+
+export type SharedMaintenanceGmailDraftInput = {
+  companyId?: string;
+  clientId: string;
+  clientName?: string;
+  reportId?: string;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  pdfPath: string;
+  fileName: string;
+  attachments?: SharedMaintenanceGmailAttachment[];
+};
+
+export type SharedMaintenanceGmailDraftResult = {
+  draftId: string;
+  messageId?: string;
+  gmailUrl: string;
+  senderEmail: string;
 };
 
 type GoogleIdentityServices = {
@@ -363,6 +392,23 @@ export function openGmailDraft(gmailUrl: string): void {
     throw new Error("Linkul draftului Gmail nu este valid.");
   }
   window.location.assign(url.toString());
+}
+
+export async function createSharedMaintenanceGmailDraft(
+  input: SharedMaintenanceGmailDraftInput
+): Promise<SharedMaintenanceGmailDraftResult> {
+  const createDraft = httpsCallable<SharedMaintenanceGmailDraftInput, SharedMaintenanceGmailDraftResult>(
+    functions,
+    "createMaintenanceGmailDraft"
+  );
+  const result = await createDraft(input);
+  const data = result.data;
+
+  if (!data?.gmailUrl || !data?.senderEmail) {
+    throw new Error("Nu am putut crea draftul Gmail pe server.");
+  }
+
+  return data;
 }
 
 export async function sendGmailMessageWithPdfAttachment(input: {

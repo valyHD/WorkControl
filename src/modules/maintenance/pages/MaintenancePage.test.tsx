@@ -37,12 +37,8 @@ const usersMocks = vi.hoisted(() => ({
 }));
 
 const gmailMocks = vi.hoisted(() => ({
-  consumeGmailRedirectAuthorization: vi.fn(() => null),
-  createGmailDraftWithPdfAttachment: vi.fn(),
+  createSharedMaintenanceGmailDraft: vi.fn(),
   openGmailDraft: vi.fn(),
-  preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
-  requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
-  startGmailRedirectAuthorization: vi.fn(() => "https://accounts.google.com/o/oauth2/v2/auth?test=1"),
 }));
 
 const pdfMocks = vi.hoisted(() => ({
@@ -104,17 +100,30 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     usersMocks.getAllUsers.mockResolvedValue([]);
-    gmailMocks.consumeGmailRedirectAuthorization.mockReturnValue(null);
-    gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
-    gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
-    gmailMocks.createGmailDraftWithPdfAttachment.mockResolvedValue({
+    gmailMocks.createSharedMaintenanceGmailDraft.mockResolvedValue({
       draftId: "gmail-draft-test",
+      messageId: "message-test",
       gmailUrl: "https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test",
+      senderEmail: "liftultau@gmail.com",
     });
-    gmailMocks.startGmailRedirectAuthorization.mockReturnValue(
-      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
-    );
-    maintenanceMocks.saveMaintenanceReportHistory.mockResolvedValue({ pdfUrl: "https://storage.example.test/report.pdf" });
+    maintenanceMocks.saveMaintenanceReportHistory.mockResolvedValue({
+      id: "report-test",
+      companyId: "company-test",
+      clientId: "client-gmail-test",
+      clientName: "Client Gmail Test",
+      reportType: "revizie",
+      address: "Strada Test 10",
+      lift: "LIFT-10",
+      technicianName: "Admin Test",
+      comments: "",
+      pdfUrl: "https://storage.example.test/report.pdf",
+      pdfPath: "maintenance-reports/client-gmail-test/report.pdf",
+      images: [],
+      fileName: "report.pdf",
+      createdAt: 0,
+      dateText: "16.07.2026",
+      timeText: "09:00:00",
+    });
     pdfMocks.buildMaintenancePdfBlob.mockResolvedValue(new Blob(["test-pdf"], { type: "application/pdf" }));
   });
 
@@ -169,76 +178,19 @@ describe("MaintenancePage client form", () => {
 
     expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
     expect(usersMocks.getAllUsers).toHaveBeenCalledTimes(1);
-    expect(gmailMocks.preloadGmailAuthorization).toHaveBeenCalledTimes(1);
   });
 
-  it("authorizes Gmail from an explicit report action", async () => {
-    const user = userEvent.setup();
-
+  it("uses the shared server-side Gmail sender without browser authorization", async () => {
     render(
       <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
         <MaintenancePage />
       </MemoryRouter>
     );
 
-    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
-
-    expect(gmailMocks.requestGmailAccessToken).toHaveBeenCalledWith("liftultau@gmail.com");
-    expect(await screen.findByText("Gmail autorizat pentru liftultau@gmail.com.")).toBeInTheDocument();
-  });
-
-  it("offers explicit same-window Gmail authorization for mobile browsers", async () => {
-    const user = userEvent.setup();
-
-    render(
-      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
-        <MaintenancePage />
-      </MemoryRouter>
-    );
-
-    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
-
-    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
-    expect(await screen.findByRole("link", { name: "Deschide Google" })).toHaveAttribute(
-      "href",
-      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
-    );
-    expect(gmailMocks.requestGmailAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("shows a clear setup error when Gmail OAuth client id is missing", async () => {
-    gmailMocks.startGmailRedirectAuthorization.mockImplementation(() => {
-      throw new Error("Lipseste VITE_GOOGLE_CLIENT_ID din .env.");
-    });
-    const user = userEvent.setup();
-
-    render(
-      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
-        <MaintenancePage />
-      </MemoryRouter>
-    );
-
-    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
-
-    expect(await screen.findByText(/Lipseste VITE_GOOGLE_CLIENT_ID/)).toBeInTheDocument();
-    expect(screen.queryByText("Se deschide autorizarea Gmail in aceeasi fereastra...")).not.toBeInTheDocument();
-  });
-
-  it("shows a mobile redirect action when Gmail popup authorization is blocked", async () => {
-    gmailMocks.requestGmailAccessToken.mockRejectedValue(new Error("popup blocked"));
-    const user = userEvent.setup();
-
-    render(
-      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
-        <MaintenancePage />
-      </MemoryRouter>
-    );
-
-    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
-    const mobileButton = await screen.findByRole("button", { name: "Autentificare Gmail pe mobil" });
-    await user.click(mobileButton);
-
-    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(await screen.findByDisplayValue("liftultau@gmail.com")).toBeInTheDocument();
+    expect(screen.getByText(/Draftul Gmail este creat pe server/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Autorizeaza Gmail" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Autentificare mobil" })).not.toBeInTheDocument();
   });
 
   it("uses a mobile-safe technician selector and restores the signed-in user on return", async () => {
@@ -281,7 +233,7 @@ describe("MaintenancePage client form", () => {
 
     const technicianSelect = await screen.findByRole("combobox", { name: "Tehnician" });
     expect(technicianSelect).toHaveValue("maintenance-admin-test");
-    expect(screen.getByRole("option", { name: "Admin Test - admin@example.test" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Admin Test" })).toBeInTheDocument();
   });
 
   it("closes client suggestions immediately after the client is selected", async () => {
@@ -306,7 +258,6 @@ describe("MaintenancePage client form", () => {
     const user = userEvent.setup();
     render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
 
-    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
     await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Gmail");
     await user.click(await screen.findByRole("option", { name: /Client Gmail Test/ }));
     await waitFor(() => {
@@ -317,11 +268,12 @@ describe("MaintenancePage client form", () => {
     await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
 
     await waitFor(() => {
-      expect(gmailMocks.createGmailDraftWithPdfAttachment).toHaveBeenCalledWith(expect.objectContaining({
-        accessToken: "gmail-token",
-        senderEmail: "liftultau@gmail.com",
+      expect(gmailMocks.createSharedMaintenanceGmailDraft).toHaveBeenCalledWith(expect.objectContaining({
+        companyId: "company-test",
+        clientId: "client-gmail-test",
         recipientEmail: "client@example.test",
-        pdfBlob: expect.any(Blob),
+        pdfPath: "maintenance-reports/client-gmail-test/report.pdf",
+        fileName: "report.pdf",
       }));
       expect(gmailMocks.openGmailDraft).toHaveBeenCalledWith("https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test");
     });
