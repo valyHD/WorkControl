@@ -1,5 +1,6 @@
 export * from "./assistantOrchestrator";
 export * from "./assistantMemory";
+export * from "./assistantMaintenanceReportCommand";
 export * from "./assistantPageContext";
 export * from "./assistantPlanner";
 export * from "./assistantTelemetry";

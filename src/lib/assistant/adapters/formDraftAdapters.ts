@@ -1,6 +1,7 @@
 import {
   ASSISTANT_FILL_LEAVE_EVENT,
   ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT,
+  ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
   ASSISTANT_FILL_PROJECT_FORM_EVENT,
   ASSISTANT_FILL_TOOL_FORM_EVENT,
   ASSISTANT_FILL_USER_FORM_EVENT,
@@ -18,6 +19,16 @@ import {
 export const ASSISTANT_FILL_EXPENSE_EVENT = ASSISTANT_FILL_EXPENSE_FORM_EVENT;
 
 type DraftInput = { fields: Record<string, unknown> };
+
+type MaintenanceReportDraftFields = {
+  clientQuery: string;
+  reportType: "revizie" | "interventie";
+  observations: string;
+  submitMode: "prepare" | "send";
+  waitForPhotos: boolean;
+};
+
+type MaintenanceReportDraftInput = { fields: MaintenanceReportDraftFields };
 
 function readDraftInput(value: unknown): DraftInput {
   const input =
@@ -114,6 +125,96 @@ export function createMaintenanceDraftTool() {
       "revisionType",
     ],
   });
+}
+
+function readMaintenanceReportDraftInput(value: unknown): MaintenanceReportDraftInput {
+  const draft = readDraftInput(value).fields;
+  return {
+    fields: {
+      clientQuery: String(draft.clientQuery || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+      reportType: draft.reportType === "interventie" ? "interventie" : "revizie",
+      observations: String(draft.observations || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+      submitMode: draft.submitMode === "send" ? "send" : "prepare",
+      waitForPhotos: draft.waitForPhotos === true,
+    },
+  };
+}
+
+function createMaintenanceReportTool(mode: "prepare" | "send") {
+  const definition: AssistantToolDefinition<unknown, MaintenanceReportDraftInput> = {
+    id: `maintenance.report.${mode}`,
+    aliases:
+      mode === "send" ? ["generate_and_send_maintenance_report"] : ["prepare_maintenance_report"],
+    description:
+      mode === "send"
+        ? "Completeaza raportul de mentenanta si il trimite numai dupa confirmare explicita."
+        : "Deschide si completeaza controlat raportul de mentenanta, fara trimitere.",
+    module: "maintenance",
+    inputSchema: {
+      type: "object",
+      properties: { fields: { type: "object" } },
+      required: ["fields"],
+      additionalProperties: false,
+    },
+    outputSchema: ASSISTANT_TOOL_OUTPUT_SCHEMA,
+    risk: mode === "send" ? "high" : "medium",
+    permission: authenticatedPermission,
+    resolve: readMaintenanceReportDraftInput,
+    validate: (input) => {
+      if (!input.fields.clientQuery) {
+        return {
+          ok: false,
+          reason: "Lipseste clientul raportului.",
+          missingInformation: ["clientul de mentenanta"],
+        };
+      }
+      if (input.fields.submitMode !== mode) {
+        return { ok: false, reason: "Modul de trimitere nu corespunde actiunii aprobate." };
+      }
+      if (mode === "send" && input.fields.waitForPhotos) {
+        return {
+          ok: false,
+          reason: "Raportul trebuie pregatit si asteptate pozele inainte de trimitere.",
+        };
+      }
+      return { ok: true };
+    },
+    preview: (input) =>
+      mode === "send"
+        ? `Generez si trimit raportul de ${input.fields.reportType} pentru ${input.fields.clientQuery}.`
+        : `Deschid raportul de ${input.fields.reportType} pentru ${input.fields.clientQuery} si completez draftul.`,
+    execute: async (input, context) => {
+      await context.runtime.navigate("/maintenance?tab=report&assistant=report");
+      const dispatched = await context.runtime.dispatchFormDraft(
+        ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+        input.fields
+      );
+      if (!dispatched) throw new Error("Generatorul de rapoarte nu este disponibil.");
+      return {
+        message:
+          mode === "send"
+            ? "Raportul a fost trimis generatorului pentru expediere controlata."
+            : input.fields.waitForPhotos
+              ? "Raportul este completat. Ataseaza pozele, apoi trimite-l."
+              : "Raportul este completat si asteapta verificarea ta.",
+        afterData: input.fields,
+      };
+    },
+    audit: (input, outcome, context) => auditAssistantTool(definition, input, outcome, context),
+  };
+  return definition;
+}
+
+export function createMaintenanceReportPrepareTool() {
+  return createMaintenanceReportTool("prepare");
+}
+
+export function createMaintenanceReportSendTool() {
+  return createMaintenanceReportTool("send");
 }
 
 export function createLeaveDraftTool() {

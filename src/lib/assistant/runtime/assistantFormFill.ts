@@ -2,6 +2,8 @@ import { dispatchAssistantFormDraft } from "../adapters/assistantFormDraftChanne
 
 export const ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT =
   "workcontrol:assistant-fill-maintenance-client";
+export const ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT =
+  "workcontrol:assistant-fill-maintenance-report";
 export const ASSISTANT_FILL_LEAVE_EVENT = "workcontrol:assistant-fill-leave";
 export const ASSISTANT_FILL_VEHICLE_FORM_EVENT = "workcontrol:assistant-fill-vehicle-form";
 export const ASSISTANT_FILL_TOOL_FORM_EVENT = "workcontrol:assistant-fill-tool-form";

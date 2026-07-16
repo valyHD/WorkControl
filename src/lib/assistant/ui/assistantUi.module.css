@@ -1,18 +1,21 @@
 .panel {
   position: fixed;
+  top: max(76px, 8vh);
   right: 16px;
-  bottom: 16px;
-  z-index: 140;
+  bottom: auto;
+  z-index: 1500;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(420px, calc(100vw - 32px));
-  max-height: min(720px, calc(100dvh - 32px));
+  max-height: min(720px, calc(100dvh - 96px));
   overflow: hidden;
   border: 1px solid var(--line-mid, #cbd5e1);
   border-radius: 8px;
   color: var(--text, #0f172a);
   background: var(--surface, #ffffff);
   box-shadow: var(--shadow-lg, 0 20px 48px rgba(15, 23, 42, 0.2));
+  pointer-events: auto;
+  isolation: isolate;
 }
 
 .panel[data-state="listening"] {
@@ -610,15 +613,13 @@
 
 @media (max-width: 640px) {
   .panel {
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    max-height: calc(100dvh - max(12px, env(safe-area-inset-top)));
-    border-right: 0;
-    border-bottom: 0;
-    border-left: 0;
-    border-radius: 8px 8px 0 0;
+    top: max(68px, calc(env(safe-area-inset-top) + 8px));
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: 8px;
+    width: auto;
+    max-height: none;
+    border-radius: 8px;
   }
 
   .panelFooter {

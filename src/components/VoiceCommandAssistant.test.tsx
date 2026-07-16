@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantCommandInterpretationV3 } from "../lib/assistant/assistantCommandService";
 import { registerAssistantFormDraftAdapter } from "../lib/assistant/adapters/assistantFormDraftChannel";
+import { ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT } from "../lib/assistant/runtime/assistantFormFill";
 import type { VehicleFormValues } from "../types/vehicle";
 import VehicleForm from "../modules/vehicles/components/VehicleForm";
 import VoiceCommandAssistant from "./VoiceCommandAssistant";
@@ -139,6 +140,35 @@ function updateVehicleContract(query = "B33LGR") {
   });
 }
 
+function maintenanceReportContract(mode: "prepare" | "send") {
+  const fields = {
+    clientQuery: "Isomat",
+    reportType: mode === "send" ? ("revizie" as const) : ("interventie" as const),
+    observations: mode === "send" ? "" : "usa nu se inchide",
+    submitMode: mode,
+    waitForPhotos: mode === "prepare",
+  };
+  return contract({
+    commandType: "form_fill",
+    intent: "open_maintenance_report",
+    toolCalls: [{ id: `maintenance.report.${mode}`, input: { fields } }],
+    targetPage: "/maintenance?tab=report&assistant=report",
+    entityReferences: [{ type: "maintenanceClient", query: "Isomat", id: "" }],
+    confirmationRequired: true,
+    response:
+      mode === "send"
+        ? "Confirma generarea si trimiterea raportului."
+        : "Confirma pregatirea raportului si asteptarea pozelor.",
+    entityType: "maintenanceClient",
+    entityQuery: "Isomat",
+    fieldsToUpdate: fields,
+    risk: mode === "send" ? "high" : "medium",
+    needsConfirmation: true,
+    spokenSummary: "Pregatesc raportul.",
+    reportType: fields.reportType,
+  });
+}
+
 function vehicleValues(): VehicleFormValues {
   return {
     plateNumber: "B33LGR",
@@ -205,7 +235,7 @@ function renderAssistant(initialPath: string, withVehicleForm = false) {
 }
 
 async function sendCommand(command: string) {
-  fireEvent.click(screen.getByRole("button", { name: "Tine apasat pentru comanda vocala" }));
+  fireEvent.click(screen.getByRole("button", { name: "Deschide asistentul vocal" }));
   const input = await screen.findByPlaceholderText("Sau scrie comanda...");
   const user = userEvent.setup();
   await user.type(input, command);
@@ -228,6 +258,12 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     ]);
     mocks.interpret.mockImplementation(async (command: string) => {
       const normalized = command.toLowerCase();
+      if (normalized.includes("raport") && normalized.includes("trimite")) {
+        return maintenanceReportContract("send");
+      }
+      if (normalized.includes("raport") && normalized.includes("poze")) {
+        return maintenanceReportContract("prepare");
+      }
       if (normalized.includes("conced")) return navigationContract("/my-leave");
       if (normalized.includes("mentenanta")) return navigationContract("/maintenance");
       if (normalized.includes("dashboard")) return navigationContract("/dashboard");
@@ -309,5 +345,50 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     await sendCommand("schimba kilometrii Loganului la 6616");
     expect(await screen.findByRole("radio", { name: /B33LGR Dacia Logan/ })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /B44ABC Dacia Logan/ })).toBeInTheDocument();
+  });
+
+  it("prefills a maintenance report only after confirmation and waits for photos", async () => {
+    const reportDraft = vi.fn();
+    const unregister = registerAssistantFormDraftAdapter(
+      ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+      reportDraft
+    );
+    renderAssistant("/dashboard");
+
+    await sendCommand(
+      "Genereaza raport interventie pentru Isomat cu observatia usa nu se inchide si asteapta sa atasez pozele"
+    );
+    expect(reportDraft).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: "Confirmă" }));
+
+    await waitFor(() => expect(reportDraft).toHaveBeenCalledTimes(1));
+    expect(reportDraft).toHaveBeenCalledWith({
+      clientQuery: "Isomat",
+      reportType: "interventie",
+      observations: "usa nu se inchide",
+      submitMode: "prepare",
+      waitForPhotos: true,
+    });
+    expect(screen.getByTestId("current-path")).toHaveTextContent("/maintenance");
+    unregister();
+  });
+
+  it("does not send a maintenance report before explicit confirmation", async () => {
+    const reportSend = vi.fn();
+    const unregister = registerAssistantFormDraftAdapter(
+      ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+      reportSend
+    );
+    renderAssistant("/dashboard");
+
+    await sendCommand("Genereaza raport revizie pentru Isomat si trimite-l");
+    expect(reportSend).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: "Confirmă" }));
+
+    await waitFor(() => expect(reportSend).toHaveBeenCalledTimes(1));
+    expect(reportSend).toHaveBeenCalledWith(
+      expect.objectContaining({ submitMode: "send", reportType: "revizie" })
+    );
+    unregister();
   });
 });

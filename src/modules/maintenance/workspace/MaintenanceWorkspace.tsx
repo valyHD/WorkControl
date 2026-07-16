@@ -42,7 +42,10 @@ import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { PageLayout, PermissionState } from "../../../components/experience";
-import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import {
+  ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT,
+  ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+} from "../../../lib/assistant/runtime/assistantFormFill";
 import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import { highlightAssistantElement } from "../../../lib/assistant/runtime/assistantButtonHighlighter";
 import { getMaintenanceModule } from "../maintenanceModules";
@@ -103,6 +106,16 @@ type GeneratedReportShare = {
   timeText: string;
   maintenanceCompany: string;
   pdfUrl: string;
+};
+
+type AssistantReportRequest = {
+  requestId: string;
+  clientQuery: string;
+  reportType: ReportType;
+  observations: string;
+  submitMode: "prepare" | "send";
+  waitForPhotos: boolean;
+  resolvedClientId?: string;
 };
 
 type MaintenanceTab = "dashboard" | "report" | "parts" | "clients" | "lifts" | "companies" | "history" | "checks";
@@ -180,6 +193,42 @@ function normalizeMaintenanceAssistantText(value: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function findMaintenanceClientsForAssistant(clients: MaintenanceClient[], clientQuery: string) {
+  const needle = normalizeMaintenanceAssistantText(clientQuery);
+  if (!needle) return [];
+
+  const searchable = clients.map((client) => {
+    const names = [client.name].filter(Boolean).map(normalizeMaintenanceAssistantText);
+    const lifts = [
+      client.liftNumber,
+      ...(client.liftNumbers || []),
+      ...(client.addresses || []).flatMap((address) =>
+        (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
+      ),
+    ]
+      .filter(Boolean)
+      .map(normalizeMaintenanceAssistantText);
+    const fullText = normalizeMaintenanceAssistantText(
+      [
+        client.name,
+        client.address,
+        ...lifts,
+        ...(client.addresses || []).map((address) => address.label || address.street || ""),
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+    return { client, names, lifts, fullText };
+  });
+  const exact = searchable.filter(
+    (item) => item.names.includes(needle) || item.lifts.includes(needle)
+  );
+  const matches = exact.length > 0
+    ? exact
+    : searchable.filter((item) => item.fullText.includes(needle));
+  return matches.map((item) => item.client);
 }
 
 function getMissingMonthlyReviews(
@@ -444,8 +493,11 @@ export default function MaintenanceWorkspace() {
   const [clientFormVisible, setClientFormVisible] = useState(false);
   const [liveStatsError, setLiveStatsError] = useState("");
   const [lastGeneratedReport, setLastGeneratedReport] = useState<GeneratedReportShare | null>(null);
+  const [assistantReportRequest, setAssistantReportRequest] = useState<AssistantReportRequest | null>(null);
   const assistantReportKeyRef = useRef("");
   const assistantClientFormKeyRef = useRef("");
+  const assistantReportExecutionRef = useRef("");
+  const generateReportRef = useRef<(type: ReportType) => Promise<void>>(async () => undefined);
   const technicianDefaultInitializedRef = useRef(false);
   const gmailSenderEmail = SHARED_MAINTENANCE_GMAIL_SENDER;
   const shouldLoadClients = ["dashboard", "report", "clients", "lifts", "checks"].includes(activeMaintenanceTab);
@@ -693,6 +745,66 @@ export default function MaintenanceWorkspace() {
     return registerAssistantFormDraftAdapter(
       ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT,
       handleAssistantClientFill
+    );
+  }, [assistantParams, location.pathname, navigate]);
+
+  useEffect(() => {
+    const handleAssistantReportFill = (detail: Readonly<Record<string, unknown>>) => {
+      const clientQuery = assistantTextField(detail, ["clientQuery", "client", "name"]);
+      const reportType: ReportType =
+        assistantTextField(detail, ["reportType", "tipRaport"]).toLowerCase() === "interventie"
+          ? "interventie"
+          : "revizie";
+      const observations = assistantTextField(detail, [
+        "observations",
+        "observation",
+        "comments",
+        "observatii",
+      ]);
+      const submitMode = detail.submitMode === "send" ? "send" : "prepare";
+      const waitForPhotos = detail.waitForPhotos === true;
+      const requestId = `assistant-report-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      setActiveMaintenanceTab("report");
+      setReportTypeDraft(reportType);
+      setReportComments(observations);
+      setReportImageFiles([]);
+      setSelectedClientId("");
+      setReportSearch(clientQuery);
+      setReportAddress("");
+      setReportLift("");
+      setReportSuggestionsOpen(false);
+      setReportError("");
+      setReportMessage(
+        submitMode === "send"
+          ? "Comanda a fost confirmata. Verific clientul si datele raportului inainte de trimitere."
+          : waitForPhotos
+            ? "Completez raportul. Ataseaza pozele, apoi apasa Genereaza tipul selectat."
+            : "Completez raportul si il las pregatit pentru verificare."
+      );
+      setAssistantReportRequest({
+        requestId,
+        clientQuery,
+        reportType,
+        observations,
+        submitMode,
+        waitForPhotos,
+      });
+
+      if (location.pathname !== "/maintenance" || assistantParams.get("tab") !== "report") {
+        navigate("/maintenance?tab=report&assistant=report", { replace: true });
+      }
+
+      window.setTimeout(() => {
+        document
+          .getElementById("maintenance-report-form-start")
+          ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      }, 160);
+    };
+
+    return registerAssistantFormDraftAdapter(
+      ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+      handleAssistantReportFill
     );
   }, [assistantParams, location.pathname, navigate]);
 
@@ -1198,6 +1310,54 @@ export default function MaintenanceWorkspace() {
     }
   }, [selectedClient, reportLift, reportLiftOptions]);
 
+  useEffect(() => {
+    if (!assistantReportRequest || assistantReportRequest.resolvedClientId || loading) return;
+
+    const matches = findMaintenanceClientsForAssistant(clients, assistantReportRequest.clientQuery);
+    if (matches.length !== 1) {
+      setSelectedClientId("");
+      setReportSearch(assistantReportRequest.clientQuery);
+      setReportSuggestionsOpen(matches.length > 0);
+      setReportMessage(
+        matches.length > 1
+          ? "Am gasit mai multi clienti. Selecteaza clientul corect; raportul nu a fost trimis."
+          : "Nu am gasit clientul. Verifica numele; raportul nu a fost trimis."
+      );
+      setAssistantReportRequest(null);
+      return;
+    }
+
+    const client = matches[0];
+    setSelectedClientId(client.id);
+    setReportSearch(client.name || client.address || client.liftNumber || "");
+    setReportSuggestionsOpen(false);
+    setReportAddress("");
+    setReportLift("");
+    setReportTypeDraft(assistantReportRequest.reportType);
+    setReportComments(assistantReportRequest.observations);
+    setAssistantReportRequest((current) =>
+      current?.requestId === assistantReportRequest.requestId
+        ? { ...current, resolvedClientId: client.id }
+        : current
+    );
+
+    if (assistantReportRequest.submitMode === "prepare") {
+      setAssistantReportRequest(null);
+      setReportMessage(
+        assistantReportRequest.waitForPhotos
+          ? "Raportul este completat. Ataseaza pozele, verifica datele si apasa Genereaza tipul selectat."
+          : "Raportul este completat. Verifica adresa, liftul si observatiile inainte de trimitere."
+      );
+      window.setTimeout(() => {
+        highlightAssistantElement(
+          assistantReportRequest.waitForPhotos
+            ? "[data-assistant-field='maintenance-report-photos']"
+            : "[data-assistant-action='maintenance-generate-selected-report']"
+        );
+      }, 260);
+    }
+  }, [assistantReportRequest, clients, loading]);
+
   function selectReportClient(client: MaintenanceClient) {
     setSelectedClientId(client.id);
     setReportSearch(client.name || client.address || client.liftNumber || "");
@@ -1438,6 +1598,60 @@ export default function MaintenanceWorkspace() {
       setReportGenerating(false);
     }
   }
+
+  generateReportRef.current = handleGenerateReport;
+
+  useEffect(() => {
+    if (
+      !assistantReportRequest ||
+      assistantReportRequest.submitMode !== "send" ||
+      !assistantReportRequest.resolvedClientId ||
+      assistantReportRequest.resolvedClientId !== selectedClientId ||
+      !selectedClient ||
+      reportGenerating
+    ) {
+      return;
+    }
+
+    if (!reportAddress) {
+      if (reportAddressOptions.length > 1) {
+        setReportMessage("Selecteaza adresa corecta. Raportul nu va fi trimis pana atunci.");
+        highlightAssistantElement("[data-assistant-field='maintenance-report-address']");
+      }
+      return;
+    }
+
+    if (!reportLift) {
+      if (reportLiftOptions.length > 1) {
+        setReportMessage("Selecteaza liftul corect. Raportul nu va fi trimis pana atunci.");
+        highlightAssistantElement("[data-assistant-field='maintenance-report-lift']");
+      }
+      return;
+    }
+
+    if (!selectedTechnician) {
+      setReportMessage("Selecteaza tehnicianul. Raportul nu va fi trimis pana atunci.");
+      highlightAssistantElement("[data-assistant-field='maintenance-report-technician']");
+      return;
+    }
+
+    if (assistantReportExecutionRef.current === assistantReportRequest.requestId) return;
+    assistantReportExecutionRef.current = assistantReportRequest.requestId;
+    const reportType = assistantReportRequest.reportType;
+    setAssistantReportRequest(null);
+    setReportMessage("Datele sunt validate. Generez PDF-ul si trimit emailul...");
+    void generateReportRef.current(reportType);
+  }, [
+    assistantReportRequest,
+    reportAddress,
+    reportAddressOptions.length,
+    reportGenerating,
+    reportLift,
+    reportLiftOptions.length,
+    selectedClient,
+    selectedClientId,
+    selectedTechnician,
+  ]);
 
   function renderMaintenanceNav() {
     return (

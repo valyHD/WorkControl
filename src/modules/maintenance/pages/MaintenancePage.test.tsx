@@ -2,7 +2,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
+import {
+  ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT,
+  ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT,
+} from "../../../lib/assistant/runtime/assistantFormFill";
 import { dispatchAssistantFormDraft } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
 import type { MaintenanceClient } from "../../../types/maintenance";
 import MaintenancePage from "./MaintenancePage";
@@ -123,7 +126,9 @@ describe("MaintenancePage client form", () => {
       dateText: "16.07.2026",
       timeText: "09:00:00",
     });
-    pdfMocks.buildMaintenancePdfBlob.mockResolvedValue(new Blob(["test-pdf"], { type: "application/pdf" }));
+    pdfMocks.buildMaintenancePdfBlob.mockResolvedValue(
+      new Blob(["test-pdf"], { type: "application/pdf" })
+    );
   });
 
   it("uses one bounded overview subscription instead of one listener per client", async () => {
@@ -175,7 +180,9 @@ describe("MaintenancePage client form", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
+    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue(
+      "maintenance-admin-test"
+    );
     expect(usersMocks.getAllUsers).toHaveBeenCalledTimes(1);
   });
 
@@ -199,7 +206,9 @@ describe("MaintenancePage client form", () => {
       </MemoryRouter>
     );
 
-    const selectedTypeButton = await screen.findByRole("button", { name: "Genereaza tipul selectat" });
+    const selectedTypeButton = await screen.findByRole("button", {
+      name: "Genereaza tipul selectat",
+    });
     const reviewButton = screen.getByRole("button", { name: "Genereaza raport revizie" });
     const interventionButton = screen.getByRole("button", { name: "Genereaza raport interventie" });
     const actionGroup = selectedTypeButton.parentElement;
@@ -238,7 +247,9 @@ describe("MaintenancePage client form", () => {
     await user.click(screen.getByRole("button", { name: /Dashboard/ }));
     await user.click(screen.getAllByRole("button", { name: /Genereaza raport/ })[0]);
 
-    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
+    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue(
+      "maintenance-admin-test"
+    );
   });
 
   it("selects the signed-in technician before the user directory finishes loading", async () => {
@@ -261,12 +272,106 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     const user = userEvent.setup();
-    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
 
-    await user.type(await screen.findByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Raport");
+    await user.type(
+      await screen.findByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"),
+      "Client Raport"
+    );
     await user.click(await screen.findByRole("option", { name: /Client Raport Test/ }));
 
     expect(screen.queryByRole("listbox", { name: "Sugestii client" })).not.toBeInTheDocument();
+  });
+
+  it("fills a controlled intervention report and waits for photo upload", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-report-assistant", "Client Raport Asistent")]);
+      return vi.fn();
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "Client Raport Asistent",
+        reportType: "interventie",
+        observations: "Usa nu se inchide",
+        submitMode: "prepare",
+        waitForPhotos: true,
+      });
+    });
+
+    expect(await screen.findByDisplayValue("Client Raport Asistent")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-assistant-field='maintenance-report-type']")
+      ).toHaveValue("interventie")
+    );
+    expect(await screen.findByDisplayValue("Usa nu se inchide")).toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Sugestii client" })).not.toBeInTheDocument();
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(highlighterMocks.highlightAssistantElement).toHaveBeenCalledWith(
+        "[data-assistant-field='maintenance-report-photos']"
+      )
+    );
+  });
+
+  it("auto-sends a validated report request received after assistant confirmation", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-report-send", "Client Raport Send")]);
+      return vi.fn();
+    });
+    maintenanceMocks.saveMaintenanceReportHistory.mockResolvedValue({
+      id: "report-assistant-send",
+      companyId: "company-test",
+      clientId: "client-report-send",
+      clientName: "Client Raport Send",
+      reportType: "revizie",
+      address: "Strada Test 10",
+      lift: "LIFT-10",
+      technicianName: "Admin Test",
+      comments: "",
+      pdfUrl: "https://storage.example.test/report.pdf",
+      pdfPath: "maintenance-reports/client-report-send/report.pdf",
+      images: [],
+      fileName: "report.pdf",
+      createdAt: 0,
+      dateText: "16.07.2026",
+      timeText: "09:00:00",
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "Client Raport Send",
+        reportType: "revizie",
+        observations: "",
+        submitMode: "send",
+        waitForPhotos: false,
+      });
+    });
+
+    await waitFor(() =>
+      expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledTimes(1)
+    );
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-report-send",
+        recipientEmail: "client@example.test",
+      })
+    );
   });
 
   it("sends the Gmail report directly with the generated PDF attached", async () => {
@@ -275,27 +380,40 @@ describe("MaintenancePage client form", () => {
       return vi.fn();
     });
     const user = userEvent.setup();
-    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
 
-    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Gmail");
+    await user.type(
+      screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"),
+      "Client Gmail"
+    );
     await user.click(await screen.findByRole("option", { name: /Client Gmail Test/ }));
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
+      expect(screen.getByRole("combobox", { name: "Tehnician" })).toHaveValue(
+        "maintenance-admin-test"
+      );
       expect(screen.getByDisplayValue("Strada Test 10")).toBeInTheDocument();
       expect(screen.getByDisplayValue("LIFT-10")).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
 
     await waitFor(() => {
-      expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(expect.objectContaining({
-        companyId: "company-test",
-        clientId: "client-gmail-test",
-        recipientEmail: "client@example.test",
-        pdfPath: "maintenance-reports/client-gmail-test/report.pdf",
-        fileName: "report.pdf",
-      }));
+      expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          companyId: "company-test",
+          clientId: "client-gmail-test",
+          recipientEmail: "client@example.test",
+          pdfPath: "maintenance-reports/client-gmail-test/report.pdf",
+          fileName: "report.pdf",
+        })
+      );
     });
-    expect(await screen.findByText(/Raportul revizie a fost trimis catre client@example\.test/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Raportul revizie a fost trimis catre client@example\.test/)
+    ).toBeInTheDocument();
   });
 
   it("replaces the progress message with the Gmail error when direct sending fails", async () => {
@@ -303,11 +421,20 @@ describe("MaintenancePage client form", () => {
       onData([createMaintenanceClientTest("client-gmail-error", "Client Gmail Error")]);
       return vi.fn();
     });
-    gmailMocks.sendSharedMaintenanceGmailReport.mockRejectedValueOnce(new Error("Gmail indisponibil"));
+    gmailMocks.sendSharedMaintenanceGmailReport.mockRejectedValueOnce(
+      new Error("Gmail indisponibil")
+    );
     const user = userEvent.setup();
-    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
 
-    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Gmail Error");
+    await user.type(
+      screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"),
+      "Client Gmail Error"
+    );
     await user.click(await screen.findByRole("option", { name: /Client Gmail Error/ }));
     await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
 

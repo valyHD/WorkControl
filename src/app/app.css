@@ -6433,7 +6433,6 @@ li,
   height: 52px;
   display: block;
   pointer-events: none;
-  transform: translateZ(0);
 }
 
 .floating-quick-links {

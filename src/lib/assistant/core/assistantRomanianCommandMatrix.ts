@@ -751,18 +751,22 @@ export const ASSISTANT_ROMANIAN_COMMAND_MATRIX: readonly AssistantRomanianComman
     ["maintenance.draft"],
     ["multi_step"]
   ),
-  navigation(
+  confirmation(
     88,
     "maintenance_lifts_reports",
     "Genereaza raportul de revizie pentru Isomat",
+    "form_fill",
     "open_maintenance_report",
+    ["maintenance.report.prepare"],
     ["standard"]
   ),
-  navigation(
+  confirmation(
     89,
     "maintenance_lifts_reports",
     "Pregateste raport de interventie pentru liftul 210869",
+    "form_fill",
     "open_maintenance_report",
+    ["maintenance.report.prepare"],
     ["standard"]
   ),
   navigation(
@@ -788,7 +792,7 @@ export const ASSISTANT_ROMANIAN_COMMAND_MATRIX: readonly AssistantRomanianComman
     93,
     "maintenance_lifts_reports",
     "Genereaza raportul de revizie",
-    "navigation",
+    "form_fill",
     "open_maintenance_report",
     ["maintenanceClient"],
     ["incomplete"]

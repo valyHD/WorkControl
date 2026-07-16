@@ -1,0 +1,152 @@
+import type { AssistantV3Contract } from "./assistantV3Types";
+
+export type AssistantMaintenanceReportFields = {
+  clientQuery: string;
+  reportType: "revizie" | "interventie";
+  observations: string;
+  submitMode: "prepare" | "send";
+  waitForPhotos: boolean;
+};
+
+function normalizeForMatching(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanExtractedValue(value: string) {
+  return value
+    .replace(/^[\s,.:;-]+|[\s,.:;-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sliceUntilCommandMarker(original: string, normalized: string) {
+  const stopPatterns = [
+    /\s+(?:si\s+)?cu\s+(?:observatia|observatie|mentiunea|comentariul|comentariu)\b/,
+    /\s+(?:si\s+)?(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/,
+    /\s+(?:si\s+)?(?:asteapta|apoi)\b/,
+  ];
+  const indexes = stopPatterns
+    .map((pattern) => normalized.search(pattern))
+    .filter((index) => index >= 0);
+  const end = indexes.length > 0 ? Math.min(...indexes) : original.length;
+  return cleanExtractedValue(original.slice(0, end));
+}
+
+function extractClientQuery(command: string, normalized: string) {
+  const clientMarker = /\bclient(?:ului|ul|u)?\s+/.exec(normalized);
+  if (clientMarker?.index !== undefined) {
+    const start = clientMarker.index + clientMarker[0].length;
+    return sliceUntilCommandMarker(command.slice(start), normalized.slice(start));
+  }
+
+  const forMarker = /\bpentru\s+/.exec(normalized);
+  if (forMarker?.index !== undefined) {
+    const start = forMarker.index + forMarker[0].length;
+    return sliceUntilCommandMarker(command.slice(start), normalized.slice(start)).replace(
+      /^(?:client(?:ului|ul|u)?|lift(?:ul)?)\s+/i,
+      ""
+    );
+  }
+
+  return "";
+}
+
+function extractObservations(command: string, normalized: string) {
+  const marker =
+    /\b(?:cu\s+)?(?:observatia|observatie|mentiunea|comentariul|comentariu)\s*[:;-]?\s*/.exec(
+      normalized
+    );
+  if (marker?.index === undefined) return "";
+  const start = marker.index + marker[0].length;
+  const originalTail = command.slice(start);
+  const normalizedTail = normalized.slice(start);
+  const stopPatterns = [
+    /\s+(?:si\s+)?(?:asteapta|trimite(?:-l)?|trimita|expediaza|transmite)\b/,
+    /\s+apoi\s+(?:dau|apas|trimit)\b/,
+  ];
+  const indexes = stopPatterns
+    .map((pattern) => normalizedTail.search(pattern))
+    .filter((index) => index >= 0);
+  const end = indexes.length > 0 ? Math.min(...indexes) : originalTail.length;
+  return cleanExtractedValue(originalTail.slice(0, end));
+}
+
+export function buildLocalMaintenanceReportContract(command: string): AssistantV3Contract | null {
+  const cleanCommand = command.replace(/\s+/g, " ").trim();
+  const normalized = normalizeForMatching(cleanCommand);
+  const isReportCommand =
+    /\braport(?:ul)?\b/.test(normalized) &&
+    /\b(?:genereaza|creeaza|pregateste|fa|trimite|expediaza)\b/.test(normalized);
+  const reportType = /\binterventi(?:e|a)\b/.test(normalized)
+    ? "interventie"
+    : /\brevizi(?:e|a)\b/.test(normalized)
+      ? "revizie"
+      : null;
+
+  if (!isReportCommand || !reportType) return null;
+
+  const clientQuery = extractClientQuery(cleanCommand, normalized);
+  const observations = extractObservations(cleanCommand, normalized);
+  const waitsForUpload =
+    (normalized.includes("asteapta") || normalized.includes("astept")) &&
+    ["atasez", "incarc", "pun", "adaug"].some((verb) => normalized.includes(verb)) &&
+    ["poze", "fotografii"].some((noun) => normalized.includes(noun));
+  const waitForPhotos =
+    waitsForUpload || /\b(?:dau|apas|trimit)\s+eu\b[^.]{0,40}\b(?:send|trimite)\b/.test(normalized);
+  const explicitSend =
+    !waitForPhotos && /\b(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/.test(normalized);
+  const submitMode = explicitSend ? "send" : "prepare";
+  const targetPage = "/maintenance?tab=report&assistant=report";
+
+  if (!clientQuery) {
+    return {
+      version: "3",
+      commandType: "form_fill",
+      intent: "open_maintenance_report",
+      toolCalls: [],
+      targetPage,
+      entityReferences: [],
+      missingInformation: ["clientul de mentenanta"],
+      confidence: 0.5,
+      confirmationRequired: false,
+      response: "Pentru ce client pregatesc raportul?",
+    };
+  }
+
+  const fields: AssistantMaintenanceReportFields = {
+    clientQuery,
+    reportType,
+    observations,
+    submitMode,
+    waitForPhotos,
+  };
+  const reportLabel = reportType === "interventie" ? "interventie" : "revizie";
+
+  return {
+    version: "3",
+    commandType: "form_fill",
+    intent: "open_maintenance_report",
+    toolCalls: [
+      {
+        id: submitMode === "send" ? "maintenance.report.send" : "maintenance.report.prepare",
+        input: { fields },
+      },
+    ],
+    targetPage,
+    entityReferences: [{ type: "maintenanceClient", query: clientQuery, id: "" }],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: true,
+    response:
+      submitMode === "send"
+        ? `Voi genera raportul de ${reportLabel} pentru ${clientQuery} si il voi trimite automat. Confirma trimiterea.`
+        : waitForPhotos
+          ? `Deschid raportul de ${reportLabel} pentru ${clientQuery}, completez datele si astept sa atasezi pozele.`
+          : `Deschid si completez raportul de ${reportLabel} pentru ${clientQuery}. Confirma pregatirea draftului.`,
+  };
+}

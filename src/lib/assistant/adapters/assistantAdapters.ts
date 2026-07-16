@@ -13,6 +13,8 @@ import {
   createExpenseDraftTool,
   createLeaveDraftTool,
   createMaintenanceDraftTool,
+  createMaintenanceReportPrepareTool,
+  createMaintenanceReportSendTool,
   createProjectDraftTool,
   createToolDraftTool,
   createUserDraftTool,
@@ -76,9 +78,11 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
     },
     {
       module: "maintenance",
-      toolIds: ["maintenance.draft"],
+      toolIds: ["maintenance.draft", "maintenance.report.prepare", "maintenance.report.send"],
       register: (registry) => {
         registry.register(createMaintenanceDraftTool());
+        registry.register(createMaintenanceReportPrepareTool());
+        registry.register(createMaintenanceReportSendTool());
       },
     },
     {

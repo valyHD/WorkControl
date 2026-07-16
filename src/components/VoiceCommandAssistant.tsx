@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Mic } from "lucide-react";
+import { Bot } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../providers/AuthProvider";
 import { interpretAssistantCommand } from "../lib/assistant/assistantCommandService";
@@ -252,7 +252,11 @@ export default function VoiceCommandAssistant() {
         setChoices([]);
         setUiState("idle");
         addHistory({ transcript: command, message: outcome.message, status: "success" });
-        if (outcome.contract?.toolCalls.some((call) => call.id.startsWith("navigation.")))
+        if (
+          outcome.contract?.toolCalls.some(
+            (call) => call.id.startsWith("navigation.") || call.id.startsWith("maintenance.report.")
+          )
+        )
           setOpen(false);
         return;
       }
@@ -478,23 +482,11 @@ export default function VoiceCommandAssistant() {
       {!open ? (
         <button
           type="button"
-          className="voice-assistant__fab voice-assistant__hold-target"
-          aria-label="Tine apasat pentru comanda vocala"
-          onPointerDown={(event) => {
-            event.preventDefault();
-            startListening();
-          }}
-          onPointerUp={(event) => {
-            event.preventDefault();
-            finishListening();
-          }}
-          onPointerCancel={() => {
-            speech.cancel();
-            audioCapture.cancel();
-          }}
+          className="voice-assistant__fab"
+          aria-label="Deschide asistentul vocal"
           onClick={() => setOpen(true)}
         >
-          {speech.status === "listening" ? <Mic size={22} /> : <Bot size={22} />}
+          <Bot size={22} />
         </button>
       ) : null}
 

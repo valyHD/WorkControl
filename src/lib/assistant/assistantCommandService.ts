@@ -1,6 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase/firebase";
 import type { AssistantCommandType } from "./runtime/assistantClassifier";
+import { buildLocalMaintenanceReportContract } from "./core/assistantMaintenanceReportCommand";
 import {
   normalizeAndValidateAssistantV3Contract,
   sanitizeAssistantV3PageContext,
@@ -158,6 +159,52 @@ export async function interpretAssistantCommand(
 ): Promise<AssistantCommandInterpretationV3 | null> {
   const cleanCommand = command.trim();
   if (!cleanCommand) return null;
+
+  const localMaintenanceReport = buildLocalMaintenanceReportContract(cleanCommand);
+  if (localMaintenanceReport) {
+    const localFields =
+      localMaintenanceReport.toolCalls[0]?.input.fields &&
+      typeof localMaintenanceReport.toolCalls[0].input.fields === "object" &&
+      !Array.isArray(localMaintenanceReport.toolCalls[0].input.fields)
+        ? (localMaintenanceReport.toolCalls[0].input.fields as Record<
+            string,
+            AssistantCommandFieldValue
+          >)
+        : {};
+    const clientQuery = String(localFields.clientQuery || "");
+    const reportType =
+      localFields.reportType === "interventie"
+        ? "interventie"
+        : localFields.reportType === "revizie"
+          ? "revizie"
+          : "";
+
+    return {
+      ...localMaintenanceReport,
+      entityType: clientQuery ? "maintenanceClient" : "none",
+      entityQuery: clientQuery,
+      fields: localFields,
+      fieldsToUpdate: localFields,
+      shouldNavigate: true,
+      shouldFillForm: true,
+      shouldUpdateFirestore: false,
+      targetText: clientQuery,
+      pageHint: localMaintenanceReport.targetPage,
+      buttonHint: "maintenance-generate-selected-report",
+      missingFields: localMaintenanceReport.missingInformation,
+      risk:
+        localFields.submitMode === "send"
+          ? "high"
+          : localMaintenanceReport.confirmationRequired
+            ? "medium"
+            : "low",
+      needsConfirmation: localMaintenanceReport.confirmationRequired,
+      spokenSummary: localMaintenanceReport.response,
+      reportType,
+      startDate: "",
+      endDate: "",
+    };
+  }
 
   const safeContext = sanitizeAssistantV3PageContext(context);
   const interpretCommand = httpsCallable<
