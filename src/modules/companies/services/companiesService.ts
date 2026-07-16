@@ -6,6 +6,7 @@ import {
   deleteField,
   doc,
   getDocs,
+  limit,
   orderBy,
   query,
   serverTimestamp,
@@ -19,6 +20,7 @@ import {
   buildCompanyScopeConstraints,
   getCurrentCompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import type {
   CompanyFormValues,
   CompanyItem,
@@ -43,6 +45,18 @@ const expenseDocumentsCollection = collection(db, "expenseDocuments");
 const usersCollection = collection(db, "users");
 const leaveRequestsCollection = collection(db, "leaveRequests");
 const FIRESTORE_BATCH_LIMIT = 450;
+
+export const COMPANY_DIRECTORY_QUERY_LIMITS = {
+  companies: 100,
+  users: 150,
+  expenses: 200,
+  maintenanceClients: 250,
+  tools: 150,
+  vehicles: 150,
+  timesheets: 120,
+  leaveRequests: 120,
+  maintenanceReports: 80,
+} as const;
 
 function toText(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
@@ -98,13 +112,16 @@ function mapCompanyDoc(id: string, data: Record<string, unknown>): CompanyItem {
   };
 }
 
-export async function getCompaniesList(): Promise<CompanyItem[]> {
+export async function getCompaniesList(maxItems?: number): Promise<CompanyItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const snap = await getDocs(query(
-    companiesCollection,
+  const constraints = [
     ...buildCompanyScopeConstraints(context),
-    orderBy("companyName", "asc")
-  ));
+    orderBy("companyName", "asc"),
+  ];
+  if (Number.isFinite(maxItems)) {
+    constraints.push(limit(clampQueryLimit(maxItems, COMPANY_DIRECTORY_QUERY_LIMITS.companies, 250)));
+  }
+  const snap = await getDocs(query(companiesCollection, ...constraints));
   return snap.docs
     .map((docItem) => mapCompanyDoc(docItem.id, docItem.data() as Record<string, unknown>))
     .filter((item) => item.companyName);
@@ -302,7 +319,7 @@ export async function getCompanyDirectoryData(): Promise<{
 }> {
   const context = await getCurrentCompanyAccessContext();
   const scope = buildCompanyScopeConstraints(context);
-  const companies = await getCompaniesList();
+  const companies = await getCompaniesList(COMPANY_DIRECTORY_QUERY_LIMITS.companies);
   const [
     users,
     expenses,
@@ -313,25 +330,28 @@ export async function getCompanyDirectoryData(): Promise<{
     leaveSnap,
     reportsSnap,
   ] = await Promise.all([
-    optionalLoad("users", getExpenseUsers, []),
-    optionalLoad("expenses", getExpenseDocuments, []),
+    optionalLoad("users", () => getExpenseUsers(COMPANY_DIRECTORY_QUERY_LIMITS.users), []),
+    optionalLoad("expenses", () => getExpenseDocuments(COMPANY_DIRECTORY_QUERY_LIMITS.expenses), []),
     optionalLoad("maintenance clients", () => getDocs(query(
       maintenanceClientsCollection,
       ...scope,
-      orderBy("name", "asc")
+      orderBy("name", "asc"),
+      limit(COMPANY_DIRECTORY_QUERY_LIMITS.maintenanceClients)
     )), null),
-    optionalLoad("tools", getToolsList, []),
-    optionalLoad("vehicles", getVehiclesList, []),
-    optionalLoad("timesheets", getTimesheetsList, []),
+    optionalLoad("tools", () => getToolsList(COMPANY_DIRECTORY_QUERY_LIMITS.tools), []),
+    optionalLoad("vehicles", () => getVehiclesList(COMPANY_DIRECTORY_QUERY_LIMITS.vehicles), []),
+    optionalLoad("timesheets", () => getTimesheetsList(COMPANY_DIRECTORY_QUERY_LIMITS.timesheets), []),
     optionalLoad("leave requests", () => getDocs(query(
       leaveRequestsCollection,
       ...scope,
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(COMPANY_DIRECTORY_QUERY_LIMITS.leaveRequests)
     )), null),
     optionalLoad("maintenance reports", () => getDocs(query(
       collectionGroup(db, "rapoarte"),
       ...scope,
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(COMPANY_DIRECTORY_QUERY_LIMITS.maintenanceReports)
     )), null),
   ]);
 

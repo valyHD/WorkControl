@@ -21,6 +21,7 @@ import {
   getCurrentCompanyAccessContext,
   requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
+import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import type {
   ProjectFormValues,
   ProjectItem,
@@ -482,13 +483,15 @@ export async function stopTimesheet(params: {
   notifyTimesheetsChanged({ userId: String(data.userId ?? ""), reason: "stop" });
 }
 
-export async function getTimesheetsList(): Promise<TimesheetItem[]> {
+export async function getTimesheetsList(maxItems = 250): Promise<TimesheetItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const safeLimit = clampQueryLimit(maxItems, 250, 250);
   const snap = await getDocs(
     query(
       timesheetsCollection,
       ...buildCompanyScopeConstraints(context),
-      orderBy("startAt", "desc")
+      orderBy("startAt", "desc"),
+      limit(safeLimit)
     )
   );
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));

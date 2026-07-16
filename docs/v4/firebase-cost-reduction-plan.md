@@ -275,3 +275,16 @@ costul.
 - costul Cloud Billing și estimarea din Control Panel sunt reconciliate zilnic;
 - regression screenshots și teste GPS trec;
 - `GPS_FUNCTIONAL_DIFF_ZERO` confirmat.
+
+## 11. Implementare 2026-07-16 - pasul 5
+
+- `getTimesheetsList` nu mai executa query neboundat; are limita maxima 250 pentru
+  snapshot-uri si overview-uri vechi.
+- Directorul operational de companii incarca listele auxiliare cu bugete explicite:
+  utilizatori 150, bonuri 200, clienti mentenanta 250, scule 150, masini 150,
+  pontaje 120, concedii 120 si rapoarte mentenanta 80.
+- Listele de utilizatori folosite de bonuri si scule au acum limita implicita 150 si maxim
+  250, pe `userOperationalViews` cand rollout-ul de izolare este activ.
+- Nu s-au modificat harta GPS, simularea, gateway-ul sau filtrarea jitter.
+- Ramane pentru increment separat: paginare cu cursor in UI pentru Companii, Bonuri si
+  Scule, astfel incat listele foarte mari sa poata fi parcurse complet fara query-uri mari.

@@ -157,15 +157,17 @@ currentHolderThemeKey: data.currentHolderThemeKey ?? null,
   };
 }
 
-export async function getUsersList(): Promise<AppUser[]> {
+export async function getUsersList(maxItems = 150): Promise<AppUser[]> {
   const context = await getCurrentCompanyAccessContext();
+  const safeLimit = clampQueryLimit(maxItems, 150, 250);
   const source = getUserDirectoryCollectionName() === "userOperationalViews"
     ? userOperationalViewsCollection
     : usersCollection;
   const snap = await getDocs(query(
     source,
     ...buildUserDirectoryConstraints(context),
-    orderBy("fullName", "asc")
+    orderBy("fullName", "asc"),
+    limit(safeLimit)
   ));
   const users = new Map<string, AppUser>();
   snap.docs.forEach((docItem) => {
