@@ -452,6 +452,7 @@ export default function MaintenanceWorkspace() {
   const [brandingMessage, setBrandingMessage] = useState("");
   const [brandingError, setBrandingError] = useState("");
   const [reportSearch, setReportSearch] = useState("");
+  const [reportSuggestionsOpen, setReportSuggestionsOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [reportAddress, setReportAddress] = useState("");
   const [reportLift, setReportLift] = useState("");
@@ -496,6 +497,16 @@ export default function MaintenanceWorkspace() {
   const currentTechnicianName = (user?.displayName || user?.email || "Utilizator").trim();
   const currentTechnicianEmail = user?.email || "";
   const currentTechnicianRole: UserRole = role === "admin" || role === "manager" ? role : "angajat";
+
+  useEffect(() => {
+    if (!shouldLoadTechnicians || !currentTechnicianId || technicianDefaultInitializedRef.current) {
+      return;
+    }
+
+    setSelectedTechnicianId(currentTechnicianId);
+    setTechnicianSearch(currentTechnicianName);
+    technicianDefaultInitializedRef.current = true;
+  }, [currentTechnicianId, currentTechnicianName, shouldLoadTechnicians]);
 
   useEffect(() => {
     if (!shouldLoadClients) {
@@ -587,16 +598,6 @@ export default function MaintenanceWorkspace() {
           availableTechnicians.unshift(currentTechnician);
         }
         setTechnicians(availableTechnicians);
-        if (!technicianDefaultInitializedRef.current && currentTechnician) {
-          const defaultTechnician = availableTechnicians.find(
-            (item) => item.id === currentTechnician.id || item.uid === currentTechnician.uid
-          );
-          if (defaultTechnician) {
-            setSelectedTechnicianId(defaultTechnician.id);
-            setTechnicianSearch(defaultTechnician.fullName);
-            technicianDefaultInitializedRef.current = true;
-          }
-        }
       })
       .catch((err) => {
         console.error(err);
@@ -1288,6 +1289,7 @@ export default function MaintenanceWorkspace() {
   function selectReportClient(client: MaintenanceClient) {
     setSelectedClientId(client.id);
     setReportSearch(client.name || client.address || client.liftNumber || "");
+    setReportSuggestionsOpen(false);
     setReportAddress("");
     setReportLift("");
     setReportComments("");
@@ -1303,6 +1305,7 @@ export default function MaintenanceWorkspace() {
       setReportLift("");
     }
     setReportSearch(nextValue);
+    setReportSuggestionsOpen(nextValue.trim().length >= 2);
     setReportMessage("");
     setReportError("");
   }
@@ -1843,9 +1846,15 @@ export default function MaintenanceWorkspace() {
                 data-assistant-field="maintenance-report-client"
                 value={reportSearch}
                 onChange={handleReportSearchChange}
+                onFocus={() => setReportSuggestionsOpen(!selectedClient && reportSearch.trim().length >= 2)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    setReportSuggestionsOpen(false);
+                  }
+                }}
                 placeholder="Ex: Razvan / Aurel Vlaicu / 210869"
               />
-              {!selectedClient && reportSuggestions.length > 0 && reportSearch.trim().length >= 2 && (
+              {reportSuggestionsOpen && !selectedClient && reportSuggestions.length > 0 && reportSearch.trim().length >= 2 && (
                 <div className="maintenance-suggestion-list" role="listbox" aria-label="Sugestii client">
                   {reportSuggestions.map((client) => (
                     <button key={`report_suggestion_${client.id}`} type="button" role="option" aria-selected="false" onClick={() => selectReportClient(client)}>

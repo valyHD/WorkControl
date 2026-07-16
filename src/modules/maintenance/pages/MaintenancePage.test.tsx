@@ -270,6 +270,20 @@ describe("MaintenancePage client form", () => {
     expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
   });
 
+  it("selects the signed-in technician before the user directory finishes loading", async () => {
+    usersMocks.getAllUsers.mockReturnValue(new Promise(() => undefined));
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    const technicianSelect = await screen.findByRole("combobox", { name: "Tehnician" });
+    expect(technicianSelect).toHaveValue("maintenance-admin-test");
+    expect(screen.getByRole("option", { name: "Admin Test - admin@example.test" })).toBeInTheDocument();
+  });
+
   it("closes client suggestions immediately after the client is selected", async () => {
     maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
       onData([createMaintenanceClientTest("client-report-test", "Client Raport Test")]);
