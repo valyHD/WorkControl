@@ -384,15 +384,6 @@
       "density": "SPARSE_ALL"
     },
     {
-      "collectionGroup": "rapoarte",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" },
-        { "fieldPath": "__name__", "order": "DESCENDING" }
-      ],
-      "density": "SPARSE_ALL"
-    },
-    {
       "collectionGroup": "auditLogs",
       "queryScope": "COLLECTION",
       "fields": [
@@ -574,6 +565,29 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "rapoarte",
+      "fieldPath": "createdAt",
+      "ttl": false,
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
     {
       "collectionGroup": "commands",
       "fieldPath": "status",
