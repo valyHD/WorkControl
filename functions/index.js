@@ -58,6 +58,15 @@ const {
   scheduleToRule,
 } = require('./timesheetReminderSchedules');
 const {
+  PART_ORDER_REMINDER_WORKER,
+  buildPartOrderReminderSchedules,
+  buildPartOrderScheduleAdvancePatch,
+  buildPartOrderScheduleSyncPlan,
+  buildPartOrderScheduleTerminalPatch,
+  getPartOrderReminderNextRunAt,
+  normalizePartOrder,
+} = require('./partOrderReminderSchedules');
+const {
   EXPENSE_DOCUMENT_CACHE_SCHEMA_VERSION,
   EXPENSE_DOCUMENT_EXTRACTION_VERSION,
   buildExpenseDocumentCacheId,
@@ -314,6 +323,42 @@ exports.syncNotificationRuleSchedules = onDocumentWritten(
 
     logger.info('Programari remindere pontaj sincronizate.', {
       ruleId,
+      operations: plan.length,
+    });
+  }
+);
+
+exports.syncMaintenancePartOrderReminderSchedule = onDocumentWritten(
+  {
+    document: 'maintenancePartOrders/{orderId}',
+    region: 'europe-west1',
+  },
+  async (event) => {
+    const orderId = event.params.orderId;
+    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : null;
+    const afterData = event.data?.after?.exists ? event.data.after.data() || {} : null;
+    const sourceUpdatedAtMs =
+      event.data?.after?.updateTime?.toMillis?.() ||
+      Date.parse(event.time || '') ||
+      Date.now();
+    const plan = buildPartOrderScheduleSyncPlan(orderId, beforeData, afterData);
+
+    await Promise.all(plan.map((operation) => {
+      const scheduleRef = db.collection('notificationSchedules').doc(operation.id);
+      if (operation.type === 'delete') {
+        return scheduleRef.delete().catch(() => undefined);
+      }
+      return scheduleRef.set({
+        ...operation.value,
+        createdAt: sourceUpdatedAtMs,
+        createdAtServer: FieldValue.serverTimestamp(),
+        updatedAt: sourceUpdatedAtMs,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false });
+    }));
+
+    logger.info('Programare reminder comanda piese sincronizata.', {
+      orderId,
       operations: plan.length,
     });
   }
@@ -3370,6 +3415,8 @@ exports.checkTimesheetReminderAlerts = onSchedule(
 const VEHICLE_ALERT_WORKER_BATCH_SIZE = 40;
 const VEHICLE_ALERT_LEASE_MS = 2 * 60 * 1000;
 const VEHICLE_ALERT_RETRY_MS = 15 * 60 * 1000;
+const PART_ORDER_REMINDER_BATCH_SIZE = 40;
+const PART_ORDER_REMINDER_LEGACY_FALLBACK_SIZE = 20;
 
 async function claimVehicleAlertSchedule(scheduleRef, workerId, now) {
   return db.runTransaction(async (transaction) => {
@@ -3534,6 +3581,147 @@ function getPartOrderLabel(order, orderId) {
   );
 }
 
+function userCanReceivePartOrderReminder(user, companyId) {
+  const userCompanyIds = Array.isArray(user?.companyIds) ? user.companyIds : [];
+  return userCompanyIds.includes(companyId) || toSafeString(user?.primaryCompanyId) === companyId;
+}
+
+async function deliverPartOrderReminderTransaction(orderRef, orderId, now, scheduleContext = null) {
+  let outcome = { status: 'skipped', recipientCount: 0, nextRunAt: null, intervalMinutes: 0 };
+
+  await db.runTransaction(async (tx) => {
+    let scheduleDoc = null;
+    if (scheduleContext?.scheduleRef) {
+      scheduleDoc = await tx.get(scheduleContext.scheduleRef);
+      const currentSchedule = scheduleDoc.exists ? scheduleDoc.data() || {} : {};
+      if (
+        !scheduleDoc.exists ||
+        toSafeString(currentSchedule.leaseOwner) !== scheduleContext.workerId ||
+        toSafeString(currentSchedule.sourceRevision) !== toSafeString(scheduleContext.claimed?.sourceRevision)
+      ) {
+        outcome = { status: 'schedule_lost', recipientCount: 0, nextRunAt: null, intervalMinutes: 0 };
+        return;
+      }
+    }
+
+    const freshOrderDoc = await tx.get(orderRef);
+    if (!freshOrderDoc.exists) {
+      outcome = { status: 'invalid', recipientCount: 0, nextRunAt: null, intervalMinutes: 0, errorCode: 'missing_order' };
+      if (scheduleContext?.scheduleRef) {
+        tx.update(scheduleContext.scheduleRef, {
+          ...buildPartOrderScheduleTerminalPatch('missing_order'),
+          updatedAt: now,
+          updatedAtServer: FieldValue.serverTimestamp(),
+        });
+      }
+      return;
+    }
+
+    const order = normalizePartOrder(orderId, freshOrderDoc.data() || {});
+    if (
+      !order.companyId ||
+      !order.notifyUserId ||
+      order.notificationSeenAt > 0 ||
+      ['installed', 'cancelled'].includes(order.status) ||
+      order.nextReminderAt <= 0
+    ) {
+      outcome = { status: 'completed', recipientCount: 0, nextRunAt: null, intervalMinutes: 0 };
+      if (scheduleContext?.scheduleRef) {
+        tx.update(scheduleContext.scheduleRef, {
+          ...buildPartOrderScheduleTerminalPatch(),
+          updatedAt: now,
+          updatedAtServer: FieldValue.serverTimestamp(),
+        });
+      }
+      return;
+    }
+    if (order.nextReminderAt > now) {
+      outcome = {
+        status: 'rescheduled',
+        recipientCount: 0,
+        nextRunAt: order.nextReminderAt,
+        intervalMinutes: order.reminderIntervalMinutes,
+      };
+      if (scheduleContext?.scheduleRef) {
+        tx.update(scheduleContext.scheduleRef, {
+          status: 'scheduled',
+          nextRunAt: order.nextReminderAt,
+          leaseUntil: 0,
+          leaseOwner: '',
+          lastErrorCode: '',
+          updatedAt: now,
+          updatedAtServer: FieldValue.serverTimestamp(),
+        });
+      }
+      return;
+    }
+
+    const userDoc = await tx.get(db.collection('users').doc(order.notifyUserId));
+    const user = userDoc.exists ? userDoc.data() || {} : {};
+    if (!userDoc.exists || !userCanReceivePartOrderReminder(user, order.companyId)) {
+      outcome = { status: 'invalid', recipientCount: 0, nextRunAt: null, intervalMinutes: 0, errorCode: 'invalid_recipient' };
+      if (scheduleContext?.scheduleRef) {
+        tx.update(scheduleContext.scheduleRef, {
+          ...buildPartOrderScheduleTerminalPatch('invalid_recipient'),
+          updatedAt: now,
+          updatedAtServer: FieldValue.serverTimestamp(),
+        });
+      }
+      return;
+    }
+
+    const title = 'Comanda piese asteapta confirmare';
+    const label = getPartOrderLabel(order, orderId);
+    const message = `${order.requestedByUserName || 'Un utilizator'} a creat comanda ${label}. Bifeaza Am vazut dupa ce o verifici.`;
+    const nextRunAt = getPartOrderReminderNextRunAt(order, now);
+    const notificationRef = db.collection('notifications').doc();
+
+    tx.set(notificationRef, {
+      companyId: order.companyId,
+      userId: order.notifyUserId,
+      targetUserThemeKey: user.themeKey || null,
+      actorUserId: order.requestedByUserId,
+      actorUserName: order.requestedByUserName || 'WorkControl',
+      actorUserThemeKey: null,
+      title,
+      message,
+      module: 'maintenance',
+      eventType: 'maintenance_part_order_created',
+      entityId: orderId,
+      notificationPath: '/maintenance/orders',
+      soundEnabled: true,
+      read: false,
+      createdAt: now,
+      createdAtServer: FieldValue.serverTimestamp(),
+    });
+
+    tx.update(orderRef, {
+      lastReminderAt: now,
+      nextReminderAt: nextRunAt,
+      updatedAt: now,
+      updatedAtServer: FieldValue.serverTimestamp(),
+    });
+
+    if (scheduleContext?.scheduleRef) {
+      tx.update(scheduleContext.scheduleRef, {
+        ...buildPartOrderScheduleAdvancePatch(order, now),
+        lastRecipientCount: 1,
+        updatedAt: now,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
+    }
+
+    outcome = {
+      status: 'delivered',
+      recipientCount: 1,
+      nextRunAt,
+      intervalMinutes: order.reminderIntervalMinutes,
+    };
+  });
+
+  return outcome;
+}
+
 exports.checkMaintenancePartOrderReminders = onSchedule(
   {
     schedule: '*/5 5-21 * * *',
@@ -3542,96 +3730,119 @@ exports.checkMaintenancePartOrderReminders = onSchedule(
   },
   async () => {
     const now = Date.now();
-    const snap = await db
-      .collection('maintenancePartOrders')
-      .where('nextReminderAt', '<=', now)
-      .limit(80)
+    const workerId = `part-order-reminder-${now}-${stableHash(String(Math.random()), 8)}`;
+    const dueSchedules = await db.collection('notificationSchedules')
+      .where('workerType', '==', PART_ORDER_REMINDER_WORKER)
+      .where('status', '==', 'scheduled')
+      .where('nextRunAt', '<=', now)
+      .orderBy('nextRunAt', 'asc')
+      .limit(PART_ORDER_REMINDER_BATCH_SIZE)
       .get();
-
+    const processedOrderIds = new Set();
     let createdCount = 0;
     let skippedCount = 0;
+    let claimedCount = 0;
+    let failedCount = 0;
+    let legacyFallbackChecked = 0;
 
-    for (const orderDoc of snap.docs) {
-      const orderId = orderDoc.id;
-
+    for (const scheduleDoc of dueSchedules.docs) {
+      const scheduleRef = scheduleDoc.ref;
+      let claimed = null;
       try {
-        await db.runTransaction(async (tx) => {
-          const freshOrderDoc = await tx.get(orderDoc.ref);
-          if (!freshOrderDoc.exists) {
-            skippedCount += 1;
-            return;
-          }
-
-          const order = freshOrderDoc.data() || {};
-          const companyId = toSafeString(order.companyId);
-          const notifyUserId = toSafeString(order.notifyUserId);
-          const nextReminderAt = Number(order.nextReminderAt || 0);
-          const status = toSafeString(order.status);
-
-          if (
-            !companyId ||
-            !notifyUserId ||
-            Number(order.notificationSeenAt || 0) > 0 ||
-            status === 'installed' ||
-            status === 'cancelled' ||
-            !Number.isFinite(nextReminderAt) ||
-            nextReminderAt > now
-          ) {
-            skippedCount += 1;
-            return;
-          }
-
-          const userDoc = await tx.get(db.collection('users').doc(notifyUserId));
-          const user = userDoc.exists ? userDoc.data() || {} : {};
-          const userCompanyIds = Array.isArray(user.companyIds) ? user.companyIds : [];
-          if (!userDoc.exists || (!userCompanyIds.includes(companyId) && toSafeString(user.primaryCompanyId) !== companyId)) {
-            skippedCount += 1;
-            return;
-          }
-          const intervalMinutes = Math.max(5, Math.min(1440, Number(order.reminderIntervalMinutes || 30)));
-          const title = 'Comanda piese asteapta confirmare';
-          const label = getPartOrderLabel(order, orderId);
-          const message = `${toSafeString(order.requestedByUserName) || 'Un utilizator'} a creat comanda ${label}. Bifeaza Am vazut dupa ce o verifici.`;
-          const notificationRef = db.collection('notifications').doc();
-
-          tx.set(notificationRef, {
-            companyId,
-            userId: notifyUserId,
-            targetUserThemeKey: user.themeKey || null,
-            actorUserId: toSafeString(order.requestedByUserId),
-            actorUserName: toSafeString(order.requestedByUserName) || 'WorkControl',
-            actorUserThemeKey: null,
-            title,
-            message,
-            module: 'maintenance',
-            eventType: 'maintenance_part_order_created',
-            entityId: orderId,
-            notificationPath: '/maintenance/orders',
-            soundEnabled: true,
-            read: false,
-            createdAt: now,
-            createdAtServer: FieldValue.serverTimestamp(),
-          });
-
-          tx.update(orderDoc.ref, {
-            lastReminderAt: now,
-            nextReminderAt: now + intervalMinutes * 60 * 1000,
-            updatedAt: now,
-            updatedAtServer: FieldValue.serverTimestamp(),
-          });
-
-          createdCount += 1;
-        });
+        claimed = await claimVehicleAlertSchedule(scheduleRef, workerId, now);
+        if (!claimed) continue;
+        claimedCount += 1;
+        const orderId = toSafeString(claimed.sourceId) || toSafeString(claimed.entityId);
+        if (!orderId) {
+          await completeVehicleAlertSchedule(
+            scheduleRef,
+            claimed,
+            workerId,
+            { ...buildPartOrderScheduleTerminalPatch('missing_order_id'), updatedAt: now },
+            0,
+            now
+          );
+          skippedCount += 1;
+          continue;
+        }
+        processedOrderIds.add(orderId);
+        const result = await deliverPartOrderReminderTransaction(
+          db.collection('maintenancePartOrders').doc(orderId),
+          orderId,
+          now,
+          { scheduleRef, claimed, workerId }
+        );
+        if (result.status === 'delivered') createdCount += result.recipientCount;
+        else skippedCount += 1;
       } catch (error) {
-        skippedCount += 1;
-        logger.error('Nu am putut crea reminder pentru comanda piese.', { orderId, error });
+        failedCount += 1;
+        logger.error('Nu am putut crea reminder programat pentru comanda piese.', {
+          scheduleId: scheduleDoc.id,
+          error,
+        });
+        if (claimed) {
+          await failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, error)
+            .catch((releaseError) => logger.error('[checkMaintenancePartOrderReminders][release]', {
+              scheduleId: scheduleDoc.id,
+              error: releaseError,
+            }));
+        }
+      }
+    }
+
+    if (dueSchedules.size < PART_ORDER_REMINDER_BATCH_SIZE) {
+      const legacyLimit = Math.min(
+        PART_ORDER_REMINDER_LEGACY_FALLBACK_SIZE,
+        PART_ORDER_REMINDER_BATCH_SIZE - dueSchedules.size
+      );
+      const legacySnap = await db
+        .collection('maintenancePartOrders')
+        .where('nextReminderAt', '<=', now)
+        .orderBy('nextReminderAt', 'asc')
+        .limit(legacyLimit)
+        .get();
+      legacyFallbackChecked = legacySnap.size;
+
+      for (const orderDoc of legacySnap.docs) {
+        if (processedOrderIds.has(orderDoc.id)) continue;
+        try {
+          const result = await deliverPartOrderReminderTransaction(orderDoc.ref, orderDoc.id, now);
+          if (result.status === 'delivered') {
+            createdCount += result.recipientCount;
+            const schedules = buildPartOrderReminderSchedules(orderDoc.id, {
+              ...(orderDoc.data() || {}),
+              nextReminderAt: result.nextRunAt,
+            });
+            await Promise.all(schedules.map((schedule) =>
+              db.collection('notificationSchedules').doc(schedule.id).set({
+                ...schedule,
+                createdAt: now,
+                createdAtServer: FieldValue.serverTimestamp(),
+                updatedAt: now,
+                updatedAtServer: FieldValue.serverTimestamp(),
+              }, { merge: false })
+            ));
+          } else {
+            skippedCount += 1;
+          }
+        } catch (error) {
+          failedCount += 1;
+          logger.error('Nu am putut crea reminder legacy pentru comanda piese.', {
+            orderId: orderDoc.id,
+            error,
+          });
+        }
       }
     }
 
     logger.info('Verificare remindere comenzi piese finalizata.', {
-      checkedCount: snap.size,
+      dueSchedules: dueSchedules.size,
+      claimedCount,
+      legacyFallbackChecked,
       createdCount,
       skippedCount,
+      failedCount,
+      fullPartOrderScans: 0,
     });
   }
 );

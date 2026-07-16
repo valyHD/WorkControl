@@ -288,3 +288,18 @@ costul.
 - Nu s-au modificat harta GPS, simularea, gateway-ul sau filtrarea jitter.
 - Ramane pentru increment separat: paginare cu cursor in UI pentru Companii, Bonuri si
   Scule, astfel incat listele foarte mari sa poata fi parcurse complet fara query-uri mari.
+
+## 12. Implementare 2026-07-16 - pasul 6
+
+- Reminderele pentru comenzi piese sunt proiectate in `notificationSchedules` prin
+  `syncMaintenancePartOrderReminderSchedule`.
+- Workerul `checkMaintenancePartOrderReminders` citeste mai intai numai programari scadente:
+  `workerType == part_order_reminders_v1`, `status == scheduled`, `nextRunAt <= now`,
+  ordonate dupa `nextRunAt`, limita 40.
+- Comenzile piese vechi fara programare sunt acoperite printr-un fallback tranzitoriu,
+  limitat la 20 documente scadente/run, ordonat dupa `nextReminderAt`. Dupa procesare,
+  ele primesc schedule si ies din fallback.
+- Workerul ramane activ doar intre 05:00 si 21:59, `Europe/Bucharest`.
+- Acelasi index `notificationSchedules(workerType, status, nextRunAt, __name__)` este
+  folosit pentru pontaje, vehicule si comenzi piese.
+- Nu s-au modificat harta GPS, simularea, traseele, gateway-ul sau filtrarea jitter.
