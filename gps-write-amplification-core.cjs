@@ -26,6 +26,7 @@ function normalizeRuntimeLiveConfig(data) {
     : {};
   return {
     enabled: runtime.enabled === true || data?.runtimeLiveEnabled === true,
+    allTrackers: runtime.allTrackers === true,
     trackerImeis: normalizeTrackerSet(runtime.trackerImeis || data?.runtimeTrackerImeis),
     dualWriteRoot: runtime.dualWriteRoot !== false,
     rootFlushSeconds: clampSeconds(
@@ -45,7 +46,10 @@ function normalizeRuntimeLiveConfig(data) {
 
 function shouldUseRuntimeLive(config, imei) {
   return Boolean(
-    config?.enabled && config.trackerImeis instanceof Set && config.trackerImeis.has(String(imei))
+    config?.enabled && (
+      config.allTrackers === true ||
+      config.trackerImeis instanceof Set && config.trackerImeis.has(String(imei))
+    )
   );
 }
 
@@ -64,7 +68,31 @@ function computeConsolidatedMileage(rootCurrentKm, mileageBaseKm, pendingCurrent
   return Number((Math.max(root, base) + pending).toFixed(3));
 }
 
+function buildRuntimeRootPayload(vehicleData, runtimeData, now) {
+  const tracker = runtimeData?.tracker && typeof runtimeData.tracker === "object"
+    ? runtimeData.tracker
+    : {};
+  const currentKm = computeConsolidatedMileage(
+    vehicleData?.currentKm,
+    runtimeData?.mileageBaseKm,
+    runtimeData?.pendingCurrentKm
+  );
+
+  return {
+    currentKm,
+    ...(runtimeData?.gpsSnapshot ? { gpsSnapshot: runtimeData.gpsSnapshot } : {}),
+    ...(runtimeData?.liveDiagnostics ? { liveDiagnostics: runtimeData.liveDiagnostics } : {}),
+    ...(runtimeData?.gpsDataUsage ? { gpsDataUsage: runtimeData.gpsDataUsage } : {}),
+    "tracker.imei": tracker.imei || "",
+    "tracker.lastSeenAt": Number(tracker.lastSeenAt || now),
+    "tracker.updatedAt": Number(tracker.updatedAt || now),
+    "tracker.protocol": tracker.protocol || "teltonika_codec_8e_tcp",
+    updatedAt: now,
+  };
+}
+
 module.exports = {
+  buildRuntimeRootPayload,
   computeConsolidatedMileage,
   normalizeRuntimeLiveConfig,
   shouldUseRuntimeLive,
