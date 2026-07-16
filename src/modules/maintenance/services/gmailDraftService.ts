@@ -349,11 +349,20 @@ export async function createGmailDraftWithPdfAttachment(input: {
 
   const draft = (await response.json()) as { id: string; message?: { id?: string; threadId?: string } };
   const authUser = encodeURIComponent(input.senderEmail || "0");
+  const messageId = draft.message?.id ? `/${encodeURIComponent(draft.message.id)}` : "";
 
   return {
     draftId: draft.id,
-    gmailUrl: `https://mail.google.com/mail/?authuser=${authUser}#drafts`,
+    gmailUrl: `https://mail.google.com/mail/?authuser=${authUser}#drafts${messageId}`,
   };
+}
+
+export function openGmailDraft(gmailUrl: string): void {
+  const url = new URL(gmailUrl);
+  if (url.protocol !== "https:" || url.hostname !== "mail.google.com") {
+    throw new Error("Linkul draftului Gmail nu este valid.");
+  }
+  window.location.assign(url.toString());
 }
 
 export async function sendGmailMessageWithPdfAttachment(input: {

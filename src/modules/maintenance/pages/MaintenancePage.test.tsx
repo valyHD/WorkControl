@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { dispatchAssistantFormDraft } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
+import type { MaintenanceClient } from "../../../types/maintenance";
 import MaintenancePage from "./MaintenancePage";
 
 const maintenanceMocks = vi.hoisted(() => ({
@@ -11,7 +12,7 @@ const maintenanceMocks = vi.hoisted(() => ({
   deleteMaintenanceClient: vi.fn(),
   saveMaintenanceCompanyBranding: vi.fn(),
   saveMaintenanceReportHistory: vi.fn(),
-  subscribeMaintenanceClients: vi.fn((onData: (items: never[]) => void) => {
+  subscribeMaintenanceClients: vi.fn((onData: (items: MaintenanceClient[]) => void) => {
     onData([]);
     return vi.fn();
   }),
@@ -37,10 +38,16 @@ const usersMocks = vi.hoisted(() => ({
 
 const gmailMocks = vi.hoisted(() => ({
   consumeGmailRedirectAuthorization: vi.fn(() => null),
+  createGmailDraftWithPdfAttachment: vi.fn(),
+  openGmailDraft: vi.fn(),
   preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
   requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
-  sendGmailMessageWithPdfAttachment: vi.fn(),
   startGmailRedirectAuthorization: vi.fn(() => "https://accounts.google.com/o/oauth2/v2/auth?test=1"),
+}));
+
+const pdfMocks = vi.hoisted(() => ({
+  buildMaintenancePdfBlob: vi.fn(),
+  resolveBrandingForCompany: vi.fn(() => null),
 }));
 
 vi.mock("../../../providers/AuthProvider", () => ({
@@ -58,12 +65,28 @@ vi.mock("../../../providers/AuthProvider", () => ({
 vi.mock("../services/maintenanceService", () => maintenanceMocks);
 vi.mock("../../users/services/usersService", () => usersMocks);
 vi.mock("../services/gmailDraftService", () => gmailMocks);
-vi.mock("../services/maintenancePdf", () => ({
-  buildMaintenancePdfBlob: vi.fn(),
-  resolveBrandingForCompany: vi.fn(() => null),
-}));
+vi.mock("../services/maintenancePdf", () => pdfMocks);
 vi.mock("../../../lib/files/downloadFile", () => ({ downloadFileFromUrl: vi.fn() }));
 vi.mock("../../../lib/assistant/runtime/assistantButtonHighlighter", () => highlighterMocks);
+
+function createMaintenanceClientTest(id: string, name: string): MaintenanceClient {
+  return {
+    id,
+    name,
+    email: "client@example.test",
+    emails: ["client@example.test"],
+    maintenanceCompany: "Firma Test",
+    address: "Strada Test 10",
+    liftNumber: "LIFT-10",
+    liftNumbers: ["LIFT-10"],
+    expiryDate: "",
+    contactPerson: "",
+    contactPhone: "",
+    createdAt: 0,
+    updatedAt: 0,
+    addresses: [],
+  };
+}
 
 describe("MaintenancePage client form", () => {
   beforeEach(() => {
@@ -84,9 +107,15 @@ describe("MaintenancePage client form", () => {
     gmailMocks.consumeGmailRedirectAuthorization.mockReturnValue(null);
     gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
     gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
+    gmailMocks.createGmailDraftWithPdfAttachment.mockResolvedValue({
+      draftId: "gmail-draft-test",
+      gmailUrl: "https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test",
+    });
     gmailMocks.startGmailRedirectAuthorization.mockReturnValue(
       "https://accounts.google.com/o/oauth2/v2/auth?test=1"
     );
+    maintenanceMocks.saveMaintenanceReportHistory.mockResolvedValue({ pdfUrl: "https://storage.example.test/report.pdf" });
+    pdfMocks.buildMaintenancePdfBlob.mockResolvedValue(new Blob(["test-pdf"], { type: "application/pdf" }));
   });
 
   it("uses one bounded overview subscription instead of one listener per client", async () => {
@@ -138,7 +167,7 @@ describe("MaintenancePage client form", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByDisplayValue("Admin Test")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
     expect(usersMocks.getAllUsers).toHaveBeenCalledTimes(1);
     expect(gmailMocks.preloadGmailAuthorization).toHaveBeenCalledTimes(1);
   });
@@ -212,7 +241,7 @@ describe("MaintenancePage client form", () => {
     expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
   });
 
-  it("keeps a manual technician for the current report and restores the default on return", async () => {
+  it("uses a mobile-safe technician selector and restores the signed-in user on return", async () => {
     usersMocks.getAllUsers.mockResolvedValue([
       {
         id: "technician-secondary",
@@ -231,18 +260,56 @@ describe("MaintenancePage client form", () => {
       </MemoryRouter>
     );
 
-    const technicianInput = await screen.findByDisplayValue("Admin Test");
-    await user.clear(technicianInput);
-    await user.type(technicianInput, "Maria");
-
-    const suggestions = await screen.findByRole("listbox", { name: "Sugestii tehnician" });
-    expect(suggestions.closest(".maintenance-step-card")).toHaveClass("maintenance-step-card--overlay-open");
-    await user.click(screen.getByRole("option", { name: /Maria Tehnician/ }));
-    expect(screen.getByDisplayValue("Maria Tehnician")).toBeInTheDocument();
+    const technicianSelect = await screen.findByRole("combobox", { name: "Tehnician" });
+    await user.selectOptions(technicianSelect, "technician-secondary");
+    expect(technicianSelect).toHaveValue("technician-secondary");
 
     await user.click(screen.getByRole("button", { name: /Dashboard/ }));
     await user.click(screen.getAllByRole("button", { name: /Genereaza raport/ })[0]);
 
-    expect(await screen.findByDisplayValue("Admin Test")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
+  });
+
+  it("closes client suggestions immediately after the client is selected", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-report-test", "Client Raport Test")]);
+      return vi.fn();
+    });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+
+    await user.type(await screen.findByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Raport");
+    await user.click(await screen.findByRole("option", { name: /Client Raport Test/ }));
+
+    expect(screen.queryByRole("listbox", { name: "Sugestii client" })).not.toBeInTheDocument();
+  });
+
+  it("creates a Gmail draft with the generated PDF attached before opening Gmail", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-gmail-test", "Client Gmail Test")]);
+      return vi.fn();
+    });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/maintenance?tab=report"]}><MaintenancePage /></MemoryRouter>);
+
+    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
+    await user.type(screen.getByPlaceholderText("Ex: Razvan / Aurel Vlaicu / 210869"), "Client Gmail");
+    await user.click(await screen.findByRole("option", { name: /Client Gmail Test/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Tehnician" })).toHaveValue("maintenance-admin-test");
+      expect(screen.getByDisplayValue("Strada Test 10")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("LIFT-10")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Genereaza raport revizie" }));
+
+    await waitFor(() => {
+      expect(gmailMocks.createGmailDraftWithPdfAttachment).toHaveBeenCalledWith(expect.objectContaining({
+        accessToken: "gmail-token",
+        senderEmail: "liftultau@gmail.com",
+        recipientEmail: "client@example.test",
+        pdfBlob: expect.any(Blob),
+      }));
+      expect(gmailMocks.openGmailDraft).toHaveBeenCalledWith("https://mail.google.com/mail/?authuser=liftultau%40gmail.com#drafts/message-test");
+    });
   });
 });

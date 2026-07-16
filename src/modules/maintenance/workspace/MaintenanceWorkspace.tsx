@@ -32,9 +32,10 @@ import {
 import { getAllUsers } from "../../users/services/usersService";
 import {
   consumeGmailRedirectAuthorization,
+  createGmailDraftWithPdfAttachment,
+  openGmailDraft,
   preloadGmailAuthorization,
   requestGmailAccessToken,
-  sendGmailMessageWithPdfAttachment,
   startGmailRedirectAuthorization,
 } from "../services/gmailDraftService";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
@@ -458,8 +459,8 @@ export default function MaintenanceWorkspace() {
   const [reportComments, setReportComments] = useState("");
   const [reportImageFiles, setReportImageFiles] = useState<File[]>([]);
   const [technicians, setTechnicians] = useState<AppUserItem[]>([]);
-  const [technicianSearch, setTechnicianSearch] = useState("");
-  const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
+  const [technicianSearch, setTechnicianSearch] = useState(() => (user?.displayName || user?.email || "").trim());
+  const [selectedTechnicianId, setSelectedTechnicianId] = useState(() => user?.uid || "");
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportMessage, setReportMessage] = useState("");
   const [reportError, setReportError] = useState("");
@@ -677,6 +678,11 @@ export default function MaintenanceWorkspace() {
     });
     setActiveMaintenanceTab(tab);
     navigate(`/maintenance?${params.toString()}`);
+    if (tab === "report") {
+      window.setTimeout(() => {
+        document.getElementById("maintenance-report-form-start")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      }, 120);
+    }
   }
 
   useEffect(() => {
@@ -1194,7 +1200,7 @@ export default function MaintenanceWorkspace() {
     }
 
     window.setTimeout(() => {
-      document.getElementById("maintenance-report-generator")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("maintenance-report-form-start")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
     }, 180);
   }, [clients, location.search]);
 
@@ -1203,9 +1209,23 @@ export default function MaintenanceWorkspace() {
     [clients, selectedClientId]
   );
 
+  const technicianOptions = useMemo(() => {
+    if (!currentTechnicianId || technicians.some((item) => item.id === currentTechnicianId || item.uid === currentTechnicianId)) {
+      return technicians;
+    }
+    return [{
+      id: currentTechnicianId,
+      uid: currentTechnicianId,
+      fullName: currentTechnicianName,
+      email: currentTechnicianEmail,
+      active: true,
+      role: currentTechnicianRole,
+    } satisfies AppUserItem, ...technicians];
+  }, [currentTechnicianEmail, currentTechnicianId, currentTechnicianName, currentTechnicianRole, technicians]);
+
   const selectedTechnician = useMemo(
-    () => technicians.find((item) => item.id === selectedTechnicianId) || null,
-    [technicians, selectedTechnicianId]
+    () => technicianOptions.find((item) => item.id === selectedTechnicianId || item.uid === selectedTechnicianId) || null,
+    [selectedTechnicianId, technicianOptions]
   );
 
   const selectedClientAddressGroups = useMemo(
@@ -1233,19 +1253,6 @@ export default function MaintenanceWorkspace() {
       .find((lift) => (lift.serialNumber || lift.label || "").trim() === reportLift)?.revisionType;
     return selectedClient.liftRevisionTypes?.[reportLift] || addressLiftType || "R2";
   }, [reportLift, selectedClient]);
-
-  const technicianSuggestions = useMemo(() => {
-    const query = technicianSearch.trim().toLowerCase();
-    if (query.length < 2) {
-      return [] as AppUserItem[];
-    }
-
-    return technicians
-      .filter((user) => `${user.fullName} ${user.email}`.toLowerCase().includes(query))
-      .slice(0, 8);
-  }, [technicians, technicianSearch]);
-  const technicianSuggestionsOpen =
-    technicianSuggestions.length > 0 && technicianSearch.trim().length >= 2 && !selectedTechnician;
 
   useEffect(() => {
     if (!selectedClient) {
@@ -1289,7 +1296,13 @@ export default function MaintenanceWorkspace() {
   }
 
   function handleReportSearchChange(event: ChangeEvent<HTMLInputElement>) {
-    setReportSearch(event.target.value);
+    const nextValue = event.target.value;
+    if (selectedClient && nextValue !== reportSearch) {
+      setSelectedClientId("");
+      setReportAddress("");
+      setReportLift("");
+    }
+    setReportSearch(nextValue);
     setReportMessage("");
     setReportError("");
   }
@@ -1331,27 +1344,21 @@ export default function MaintenanceWorkspace() {
     }
   }
 
-  function handleTechnicianSearchChange(event: ChangeEvent<HTMLInputElement>) {
-    setTechnicianSearch(event.target.value);
-    setSelectedTechnicianId("");
-    setReportMessage("");
-    setReportError("");
-  }
-
-  function selectTechnician(user: AppUserItem) {
-    setSelectedTechnicianId(user.id);
-    setTechnicianSearch(user.fullName);
+  function selectTechnicianById(technicianId: string) {
+    const technician = technicianOptions.find((item) => item.id === technicianId || item.uid === technicianId);
+    setSelectedTechnicianId(technicianId);
+    setTechnicianSearch(technician?.fullName || (technicianId === currentTechnicianId ? currentTechnicianName : ""));
     setReportMessage("");
     setReportError("");
   }
 
   function resetTechnicianToCurrentUser() {
-    const defaultTechnician = technicians.find(
+    const defaultTechnician = technicianOptions.find(
       (item) => item.id === currentTechnicianId || item.uid === currentTechnicianId
     );
-    setSelectedTechnicianId(defaultTechnician?.id || "");
-    setTechnicianSearch(defaultTechnician?.fullName || "");
-    technicianDefaultInitializedRef.current = Boolean(defaultTechnician);
+    setSelectedTechnicianId(defaultTechnician?.id || currentTechnicianId);
+    setTechnicianSearch(defaultTechnician?.fullName || currentTechnicianName);
+    technicianDefaultInitializedRef.current = Boolean(defaultTechnician || currentTechnicianId);
   }
 
   function saveGmailReportDraftForRedirect(senderEmail = gmailSenderEmail.trim()) {
@@ -1521,7 +1528,7 @@ export default function MaintenanceWorkspace() {
 
     try {
       setReportError("");
-      setReportMessage("Se genereaza PDF-ul si se trimite emailul cu atasament...");
+      setReportMessage("Se genereaza PDF-ul si se pregateste draftul Gmail cu atasamente...");
 
       const now = new Date();
       const dateText = now.toLocaleDateString("ro-RO");
@@ -1562,21 +1569,6 @@ export default function MaintenanceWorkspace() {
         .toLowerCase()
         .replace(/[^a-z0-9_.-]+/g, "-");
 
-      const historyItem = await saveMaintenanceReportHistory({
-        client: selectedClient,
-        reportType: fileType,
-        address: addressValue,
-        lift: liftValue,
-        technicianName: selectedTechnician.fullName,
-        comments: commentsValue,
-        pdfBlob,
-        imageFiles: reportImageFiles,
-        fileName,
-        createdAt: now.getTime(),
-        dateText,
-        timeText,
-      });
-
       const emailDraft = buildEmailDraft({
         reportType: fileType,
         dateText,
@@ -1584,20 +1576,37 @@ export default function MaintenanceWorkspace() {
         maintenanceCompany: selectedClient.maintenanceCompany,
       });
 
-      const sentMessage = await sendGmailMessageWithPdfAttachment({
-        accessToken: reportGmailAccessToken,
-        senderEmail,
-        recipientEmail: clientEmail,
-        subject: emailDraft.subject,
-        body: emailDraft.body,
-        pdfBlob,
-        fileName,
-        attachments: reportImageFiles.map((file) => ({
-          blob: file,
-          fileName: file.name,
-          contentType: file.type || "image/jpeg",
-        })),
-      });
+      const attachments = reportImageFiles.map((file) => ({
+        blob: file,
+        fileName: file.name,
+        contentType: file.type || "image/jpeg",
+      }));
+      const [historyItem, gmailDraft] = await Promise.all([
+        saveMaintenanceReportHistory({
+          client: selectedClient,
+          reportType: fileType,
+          address: addressValue,
+          lift: liftValue,
+          technicianName: selectedTechnician.fullName,
+          comments: commentsValue,
+          pdfBlob,
+          imageFiles: reportImageFiles,
+          fileName,
+          createdAt: now.getTime(),
+          dateText,
+          timeText,
+        }),
+        createGmailDraftWithPdfAttachment({
+          accessToken: reportGmailAccessToken,
+          senderEmail,
+          recipientEmail: clientEmail,
+          subject: emailDraft.subject,
+          body: emailDraft.body,
+          pdfBlob,
+          fileName,
+          attachments,
+        }),
+      ]);
 
       const shareInfo: GeneratedReportShare = {
         clientName: selectedClient.name || "",
@@ -1608,18 +1617,19 @@ export default function MaintenanceWorkspace() {
         timeText,
         maintenanceCompany: selectedClient.maintenanceCompany,
         pdfUrl: historyItem.pdfUrl,
-        gmailUrl: sentMessage.gmailUrl,
+        gmailUrl: gmailDraft.gmailUrl,
       };
 
       setLastGeneratedReport(shareInfo);
       setReportImageFiles([]);
       resetTechnicianToCurrentUser();
 
-      setReportMessage(`Raportul ${fileType} a fost generat si emailul a fost trimis cu PDF atasat.`);
+      setReportMessage(`Raportul ${fileType} este pregatit in Gmail cu PDF-ul atasat. Verifica si apasa Trimite.`);
+      openGmailDraft(gmailDraft.gmailUrl);
     } catch (err) {
       console.error(err);
       const errorMessage = err instanceof Error ? err.message : "";
-      setReportError(`Nu am putut genera PDF-ul sau trimite emailul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
+      setReportError(`Nu am putut genera PDF-ul sau pregati draftul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
     } finally {
       setReportGenerating(false);
     }
@@ -1795,8 +1805,8 @@ export default function MaintenanceWorkspace() {
         {lastGeneratedReport && (
           <div className="panel maintenance-generated-report">
             <div>
-              <h2 className="panel-title">Raport trimis catre {lastGeneratedReport.clientName || "client"}</h2>
-              <p className="tools-subtitle">Destinatar: {lastGeneratedReport.clientEmail || "-"} · PDF atasat in Gmail.</p>
+              <h2 className="panel-title">Draft Gmail pregatit pentru {lastGeneratedReport.clientName || "client"}</h2>
+              <p className="tools-subtitle">Destinatar: {lastGeneratedReport.clientEmail || "-"} · PDF atasat efectiv.</p>
             </div>
             <div className="maintenance-actions">
               {lastGeneratedReport.pdfUrl ? (
@@ -1813,15 +1823,15 @@ export default function MaintenanceWorkspace() {
                   <Download size={15} /> Download PDF
                 </button>
               ) : null}
-              <button className="primary-btn" type="button" onClick={() => window.open(lastGeneratedReport.gmailUrl, "_blank")}>
-                <Send size={15} /> Deschide Gmail Sent
+              <button className="primary-btn" type="button" onClick={() => openGmailDraft(lastGeneratedReport.gmailUrl)}>
+                <Send size={15} /> Deschide draftul Gmail
               </button>
             </div>
           </div>
         )}
 
         <div className="maintenance-report-steps">
-          <div className="panel maintenance-step-card" data-assistant-step="report-client">
+          <div id="maintenance-report-form-start" className="panel maintenance-step-card" data-assistant-step="report-client">
             <div className="maintenance-step-card__head">
               <span>Pas 1</span>
               <h2>Client</h2>
@@ -1835,10 +1845,10 @@ export default function MaintenanceWorkspace() {
                 onChange={handleReportSearchChange}
                 placeholder="Ex: Razvan / Aurel Vlaicu / 210869"
               />
-              {reportSuggestions.length > 0 && reportSearch.trim().length >= 2 && (
-                <div className="maintenance-suggestion-list">
+              {!selectedClient && reportSuggestions.length > 0 && reportSearch.trim().length >= 2 && (
+                <div className="maintenance-suggestion-list" role="listbox" aria-label="Sugestii client">
                   {reportSuggestions.map((client) => (
-                    <button key={`report_suggestion_${client.id}`} type="button" onClick={() => selectReportClient(client)}>
+                    <button key={`report_suggestion_${client.id}`} type="button" role="option" aria-selected="false" onClick={() => selectReportClient(client)}>
                       <strong>{client.name || "Fara nume"}</strong>
                       <small>Adresa: {client.address || "-"} · Lift: {client.liftNumber || client.liftNumbers?.[0] || "-"}</small>
                     </button>
@@ -1888,10 +1898,7 @@ export default function MaintenanceWorkspace() {
             </div>
           </div>
 
-          <div
-            className={`panel maintenance-step-card ${technicianSuggestionsOpen ? "maintenance-step-card--overlay-open" : ""}`}
-            data-assistant-step="report-details"
-          >
+          <div className="panel maintenance-step-card" data-assistant-step="report-details">
             <div className="maintenance-step-card__head">
               <span>Pas 3</span>
               <h2>Detalii raport</h2>
@@ -1922,17 +1929,15 @@ export default function MaintenanceWorkspace() {
               </div>
               <div className="tool-form-block maintenance-technician-picker">
                 <label className="tool-form-label">Tehnician</label>
-                <input className="tool-input" data-assistant-field="maintenance-report-technician" value={technicianSearch} onChange={handleTechnicianSearchChange} placeholder="Ex: Ion / Popescu" />
-                {technicianSuggestionsOpen && (
-                  <div className="maintenance-suggestion-list" role="listbox" aria-label="Sugestii tehnician">
-                    {technicianSuggestions.map((technician) => (
-                      <button key={`technician_suggestion_${technician.id}`} type="button" role="option" aria-selected="false" onClick={() => selectTechnician(technician)}>
-                        <strong>{technician.fullName}</strong>
-                        <small>{technician.email || "-"}</small>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <select className="tool-input" aria-label="Tehnician" data-assistant-field="maintenance-report-technician" value={selectedTechnicianId} onChange={(event) => selectTechnicianById(event.target.value)}>
+                  <option value="">Selecteaza tehnicianul</option>
+                  {technicianOptions.map((technician) => (
+                    <option key={`technician_${technician.id}`} value={technician.id}>
+                      {technician.fullName}{technician.email ? ` - ${technician.email}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="simple-list-subtitle">Implicit este selectat utilizatorul autentificat.</div>
               </div>
             </div>
           </div>
@@ -1967,10 +1972,10 @@ export default function MaintenanceWorkspace() {
               >
                 Autentificare mobil
               </button>
-              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF si il trimite pe email" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
+              <button className="primary-btn maintenance-send-btn" data-assistant-action="maintenance-generate-review-report" type="button" title="Genereaza PDF-ul si deschide draftul Gmail cu atasament" onClick={() => void handleGenerateReport("revizie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport revizie"}
               </button>
-              <button className="secondary-btn" data-assistant-action="maintenance-generate-intervention-report" type="button" title="Genereaza raport de interventie si il trimite pe email" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
+              <button className="secondary-btn" data-assistant-action="maintenance-generate-intervention-report" type="button" title="Genereaza raportul de interventie si deschide draftul Gmail" onClick={() => void handleGenerateReport("interventie")} disabled={reportGenerating}>
                 {reportGenerating ? "Se genereaza..." : "Genereaza raport interventie"}
               </button>
               <button className="secondary-btn" data-assistant-action="maintenance-generate-selected-report" type="button" title="Genereaza raportul pentru tipul selectat" onClick={() => void handleGenerateReport(reportTypeDraft)} disabled={reportGenerating}>

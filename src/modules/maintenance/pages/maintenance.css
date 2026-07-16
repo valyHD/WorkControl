@@ -223,12 +223,8 @@
   overflow: visible;
 }
 
-.maintenance-step-card--overlay-open {
-  z-index: 40;
-}
-
-.maintenance-technician-picker {
-  position: relative;
+#maintenance-report-form-start {
+  scroll-margin-top: 84px;
 }
 
 .maintenance-step-card--send {
