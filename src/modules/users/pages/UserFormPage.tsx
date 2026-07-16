@@ -11,6 +11,10 @@ import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { ASSISTANT_FILL_USER_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
+import {
+  getAvailableCompanyChoices,
+  type CompanyChoice,
+} from "../../companies/services/companiesService";
 
 type UserFormValues = {
   fullName: string;
@@ -19,6 +23,7 @@ type UserFormValues = {
   role: UserRole;
   roleTitle: string;
   department: string;
+  companyId: string;
   active: boolean;
 };
 
@@ -29,17 +34,39 @@ const emptyValues: UserFormValues = {
   role: "angajat",
   roleTitle: "",
   department: "",
+  companyId: "",
   active: true,
 };
 
 async function getNextUserThemeKey() {
-  const users = await getAllUsers();
-  const usedThemeKeys = users.map((item) => String(item.themeKey || "").trim().toLowerCase());
-  return pickNextAvailableThemeKey(usedThemeKeys);
+  try {
+    const users = await getAllUsers();
+    const usedThemeKeys = users.map((item) => String(item.themeKey || "").trim().toLowerCase());
+    return pickNextAvailableThemeKey(usedThemeKeys);
+  } catch {
+    return pickNextAvailableThemeKey([]);
+  }
+}
+
+function getSaveErrorMessage(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+  const message = typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : "";
+  if (code.includes("already-exists")) {
+    return "Exista deja un utilizator intern cu acest email.";
+  }
+  if (code.includes("permission-denied")) {
+    return "Nu ai permisiunea de a crea utilizatorul pentru firma selectata.";
+  }
+  if (code.includes("invalid-argument") && message) return message;
+  return "Nu am putut salva utilizatorul.";
 }
 
 export default function UserFormPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { userId } = useParams();
   const navigate = useNavigate();
   const isEdit = Boolean(userId);
@@ -48,6 +75,7 @@ export default function UserFormPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [companyChoices, setCompanyChoices] = useState<CompanyChoice[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -66,17 +94,32 @@ export default function UserFormPage() {
               role: found.role,
               roleTitle: found.roleTitle || "",
               department: found.department || "",
+              companyId: found.primaryCompanyId || found.companyIds?.[0] || "",
               active: found.active,
             });
           }
+        } else {
+          const companies = await getAvailableCompanyChoices();
+          setCompanyChoices(companies);
+          const preferredCompanyId = user?.primaryCompanyId ||
+            (companies.length === 1 ? companies[0].companyId : "");
+          setInitialValues((current) => ({
+            ...current,
+            companyId: current.companyId || preferredCompanyId,
+          }));
         }
+      } catch (loadError) {
+        console.error(loadError);
+        setError(userId
+          ? "Utilizatorul nu a putut fi incarcat."
+          : "Lista firmelor nu a putut fi incarcata. Poti folosi firma implicita a contului.");
       } finally {
         setLoading(false);
       }
     }
 
     void load();
-  }, [userId]);
+  }, [user?.primaryCompanyId, userId]);
 
   useEffect(() => {
     if (isEdit) return undefined;
@@ -135,12 +178,13 @@ export default function UserFormPage() {
         roleTitle: values.roleTitle.trim(),
         department: values.department.trim(),
         themeKey,
+        companyId: values.companyId || undefined,
       });
 
       navigate("/users");
     } catch (err) {
       console.error(err);
-      setError("Nu am putut salva utilizatorul.");
+      setError(getSaveErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -219,6 +263,7 @@ export default function UserFormPage() {
           initialValues={initialValues}
           isEdit={isEdit}
           submitting={submitting}
+          companyChoices={companyChoices}
           onSubmit={handleSubmit}
         />
       </div>

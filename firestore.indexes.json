@@ -113,6 +113,16 @@
       "density": "SPARSE_ALL"
     },
     {
+      "collectionGroup": "timesheets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "stopAt", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
       "collectionGroup": "expenseDocuments",
       "queryScope": "COLLECTION",
       "fields": [
@@ -160,6 +170,17 @@
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "enabled", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "notificationSchedules",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerType", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextRunAt", "order": "ASCENDING" },
         { "fieldPath": "__name__", "order": "ASCENDING" }
       ],
       "density": "SPARSE_ALL"
@@ -297,6 +318,16 @@
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" },
         { "fieldPath": "__name__", "order": "DESCENDING" }
+      ],
+      "density": "SPARSE_ALL"
+    },
+    {
+      "collectionGroup": "leaveRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "periodEnd", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
       ],
       "density": "SPARSE_ALL"
     },
@@ -559,6 +590,12 @@
     },
     {
       "collectionGroup": "aiCommandLogs",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "notificationDeliveries",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

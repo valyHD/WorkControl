@@ -74,6 +74,7 @@ const NOTIFICATION_WINDOW_MS = 60 * 1000;
 const NOTIFICATION_MAX_PER_WINDOW = 20;
 const ALLOWED_VEHICLE_COMMANDS = new Set(['pulse_dout1', 'allow_start', 'block_start']);
 const AUDIT_ONLY_NOTIFICATION_EVENTS = new Set(['user_site_entered']);
+const MAX_ACTIVE_TIMESHEET_MS = 12 * 60 * 60 * 1000;
 
 function cleanText(value, maxLength = 200) {
   return String(value ?? '').trim().slice(0, maxLength);
@@ -149,6 +150,48 @@ function getBucharestDateParts(nowMs) {
   };
 }
 
+function getTimestampMillis(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value?.toMillis === 'function') {
+    const millis = Number(value.toMillis());
+    return Number.isFinite(millis) ? millis : null;
+  }
+  if (Number.isFinite(Number(value?._seconds))) {
+    return Number(value._seconds) * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1_000_000);
+  }
+  return null;
+}
+
+function isValidWorkDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(cleanText(value, 20));
+}
+
+function isStaleActiveTimesheet(data, nowMs) {
+  if (!data || data.status !== 'activ') return false;
+  const todayKey = getBucharestDateParts(nowMs).workDate;
+  const workDate = cleanText(data.workDate, 20);
+  const startAt = getTimestampMillis(data.startAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) {
+    return isValidWorkDateKey(workDate) && workDate < todayKey;
+  }
+  if (nowMs - startAt <= MAX_ACTIVE_TIMESHEET_MS) return false;
+  const startDateKey = getBucharestDateParts(startAt).workDate;
+  return startDateKey !== todayKey || (isValidWorkDateKey(workDate) && workDate < todayKey);
+}
+
+function buildStaleActiveTimesheetPatch(fieldValue, nowMs) {
+  return {
+    status: 'neinchis',
+    stopAt: null,
+    stopSource: 'system',
+    stopPolicyFlag: 'stale_active_replaced',
+    stopExplanation: 'Pontaj activ vechi marcat automat ca neinchis pentru a permite pornirea pontajului curent.',
+    updatedAt: nowMs,
+    updatedAtServer: fieldValue.serverTimestamp(),
+  };
+}
+
 function userCompanyIds(data) {
   const primary = cleanText(data.primaryCompanyId, 120);
   const ids = cleanStringList(data.companyIds);
@@ -207,7 +250,7 @@ async function loadActor(db, uid, HttpsError) {
   return {
     uid,
     role,
-    globalAdmin: data.globalAdmin === true,
+    globalAdmin: data.globalAdmin === true || (role === 'admin' && userCompanyIds(data).length === 0),
     companyIds: userCompanyIds(data),
     primaryCompanyId: cleanText(data.primaryCompanyId, 120),
     fullName: cleanText(data.fullName || data.email || uid, 160),
@@ -385,6 +428,64 @@ function notificationPath(input) {
 }
 
 function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger }) {
+  async function registerInternalAccount(request) {
+    const uid = cleanText(request.auth?.uid, 128);
+    const tokenEmail = cleanText(request.auth?.token?.email, 240).toLowerCase();
+    const fullName = cleanText(request.data?.fullName, 160);
+    if (!uid || !tokenEmail) {
+      throw new HttpsError('unauthenticated', 'Contul Firebase autentificat este obligatoriu.');
+    }
+    if (!fullName) {
+      throw new HttpsError('invalid-argument', 'Numele complet este obligatoriu.');
+    }
+
+    const authUser = await authAdmin.getUser(uid).catch((error) => {
+      logger.error('[registerInternalAccount][auth]', { code: cleanText(error?.code, 80) });
+      throw new HttpsError('unauthenticated', 'Contul Firebase nu a putut fi verificat.');
+    });
+    const authEmail = cleanText(authUser?.email, 240).toLowerCase();
+    if (!authEmail || authEmail !== tokenEmail || authUser.disabled === true) {
+      throw new HttpsError('permission-denied', 'Contul Firebase nu este eligibil pentru inregistrare.');
+    }
+
+    const userRef = db.collection('users').doc(uid);
+    const created = await db.runTransaction(async (tx) => {
+      const existing = await tx.get(userRef);
+      if (existing.exists) {
+        const data = existing.data() || {};
+        if (cleanText(data.email, 240).toLowerCase() !== authEmail) {
+          throw new HttpsError('already-exists', 'Exista deja un profil intern diferit pentru acest cont.');
+        }
+        return false;
+      }
+
+      tx.create(userRef, {
+        uid,
+        fullName,
+        email: authEmail,
+        role: 'angajat',
+        active: true,
+        accessStatus: 'active',
+        globalAdmin: false,
+        companyId: '',
+        primaryCompanyId: '',
+        primaryCompanyName: '',
+        companyIds: [],
+        companyNames: [],
+        roleTitle: '',
+        department: '',
+        themeKey: null,
+        selfRegistered: true,
+        createdByUserId: uid,
+        createdAt: Date.now(),
+        createdAtServer: fieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+
+    return { userId: uid, created };
+  }
+
   async function adminCreateUser(request) {
     const actor = await loadActor(db, request.auth?.uid, HttpsError);
     if (actor.role !== 'admin') {
@@ -411,10 +512,30 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     }
 
     let createdUser;
+    let createdAuthUser = false;
     try {
-      createdUser = await authAdmin.createUser({ email, password, displayName: fullName, disabled: false });
+      try {
+        createdUser = await authAdmin.createUser({ email, password, displayName: fullName, disabled: false });
+        createdAuthUser = true;
+      } catch (error) {
+        if (cleanText(error?.code, 80) !== 'auth/email-already-exists') throw error;
+        createdUser = await authAdmin.getUserByEmail(email);
+        const existingProfile = await db.collection('users').doc(createdUser.uid).get();
+        if (existingProfile.exists) {
+          throw new HttpsError('already-exists', 'Exista deja un utilizator intern cu acest email.');
+        }
+        createdUser = await authAdmin.updateUser(createdUser.uid, {
+          password,
+          displayName: fullName,
+          disabled: false,
+        });
+      }
       await db.runTransaction(async (tx) => {
         const userRef = db.collection('users').doc(createdUser.uid);
+        const existingProfile = await tx.get(userRef);
+        if (existingProfile.exists) {
+          throw new HttpsError('already-exists', 'Exista deja un utilizator intern cu acest email.');
+        }
         tx.create(userRef, {
           uid: createdUser.uid,
           fullName,
@@ -445,7 +566,9 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         }));
       });
     } catch (error) {
-      if (createdUser?.uid) await authAdmin.deleteUser(createdUser.uid).catch(() => undefined);
+      if (createdAuthUser && createdUser?.uid) {
+        await authAdmin.deleteUser(createdUser.uid).catch(() => undefined);
+      }
       if (error instanceof HttpsError) throw error;
       logger.error('[adminCreateUser]', { code: cleanText(error?.code, 80) });
       throw new HttpsError('internal', 'Utilizatorul nu a putut fi creat.');
@@ -800,37 +923,87 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     const preexisting = await db.collection('timesheets')
       .where('userId', '==', actor.uid)
       .where('status', '==', 'activ')
-      .limit(1)
+      .limit(10)
       .get();
     const lockRef = db.collection('activeTimesheets').doc(actor.uid);
     const createdRef = db.collection('timesheets').doc();
-    const now = Number.isFinite(Number(input.occurredAt))
-      ? Math.min(Date.now(), Math.max(Date.now() - 24 * 60 * 60 * 1000, Number(input.occurredAt)))
+    const startSource = cleanText(input.startSource, 20) === 'android' ? 'android' : 'web';
+    const clientOccurredAt = Number(input.occurredAt);
+    const allowClientOccurredAt = input.offlineReplay === true || startSource === 'android';
+    const now = allowClientOccurredAt && Number.isFinite(clientOccurredAt)
+      ? Math.min(Date.now(), Math.max(Date.now() - 24 * 60 * 60 * 1000, clientOccurredAt))
       : Date.now();
     const parts = getBucharestDateParts(now);
     const project = projectSnap.data() || {};
 
     return db.runTransaction(async (tx) => {
+      const closedStaleActiveIds = new Set();
+      const closeStaleActive = (activeRef, activeId, activeData) => {
+        const staleCompanyId = cleanText(activeData.companyId, 120) || companyId;
+        tx.update(activeRef, buildStaleActiveTimesheetPatch(fieldValue, now));
+        tx.create(db.collection('auditLogs').doc(), buildAuditPayload(fieldValue, actor, {
+          companyId: staleCompanyId,
+          category: 'timesheets',
+          action: 'timesheet_stale_active_replaced',
+          title: 'Pontaj vechi mutat la incomplete',
+          message: 'Pontaj activ vechi marcat automat ca neinchis la pornirea pontajului curent.',
+          entityId: activeId,
+          metadata: {
+            replacementWorkDate: parts.workDate,
+            staleWorkDate: cleanText(activeData.workDate, 20),
+          },
+          before: activeData,
+          after: buildStaleActiveTimesheetPatch(fieldValue, now),
+        }));
+        closedStaleActiveIds.add(activeId);
+      };
+
       const lock = await tx.get(lockRef);
       if (lock.exists) {
         const activeId = cleanText(lock.get('timesheetId'), 160);
         if (activeId) {
-          const activeSnap = await tx.get(db.collection('timesheets').doc(activeId));
+          const activeRef = db.collection('timesheets').doc(activeId);
+          const activeSnap = await tx.get(activeRef);
           if (activeSnap.exists && activeSnap.get('status') === 'activ') {
-            return { timesheetId: activeId, duplicate: true };
+            const activeData = activeSnap.data() || {};
+            if (isStaleActiveTimesheet(activeData, now)) {
+              closeStaleActive(activeRef, activeId, activeData);
+            } else {
+              return { timesheetId: activeId, duplicate: true };
+            }
           }
         }
       }
-      if (!preexisting.empty) {
-        const activeId = preexisting.docs[0].id;
-        tx.set(lockRef, {
-          companyId,
-          userId: actor.uid,
-          timesheetId: activeId,
-          updatedAt: Date.now(),
-          updatedAtServer: fieldValue.serverTimestamp(),
-        });
-        return { timesheetId: activeId, duplicate: true };
+      for (const activeDoc of preexisting.docs) {
+        const activeId = cleanText(activeDoc.id || activeDoc.ref?.id, 160);
+        if (activeId && !closedStaleActiveIds.has(activeId)) {
+          const activeRef = db.collection('timesheets').doc(activeId);
+          const activeSnap = await tx.get(activeRef);
+          const activeData = activeSnap.data() || activeDoc.data();
+          if (activeSnap.exists && activeSnap.get('status') === 'activ') {
+            if (isStaleActiveTimesheet(activeData, now)) {
+              closeStaleActive(activeRef, activeId, activeData);
+            } else {
+              tx.set(lockRef, {
+                companyId,
+                userId: actor.uid,
+                timesheetId: activeId,
+                updatedAt: Date.now(),
+                updatedAtServer: fieldValue.serverTimestamp(),
+              });
+              return { timesheetId: activeId, duplicate: true };
+            }
+          } else if (activeDoc.get('status') === 'activ') {
+            tx.set(lockRef, {
+              companyId,
+              userId: actor.uid,
+              timesheetId: activeId,
+              updatedAt: Date.now(),
+              updatedAtServer: fieldValue.serverTimestamp(),
+            });
+            return { timesheetId: activeId, duplicate: true };
+          }
+        }
       }
 
       const startExplanation = cleanText(input.startExplanation, 1000);
@@ -856,7 +1029,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         workedMinutes: 0,
         startLocation: normalizeLocation(input.startLocation),
         stopLocation: null,
-        startSource: cleanText(input.startSource, 20) === 'android' ? 'android' : 'web',
+        startSource,
         stopSource: '',
         workDate: parts.workDate,
         yearMonth: parts.yearMonth,
@@ -909,10 +1082,12 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       if (!Number.isFinite(startAt) || startAt <= 0) {
         throw new HttpsError('failed-precondition', 'Pontajul nu are o ora valida de start.');
       }
+      const now = Date.now();
       const occurredAt = Number(input.occurredAt);
-      const stopAt = Number.isFinite(occurredAt)
-        ? Math.max(startAt, Math.min(Date.now(), occurredAt))
-        : Date.now();
+      const hasValidClientStop = Number.isFinite(occurredAt) && occurredAt > startAt;
+      const stopAt = hasValidClientStop
+        ? Math.max(startAt, Math.min(now, occurredAt))
+        : now;
       const workedMinutes = Math.max(1, Math.round((stopAt - startAt) / 60000));
       const status = workedMinutes < 8 * 60 || workedMinutes > 9 * 60 ? 'corectat' : 'inchis';
       const stopExplanation = cleanText(input.stopExplanation || input.explanation, 1000);
@@ -1461,6 +1636,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
   }
 
   return {
+    registerInternalAccount,
     adminCreateUser,
     setPrimaryCompany,
     listCompanyChoices,

@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_FILL_MAINTENANCE_CLIENT_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
@@ -30,6 +31,18 @@ const highlighterMocks = vi.hoisted(() => ({
   highlightAssistantElement: vi.fn(),
 }));
 
+const usersMocks = vi.hoisted(() => ({
+  getAllUsers: vi.fn().mockResolvedValue([]),
+}));
+
+const gmailMocks = vi.hoisted(() => ({
+  consumeGmailRedirectAuthorization: vi.fn(() => null),
+  preloadGmailAuthorization: vi.fn().mockResolvedValue(undefined),
+  requestGmailAccessToken: vi.fn().mockResolvedValue("gmail-token"),
+  sendGmailMessageWithPdfAttachment: vi.fn(),
+  startGmailRedirectAuthorization: vi.fn(() => "https://accounts.google.com/o/oauth2/v2/auth?test=1"),
+}));
+
 vi.mock("../../../providers/AuthProvider", () => ({
   useAuth: () => ({
     role: "admin",
@@ -43,13 +56,8 @@ vi.mock("../../../providers/AuthProvider", () => ({
   }),
 }));
 vi.mock("../services/maintenanceService", () => maintenanceMocks);
-vi.mock("../../users/services/usersService", () => ({
-  getAllUsers: vi.fn().mockResolvedValue([]),
-}));
-vi.mock("../services/gmailDraftService", () => ({
-  requestGmailAccessToken: vi.fn(),
-  sendGmailMessageWithPdfAttachment: vi.fn(),
-}));
+vi.mock("../../users/services/usersService", () => usersMocks);
+vi.mock("../services/gmailDraftService", () => gmailMocks);
 vi.mock("../services/maintenancePdf", () => ({
   buildMaintenancePdfBlob: vi.fn(),
   resolveBrandingForCompany: vi.fn(() => null),
@@ -72,6 +80,13 @@ describe("MaintenancePage client form", () => {
       onData([]);
       return vi.fn();
     });
+    usersMocks.getAllUsers.mockResolvedValue([]);
+    gmailMocks.consumeGmailRedirectAuthorization.mockReturnValue(null);
+    gmailMocks.preloadGmailAuthorization.mockResolvedValue(undefined);
+    gmailMocks.requestGmailAccessToken.mockResolvedValue("gmail-token");
+    gmailMocks.startGmailRedirectAuthorization.mockReturnValue(
+      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
+    );
   });
 
   it("uses one bounded overview subscription instead of one listener per client", async () => {
@@ -114,5 +129,120 @@ describe("MaintenancePage client form", () => {
         "[data-assistant-action='maintenance-save-client']"
       )
     );
+  });
+
+  it("defaults the report technician to the signed-in user", async () => {
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByDisplayValue("Admin Test")).toBeInTheDocument();
+    expect(usersMocks.getAllUsers).toHaveBeenCalledTimes(1);
+    expect(gmailMocks.preloadGmailAuthorization).toHaveBeenCalledTimes(1);
+  });
+
+  it("authorizes Gmail from an explicit report action", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
+
+    expect(gmailMocks.requestGmailAccessToken).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(await screen.findByText("Gmail autorizat pentru liftultau@gmail.com.")).toBeInTheDocument();
+  });
+
+  it("offers explicit same-window Gmail authorization for mobile browsers", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
+
+    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
+    expect(await screen.findByRole("link", { name: "Deschide Google" })).toHaveAttribute(
+      "href",
+      "https://accounts.google.com/o/oauth2/v2/auth?test=1"
+    );
+    expect(gmailMocks.requestGmailAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("shows a clear setup error when Gmail OAuth client id is missing", async () => {
+    gmailMocks.startGmailRedirectAuthorization.mockImplementation(() => {
+      throw new Error("Lipseste VITE_GOOGLE_CLIENT_ID din .env.");
+    });
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autentificare mobil" }));
+
+    expect(await screen.findByText(/Lipseste VITE_GOOGLE_CLIENT_ID/)).toBeInTheDocument();
+    expect(screen.queryByText("Se deschide autorizarea Gmail in aceeasi fereastra...")).not.toBeInTheDocument();
+  });
+
+  it("shows a mobile redirect action when Gmail popup authorization is blocked", async () => {
+    gmailMocks.requestGmailAccessToken.mockRejectedValue(new Error("popup blocked"));
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Autorizeaza Gmail" }));
+    const mobileButton = await screen.findByRole("button", { name: "Autentificare Gmail pe mobil" });
+    await user.click(mobileButton);
+
+    expect(gmailMocks.startGmailRedirectAuthorization).toHaveBeenCalledWith("liftultau@gmail.com");
+  });
+
+  it("keeps a manual technician for the current report and restores the default on return", async () => {
+    usersMocks.getAllUsers.mockResolvedValue([
+      {
+        id: "technician-secondary",
+        uid: "technician-secondary",
+        fullName: "Maria Tehnician",
+        email: "maria@example.test",
+        active: true,
+        role: "angajat",
+      },
+    ]);
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    const technicianInput = await screen.findByDisplayValue("Admin Test");
+    await user.clear(technicianInput);
+    await user.type(technicianInput, "Maria");
+
+    const suggestions = await screen.findByRole("listbox", { name: "Sugestii tehnician" });
+    expect(suggestions.closest(".maintenance-step-card")).toHaveClass("maintenance-step-card--overlay-open");
+    await user.click(screen.getByRole("option", { name: /Maria Tehnician/ }));
+    expect(screen.getByDisplayValue("Maria Tehnician")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Dashboard/ }));
+    await user.click(screen.getAllByRole("button", { name: /Genereaza raport/ })[0]);
+
+    expect(await screen.findByDisplayValue("Admin Test")).toBeInTheDocument();
   });
 });

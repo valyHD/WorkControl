@@ -189,6 +189,37 @@ test("stop is idempotent and server calculates protected duration fields", async
   assert.ok(first.workedMinutes >= 1);
 });
 
+test("stop ignores stale client timestamp that is not after start", async () => {
+  const startAt = Date.now() - 2 * 60 * 60_000;
+  await db.collection("timesheets").doc("stale-stop").set({
+    companyId: "company-a",
+    userId: "employee-a",
+    userName: "Employee A",
+    projectId: "project-a",
+    projectName: "Project A",
+    status: "activ",
+    startAt,
+    stopAt: null,
+    workedMinutes: 0,
+    workDate: "2026-07-15",
+  });
+  await db.collection("activeTimesheets").doc("employee-a").set({
+    companyId: "company-a",
+    userId: "employee-a",
+    timesheetId: "stale-stop",
+  });
+
+  const result = await handlers.stopTimesheet({
+    auth: { uid: "employee-a" },
+    data: { timesheetId: "stale-stop", occurredAt: startAt },
+  });
+  const saved = await db.collection("timesheets").doc("stale-stop").get();
+
+  assert.equal(result.duplicate, false);
+  assert.ok(result.workedMinutes >= 119);
+  assert.ok(saved.get("stopAt") > startAt);
+});
+
 test("negative mileage and cross-company vehicle changes are rejected", async () => {
   await assert.rejects(
     handlers.updateVehicleMileage({

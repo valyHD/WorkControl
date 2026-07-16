@@ -286,9 +286,30 @@
 }
 
 .user-accent-card:hover {
+  border-color: var(--user-accent-border, var(--line)) !important;
+  background: var(--user-accent-soft, #dbeafe) !important;
+  background: color-mix(in srgb, var(--user-accent-soft, #dbeafe) 42%, white) !important;
   box-shadow:
     var(--shadow-md),
     0 8px 26px var(--user-accent-glow);
+}
+
+.user-accent-surface {
+  --user-surface-border: var(--user-accent-border, var(--line));
+}
+
+.user-accent-surface:hover,
+.user-history-row:hover {
+  border-color: var(--user-surface-border) !important;
+  background-color: var(--user-accent-soft, #dbeafe) !important;
+  background-color: color-mix(in srgb, var(--user-accent-soft, #dbeafe) 58%, white) !important;
+  box-shadow: 0 8px 24px var(--user-accent-glow, rgba(37, 99, 235, 0.14));
+}
+
+.user-table-row:hover td {
+  border-color: var(--user-accent-border, var(--line)) !important;
+  background-color: var(--user-accent-soft, #dbeafe) !important;
+  background-color: color-mix(in srgb, var(--user-accent-soft, #dbeafe) 58%, white) !important;
 }
 
 .user-accent-title {
@@ -350,6 +371,13 @@
   border-left: 4px solid var(--user-accent) !important;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--user-accent-soft) 70%, white) 0, transparent 18%);
+}
+
+.user-accent-card,
+.user-accent-surface,
+.user-history-row,
+.user-table-row td {
+  transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
 .user-table-row td:first-child {

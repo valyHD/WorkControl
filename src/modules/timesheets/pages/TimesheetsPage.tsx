@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
@@ -26,7 +26,14 @@ import { getAllUsers } from "../../users/services/usersService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import KpiCard from "../../../components/KpiCard";
 import FilterBar from "../../../components/FilterBar";
-import { DetailsDrawer, LoadingState, PageHeader, PageLayout, PermissionState } from "../../../components/experience";
+import {
+  DetailsDrawer,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  PageLayout,
+  PermissionState,
+} from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import StatusBadge from "../../../components/StatusBadge";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
@@ -40,21 +47,28 @@ import {
   buildUserMinuteBuckets,
   buildUserTimesheetIndex,
   getEffectiveWorkedMinutes,
+  getActiveTimesheetsNow,
+  getActiveUsersNow,
   getLocalDateKey,
   getLocalMonthKey,
   getProjectLabel,
+  getTimesheetMinutesForDay,
+  getTimesheetMinutesForRange,
   getTimesheetPeriodRange,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
   getUserDisplayName,
   getUserTimesheetSummary,
   isIncompleteTimesheet,
+  isStaleActiveTimesheet,
   isTimesheetInRange,
   sumTimesheetMinutes,
+  sumTimesheetMinutesForDay,
   type TimesheetPeriodKey,
 } from "../utils/timesheetAnalytics";
 import { formatTimesheetLocation } from "../utils/timesheetLocation";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
+import { subscribeTimesheetsChanged } from "../services/timesheetLiveUpdates";
 
 type SortKey = "date" | "employee" | "department" | "project" | "duration" | "status";
 type TimesheetManagerView =
@@ -144,6 +158,8 @@ export default function TimesheetsPage() {
   const [timesheets, setTimesheets] = useState<TimesheetItem[]>([]);
   const [users, setUsers] = useState<AppUserItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [liveClock, setLiveClock] = useState(() => Date.now());
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState<TimesheetPeriodKey>("today");
   const [customFrom, setCustomFrom] = useState(getLocalDateKey());
@@ -183,6 +199,7 @@ export default function TimesheetsPage() {
 
     async function load() {
       setLoading(true);
+      setLoadError("");
       try {
         const [timesheetsData, usersData] = await Promise.all([
           getTimesheetsManagementList(),
@@ -191,16 +208,29 @@ export default function TimesheetsPage() {
         if (cancelled) return;
         setTimesheets(timesheetsData);
         setUsers(usersData);
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Nu am putut incarca pontajele.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     void load();
+    const unsubscribe = subscribeTimesheetsChanged(() => void load());
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!timesheets.some((item) => item.status === "activ")) return undefined;
+    setLiveClock(Date.now());
+    const timer = window.setInterval(() => setLiveClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [timesheets]);
 
   useEffect(() => {
     const assistantSearch = assistantParams.get("assistantSearch") || "";
@@ -277,15 +307,27 @@ export default function TimesheetsPage() {
     () => getTimesheetPeriodRange(period, customFrom, customTo),
     [customFrom, customTo, period]
   );
+  const operationalTimesheets = useMemo(
+    () => timesheets.filter((item) => !isStaleActiveTimesheet(item, liveClock)),
+    [liveClock, timesheets]
+  );
+  const displayRange = period === "all" ? undefined : periodRange;
+  const getDisplayMinutesForTimesheet = useCallback(
+    (item: TimesheetItem) =>
+      displayRange
+        ? getTimesheetMinutesForRange(item, displayRange, liveClock)
+        : getEffectiveWorkedMinutes(item, liveClock),
+    [displayRange, liveClock]
+  );
 
   const allProjects = useMemo(() => {
     const map = new Map<string, string>();
-    for (const item of timesheets) {
+    for (const item of operationalTimesheets) {
       const key = item.projectId || item.projectName || item.projectCode || "__no_project__";
       map.set(key, getProjectLabel(item));
     }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [timesheets]);
+  }, [operationalTimesheets]);
 
   const departments = useMemo(
     () =>
@@ -300,12 +342,12 @@ export default function TimesheetsPage() {
   const filteredTimesheets = useMemo(() => {
     const q = normalizeSearchText(search);
 
-    return timesheets.filter((item) => {
+    return operationalTimesheets.filter((item) => {
       const userItem = getUserMeta(usersById, item);
       const department = userItem?.department || "";
       const projectKey = item.projectId || item.projectName || item.projectCode || "__no_project__";
 
-      if (!isTimesheetInRange(item, periodRange)) return false;
+      if (!activeOnly && !isTimesheetInRange(item, periodRange, liveClock)) return false;
       if (userFilter && item.userId !== userFilter) return false;
       if (projectFilter && projectKey !== projectFilter) return false;
       if (statusFilter && item.status !== statusFilter) return false;
@@ -327,11 +369,12 @@ export default function TimesheetsPage() {
     activeOnly,
     departmentFilter,
     incompleteOnly,
+    liveClock,
     periodRange,
     projectFilter,
     search,
     statusFilter,
-    timesheets,
+    operationalTimesheets,
     userFilter,
     usersById,
   ]);
@@ -351,11 +394,11 @@ export default function TimesheetsPage() {
       if (sortKey === "project")
         return multiplier * getProjectLabel(a).localeCompare(getProjectLabel(b));
       if (sortKey === "duration")
-        return multiplier * (getEffectiveWorkedMinutes(a) - getEffectiveWorkedMinutes(b));
+        return multiplier * (getDisplayMinutesForTimesheet(a) - getDisplayMinutesForTimesheet(b));
       if (sortKey === "status") return multiplier * a.status.localeCompare(b.status);
       return multiplier * ((a.startAt || 0) - (b.startAt || 0));
     });
-  }, [filteredTimesheets, sortDirection, sortKey, usersById]);
+  }, [filteredTimesheets, getDisplayMinutesForTimesheet, sortDirection, sortKey, usersById]);
 
   const pageSize = 18;
   const totalPages = Math.max(1, Math.ceil(sortedTimesheets.length / pageSize));
@@ -377,27 +420,44 @@ export default function TimesheetsPage() {
     userFilter,
   ]);
 
-  const todayKey = getLocalDateKey();
-  const monthKey = getLocalMonthKey();
+  const todayKey = getLocalDateKey(liveClock);
+  const monthKey = getLocalMonthKey(liveClock);
   const todayItems = useMemo(
-    () => timesheets.filter((item) => item.workDate === todayKey),
-    [timesheets, todayKey]
+    () =>
+      operationalTimesheets.filter(
+        (item) =>
+          item.workDate === todayKey || getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
+      ),
+    [liveClock, operationalTimesheets, todayKey]
   );
   const monthItems = useMemo(
-    () => timesheets.filter((item) => item.yearMonth === monthKey),
-    [monthKey, timesheets]
+    () => operationalTimesheets.filter((item) => item.yearMonth === monthKey),
+    [monthKey, operationalTimesheets]
   );
-  const activeToday = useMemo(
-    () => todayItems.filter((item) => item.status === "activ"),
-    [todayItems]
+  const activeNow = useMemo(
+    () => getActiveTimesheetsNow(operationalTimesheets),
+    [operationalTimesheets]
+  );
+  const activeUsersNow = useMemo(
+    () => getActiveUsersNow(operationalTimesheets),
+    [operationalTimesheets]
+  );
+  const todayOperationalItems = useMemo(() => {
+    const byId = new Map(todayItems.map((item) => [item.id, item]));
+    activeNow.forEach((item) => byId.set(item.id, item));
+    return [...byId.values()];
+  }, [activeNow, todayItems]);
+  const todayMinutes = useMemo(
+    () => sumTimesheetMinutesForDay(todayOperationalItems, todayKey, liveClock),
+    [liveClock, todayKey, todayOperationalItems]
   );
   const incompleteItems = useMemo(
     () => filteredTimesheets.filter(isIncompleteTimesheet),
     [filteredTimesheets]
   );
   const topProject = useMemo(
-    () => buildProjectMinuteBuckets(filteredTimesheets, Date.now(), 1)[0],
-    [filteredTimesheets]
+    () => buildProjectMinuteBuckets(filteredTimesheets, liveClock, 1, displayRange)[0],
+    [displayRange, filteredTimesheets, liveClock]
   );
 
   const userTimesheetIndex = useMemo(
@@ -412,7 +472,12 @@ export default function TimesheetsPage() {
     ? (userTimesheetIndex.get(getUserId(selectedUser)) ?? [])
     : [];
   const selectedUserSummary = selectedUser
-    ? getUserTimesheetSummary({ user: selectedUser, items: selectedUserItems, range: periodRange })
+    ? getUserTimesheetSummary({
+        user: selectedUser,
+        items: selectedUserItems,
+        range: periodRange,
+        nowTs: liveClock,
+      })
     : null;
 
   const columns = useMemo<DataTableColumn<TimesheetItem>[]>(
@@ -488,7 +553,7 @@ export default function TimesheetsPage() {
         key: "duration",
         header: "Durata",
         sortable: true,
-        render: (item) => formatMinutes(getEffectiveWorkedMinutes(item)),
+        render: (item) => formatMinutes(getDisplayMinutesForTimesheet(item)),
       },
       { key: "break", header: "Pauza", render: () => "-" },
       {
@@ -546,7 +611,7 @@ export default function TimesheetsPage() {
         ),
       },
     ],
-    [selectedIds, usersById]
+    [getDisplayMinutesForTimesheet, selectedIds, usersById]
   );
 
   const displayedColumns = useMemo(
@@ -587,7 +652,7 @@ export default function TimesheetsPage() {
           getProjectLabel(item),
           formatDateTime(item.startAt),
           formatDateTime(item.stopAt),
-          formatMinutes(getEffectiveWorkedMinutes(item)),
+          formatMinutes(getDisplayMinutesForTimesheet(item)),
           getTimesheetStatusLabel(item.status),
           formatTimesheetLocation(item.startLocation),
           formatTimesheetLocation(item.stopLocation),
@@ -608,7 +673,22 @@ export default function TimesheetsPage() {
   if (loading) {
     return (
       <PageLayout className="timesheets-management-page">
-        <LoadingState title="Se incarca pontajele" description="Pregatim situatia echipei si proiectelor." />
+        <LoadingState
+          title="Se incarca pontajele"
+          description="Pregatim situatia echipei si proiectelor."
+        />
+      </PageLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <PageLayout className="timesheets-management-page">
+        <ErrorState
+          title="Pontajele nu au putut fi incarcate"
+          description={loadError}
+          retry={() => window.location.reload()}
+        />
       </PageLayout>
     );
   }
@@ -657,7 +737,7 @@ export default function TimesheetsPage() {
         onChange={handleViewChange}
         tabs={[
           { id: "overview", label: "Overview", icon: LayoutDashboard },
-          { id: "active", label: "Active acum", icon: CircleDot, badge: activeToday.length },
+          { id: "active", label: "Active acum", icon: CircleDot, badge: activeNow.length },
           { id: "all", label: "Toate pontajele", icon: CalendarDays },
           { id: "employees", label: "Angajati", icon: Users, badge: users.length },
           { id: "projects", label: "Proiecte", icon: BriefcaseBusiness, to: "/projects" },
@@ -670,8 +750,8 @@ export default function TimesheetsPage() {
       <div className="wc-kpi-grid wc-kpi-grid--five" hidden={activeView !== "overview"}>
         <KpiCard
           label="Total ore azi"
-          value={formatMinutes(sumTimesheetMinutes(todayItems))}
-          helper={`${todayItems.length} pontaje`}
+          value={formatMinutes(todayMinutes)}
+          helper={`${todayOperationalItems.length} pontaje`}
           tone="green"
           icon={TimerReset}
         />
@@ -684,8 +764,8 @@ export default function TimesheetsPage() {
         />
         <KpiCard
           label="Angajati activi azi"
-          value={new Set(activeToday.map((item) => item.userId)).size}
-          helper={`${activeToday.length} pontaje active`}
+          value={activeUsersNow.size}
+          helper={`${activeNow.length} pontaje active`}
           tone="blue"
           icon={Users}
         />
@@ -949,11 +1029,11 @@ export default function TimesheetsPage() {
         <TimesheetChartCard
           title="Ore lucrate pe zile"
           subtitle={periodRange.label}
-          bars={buildDayMinuteBuckets(filteredTimesheets)}
+          bars={buildDayMinuteBuckets(filteredTimesheets, liveClock)}
         />
         <TimesheetChartCard
           title="Ore pe proiecte"
-          bars={buildProjectMinuteBuckets(filteredTimesheets)}
+          bars={buildProjectMinuteBuckets(filteredTimesheets, liveClock, 6, displayRange)}
         />
         <TimesheetChartCard
           title="Prezenta echipa azi"
@@ -983,7 +1063,7 @@ export default function TimesheetsPage() {
         />
         <TimesheetChartCard
           title="Ore per utilizator"
-          bars={buildUserMinuteBuckets(filteredTimesheets)}
+          bars={buildUserMinuteBuckets(filteredTimesheets, liveClock, 8, displayRange)}
         />
         <TimesheetChartCard title="Statusuri" bars={buildStatusBuckets(filteredTimesheets)} />
       </div>
@@ -1088,7 +1168,7 @@ export default function TimesheetsPage() {
                 </p>
                 <p>
                   {formatTime(item.startAt)} - {formatTime(item.stopAt)} /{" "}
-                  {formatMinutes(getEffectiveWorkedMinutes(item))}
+                  {formatMinutes(getDisplayMinutesForTimesheet(item))}
                 </p>
                 <small>{formatTimesheetLocation(item.startLocation) || "-"}</small>
               </Link>
@@ -1133,11 +1213,11 @@ export default function TimesheetsPage() {
           <div className="content-grid">
             <TimesheetChartCard
               title="Ore lucrate pe zile"
-              bars={buildDayMinuteBuckets(selectedUserItems)}
+              bars={buildDayMinuteBuckets(selectedUserItems, liveClock)}
             />
             <TimesheetChartCard
               title="Ore pe proiecte"
-              bars={buildProjectMinuteBuckets(selectedUserItems)}
+              bars={buildProjectMinuteBuckets(selectedUserItems, liveClock, 6, displayRange)}
             />
           </div>
           <div className="content-grid" style={{ marginTop: 16 }}>
@@ -1211,7 +1291,7 @@ export default function TimesheetsPage() {
             </div>
             <div>
               <span>Durata</span>
-              <strong>{formatMinutes(getEffectiveWorkedMinutes(previewTimesheet))}</strong>
+              <strong>{formatMinutes(getDisplayMinutesForTimesheet(previewTimesheet))}</strong>
             </div>
             <div>
               <span>Locatie start</span>

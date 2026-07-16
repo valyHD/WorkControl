@@ -106,9 +106,34 @@ export function getTimesheetPeriodRange(
   };
 }
 
-export function isTimesheetInRange(item: TimesheetItem, range: TimesheetPeriodRange) {
-  const startAt = item.startAt || 0;
-  return startAt >= range.from && startAt <= range.to;
+function getTimesheetIntervalEnd(item: TimesheetItem, nowTs = Date.now()) {
+  if (item.status === "activ") return nowTs;
+  if (item.stopAt) return item.stopAt;
+  if (item.startAt && item.workedMinutes > 0) {
+    return item.startAt + item.workedMinutes * 60_000;
+  }
+  return item.startAt || 0;
+}
+
+export function getTimesheetMinutesForRange(
+  item: TimesheetItem,
+  range: TimesheetPeriodRange,
+  nowTs = Date.now()
+) {
+  if (!item.startAt) return 0;
+  const intervalStart = Math.max(item.startAt, range.from);
+  const intervalEnd = Math.min(getTimesheetIntervalEnd(item, nowTs), range.to);
+  return intervalEnd > intervalStart
+    ? Math.max(0, Math.floor((intervalEnd - intervalStart) / 60_000))
+    : 0;
+}
+
+export function isTimesheetInRange(
+  item: TimesheetItem,
+  range: TimesheetPeriodRange,
+  nowTs = Date.now()
+) {
+  return getTimesheetMinutesForRange(item, range, nowTs) > 0;
 }
 
 export function getEffectiveWorkedMinutes(item: TimesheetItem, nowTs = Date.now()) {
@@ -118,8 +143,79 @@ export function getEffectiveWorkedMinutes(item: TimesheetItem, nowTs = Date.now(
   return item.workedMinutes || 0;
 }
 
+function isValidDateKey(value: string | null | undefined) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+export function isStaleActiveTimesheet(item: TimesheetItem | null | undefined, nowTs = Date.now()) {
+  if (!item || item.status !== "activ") return false;
+  const todayKey = getLocalDateKey(nowTs);
+  if (!item.startAt) return isValidDateKey(item.workDate) && item.workDate < todayKey;
+  if (nowTs - item.startAt <= 12 * 60 * 60 * 1000) return false;
+  return (
+    getLocalDateKey(item.startAt) !== todayKey ||
+    (isValidDateKey(item.workDate) && item.workDate < todayKey)
+  );
+}
+
 export function sumTimesheetMinutes(items: TimesheetItem[], nowTs = Date.now()) {
   return items.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item, nowTs), 0);
+}
+
+function getDayBounds(dayKey: string): { from: number; to: number } | null {
+  const from = new Date(`${dayKey}T00:00:00`);
+  if (!Number.isFinite(from.getTime()) || getLocalDateKey(from.getTime()) !== dayKey) return null;
+  const to = startOfDay(from);
+  to.setDate(to.getDate() + 1);
+  return { from: from.getTime(), to: to.getTime() };
+}
+
+export function getTimesheetMinutesForDay(
+  item: TimesheetItem,
+  dayKey = getLocalDateKey(),
+  nowTs = Date.now()
+) {
+  if (item.status !== "activ") {
+    if (item.workDate === dayKey) return Math.max(0, Number(item.workedMinutes || 0));
+    const bounds = getDayBounds(dayKey);
+    if (!bounds || !item.startAt || !item.stopAt) return 0;
+    const intervalStart = Math.max(item.startAt, bounds.from);
+    const intervalEnd = Math.min(item.stopAt, bounds.to);
+    return intervalEnd > intervalStart
+      ? Math.max(0, Math.floor((intervalEnd - intervalStart) / 60_000))
+      : 0;
+  }
+
+  const bounds = getDayBounds(dayKey);
+  if (!bounds || !item.startAt) return 0;
+  const intervalStart = Math.max(item.startAt, bounds.from);
+  const intervalEnd = Math.min(nowTs, bounds.to);
+  if (intervalEnd <= intervalStart) return 0;
+
+  const liveMinutes = Math.floor((intervalEnd - intervalStart) / 60_000);
+  return item.workDate === dayKey
+    ? Math.max(Math.max(0, Number(item.workedMinutes || 0)), liveMinutes)
+    : liveMinutes;
+}
+
+export function sumTimesheetMinutesForDay(
+  items: TimesheetItem[],
+  dayKey = getLocalDateKey(),
+  nowTs = Date.now()
+) {
+  return items.reduce((sum, item) => sum + getTimesheetMinutesForDay(item, dayKey, nowTs), 0);
+}
+
+export function getActiveTimesheetsNow(items: TimesheetItem[]) {
+  return items.filter((item) => item.status === "activ");
+}
+
+export function getActiveUsersNow(items: TimesheetItem[]) {
+  return new Set(
+    getActiveTimesheetsNow(items)
+      .map((item) => item.userId)
+      .filter(Boolean)
+  );
 }
 
 export function getTimesheetStatusLabel(status: TimesheetItem["status"] | "nepontat" | "pauza") {
@@ -179,7 +275,11 @@ export function getUsersWithTimesheetToday(items: TimesheetItem[], todayKey = ge
   return new Set(items.filter((item) => item.workDate === todayKey).map((item) => item.userId));
 }
 
-export function getUsersWithoutTimesheetToday(users: AppUserItem[], items: TimesheetItem[], todayKey = getLocalDateKey()) {
+export function getUsersWithoutTimesheetToday(
+  users: AppUserItem[],
+  items: TimesheetItem[],
+  todayKey = getLocalDateKey()
+) {
   const withTimesheet = getUsersWithTimesheetToday(items, todayKey);
   return users.filter((user) => user.active !== false && !withTimesheet.has(user.uid || user.id));
 }
@@ -191,8 +291,26 @@ export function isIncompleteTimesheet(item: TimesheetItem) {
 export function buildDayMinuteBuckets(items: TimesheetItem[], nowTs = Date.now()) {
   const map = new Map<string, number>();
   for (const item of items) {
-    const key = item.workDate || getLocalDateKey(item.startAt);
-    map.set(key, (map.get(key) || 0) + getEffectiveWorkedMinutes(item, nowTs));
+    const startAt = item.startAt || 0;
+    const endAt = getTimesheetIntervalEnd(item, nowTs);
+    const firstDay = startAt ? startOfDay(new Date(startAt)) : startOfDay(new Date(nowTs));
+    const lastDay = endAt ? startOfDay(new Date(endAt)) : firstDay;
+    let added = false;
+
+    for (let day = new Date(firstDay), guard = 0; day <= lastDay && guard < 370; guard += 1) {
+      const key = getLocalDateKey(day.getTime());
+      const minutes = getTimesheetMinutesForDay(item, key, nowTs);
+      if (minutes > 0) {
+        map.set(key, (map.get(key) || 0) + minutes);
+        added = true;
+      }
+      day.setDate(day.getDate() + 1);
+    }
+
+    if (!added && item.workDate) {
+      const minutes = Math.max(0, Number(item.workedMinutes || 0));
+      if (minutes > 0) map.set(item.workDate, (map.get(item.workDate) || 0) + minutes);
+    }
   }
   return [...map.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -203,11 +321,20 @@ export function buildDayMinuteBuckets(items: TimesheetItem[], nowTs = Date.now()
     }));
 }
 
-export function buildProjectMinuteBuckets(items: TimesheetItem[], nowTs = Date.now(), limitCount = 6) {
+export function buildProjectMinuteBuckets(
+  items: TimesheetItem[],
+  nowTs = Date.now(),
+  limitCount = 6,
+  range?: TimesheetPeriodRange
+) {
   const map = new Map<string, number>();
   for (const item of items) {
     const label = getProjectLabel(item);
-    map.set(label, (map.get(label) || 0) + getEffectiveWorkedMinutes(item, nowTs));
+    const minutes = range
+      ? getTimesheetMinutesForRange(item, range, nowTs)
+      : getEffectiveWorkedMinutes(item, nowTs);
+    if (minutes <= 0) continue;
+    map.set(label, (map.get(label) || 0) + minutes);
   }
   return [...map.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -219,12 +346,25 @@ export function buildProjectMinuteBuckets(items: TimesheetItem[], nowTs = Date.n
     }));
 }
 
-export function buildUserMinuteBuckets(items: TimesheetItem[], nowTs = Date.now(), limitCount = 8) {
+export function buildUserMinuteBuckets(
+  items: TimesheetItem[],
+  nowTs = Date.now(),
+  limitCount = 8,
+  range?: TimesheetPeriodRange
+) {
   const map = new Map<string, { userId: string; userName: string; minutes: number }>();
   for (const item of items) {
+    const minutes = range
+      ? getTimesheetMinutesForRange(item, range, nowTs)
+      : getEffectiveWorkedMinutes(item, nowTs);
+    if (minutes <= 0) continue;
     const key = item.userId || item.userName || "unknown";
-    const current = map.get(key) ?? { userId: item.userId, userName: item.userName || "Utilizator", minutes: 0 };
-    current.minutes += getEffectiveWorkedMinutes(item, nowTs);
+    const current = map.get(key) ?? {
+      userId: item.userId,
+      userName: item.userName || "Utilizator",
+      minutes: 0,
+    };
+    current.minutes += minutes;
     map.set(key, current);
   }
   return [...map.values()]
@@ -280,11 +420,19 @@ export function getUserTimesheetSummary(params: {
   nowTs?: number;
 }) {
   const nowTs = params.nowTs ?? Date.now();
-  const totalMinutes = sumTimesheetMinutes(params.items, nowTs);
-  const workedDays = new Set(params.items.filter((item) => getEffectiveWorkedMinutes(item, nowTs) > 0).map((item) => item.workDate)).size;
+  const totalMinutes = params.items.reduce(
+    (sum, item) => sum + getTimesheetMinutesForRange(item, params.range, nowTs),
+    0
+  );
+  const workedDays = new Set(
+    getWorkdaysInRange(params.range).filter((day) =>
+      params.items.some((item) => getTimesheetMinutesForDay(item, day, nowTs) > 0)
+    )
+  ).size;
   const missingDays = getMissingWorkdaysForUser(params.items, params.range);
   const incomplete = params.items.filter(isIncompleteTimesheet);
-  const projectCount = new Set(params.items.map((item) => item.projectId || getProjectLabel(item))).size;
+  const projectCount = new Set(params.items.map((item) => item.projectId || getProjectLabel(item)))
+    .size;
 
   return {
     user: params.user,

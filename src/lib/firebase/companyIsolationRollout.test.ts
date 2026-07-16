@@ -10,17 +10,17 @@ describe("companyIsolationRollout", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keeps legacy collections until the migration flag is explicitly enabled", () => {
-    expect(areCompanyIsolationReadsEnabled()).toBe(false);
-    expect(getUserDirectoryCollectionName()).toBe("users");
-    expect(getVehicleDirectoryCollectionName()).toBe("vehicles");
-  });
-
-  it("uses operational views only after explicit activation", () => {
-    vi.stubEnv("VITE_COMPANY_ISOLATION_READS", "true");
-
+  it("uses company-safe operational collections by default", () => {
     expect(areCompanyIsolationReadsEnabled()).toBe(true);
     expect(getUserDirectoryCollectionName()).toBe("userOperationalViews");
     expect(getVehicleDirectoryCollectionName()).toBe("vehicleOperationalViews");
+  });
+
+  it("can temporarily fall back only when explicitly disabled", () => {
+    vi.stubEnv("VITE_COMPANY_ISOLATION_READS", "false");
+
+    expect(areCompanyIsolationReadsEnabled()).toBe(false);
+    expect(getUserDirectoryCollectionName()).toBe("users");
+    expect(getVehicleDirectoryCollectionName()).toBe("vehicles");
   });
 });

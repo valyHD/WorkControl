@@ -5,7 +5,6 @@ import { logoutUser } from "../modules/auth/services/authService";
 import { hasPushVapidKey, syncPushTokenIfGranted } from "../lib/notifications/pushNotifications";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { NotificationPermissionBanner } from "../components/NotificationPermissionBanner";
-import { AppUpdateBanner } from "../components/AppUpdateBanner";
 import { FloatingQuickLinks } from "../components/FloatingQuickLinks";
 import { getAuditLogs, logPageView } from "../modules/audit/services/auditLogService";
 import type { AuditLogItem } from "../types/audit";
@@ -344,7 +343,6 @@ export default function AppShell() {
           </div>
         </header>
 
-        <AppUpdateBanner />
         <ConnectivityBanner />
         <InstallAppBanner />
         <NotificationPermissionBanner userId={user?.uid} />

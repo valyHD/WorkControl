@@ -33,6 +33,14 @@ const profiles = {
     primaryCompanyId: "company-a",
     companyIds: ["company-a", "company-b"],
   },
+  legacyAdmin: {
+    uid: "legacy-admin",
+    fullName: "Legacy Admin",
+    role: "admin",
+    active: true,
+    accessStatus: "active",
+    companyIds: [],
+  },
   adminA: {
     uid: "admin-a",
     fullName: "Admin A",
@@ -325,6 +333,44 @@ test("manager cannot bypass server functions for assignments or mileage", async 
   }));
 });
 
+test("global admin may persist GPS simulation mileage without opening normal GPS writes", async () => {
+  await assertFails(updateDoc(doc(firestore("manager-a"), "vehicles", "vehicle-a"), {
+    gpsSimHistory: [{
+      id: "sim-1",
+      startedAt: 1,
+      stoppedAt: 2,
+      totalDistanceKm: 10,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6200, ts: 1, speedKmh: 0, angle: 0, ignitionOn: false }],
+    }],
+    currentKm: 6210,
+    updatedAt: 2,
+  }));
+
+  await assertSucceeds(updateDoc(doc(firestore("global"), "vehicles", "vehicle-a"), {
+    gpsSim: {
+      active: true,
+      status: "running",
+      startedAt: 3,
+      resumedAt: 3,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6210, ts: 3, speedKmh: 20, angle: 0, ignitionOn: true }],
+    },
+    gpsSimHistory: [{
+      id: "sim-1",
+      startedAt: 1,
+      stoppedAt: 2,
+      totalDistanceKm: 10,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 6200, ts: 1, speedKmh: 0, angle: 0, ignitionOn: false }],
+    }],
+    currentKm: 6210,
+    updatedAt: 3,
+  }));
+
+  await assertFails(setDoc(doc(firestore("global"), "vehicles", "vehicle-a", "positionDays", "2026-07-15", "points", "sim"), {
+    lat: 44.4,
+    lng: 26.1,
+  }));
+});
+
 test("employee can update safe profile fields and manager cannot change roles", async () => {
   await assertSucceeds(updateDoc(doc(firestore("employee-a"), "users", "employee-a"), {
     fullName: "Employee A Updated",
@@ -370,6 +416,15 @@ test("clients cannot forge audit, AI, system logs or notifications", async () =>
     userId: "manager-a",
     title: "spam",
   }));
+  await assertFails(setDoc(doc(db, "notificationSchedules", "fake"), {
+    companyId: "company-a",
+    status: "scheduled",
+    nextRunAt: Date.now(),
+  }));
+  await assertFails(setDoc(doc(db, "notificationDeliveries", "fake"), {
+    companyId: "company-a",
+    recipientCount: 1,
+  }));
 });
 
 test("GPS points are readable only for assigned users and company managers", async () => {
@@ -386,6 +441,12 @@ test("global admin has explicit cross-company access while company managers do n
   await assertSucceeds(getDocs(collection(firestore("global"), "projects")));
   await assertFails(getDoc(doc(firestore("manager-a"), "vehicles", "vehicle-b")));
   await assertFails(getDocs(collection(firestore("manager-a"), "projects")));
+});
+
+test("legacy admin without company scope keeps global access", async () => {
+  await assertSucceeds(getDocs(collection(firestore("legacy-admin"), "users")));
+  await assertSucceeds(getDoc(doc(firestore("legacy-admin"), "vehicles", "vehicle-b")));
+  await assertSucceeds(getDocs(collection(firestore("legacy-admin"), "projects")));
 });
 
 test("Storage enforces owner, company, type and size", async () => {

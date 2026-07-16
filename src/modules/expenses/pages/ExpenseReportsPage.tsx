@@ -13,6 +13,7 @@ import {
   summarizeExpenses,
 } from "../services/expensesService";
 import UserProfileLink from "../../../components/UserProfileLink";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 const initialFilters: ExpenseFilters = {
   yearMonth: new Date().toISOString().slice(0, 7),
@@ -159,6 +160,10 @@ export default function ExpenseReportsPage() {
   const byUser = useMemo(() => groupByLabel(filtered, (item) => item.assignedUserName), [filtered]);
   const byProject = useMemo(() => groupByLabel(filtered, (item) => item.projectName || item.projectCode), [filtered]);
   const byCompany = useMemo(() => groupByLabel(filtered, (item) => item.companyName), [filtered]);
+  const userThemeById = useMemo(
+    () => new Map(users.map((userItem) => [userItem.id, userItem.themeKey ?? null])),
+    [users]
+  );
 
   if (role !== "admin") {
     return <Navigate to="/expenses/scan" replace />;
@@ -293,11 +298,11 @@ export default function ExpenseReportsPage() {
                 </thead>
                 <tbody>
                   {filtered.map((item) => (
-                    <tr key={item.id}>
+                    <tr key={item.id} className={`user-table-row ${getUserThemeClass(userThemeById.get(item.assignedUserId))}`}>
                       <td>{item.documentDate || "-"}</td>
                       <td>{item.documentKind}</td>
                       <td>{item.supplierName || "-"}</td>
-                      <td><UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} /></td>
+                      <td><UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} themeKey={userThemeById.get(item.assignedUserId)} /></td>
                       <td>{item.projectName || item.projectCode || "-"}</td>
                       <td>{item.companyName || "-"}</td>
                       <td>{money(item.subtotalAmount || Math.max(0, item.totalAmount - item.vatAmount), item.currency)}</td>

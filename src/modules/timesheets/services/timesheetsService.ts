@@ -35,6 +35,7 @@ import {
   type AuditFieldDescriptor,
 } from "../../audit/utils/auditMetadata";
 import { simplifyTimesheetAddressLabel } from "../utils/timesheetLocation";
+import { notifyTimesheetsChanged } from "./timesheetLiveUpdates";
 
 const projectsCollection = collection(db, "projects");
 const timesheetsCollection = collection(db, "timesheets");
@@ -43,6 +44,21 @@ const projectAuditFields: AuditFieldDescriptor<ProjectFormValues>[] = [
   { key: "name", label: "Nume proiect" },
   { key: "status", label: "Status" },
 ];
+
+function toMillis(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value === "object" && "toMillis" in value) {
+    const millis = Number((value as { toMillis: () => number }).toMillis());
+    return Number.isFinite(millis) ? millis : fallback;
+  }
+  if (value && typeof value === "object" && "_seconds" in value) {
+    const seconds = Number((value as { _seconds?: number })._seconds);
+    const nanos = Number((value as { _nanoseconds?: number })._nanoseconds || 0);
+    if (Number.isFinite(seconds)) return seconds * 1000 + Math.floor(nanos / 1_000_000);
+  }
+  return fallback;
+}
 
 function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
   return {
@@ -59,6 +75,10 @@ function mapProjectDoc(id: string, data: Record<string, any>): ProjectItem {
 function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
   const rawStatus = (data.status ?? "activ") as TimesheetItem["status"];
   const normalizedStatus = rawStatus === "neinchis" && data.stopAt ? "corectat" : rawStatus;
+  const createdAt = toMillis(data.createdAt, 0);
+  const updatedAt = toMillis(data.updatedAt, createdAt || 0);
+  const startAt = toMillis(data.startAt, createdAt || 0);
+  const stopAt = data.stopAt == null ? null : toMillis(data.stopAt, 0);
 
   return {
     id,
@@ -79,8 +99,8 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     stopExpectedMinutes:
       typeof data.stopExpectedMinutes === "number" ? data.stopExpectedMinutes : null,
 
-    startAt: data.startAt ?? Date.now(),
-    stopAt: data.stopAt ?? null,
+    startAt,
+    stopAt,
     workedMinutes: Number(data.workedMinutes ?? 0),
 
     startLocation: {
@@ -103,8 +123,8 @@ function mapTimesheetDoc(id: string, data: Record<string, any>): TimesheetItem {
     yearMonth: data.yearMonth ?? "",
     weekKey: data.weekKey ?? "",
 
-    createdAt: data.createdAt ?? Date.now(),
-    updatedAt: data.updatedAt ?? Date.now(),
+    createdAt,
+    updatedAt,
     companyId: data.companyId ?? "",
   };
 }
@@ -137,17 +157,11 @@ function getProjectDisplayName(projectName?: string, projectCode?: string): stri
 
 export async function getProjectsList(maxItems?: number): Promise<ProjectItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const constraints = [
-    ...buildCompanyScopeConstraints(context),
-    orderBy("name", "asc"),
-  ];
+  const constraints = [...buildCompanyScopeConstraints(context), orderBy("name", "asc")];
   if (Number.isFinite(maxItems)) {
     constraints.push(limit(Math.min(250, Math.max(1, Math.floor(maxItems as number)))));
   }
-  const snap = await getDocs(query(
-    projectsCollection,
-    ...constraints
-  ));
+  const snap = await getDocs(query(projectsCollection, ...constraints));
   return snap.docs.map((docItem) => mapProjectDoc(docItem.id, docItem.data()));
 }
 
@@ -302,7 +316,7 @@ export async function getActiveTimesheetForUser(userId: string): Promise<Timeshe
   return mapTimesheetDoc(snap.docs[0].id, snap.docs[0].data());
 }
 
-export async function startTimesheet(params: {
+export type StartTimesheetParams = {
   userId: string;
   userName: string;
   userThemeKey?: string | null;
@@ -314,7 +328,17 @@ export async function startTimesheet(params: {
   startPolicyFlag?: string;
   startExpectedTime?: string;
   occurredAt?: number;
-}): Promise<string> {
+  offlineReplay?: boolean;
+};
+
+export type StartTimesheetResult = {
+  timesheetId: string;
+  duplicate: boolean;
+};
+
+export async function startTimesheetDetailed(
+  params: StartTimesheetParams
+): Promise<StartTimesheetResult> {
   const context = await getCurrentCompanyAccessContext();
   if (context.uid !== params.userId) {
     throw new Error("Poti porni numai pontajul propriu.");
@@ -329,6 +353,7 @@ export async function startTimesheet(params: {
       startPolicyFlag?: string;
       startExpectedTime?: string;
       occurredAt?: number;
+      offlineReplay?: boolean;
       startSource: "web";
     },
     { timesheetId: string; duplicate: boolean }
@@ -340,38 +365,52 @@ export async function startTimesheet(params: {
     startExplanation: params.startExplanation,
     startPolicyFlag: params.startPolicyFlag,
     startExpectedTime: params.startExpectedTime ?? "",
-    occurredAt: params.occurredAt,
+    occurredAt: params.offlineReplay === true ? params.occurredAt : undefined,
+    offlineReplay: params.offlineReplay === true ? true : undefined,
     startSource: "web",
   });
   const timesheetId = response.data.timesheetId;
   if (!timesheetId) throw new Error("Pontajul nu a returnat un identificator valid.");
+  const duplicate = response.data.duplicate === true;
 
-  await dispatchNotificationEvent({
-    module: "timesheets",
-    eventType: "timesheet_started",
-    entityId: timesheetId,
-    title: "Pontaj pornit",
-    message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
-    directUserId: params.userId,
-    ownerUserId: params.userId,
-    actorUserId: params.userId,
-    actorUserName: params.userName,
-    actorUserThemeKey: params.userThemeKey ?? null,
-    metadata: {
-      fieldsText: [
-        `User: ${params.userName}`,
-        `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
-        `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
-        `Explicatie start: ${params.startExplanation || "-"}`,
-        `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
-      ],
-      fieldsCount: 5,
-    },
-    companyId,
-    idempotencyKey: `timesheet-started-${timesheetId}`,
-  });
+  if (!duplicate) {
+    await dispatchNotificationEvent({
+      module: "timesheets",
+      eventType: "timesheet_started",
+      entityId: timesheetId,
+      title: "Pontaj pornit",
+      message: `${params.userName} a pornit pontajul pe ${getProjectDisplayName(params.projectName, params.projectCode)}.`,
+      directUserId: params.userId,
+      ownerUserId: params.userId,
+      actorUserId: params.userId,
+      actorUserName: params.userName,
+      actorUserThemeKey: params.userThemeKey ?? null,
+      metadata: {
+        fieldsText: [
+          `User: ${params.userName}`,
+          `Proiect: ${getProjectDisplayName(params.projectName, params.projectCode)}`,
+          `Ora asteptata pornire: ${params.startExpectedTime || "-"}`,
+          `Explicatie start: ${params.startExplanation || "-"}`,
+          `Locatie start: ${cleanTimesheetLocation(params.startLocation).label || "-"}`,
+        ],
+        fieldsCount: 5,
+      },
+      companyId,
+      idempotencyKey: `timesheet-started-${timesheetId}`,
+    });
+  }
 
-  return timesheetId;
+  notifyTimesheetsChanged({ userId: params.userId, reason: "start" });
+
+  return {
+    timesheetId,
+    duplicate,
+  };
+}
+
+export async function startTimesheet(params: StartTimesheetParams): Promise<string> {
+  const result = await startTimesheetDetailed(params);
+  return result.timesheetId;
 }
 
 export async function stopTimesheet(params: {
@@ -439,15 +478,19 @@ export async function stopTimesheet(params: {
     companyId: String(data.companyId ?? ""),
     idempotencyKey: `timesheet-stopped-${params.timesheetId}`,
   });
+
+  notifyTimesheetsChanged({ userId: String(data.userId ?? ""), reason: "stop" });
 }
 
 export async function getTimesheetsList(): Promise<TimesheetItem[]> {
   const context = await getCurrentCompanyAccessContext();
-  const snap = await getDocs(query(
-    timesheetsCollection,
-    ...buildCompanyScopeConstraints(context),
-    orderBy("startAt", "desc")
-  ));
+  const snap = await getDocs(
+    query(
+      timesheetsCollection,
+      ...buildCompanyScopeConstraints(context),
+      orderBy("startAt", "desc")
+    )
+  );
   return snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
 }
 

@@ -27,6 +27,7 @@ const {
   requestAssistantTranscription,
 } = require('./assistantTranscription');
 const { createSecurityHandlers } = require('./securityActions');
+const { createDocumentIntelligenceHandlers } = require('./documentIntelligence');
 const {
   buildVehicleOperationalView,
   VEHICLE_OPERATIONAL_VIEW_VERSION,
@@ -40,6 +41,15 @@ const {
 } = require('./userOperationalView');
 const { writeProjectionIfChanged } = require('./projectionPayload');
 const { GLOBAL_RUNTIME_OPTIONS } = require('./runtimeOptions');
+const {
+  buildDeliveryKey,
+  buildNotificationForSchedule,
+  buildScheduleLeasePatch,
+  buildScheduleSyncPlan,
+  canClaimSchedule,
+  getScheduleAdvancePatch,
+  stableHash,
+} = require('./expiryAutomation');
 
 setGlobalOptions(GLOBAL_RUNTIME_OPTIONS);
 
@@ -59,6 +69,22 @@ const SECURITY_CALLABLE_OPTIONS = {
   region: 'europe-west1',
   enforceAppCheck: process.env.WORKCONTROL_ENFORCE_APP_CHECK === 'true',
 };
+const DOCUMENT_CALLABLE_OPTIONS = {
+  ...SECURITY_CALLABLE_OPTIONS,
+  timeoutSeconds: 120,
+  memory: '512MiB',
+};
+const documentIntelligenceHandlers = createDocumentIntelligenceHandlers({
+  db,
+  bucket: admin.storage().bucket(),
+  fieldValue: FieldValue,
+  HttpsError,
+  logger,
+  openaiApiKey,
+  assertActiveInternalRequest,
+  canAccessCompany: internalContextCanAccessCompany,
+  buildAuditPayload,
+});
 const VEHICLE_POSITION_ARCHIVE_RETENTION_DAYS = 30;
 const VEHICLE_POSITION_ARCHIVE_MAX_DAYS_PER_RUN = 80;
 const FIRESTORE_DELETE_BATCH_SIZE = 450;
@@ -67,6 +93,10 @@ let fleetOverviewCache = null;
 let fleetOverviewRequest = null;
 
 exports.adminCreateUser = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.adminCreateUser);
+exports.registerInternalAccount = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.registerInternalAccount
+);
 exports.setPrimaryCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.setPrimaryCompany);
 exports.listCompanyChoices = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.listCompanyChoices);
 exports.claimInitialCompany = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimInitialCompany);
@@ -111,6 +141,41 @@ exports.acceptToolTransfer = onCall(
   securityHandlers.acceptToolTransfer
 );
 exports.claimTool = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.claimTool);
+exports.createVehicleDocumentIngestionJob = onCall(
+  DOCUMENT_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.createVehicleDocumentIngestionJob
+);
+exports.getVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.getVehicleDocumentIngestionJob
+);
+exports.retryVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.retryVehicleDocumentIngestionJob
+);
+exports.applyVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.applyVehicleDocumentIngestionJob
+);
+exports.rejectVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.rejectVehicleDocumentIngestionJob
+);
+exports.rollbackVehicleDocumentIngestionJob = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  documentIntelligenceHandlers.rollbackVehicleDocumentIngestionJob
+);
+exports.processDocumentIngestionJob = onDocumentWritten(
+  {
+    document: 'documentIngestionJobs/{jobId}',
+    region: 'europe-west1',
+    timeoutSeconds: 120,
+    memory: '1GiB',
+    secrets: [openaiApiKey],
+    retry: false,
+  },
+  documentIntelligenceHandlers.processDocumentIngestionJob
+);
 
 exports.syncVehicleOperationalView = onDocumentWritten(
   {
@@ -120,18 +185,25 @@ exports.syncVehicleOperationalView = onDocumentWritten(
   async (event) => {
     const vehicleId = event.params.vehicleId;
     const after = event.data?.after;
+    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : {};
     const operationalRef = db.collection('vehicleOperationalViews').doc(vehicleId);
     const trackerAdminRef = db.collection('vehicleTrackerAdmin').doc(vehicleId);
 
     if (!after?.exists) {
+      const scheduleDeletes = buildScheduleSyncPlan(
+        vehicleId,
+        beforeData,
+        null,
+        Date.parse(event.time || '') || Date.now()
+      ).map((operation) => db.collection('notificationSchedules').doc(operation.id).delete().catch(() => undefined));
       await Promise.all([
         operationalRef.delete().catch(() => undefined),
         trackerAdminRef.delete().catch(() => undefined),
+        ...scheduleDeletes,
       ]);
       return;
     }
 
-    const beforeData = event.data?.before?.exists ? event.data.before.data() || {} : {};
     const afterData = after.data() || {};
     const beforeOperational = buildVehicleOperationalView(vehicleId, beforeData);
     const afterOperational = buildVehicleOperationalView(vehicleId, afterData);
@@ -169,6 +241,26 @@ exports.syncVehicleOperationalView = onDocumentWritten(
         serverTimestamp: () => FieldValue.serverTimestamp(),
       }));
     }
+    const schedulePlan = buildScheduleSyncPlan(
+      vehicleId,
+      beforeData,
+      afterData,
+      sourceUpdatedAtMs
+    );
+    schedulePlan.forEach((operation) => {
+      const scheduleRef = db.collection('notificationSchedules').doc(operation.id);
+      if (operation.type === 'delete') {
+        writes.push(scheduleRef.delete().catch(() => undefined));
+        return;
+      }
+      writes.push(scheduleRef.set({
+        ...operation.value,
+        createdAt: sourceUpdatedAtMs,
+        createdAtServer: FieldValue.serverTimestamp(),
+        updatedAt: sourceUpdatedAtMs,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      }, { merge: false }));
+    });
     await Promise.all(writes);
   }
 );
@@ -1174,32 +1266,6 @@ async function saveExpenseDocumentFromScanJob(jobData, analysis) {
   return docRef.id;
 }
 
-function parseDateToStartTs(dateString) {
-  const safeDate = toSafeString(dateString);
-  if (!safeDate) return null;
-
-  const [year, month, day] = safeDate.split('-').map((part) => Number(part));
-  if (!year || !month || !day) return null;
-
-  const ts = Date.UTC(year, month - 1, day);
-  return Number.isFinite(ts) ? ts : null;
-}
-
-function diffDaysFromToday(targetTs) {
-  const todayStart = parseDateToStartTs(getTodayKey());
-  if (!todayStart) return 0;
-  return Math.ceil((targetTs - todayStart) / 86400000);
-}
-
-function getTodayKey() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Bucharest',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
-
 function getUtcDayKeyFromTs(ts) {
   return new Date(ts).toISOString().slice(0, 10);
 }
@@ -1511,8 +1577,40 @@ async function getNotificationContext() {
   };
 }
 
+async function getNotificationContextForCompany(companyId) {
+  const safeCompanyId = toSafeString(companyId);
+  if (!safeCompanyId) return { users: [], rules: [] };
+  const [usersSnap, rulesSnap] = await Promise.all([
+    db.collection('userOperationalViews')
+      .where('companyId', '==', safeCompanyId)
+      .limit(250)
+      .get(),
+    db.collection('notificationRules')
+      .where('companyId', '==', safeCompanyId)
+      .where('enabled', '==', true)
+      .limit(100)
+      .get(),
+  ]);
+  return {
+    users: usersSnap.docs.map((doc) => {
+      const data = doc.data() || {};
+      return {
+        id: toSafeString(data.uid) || doc.id,
+        name: toSafeString(data.fullName) || toSafeString(data.email) || 'Utilizator',
+        role: toSafeString(data.role),
+        companyIds: [safeCompanyId],
+        primaryCompanyId: safeCompanyId,
+        active: data.active === true && toSafeString(data.accessStatus) === 'active',
+        themeKey: data.themeKey || null,
+      };
+    }),
+    rules: rulesSnap.docs.map(normalizeRule),
+  };
+}
+
 async function dispatchNotificationEvent(input, context) {
   const companyId = toSafeString(input.companyId);
+  const idempotencyKey = toSafeString(input.idempotencyKey);
   if (!companyId) {
     logger.warn('[dispatchNotificationEvent] Eveniment ignorat fara companyId', {
       module: toSafeString(input.module),
@@ -1520,7 +1618,7 @@ async function dispatchNotificationEvent(input, context) {
     });
     return 0;
   }
-  await createAuditLog({
+  const eventAuditInput = {
     companyId,
     category: input.module,
     action: input.eventType,
@@ -1539,8 +1637,13 @@ async function dispatchNotificationEvent(input, context) {
       ownerUserId: input.ownerUserId || '',
       module: input.module,
       eventType: input.eventType,
+      idempotencyKey,
     },
-  }).catch((error) => logger.warn('[audit][event]', error));
+  };
+  const eventAuditPayload = buildAuditPayload(eventAuditInput);
+  if (!idempotencyKey) {
+    await createAuditLog(eventAuditInput).catch((error) => logger.warn('[audit][event]', error));
+  }
 
   const rules = context.rules.filter((rule) =>
     rule.companyId === companyId && ruleMatches(rule, input.module, input.eventType, input.entityId)
@@ -1578,8 +1681,98 @@ async function dispatchNotificationEvent(input, context) {
   const userIds = Array.from(recipientsSet);
   if (userIds.length === 0) return 0;
 
-  const batch = db.batch();
   const now = Date.now();
+
+  if (idempotencyKey) {
+    const limitedUserIds = userIds.slice(0, 100);
+    if (limitedUserIds.length < userIds.length) {
+      logger.warn('[dispatchNotificationEvent] Recipientii au fost limitati.', {
+        companyId,
+        requested: userIds.length,
+        accepted: limitedUserIds.length,
+      });
+    }
+    const deliveryId = stableHash(`${companyId}:${idempotencyKey}`, 40);
+    const deliveryRef = db.collection('notificationDeliveries').doc(deliveryId);
+    return db.runTransaction(async (transaction) => {
+      const existingDelivery = await transaction.get(deliveryRef);
+      if (existingDelivery.exists) {
+        return toSafeNumber(existingDelivery.get('recipientCount'), 0);
+      }
+
+      if (!shouldSkipAuditLog(eventAuditInput)) {
+        transaction.set(
+          db.collection('auditLogs').doc(`notification_event_${deliveryId}`),
+          eventAuditPayload,
+          { merge: false }
+        );
+      }
+      limitedUserIds.forEach((userId) => {
+        const targetUser = users.find((user) => user.id === userId);
+        const targetUserName = targetUser?.name || userId;
+        const recipientKey = stableHash(`${deliveryId}:${userId}`, 40);
+        transaction.set(db.collection('notifications').doc(`notification_${recipientKey}`), {
+          companyId,
+          userId,
+          targetUserThemeKey: targetUser?.themeKey || null,
+          actorUserId: input.actorUserId || '',
+          actorUserName: input.actorUserName || 'WorkControl',
+          actorUserThemeKey: input.actorUserThemeKey || null,
+          title: input.title,
+          message: input.message,
+          module: input.module,
+          eventType: input.eventType,
+          entityId: input.entityId || '',
+          notificationPath: input.notificationPath || '',
+          soundEnabled,
+          read: false,
+          createdAt: now,
+          createdAtServer: FieldValue.serverTimestamp(),
+        }, { merge: false });
+        transaction.set(
+          db.collection('auditLogs').doc(`notification_delivery_${recipientKey}`),
+          buildAuditPayload({
+            companyId,
+            category: 'notifications',
+            action: 'notification_delivered',
+            title: 'Notificare primita',
+            message: `${targetUserName} a primit notificarea: ${input.title}.`,
+            actorUserId: input.actorUserId || '',
+            actorUserName: input.actorUserName || 'WorkControl',
+            actorUserThemeKey: input.actorUserThemeKey || null,
+            targetUserId: userId,
+            targetUserName,
+            targetUserThemeKey: targetUser?.themeKey || null,
+            entityId: input.entityId || '',
+            entityLabel: input.title,
+            path: input.notificationPath || buildPathFromNotification(input),
+            pageTitle: 'Notificari',
+            metadata: {
+              module: input.module,
+              eventType: input.eventType,
+              soundEnabled,
+              deliveryId,
+            },
+          }),
+          { merge: false }
+        );
+      });
+      transaction.set(deliveryRef, {
+        companyId,
+        idempotencyHash: deliveryId,
+        module: toSafeString(input.module),
+        eventType: toSafeString(input.eventType),
+        entityId: toSafeString(input.entityId),
+        recipientCount: limitedUserIds.length,
+        createdAt: now,
+        createdAtServer: FieldValue.serverTimestamp(),
+        expiresAt: admin.firestore.Timestamp.fromMillis(now + 180 * 24 * 60 * 60 * 1000),
+      }, { merge: false });
+      return limitedUserIds.length;
+    });
+  }
+
+  const batch = db.batch();
 
     userIds.forEach((userId) => {
       const targetUser = users.find((user) => user.id === userId);
@@ -3101,146 +3294,161 @@ exports.checkTimesheetReminderAlerts = onSchedule(
   }
 );
 
-async function maybeCreateVehicleAlert(params) {
-  const markerRef = db.collection('vehicleMaintenanceAlerts').doc(params.markerId);
-  const marker = await markerRef.get();
+const VEHICLE_ALERT_WORKER_BATCH_SIZE = 40;
+const VEHICLE_ALERT_LEASE_MS = 2 * 60 * 1000;
+const VEHICLE_ALERT_RETRY_MS = 15 * 60 * 1000;
 
-  if (marker.exists) return false;
-
-  const recipientCount = await dispatchNotificationEvent(params.notification, params.notificationContext);
-
-  await markerRef.set({
-    companyId: toSafeString(params.notification?.companyId),
-    createdAt: Date.now(),
-    createdAtServer: FieldValue.serverTimestamp(),
-    dateKey: params.todayKey,
-    type: params.type,
-    vehicleId: params.vehicleId,
-    recipientCount,
+async function claimVehicleAlertSchedule(scheduleRef, workerId, now) {
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(scheduleRef);
+    if (!snapshot.exists) return null;
+    const schedule = snapshot.data() || {};
+    if (!canClaimSchedule(schedule, now)) {
+      return null;
+    }
+    transaction.update(scheduleRef, {
+      ...buildScheduleLeasePatch(workerId, now, VEHICLE_ALERT_LEASE_MS),
+      updatedAtServer: FieldValue.serverTimestamp(),
+    });
+    return { ...schedule, id: scheduleRef.id };
   });
+}
 
-  return true;
+async function completeVehicleAlertSchedule(scheduleRef, claimed, workerId, patch, recipientCount, now) {
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(scheduleRef);
+    if (!snapshot.exists) return;
+    const current = snapshot.data() || {};
+    if (
+      toSafeString(current.leaseOwner) !== workerId ||
+      toSafeString(current.sourceRevision) !== toSafeString(claimed.sourceRevision)
+    ) {
+      return;
+    }
+    transaction.update(scheduleRef, {
+      ...patch,
+      lastRecipientCount: recipientCount,
+      updatedAt: now,
+      updatedAtServer: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+async function failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, error) {
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(scheduleRef);
+    if (!snapshot.exists) return;
+    const current = snapshot.data() || {};
+    if (
+      toSafeString(current.leaseOwner) !== workerId ||
+      toSafeString(current.sourceRevision) !== toSafeString(claimed.sourceRevision)
+    ) {
+      return;
+    }
+    transaction.update(scheduleRef, {
+      status: 'scheduled',
+      nextRunAt: now + VEHICLE_ALERT_RETRY_MS,
+      leaseUntil: 0,
+      leaseOwner: '',
+      failureCount: Math.min(toSafeNumber(current.failureCount, 0) + 1, 20),
+      lastErrorCode: toSafeString(error?.code) || 'worker_error',
+      updatedAt: now,
+      updatedAtServer: FieldValue.serverTimestamp(),
+    });
+  });
 }
 
 exports.checkVehicleMaintenanceAlerts = onSchedule(
   {
-    schedule: 'every 1 hours',
+    schedule: 'every 15 minutes',
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
   async () => {
-    const [vehiclesSnap, notificationContext] = await Promise.all([
-      db.collection('vehicles').get(),
-      getNotificationContext(),
-    ]);
-    const todayKey = getTodayKey();
-    let createdCount = 0;
+    const now = Date.now();
+    const workerId = `vehicle-alert-${now}-${stableHash(String(Math.random()), 8)}`;
+    const dueSchedules = await db.collection('notificationSchedules')
+      .where('workerType', '==', 'vehicle_alerts_v1')
+      .where('status', '==', 'scheduled')
+      .where('nextRunAt', '<=', now)
+      .orderBy('nextRunAt', 'asc')
+      .limit(VEHICLE_ALERT_WORKER_BATCH_SIZE)
+      .get();
+    const companyContexts = new Map();
+    let claimedCount = 0;
+    let deliveredCount = 0;
+    let completedCount = 0;
+    let failedCount = 0;
 
-    for (const vehicleDoc of vehiclesSnap.docs) {
-      const vehicle = vehicleDoc.data() || {};
-      const vehicleId = vehicleDoc.id;
-      const companyId = toSafeString(vehicle.companyId);
-      if (!companyId) continue;
-      const plateNumber = toSafeString(vehicle.plateNumber) || 'fara numar';
-      const ownerUserId = toSafeString(vehicle.ownerUserId);
-      const directUserId = toSafeString(vehicle.currentDriverUserId) || ownerUserId;
-      const currentKm = toSafeNumber(vehicle.currentKm, 0);
-      const gpsOdometerKm = toSafeNumber(vehicle.gpsSnapshot?.odometerKm, 0);
-      const effectiveKm = Math.max(currentKm, gpsOdometerKm);
-
-      const serviceTargets = [
-        {
-          key: 'service',
-          label: 'Revizie',
-          value: toSafeNumber(vehicle.nextServiceKm, 0),
-          eventType: 'vehicle_service_due_soon',
-        },
-        {
-          key: 'oil',
-          label: 'Revizie ulei',
-          value: toSafeNumber(vehicle.nextOilServiceKm, 0),
-          eventType: 'vehicle_oil_service_due_soon',
-        },
-      ];
-
-      for (const serviceInfo of serviceTargets) {
-        if (serviceInfo.value <= 0) continue;
-
-        const remainingKm = serviceInfo.value - effectiveKm;
-        if (remainingKm > 500) continue;
-
-        const created = await maybeCreateVehicleAlert({
-          markerId: `${vehicleId}_${serviceInfo.key}_${todayKey}`,
-          todayKey,
-          type: serviceInfo.key,
-          vehicleId,
-          notificationContext,
-          notification: {
-            companyId,
-            module: 'vehicles',
-            eventType: serviceInfo.eventType,
-            entityId: vehicleId,
-            notificationPath: `/vehicles/${vehicleId}`,
-            title: `${serviceInfo.label} aproape scadenta`,
-            message: `Masina ${plateNumber} se apropie de ${serviceInfo.label.toLowerCase()} (mai sunt ${Math.max(
-              remainingKm,
-              0
-            )} km).`,
-            directUserId,
-            ownerUserId,
-            notifyAdminsByDefault: true,
-          },
+    for (const scheduleDoc of dueSchedules.docs) {
+      const scheduleRef = scheduleDoc.ref;
+      let claimed = null;
+      try {
+        claimed = await claimVehicleAlertSchedule(scheduleRef, workerId, now);
+        if (!claimed) continue;
+        claimedCount += 1;
+        const delivery = buildNotificationForSchedule(claimed, now);
+        if (!delivery) {
+          await completeVehicleAlertSchedule(
+            scheduleRef,
+            claimed,
+            workerId,
+            {
+              status: 'invalid',
+              nextMilestone: '',
+              nextRunAt: null,
+              leaseUntil: 0,
+              leaseOwner: '',
+              lastErrorCode: 'invalid_schedule',
+            },
+            0,
+            now
+          );
+          continue;
+        }
+        const companyId = toSafeString(claimed.companyId);
+        if (!companyContexts.has(companyId)) {
+          companyContexts.set(companyId, await getNotificationContextForCompany(companyId));
+        }
+        const deliveryKey = buildDeliveryKey(claimed, delivery.milestone);
+        const recipientCount = await dispatchNotificationEvent(
+          { ...delivery.notification, idempotencyKey: deliveryKey },
+          companyContexts.get(companyId)
+        );
+        deliveredCount += recipientCount;
+        const advancePatch = getScheduleAdvancePatch(claimed, delivery.milestone, now);
+        await completeVehicleAlertSchedule(
+          scheduleRef,
+          claimed,
+          workerId,
+          advancePatch,
+          recipientCount,
+          now
+        );
+        completedCount += 1;
+      } catch (error) {
+        failedCount += 1;
+        logger.error('[checkVehicleMaintenanceAlerts][schedule]', {
+          scheduleId: scheduleRef.id,
+          error,
         });
-
-        if (created) createdCount += 1;
-      }
-
-      const expiringDocs = [
-        { label: 'ITP', value: vehicle.nextItpDate, key: 'itp', eventType: 'vehicle_document_itp_due_soon' },
-        { label: 'RCA', value: vehicle.nextRcaDate, key: 'rca', eventType: 'vehicle_document_rca_due_soon' },
-        { label: 'CASCO', value: vehicle.nextCascoDate, key: 'casco', eventType: 'vehicle_document_casco_due_soon' },
-        {
-          label: 'Rovinieta',
-          value: vehicle.nextRovinietaDate,
-          key: 'rovinieta',
-          eventType: 'vehicle_document_rovinieta_due_soon',
-        },
-      ];
-
-      for (const docInfo of expiringDocs) {
-        const expiryTs = parseDateToStartTs(docInfo.value);
-        if (!expiryTs) continue;
-
-        const daysLeft = diffDaysFromToday(expiryTs);
-        if (daysLeft > 10) continue;
-
-        const created = await maybeCreateVehicleAlert({
-          markerId: `${vehicleId}_${docInfo.key}_${todayKey}`,
-          todayKey,
-          type: docInfo.key,
-          vehicleId,
-          notificationContext,
-          notification: {
-            companyId,
-            module: 'vehicles',
-            eventType: docInfo.eventType,
-            entityId: vehicleId,
-            notificationPath: `/vehicles/${vehicleId}`,
-            title: `${docInfo.label} aproape de expirare`,
-            message: `Masina ${plateNumber}: ${docInfo.label} expira in ${Math.max(daysLeft, 0)} zile (${docInfo.value}).`,
-            directUserId,
-            ownerUserId,
-            notifyAdminsByDefault: true,
-          },
-        });
-
-        if (created) createdCount += 1;
+        if (claimed) {
+          await failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, error)
+            .catch((releaseError) => logger.error('[checkVehicleMaintenanceAlerts][release]', {
+              scheduleId: scheduleRef.id,
+              error: releaseError,
+            }));
+        }
       }
     }
 
-    logger.info('Verificare mentenanta vehicule finalizata.', {
-      vehiclesChecked: vehiclesSnap.size,
-      alertsCreated: createdCount,
+    logger.info('Worker alerte vehicule finalizat.', {
+      dueCount: dueSchedules.size,
+      claimedCount,
+      completedCount,
+      deliveredCount,
+      failedCount,
+      fullVehicleScans: 0,
     });
   }
 );

@@ -28,6 +28,7 @@ import {
 } from "./lib/routing/dynamicImportRecovery";
 import { initSentry } from "./lib/monitoring/sentry";
 import { FeatureFlagProvider } from "./lib/productIntelligence";
+import { AppUpdateBanner } from "./components/AppUpdateBanner";
 
 const FORCE_LIGHT_BACKGROUND =
   'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAANSURBVBhXY/jw5ed/AAmSA90f2KU2AAAAAElFTkSuQmCC")';
@@ -96,6 +97,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <AuthProvider>
         <FeatureFlagProvider>
           <RouterProvider router={router} />
+          <AppUpdateBanner />
         </FeatureFlagProvider>
       </AuthProvider>
     </AppErrorBoundary>

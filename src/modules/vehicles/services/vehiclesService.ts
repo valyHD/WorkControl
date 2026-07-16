@@ -47,6 +47,8 @@ import type {
   VehicleDailyDiagnosticSeverity,
   VehicleDailyDiagnosticsSummary,
   VehicleDocumentCategory,
+  VehicleDocumentIngestionJob,
+  VehicleDocumentIntelligenceStatus,
   VehicleDocumentItem,
   VehicleEventItem,
   VehicleFormValues,
@@ -1018,6 +1020,15 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
          ? item.category === "rca_itp" ? "itp" : item.category
         : "other",
       expiryDate: toSafeString(item?.expiryDate),
+      expirySource: ["manual", "ai_confirmed", ""].includes(item?.expirySource)
+        ? item.expirySource
+        : "",
+      intelligenceJobId: toSafeString(item?.intelligenceJobId),
+      intelligenceStatus: ["queued", "processing", "needs_review", "applied", "rejected", "failed"].includes(item?.intelligenceStatus)
+        ? item.intelligenceStatus
+        : undefined,
+      intelligenceReviewedAt: toSafeNumber(item?.intelligenceReviewedAt, 0) || undefined,
+      intelligenceReviewedByUserId: toSafeString(item?.intelligenceReviewedByUserId) || undefined,
       aiAnalysis: item?.aiAnalysis && typeof item.aiAnalysis === "object"
          ? {
             documentType: ["service", "itp", "rca", "casco", "leasing_rate", "rovinieta", "amenda", "other", "unknown"].includes(item.aiAnalysis.documentType)
@@ -1029,6 +1040,13 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
             providerName: toSafeString(item.aiAnalysis.providerName),
             vehiclePlateNumber: toSafeString(item.aiAnalysis.vehiclePlateNumber),
             confidence: toSafeNumber(item.aiAnalysis.confidence, 0),
+            fieldConfidence: item.aiAnalysis.fieldConfidence && typeof item.aiAnalysis.fieldConfidence === "object"
+              ? Object.fromEntries(
+                  Object.entries(item.aiAnalysis.fieldConfidence)
+                    .filter(([key]) => ["documentType", "expiryDate", "issueDate", "policyNumber", "providerName", "vehiclePlateNumber"].includes(key))
+                    .map(([key, value]) => [key, toSafeNumber(value, 0)])
+                )
+              : undefined,
             notes: toSafeString(item.aiAnalysis.notes),
             analyzedAt: toSafeNumber(item.aiAnalysis.analyzedAt, 0),
           }
@@ -1901,6 +1919,7 @@ export async function uploadVehicleDocuments(
       extension: ext,
       category: item.category,
       expiryDate: item.expiryDate || "",
+      expirySource: item.expiryDate ? "manual" : "",
       createdAt: Date.now(),
     });
   }
@@ -1975,6 +1994,120 @@ export async function enrichVehicleDocumentsWithAi(
   }
 
   return enriched;
+}
+
+type VehicleDocumentJobReference = {
+  vehicleId: string;
+  documentId: string;
+  jobId: string;
+};
+
+function normalizeVehicleDocumentJob(value: unknown): VehicleDocumentIngestionJob {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const status = ["queued", "processing", "needs_review", "applied", "rejected", "failed"].includes(String(raw.status))
+    ? raw.status as VehicleDocumentIntelligenceStatus
+    : "queued";
+  return {
+    jobId: toSafeString(raw.jobId),
+    status,
+    result: raw.result && typeof raw.result === "object"
+      ? raw.result as VehicleDocumentIngestionJob["result"]
+      : null,
+    model: toSafeString(raw.model) || undefined,
+    extractionVersion: toSafeString(raw.extractionVersion) || undefined,
+    attempts: toSafeNumber(raw.attempts, 0),
+    errorCode: toSafeString(raw.errorCode) || undefined,
+    createdAt: toSafeNumber(raw.createdAt, 0),
+    updatedAt: toSafeNumber(raw.updatedAt, 0),
+    decision: ["applied", "rejected", "rolled_back", ""].includes(String(raw.decision))
+      ? raw.decision as VehicleDocumentIngestionJob["decision"]
+      : "",
+  };
+}
+
+export async function queueVehicleDocumentsForAnalysis(
+  vehicleId: string,
+  documents: VehicleDocumentItem[]
+): Promise<VehicleDocumentItem[]> {
+  const createJob = httpsCallable<
+    { vehicleId: string; documentId: string; storagePath: string; fileName: string; contentType: string },
+    VehicleDocumentIngestionJob & { created?: boolean }
+  >(functions, "createVehicleDocumentIngestionJob");
+  const queued: VehicleDocumentItem[] = [];
+
+  for (const item of documents) {
+    try {
+      const response = await createJob({
+        vehicleId,
+        documentId: item.id,
+        storagePath: item.path,
+        fileName: item.name,
+        contentType: item.contentType,
+      });
+      const job = normalizeVehicleDocumentJob(response.data);
+      queued.push({
+        ...item,
+        intelligenceJobId: job.jobId,
+        intelligenceStatus: job.decision === "applied" ? "applied" : job.status,
+      });
+    } catch (error) {
+      console.warn("[queueVehicleDocumentsForAnalysis]", item.name, error);
+      queued.push(item);
+    }
+  }
+  return queued;
+}
+
+export async function getVehicleDocumentIngestionJob(
+  reference: VehicleDocumentJobReference
+): Promise<VehicleDocumentIngestionJob> {
+  const getJob = httpsCallable<VehicleDocumentJobReference, VehicleDocumentIngestionJob>(
+    functions,
+    "getVehicleDocumentIngestionJob"
+  );
+  const response = await getJob(reference);
+  return normalizeVehicleDocumentJob(response.data);
+}
+
+export async function retryVehicleDocumentIngestionJob(
+  reference: VehicleDocumentJobReference
+): Promise<void> {
+  const retryJob = httpsCallable<VehicleDocumentJobReference, { status: string }>(
+    functions,
+    "retryVehicleDocumentIngestionJob"
+  );
+  await retryJob(reference);
+}
+
+export async function applyVehicleDocumentIngestionJob(
+  reference: VehicleDocumentJobReference,
+  acceptedFields: Array<"documentType" | "expiryDate">
+): Promise<void> {
+  const applyJob = httpsCallable<
+    VehicleDocumentJobReference & { acceptedFields: string[]; confirm: true },
+    { operationId: string; duplicate: boolean }
+  >(functions, "applyVehicleDocumentIngestionJob");
+  await applyJob({ ...reference, acceptedFields, confirm: true });
+}
+
+export async function rejectVehicleDocumentIngestionJob(
+  reference: VehicleDocumentJobReference
+): Promise<void> {
+  const rejectJob = httpsCallable<
+    VehicleDocumentJobReference & { confirm: true },
+    { decisionId: string; status: string }
+  >(functions, "rejectVehicleDocumentIngestionJob");
+  await rejectJob({ ...reference, confirm: true });
+}
+
+export async function rollbackVehicleDocumentIngestionJob(
+  reference: VehicleDocumentJobReference
+): Promise<void> {
+  const rollbackJob = httpsCallable<
+    VehicleDocumentJobReference & { confirm: true },
+    { operationId: string; status: string }
+  >(functions, "rollbackVehicleDocumentIngestionJob");
+  await rollbackJob({ ...reference, confirm: true });
 }
 
 export async function saveVehicleDocuments(

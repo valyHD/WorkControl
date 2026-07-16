@@ -17,7 +17,13 @@ type Props = {
   fallback?: string;
 };
 
-const avatarCache = new Map<string, { avatarUrl: string; avatarThumbUrl: string }>();
+type UserPresentation = {
+  avatarUrl: string;
+  avatarThumbUrl: string;
+  themeKey?: string | null;
+};
+
+const avatarCache = new Map<string, UserPresentation>();
 
 export default function UserProfileLink({
   userId,
@@ -32,11 +38,11 @@ export default function UserProfileLink({
   fallback = "-",
 }: Props) {
   const navigate = useNavigate();
-  const [loadedAvatar, setLoadedAvatar] = useState<{ avatarUrl: string; avatarThumbUrl: string } | null>(null);
+  const [loadedAvatar, setLoadedAvatar] = useState<UserPresentation | null>(null);
   const label = name || email || fallback;
   const cleanUserId = String(userId || "").trim();
   const canOpenProfile = Boolean(cleanUserId);
-  const themeClass = getUserThemeClass(themeKey || null);
+  const themeClass = getUserThemeClass(themeKey || loadedAvatar?.themeKey || null);
   const imageUrl = avatarThumbUrl || avatarUrl || loadedAvatar?.avatarThumbUrl || loadedAvatar?.avatarUrl || "";
 
   useEffect(() => {

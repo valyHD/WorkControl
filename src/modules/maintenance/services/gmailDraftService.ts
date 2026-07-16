@@ -1,5 +1,7 @@
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
+const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GMAIL_REDIRECT_STATE_KEY = "workcontrol.gmailRedirectState.v1";
 
 type TokenResponse = {
   access_token?: string;
@@ -9,6 +11,23 @@ type TokenResponse = {
 
 type TokenClient = {
   requestAccessToken: (options?: { prompt?: string; hint?: string }) => void;
+};
+
+type GmailRedirectState = {
+  state: string;
+  senderEmail: string;
+  redirectUri: string;
+  createdAt: number;
+};
+
+export type GmailRedirectAuthorization = {
+  accessToken: string;
+  senderEmail: string;
+  expiresIn: number | null;
+};
+
+export type GmailRedirectAuthorizationRequest = GmailRedirectState & {
+  url: string;
 };
 
 type GoogleIdentityServices = {
@@ -31,6 +50,32 @@ declare global {
 }
 
 let gisLoadPromise: Promise<void> | null = null;
+
+function getGoogleClientId(): string {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    throw new Error("Lipseste VITE_GOOGLE_CLIENT_ID din .env.");
+  }
+  return clientId;
+}
+
+function readRedirectState(): GmailRedirectState | null {
+  try {
+    const raw = window.sessionStorage.getItem(GMAIL_REDIRECT_STATE_KEY);
+    return raw ? (JSON.parse(raw) as GmailRedirectState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearRedirectState() {
+  window.sessionStorage.removeItem(GMAIL_REDIRECT_STATE_KEY);
+}
+
+function clearOAuthHashFromUrl() {
+  if (!window.location.hash) return;
+  window.history.replaceState(null, document.title, `${window.location.pathname}${window.location.search}`);
+}
 
 function loadGoogleIdentityServices(): Promise<void> {
   if (window.google?.accounts?.oauth2) {
@@ -62,40 +107,132 @@ function loadGoogleIdentityServices(): Promise<void> {
   return gisLoadPromise;
 }
 
-export function requestGmailAccessToken(senderEmail: string): Promise<string> {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  if (!clientId) {
-    return Promise.reject(new Error("Lipseste VITE_GOOGLE_CLIENT_ID din .env."));
-  }
+export function preloadGmailAuthorization(): Promise<void> {
+  return loadGoogleIdentityServices();
+}
 
-  return loadGoogleIdentityServices().then(
-    () =>
-      new Promise((resolve, reject) => {
-        const tokenClient = window.google?.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: GMAIL_SCOPE,
-          hint: senderEmail || undefined,
-          callback: (response) => {
-            if (response.error || !response.access_token) {
-              reject(new Error(response.error_description || response.error || "Autorizarea Gmail a esuat."));
-              return;
-            }
-
-            resolve(response.access_token);
-          },
-        });
-
-        if (!tokenClient) {
-          reject(new Error("Google Identity Services nu este disponibil."));
+function requestLoadedGmailAccessToken(clientId: string, senderEmail: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tokenClient = window.google?.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GMAIL_SCOPE,
+      hint: senderEmail || undefined,
+      callback: (response) => {
+        if (response.error || !response.access_token) {
+          reject(new Error(response.error_description || response.error || "Autorizarea Gmail a esuat."));
           return;
         }
 
-        tokenClient.requestAccessToken({
-          prompt: "select_account",
-          hint: senderEmail || undefined,
-        });
-      })
-  );
+        resolve(response.access_token);
+      },
+    });
+
+    if (!tokenClient) {
+      reject(new Error("Google Identity Services nu este disponibil."));
+      return;
+    }
+
+    tokenClient.requestAccessToken({
+      prompt: "select_account",
+      hint: senderEmail || undefined,
+    });
+  });
+}
+
+export function requestGmailAccessToken(senderEmail: string): Promise<string> {
+  let clientId = "";
+  try {
+    clientId = getGoogleClientId();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  if (window.google?.accounts?.oauth2) {
+    return requestLoadedGmailAccessToken(clientId, senderEmail);
+  }
+
+  return loadGoogleIdentityServices().then(() => requestLoadedGmailAccessToken(clientId, senderEmail));
+}
+
+export function shouldUseGmailRedirectAuthorization(): boolean {
+  const userAgent = navigator.userAgent || "";
+  const isMobileBrowser = /Android|iPhone|iPad|iPod|SamsungBrowser/i.test(userAgent);
+  const isNarrowViewport = window.matchMedia?.("(max-width: 768px)").matches ?? false;
+  return isMobileBrowser || isNarrowViewport;
+}
+
+export function createGmailRedirectAuthorizationRequest(senderEmail: string): GmailRedirectAuthorizationRequest {
+  const clientId = getGoogleClientId();
+  const redirectUri = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  const state = `wc_gmail_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "token",
+    scope: GMAIL_SCOPE,
+    include_granted_scopes: "true",
+    prompt: "select_account",
+    state,
+  });
+  if (senderEmail) {
+    params.set("login_hint", senderEmail);
+  }
+
+  return {
+    state,
+    senderEmail,
+    redirectUri,
+    createdAt: Date.now(),
+    url: `${GOOGLE_OAUTH_AUTHORIZE_URL}?${params.toString()}`,
+  };
+}
+
+export function storeGmailRedirectAuthorizationRequest(request: GmailRedirectAuthorizationRequest): void {
+  const redirectState: GmailRedirectState = {
+    state: request.state,
+    senderEmail: request.senderEmail,
+    redirectUri: request.redirectUri,
+    createdAt: request.createdAt,
+  };
+  window.sessionStorage.setItem(GMAIL_REDIRECT_STATE_KEY, JSON.stringify(redirectState));
+}
+
+export function startGmailRedirectAuthorization(senderEmail: string): string {
+  const request = createGmailRedirectAuthorizationRequest(senderEmail);
+  storeGmailRedirectAuthorizationRequest(request);
+  window.location.href = request.url;
+  return request.url;
+}
+
+export function consumeGmailRedirectAuthorization(): GmailRedirectAuthorization | null {
+  if (!window.location.hash) return null;
+
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const accessToken = params.get("access_token");
+  const error = params.get("error");
+  if (!accessToken && !error) return null;
+
+  const storedState = readRedirectState();
+  const returnedState = params.get("state") || "";
+  clearOAuthHashFromUrl();
+  clearRedirectState();
+
+  if (error) {
+    throw new Error(params.get("error_description") || error);
+  }
+  if (!accessToken) {
+    throw new Error("Autorizarea Gmail nu a returnat un token valid.");
+  }
+  if (storedState?.state && returnedState && storedState.state !== returnedState) {
+    throw new Error("Autorizarea Gmail nu a putut fi verificata. Incearca din nou.");
+  }
+
+  const expiresIn = Number(params.get("expires_in") || "");
+  return {
+    accessToken,
+    senderEmail: storedState?.senderEmail || "",
+    expiresIn: Number.isFinite(expiresIn) ? expiresIn : null,
+  };
 }
 
 function encodeHeader(value: string): string {

@@ -32,23 +32,28 @@ test.describe("Product Experience public shell", () => {
     expect(blocking).toEqual([]);
   });
 
-  test("login exposes authentication only and no public internal signup", async ({ page }) => {
+  test("login exposes both existing account access and controlled registration", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(
-      page.getByText("Accesul este disponibil numai conturilor create de administrator.")
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: /creeaza cont/i })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /creeaza cont/i })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Conectare" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    await page.getByRole("tab", { name: "Cont nou" }).click();
+    await expect(page.getByRole("heading", { name: "Creeaza cont" })).toBeVisible();
+    await expect(page.getByLabel("Nume complet")).toBeVisible();
+    await expect(page.getByLabel("Confirma parola")).toBeVisible();
   });
 
   test("login visual baseline is stable on mobile and desktop", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/login");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page).toHaveScreenshot("login-mobile.png", { animations: "disabled", fullPage: true });
 
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.goto("/login");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page).toHaveScreenshot("login-desktop.png", { animations: "disabled", fullPage: true });
   });
 });

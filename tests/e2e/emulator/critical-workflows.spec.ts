@@ -205,6 +205,37 @@ test.describe("WorkControl critical workflows with Firebase Emulator", () => {
     await request.delete(authResetUrl);
   });
 
+  test("new account registration creates a limited employee and requires company selection", async ({
+    page,
+    request,
+  }) => {
+    const registrationEmail = "self-registration@example.test";
+    await page.goto("/login");
+    await page.getByRole("tab", { name: "Cont nou" }).click();
+    await page.getByLabel("Nume complet").fill("Angajat Inregistrat");
+    await page.getByLabel("Email").fill(registrationEmail);
+    await page.getByLabel("Parola", { exact: true }).fill(testPassword);
+    await page.getByLabel("Confirma parola").fill(testPassword);
+    await page.getByRole("button", { name: "Creeaza cont" }).click();
+
+    await expect(page.getByRole("heading", { name: "Alege firma ta" })).toBeVisible();
+    await page.locator("#initial-company").selectOption("company-e2e");
+    await page.getByRole("button", { name: "Confirma firma" }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+
+    await expect
+      .poll(async () => {
+        const users = await listDocuments(request, "users");
+        return users.find((document) => fieldString(document, "email") === registrationEmail);
+      })
+      .toMatchObject({
+        fields: expect.objectContaining({
+          role: { stringValue: "angajat" },
+          primaryCompanyId: { stringValue: "company-e2e" },
+        }),
+      });
+  });
+
   test("login, project, timesheet, leave, maintenance client and vehicle mileage", async ({
     page,
     context,
