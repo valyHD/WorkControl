@@ -21,6 +21,16 @@ function cleanCompanyIds(values: unknown, primaryCompanyId: string): string[] {
   return [...new Set(ids)].slice(0, 30);
 }
 
+export function isGlobalAdminProfile(data: Record<string, unknown>): boolean {
+  if (data.role !== "admin") return false;
+  if (data.globalAdmin === true) return true;
+
+  const primaryCompanyId =
+    typeof data.primaryCompanyId === "string" ? data.primaryCompanyId.trim() : "";
+  const companyIds = cleanCompanyIds(data.companyIds, primaryCompanyId);
+  return companyIds.length === 0;
+}
+
 export async function getCurrentCompanyAccessContext(): Promise<CompanyAccessContext> {
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error("Trebuie sa fii autentificat.");
@@ -44,7 +54,7 @@ export async function getCurrentCompanyAccessContext(): Promise<CompanyAccessCon
   return {
     uid: currentUser.uid,
     role,
-    globalAdmin: role === "admin" && data.globalAdmin === true,
+    globalAdmin: isGlobalAdminProfile(data),
     primaryCompanyId,
     companyIds,
   };

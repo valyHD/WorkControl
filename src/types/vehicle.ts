@@ -31,6 +31,43 @@ export const VEHICLE_DOCUMENT_CATEGORIES = [
 
 export type VehicleDocumentCategory = (typeof VEHICLE_DOCUMENT_CATEGORIES)[number];
 
+export type VehicleDocumentIntelligenceStatus =
+  | "queued"
+  | "processing"
+  | "needs_review"
+  | "applied"
+  | "rejected"
+  | "failed";
+
+export interface VehicleDocumentAnalysisField {
+  value: string;
+  confidence: number;
+  validationErrors?: string[];
+}
+
+export interface VehicleDocumentExtractionResult {
+  documentType: VehicleDocumentAnalysisField;
+  expiryDate: VehicleDocumentAnalysisField;
+  issueDate: VehicleDocumentAnalysisField;
+  policyNumber: VehicleDocumentAnalysisField;
+  providerName: VehicleDocumentAnalysisField;
+  vehiclePlateNumber: VehicleDocumentAnalysisField;
+  notes: string;
+}
+
+export interface VehicleDocumentIngestionJob {
+  jobId: string;
+  status: VehicleDocumentIntelligenceStatus;
+  result: VehicleDocumentExtractionResult | null;
+  model?: string;
+  extractionVersion?: string;
+  attempts: number;
+  errorCode?: string;
+  createdAt: number;
+  updatedAt: number;
+  decision?: "applied" | "rejected" | "rolled_back" | "";
+}
+
 export interface VehicleDocumentItem {
   id: string;
   name: string;
@@ -41,6 +78,11 @@ export interface VehicleDocumentItem {
   extension: string;
   category: VehicleDocumentCategory;
   expiryDate?: string;
+  expirySource?: "manual" | "ai_confirmed" | "";
+  intelligenceJobId?: string;
+  intelligenceStatus?: VehicleDocumentIntelligenceStatus;
+  intelligenceReviewedAt?: number;
+  intelligenceReviewedByUserId?: string;
   aiAnalysis?: {
     documentType?: VehicleDocumentCategory | "unknown";
     expiryDate?: string;
@@ -49,6 +91,10 @@ export interface VehicleDocumentItem {
     providerName?: string;
     vehiclePlateNumber?: string;
     confidence?: number;
+    fieldConfidence?: Partial<Record<
+      "documentType" | "expiryDate" | "issueDate" | "policyNumber" | "providerName" | "vehiclePlateNumber",
+      number
+    >>;
     notes?: string;
     analyzedAt?: number;
   };

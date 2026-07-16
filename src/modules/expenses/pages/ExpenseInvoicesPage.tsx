@@ -28,6 +28,7 @@ import {
 } from "../services/expensesService";
 import UserProfileLink from "../../../components/UserProfileLink";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 type InvoiceDraft = ExpenseAiAnalysis & {
   assignedUserId: string;
@@ -263,6 +264,10 @@ export default function ExpenseInvoicesPage() {
         return haystack.includes(q);
       });
   }, [documents, invoiceMonth, invoiceSearch]);
+  const userThemeById = useMemo(
+    () => new Map([...users, ...(appUser ? [appUser] : [])].map((userItem) => [userItem.id, userItem.themeKey ?? null])),
+    [appUser, users]
+  );
 
   const invoiceSummary = useMemo(() => summarizeExpenses(invoiceDocuments), [invoiceDocuments]);
   const invoiceSupplierCount = useMemo(
@@ -675,7 +680,7 @@ export default function ExpenseInvoicesPage() {
               </thead>
               <tbody>
                 {invoiceDocuments.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={`user-table-row ${getUserThemeClass(userThemeById.get(item.assignedUserId))}`}>
                     <td>
                       <div className="expense-cell-main">{formatDate(item.documentDate)}</div>
                       <div className="expense-cell-muted">{item.documentNumber || "-"}</div>
@@ -688,7 +693,7 @@ export default function ExpenseInvoicesPage() {
                       <div className="expense-cell-main">{item.companyName || "-"}</div>
                       <div className="expense-cell-muted">{item.projectName || item.projectCode || "Fara proiect"}</div>
                     </td>
-                    <td><UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} /></td>
+                    <td><UserProfileLink userId={item.assignedUserId} name={item.assignedUserName} themeKey={userThemeById.get(item.assignedUserId)} /></td>
                     <td>{formatMoney(item.subtotalAmount)}</td>
                     <td>{formatMoney(item.vatAmount)}</td>
                     <td>{formatMoney(item.totalAmount)}</td>

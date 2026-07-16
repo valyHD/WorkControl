@@ -7,10 +7,10 @@ import VehicleForm from "../components/VehicleForm";
 import type { VehiclePendingDocument } from "../components/VehicleDocumentUploader";
 import {
   createVehicle,
-  enrichVehicleDocumentsWithAi,
   getVehicleById,
   getVehicleUsers,
   isPlateNumberUsed,
+  queueVehicleDocumentsForAnalysis,
   saveVehicleImages,
   saveVehicleDocuments,
   updateVehicle,
@@ -295,9 +295,9 @@ export default function VehicleFormPage() {
         if (selectedDocuments.length > 0) {
           setSubmitStatus("Se incarca documentele...");
           const uploadedDocs = await uploadVehicleDocuments(newVehicleId, selectedDocuments);
-          setSubmitStatus("Se citesc documentele cu AI...");
-          const analyzedDocs = await enrichVehicleDocumentsWithAi(uploadedDocs);
-          await saveVehicleDocuments(newVehicleId, [], analyzedDocs);
+          setSubmitStatus("Se pregateste analiza documentelor...");
+          const queuedDocs = await queueVehicleDocumentsForAnalysis(newVehicleId, uploadedDocs);
+          await saveVehicleDocuments(newVehicleId, [], queuedDocs);
         }
 
         navigate(`/vehicles/${newVehicleId}`);
@@ -315,9 +315,9 @@ export default function VehicleFormPage() {
       if (selectedDocuments.length > 0) {
         setSubmitStatus("Se incarca documentele...");
         const uploadedDocs = await uploadVehicleDocuments(vehicleId, selectedDocuments);
-        setSubmitStatus("Se citesc documentele cu AI...");
-        const analyzedDocs = await enrichVehicleDocumentsWithAi(uploadedDocs);
-        await saveVehicleDocuments(vehicleId, normalizedValues.documents, analyzedDocs);
+        setSubmitStatus("Se pregateste analiza documentelor...");
+        const queuedDocs = await queueVehicleDocumentsForAnalysis(vehicleId, uploadedDocs);
+        await saveVehicleDocuments(vehicleId, normalizedValues.documents, queuedDocs);
       }
 
       navigate(`/vehicles/${vehicleId}`);

@@ -42,6 +42,7 @@ import {
   appendLiveTrailPoint,
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 const ACTIVE_ROUTE_REFRESH_MS = 3_000;
 const ROUTE_PAGE_SIZE = 1800;
@@ -1040,7 +1041,7 @@ function VehicleFleetMapCard({
   return (
     <article
       id={`vehicle-fleet-map-card-${vehicle.id}`}
-      className={`vehicle-fleet-map-card ${focused ? "is-assistant-focused" : ""}`}
+      className={`vehicle-fleet-map-card user-accent-card ${getUserThemeClass(vehicle.currentDriverThemeKey || vehicle.ownerThemeKey)} ${focused ? "is-assistant-focused" : ""}`}
     >
       <div className="vehicle-fleet-map-card__head">
         <div>

@@ -21,7 +21,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../../providers/AuthProvider";
 import { getDashboardData } from "../services/dashboardService";
-import type { DashboardMaintenanceSummary } from "../services/dashboardService";
+import type {
+  DashboardLeaveSummary,
+  DashboardMaintenanceSummary,
+} from "../services/dashboardService";
 import type { AppUserItem } from "../../../types/user";
 import type { ToolItem } from "../../../types/tool";
 import type { VehicleItem } from "../../../types/vehicle";
@@ -35,15 +38,18 @@ import StatusBadge from "../../../components/StatusBadge";
 import EmptyState from "../../../components/EmptyState";
 import DataTable, { type DataTableColumn } from "../../../components/DataTable";
 import { ProductContentLayout, ProductQuickActions } from "../../../components/product/ProductPage";
-import { LoadingState, PageHeader, PageLayout } from "../../../components/experience";
+import { ErrorState, LoadingState, PageHeader, PageLayout } from "../../../components/experience";
 import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import {
-  getEffectiveWorkedMinutes,
   getLocalDateKey,
   getProjectLabel,
+  isStaleActiveTimesheet,
+  getTimesheetMinutesForDay,
+  sumTimesheetMinutesForDay,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
 } from "../../timesheets/utils/timesheetAnalytics";
+import { subscribeTimesheetsChanged } from "../../timesheets/services/timesheetLiveUpdates";
 import { getUserInitials, getUserThemeClass } from "../../../lib/ui/userTheme";
 import {
   getLiveFirebaseCostEstimate,
@@ -103,7 +109,9 @@ export default function DashboardPage() {
   const lastLoadedAtRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [liveClock, setLiveClock] = useState(() => Date.now());
   const [navigatingVehicle, setNavigatingVehicle] = useState(false);
   const [users, setUsers] = useState<AppUserItem[]>([]);
   const [tools, setTools] = useState<ToolItem[]>([]);
@@ -116,6 +124,12 @@ export default function DashboardPage() {
     lifts: 0,
     expiredLifts: 0,
     expiringSoonLifts: 0,
+    isPartial: false,
+  });
+  const [leave, setLeave] = useState<DashboardLeaveSummary>({
+    scheduled: 0,
+    activeToday: 0,
+    pending: 0,
     isPartial: false,
   });
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -148,6 +162,7 @@ export default function DashboardPage() {
       loadInProgressRef.current = true;
       if (!silent) setLoading(true);
       else setRefreshing(true);
+      setLoadError("");
 
       try {
         const data = await getDashboardData(user?.uid, undefined, role);
@@ -159,10 +174,16 @@ export default function DashboardPage() {
         setProjects(data.projects ?? []);
         setNotifications(data.notifications ?? []);
         setMaintenance(data.maintenance);
+        setLeave(data.leave);
         setLastRefreshed(new Date());
         lastLoadedAtRef.current = Date.now();
       } catch (error) {
         console.error("[DashboardPage][load]", error);
+        if (mountedRef.current && !silent) {
+          setLoadError(
+            error instanceof Error ? error.message : "Datele operationale nu au putut fi incarcate."
+          );
+        }
       } finally {
         loadInProgressRef.current = false;
         if (mountedRef.current) {
@@ -192,6 +213,8 @@ export default function DashboardPage() {
     };
   }, [load]);
 
+  useEffect(() => subscribeTimesheetsChanged(() => void load(true)), [load]);
+
   const openMyVehicle = useCallback(async () => {
     if (navigatingVehicle) return;
     if (!user?.uid) {
@@ -210,23 +233,33 @@ export default function DashboardPage() {
     }
   }, [navigate, navigatingVehicle, user?.uid]);
 
-  const todayKey = getLocalDateKey();
+  const todayKey = getLocalDateKey(liveClock);
+  const operationalTimesheets = useMemo(
+    () => timesheets.filter((item) => !isStaleActiveTimesheet(item, liveClock)),
+    [liveClock, timesheets]
+  );
   const activeUsers = useMemo(() => users.filter((item) => item.active !== false), [users]);
   const todayTimesheets = useMemo(
-    () => timesheets.filter((item) => item.workDate === todayKey),
-    [timesheets, todayKey]
+    () =>
+      operationalTimesheets.filter(
+        (item) =>
+          item.workDate === todayKey || getTimesheetMinutesForDay(item, todayKey, liveClock) > 0
+      ),
+    [liveClock, operationalTimesheets, todayKey]
   );
   const activeTimesheetsNow = useMemo(
     () => timesheets.filter((item) => item.status === "activ"),
     [timesheets]
   );
-  const currentTeamTimesheets = useMemo(
-    () => timesheets.filter((item) => item.workDate === todayKey || item.status === "activ"),
-    [timesheets, todayKey]
-  );
+  useEffect(() => {
+    if (activeTimesheetsNow.length === 0) return;
+    const timer = window.setInterval(() => setLiveClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [activeTimesheetsNow.length]);
+  const currentTeamTimesheets = useMemo(() => todayTimesheets, [todayTimesheets]);
   const todayMinutes = useMemo(
-    () => todayTimesheets.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0),
-    [todayTimesheets]
+    () => sumTimesheetMinutesForDay(currentTeamTimesheets, todayKey, liveClock),
+    [currentTeamTimesheets, liveClock, todayKey]
   );
   const activeProjects = useMemo(
     () => projects.filter((project) => project.status === "activ"),
@@ -252,7 +285,8 @@ export default function DashboardPage() {
     [vehicles]
   );
   const importantAlertsCount =
-    todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60).length +
+    todayTimesheets.filter((item) => getTimesheetMinutesForDay(item, todayKey, liveClock) > 8 * 60)
+      .length +
     todayTimesheets.filter((item) => !item.projectId && !item.projectName).length +
     vehiclesWithoutDriver.length +
     problemVehicles.length +
@@ -344,7 +378,9 @@ export default function DashboardPage() {
         key: "duration",
         header: "Durata",
         render: (row) =>
-          row.timesheet ? formatMinutes(getEffectiveWorkedMinutes(row.timesheet)) : "-",
+          row.timesheet
+            ? formatMinutes(getTimesheetMinutesForDay(row.timesheet, todayKey, liveClock))
+            : "-",
       },
       {
         key: "status",
@@ -379,13 +415,28 @@ export default function DashboardPage() {
           ),
       },
     ],
-    []
+    [liveClock, todayKey]
   );
 
   if (loading) {
     return (
       <PageLayout className="dashboard-modern-page">
-        <LoadingState title="Se incarca centrul operational" description="Pregatim indicatorii relevanti pentru rolul tau." />
+        <LoadingState
+          title="Se incarca centrul operational"
+          description="Pregatim indicatorii relevanti pentru rolul tau."
+        />
+      </PageLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <PageLayout className="dashboard-modern-page">
+        <ErrorState
+          title="Dashboard-ul nu a putut fi incarcat"
+          description={loadError}
+          retry={() => void load()}
+        />
       </PageLayout>
     );
   }
@@ -436,6 +487,22 @@ export default function DashboardPage() {
           tone="green"
           icon={TimerReset}
           to="/timesheets?period=today"
+        />
+        <KpiCard
+          label="Concedii programate"
+          value={leave.scheduled}
+          helper={
+            leave.isPartial
+              ? "date incomplete; reincearca actualizarea"
+              : leave.activeToday
+                ? `${leave.activeToday} in desfasurare`
+                : leave.pending
+                  ? `${leave.pending} in asteptare`
+                  : "niciun concediu activ azi"
+          }
+          tone={leave.isPartial || leave.pending ? "orange" : "green"}
+          icon={CalendarClock}
+          to="/my-leave"
         />
         {managementScope ? (
           <KpiCard
@@ -598,8 +665,9 @@ export default function DashboardPage() {
                 >
                   <strong>
                     {
-                      todayTimesheets.filter((item) => getEffectiveWorkedMinutes(item) > 8 * 60)
-                        .length
+                      todayTimesheets.filter(
+                        (item) => getTimesheetMinutesForDay(item, todayKey, liveClock) > 8 * 60
+                      ).length
                     }
                   </strong>
                   <span>pontaje peste 8 ore</span>

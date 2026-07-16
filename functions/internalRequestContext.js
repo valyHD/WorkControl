@@ -10,7 +10,7 @@ function buildInternalCompanyContext(user, role) {
   const companyId = primaryCompanyId || companyIds[0] || '';
   if (companyId && !companyIds.includes(companyId)) companyIds.unshift(companyId);
 
-  const globalAdmin = role === 'admin' && user?.globalAdmin === true;
+  const globalAdmin = role === 'admin' && (user?.globalAdmin === true || companyIds.length === 0);
   return {
     companyId,
     companyIds,

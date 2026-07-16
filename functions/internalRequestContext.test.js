@@ -12,12 +12,18 @@ test('allows a global administrator to access global operations without a compan
   });
 });
 
+test('keeps legacy administrators without company scope working as global admins', () => {
+  assert.deepEqual(buildInternalCompanyContext({ globalAdmin: false }, 'admin'), {
+    companyId: '',
+    companyIds: [],
+    globalAdmin: true,
+    requiresCompany: false,
+  });
+});
+
 test('still requires a company for non-global internal users', () => {
   assert.equal(buildInternalCompanyContext({}, 'manager').requiresCompany, true);
-  assert.equal(
-    buildInternalCompanyContext({ globalAdmin: false }, 'admin').requiresCompany,
-    true
-  );
+  assert.equal(buildInternalCompanyContext({ companyIds: [] }, 'angajat').requiresCompany, true);
 });
 
 test('normalizes and deduplicates the assigned company context', () => {

@@ -1,15 +1,19 @@
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import {
   doc,
   getDoc,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { auth, db } from "../../../lib/firebase/firebase";
+import { auth, db, functions } from "../../../lib/firebase/firebase";
 import { createAuditLog } from "../../audit/services/auditLogService";
 import {
   evaluateInternalAccessProfile,
@@ -20,6 +24,7 @@ import {
   USER_PRESENCE_HEARTBEAT_MS,
   type PresenceWriteState,
 } from "./presencePolicy";
+import { getResolvedProfileCompanyFields } from "./profileCompanyFields";
 
 export type AppAuthUser = {
   uid: string;
@@ -40,6 +45,89 @@ export type AppAuthUser = {
 };
 
 let stopActivePresenceSession: ((writeOffline?: boolean) => void) | null = null;
+let registrationBarrier: Promise<void> | null = null;
+
+export class ExistingAuthAccountError extends Error {
+  readonly code = "auth/existing-account-password-mismatch";
+  readonly email: string;
+
+  constructor(email: string) {
+    super("Exista deja un cont Firebase pentru acest email, dar parola introdusa nu corespunde.");
+    this.name = "ExistingAuthAccountError";
+    this.email = email;
+  }
+}
+
+function getAuthErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+}
+
+export async function registerWithEmail(params: {
+  fullName: string;
+  email: string;
+  password: string;
+}) {
+  if (registrationBarrier) {
+    throw new Error("O alta inregistrare este deja in curs.");
+  }
+
+  let releaseBarrier: () => void = () => undefined;
+  registrationBarrier = new Promise<void>((resolve) => {
+    releaseBarrier = resolve;
+  });
+
+  let createdUser: Awaited<ReturnType<typeof createUserWithEmailAndPassword>> | null = null;
+  let ownsNewAuthUser = false;
+  try {
+    const email = params.email.trim().toLowerCase();
+    try {
+      createdUser = await createUserWithEmailAndPassword(auth, email, params.password);
+      ownsNewAuthUser = true;
+    } catch (error) {
+      const code = getAuthErrorCode(error);
+      if (!code.includes("email-already-in-use")) throw error;
+      try {
+        createdUser = await signInWithEmailAndPassword(auth, email, params.password);
+      } catch (signInError) {
+        const signInCode = getAuthErrorCode(signInError);
+        if (
+          signInCode.includes("invalid-credential") ||
+          signInCode.includes("wrong-password") ||
+          signInCode.includes("invalid-login-credentials")
+        ) {
+          throw new ExistingAuthAccountError(email);
+        }
+        throw signInError;
+      }
+    }
+    const registerProfile = httpsCallable<
+      { fullName: string },
+      { userId: string; created: boolean }
+    >(functions, "registerInternalAccount");
+    const response = await registerProfile({ fullName: params.fullName.trim() });
+    if (response.data.userId !== createdUser.user.uid) {
+      throw new Error("Profilul intern nu corespunde contului autentificat.");
+    }
+    return createdUser;
+  } catch (error) {
+    if (ownsNewAuthUser && createdUser?.user) {
+      await deleteUser(createdUser.user).catch(() => undefined);
+    }
+    await signOut(auth).catch(() => undefined);
+    throw error;
+  } finally {
+    releaseBarrier();
+    registrationBarrier = null;
+  }
+}
+
+export async function sendAccountRecoveryEmail(email: string) {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Adresa de email este obligatorie.");
+  await sendPasswordResetEmail(auth, normalizedEmail);
+}
 
 export async function loginWithEmail(email: string, password: string) {
   const result = await signInWithEmailAndPassword(auth, email, password);
@@ -82,6 +170,9 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       return;
     }
 
+    const pendingRegistration = registrationBarrier;
+    if (pendingRegistration) await pendingRegistration;
+
     const profileSnap = await getDoc(doc(db, "users", firebaseUser.uid));
     const profile = profileSnap.exists() ? profileSnap.data() : null;
     const decision = evaluateInternalAccessProfile(profile);
@@ -90,6 +181,7 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       callback(null);
       return;
     }
+    const companyFields = await getResolvedProfileCompanyFields(profile);
 
     callback({
       uid: firebaseUser.uid,
@@ -106,14 +198,10 @@ export function observeAuth(callback: (user: AppAuthUser | null) => void) {
       themeKey: typeof profile.themeKey === "string" ? profile.themeKey : null,
       roleTitle: String(profile.roleTitle ?? ""),
       department: String(profile.department ?? ""),
-      companyIds: Array.isArray(profile.companyIds)
-        ? profile.companyIds.filter((value): value is string => typeof value === "string")
-        : [],
-      companyNames: Array.isArray(profile.companyNames)
-        ? profile.companyNames.filter((value): value is string => typeof value === "string")
-        : [],
-      primaryCompanyId: String(profile.primaryCompanyId ?? ""),
-      primaryCompanyName: String(profile.primaryCompanyName ?? ""),
+      companyIds: companyFields.companyIds,
+      companyNames: companyFields.companyNames,
+      primaryCompanyId: companyFields.primaryCompanyId,
+      primaryCompanyName: companyFields.primaryCompanyName,
       role: profile.role as AppAuthUser["role"],
       active: true,
       globalAdmin: profile.globalAdmin === true,

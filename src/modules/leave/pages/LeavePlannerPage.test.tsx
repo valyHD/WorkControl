@@ -4,7 +4,6 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ASSISTANT_FILL_LEAVE_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { dispatchAssistantFormDraft } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
-import LeavePlannerPage from "./LeavePlannerPage";
 
 const leaveServiceMocks = vi.hoisted(() => ({
   approveLeaveRequest: vi.fn(),
@@ -17,10 +16,31 @@ const leaveServiceMocks = vi.hoisted(() => ({
 const highlighterMocks = vi.hoisted(() => ({
   highlightAssistantElement: vi.fn(),
 }));
+const authUser = vi.hoisted(() => ({
+  uid: "leave-user-test",
+  email: "leave@example.test",
+  displayName: "Utilizator Test",
+  primaryCompanyName: "Companie Test",
+  roleTitle: "Tehnician",
+  department: "Service",
+}));
 
 vi.mock("firebase/firestore", () => ({
   collection: vi.fn((...parts: unknown[]) => ({ parts })),
+  doc: vi.fn((...parts: unknown[]) => ({ parts })),
   documentId: vi.fn(() => ({ fieldPath: "__name__" })),
+  getDoc: vi.fn(() =>
+    Promise.resolve({
+      exists: () => true,
+      data: () => ({
+        active: true,
+        accessStatus: "active",
+        role: "angajat",
+        primaryCompanyId: "company-a",
+        companyIds: ["company-a"],
+      }),
+    })
+  ),
   limit: vi.fn((value: unknown) => ({ limit: value })),
   onSnapshot: vi.fn((...args: unknown[]) => {
     const onData = args.find((arg) => typeof arg === "function") as
@@ -33,19 +53,27 @@ vi.mock("firebase/firestore", () => ({
   where: vi.fn((...parts: unknown[]) => ({ where: parts })),
 }));
 
-vi.mock("../../../lib/firebase/firebase", () => ({ db: { project: "test" } }));
+vi.mock("../../../lib/firebase/firebase", () => ({
+  auth: { currentUser: { uid: "leave-user-test" } },
+  db: { project: "test" },
+}));
+vi.mock("../../../lib/firebase/companyAccess", () => ({
+  buildCompanyScopeConstraints: vi.fn(() => []),
+  getCurrentCompanyAccessContext: vi.fn(() =>
+    Promise.resolve({
+      uid: "leave-user-test",
+      role: "angajat",
+      globalAdmin: false,
+      primaryCompanyId: "company-a",
+      companyIds: ["company-a"],
+    })
+  ),
+}));
 vi.mock("../../../providers/AuthProvider", () => ({
   useAuth: () => ({
     role: "angajat",
     loading: false,
-    user: {
-      uid: "leave-user-test",
-      email: "leave@example.test",
-      displayName: "Utilizator Test",
-      primaryCompanyName: "Companie Test",
-      roleTitle: "Tehnician",
-      department: "Service",
-    },
+    user: authUser,
   }),
 }));
 vi.mock("../services/leaveRequestsService", () => leaveServiceMocks);
@@ -61,6 +89,7 @@ describe("LeavePlannerPage form", () => {
   });
 
   it("accepts assistant values but does not submit without explicit user action", async () => {
+    const { default: LeavePlannerPage } = await import("./LeavePlannerPage");
     render(
       <MemoryRouter initialEntries={["/my-leave"]}>
         <LeavePlannerPage />
@@ -88,6 +117,7 @@ describe("LeavePlannerPage form", () => {
 
   it("does not submit the leave request without a signature", async () => {
     const user = userEvent.setup();
+    const { default: LeavePlannerPage } = await import("./LeavePlannerPage");
     render(
       <MemoryRouter initialEntries={["/my-leave?assistant=leave&start=2026-08-24&end=2026-08-30"]}>
         <LeavePlannerPage />

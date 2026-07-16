@@ -23,6 +23,7 @@ import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
 import {
   buildUserDirectoryConstraints,
   getCurrentCompanyAccessContext,
+  type CompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
 import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
 import { buildAuditChanges, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
@@ -131,12 +132,23 @@ function mapUserDoc(id: string, data: Record<string, unknown>): AppUserItem {
   };
 }
 
+export function getUserDirectorySourceName(
+  context: CompanyAccessContext
+): "users" | "userOperationalViews" {
+  if (context.globalAdmin) return "users";
+  return getUserDirectoryCollectionName();
+}
+
+function getUserDirectorySource(context: CompanyAccessContext) {
+  return getUserDirectorySourceName(context) === "userOperationalViews"
+    ? userOperationalViewsCollection
+    : usersCollection;
+}
+
 export async function getAllUsers(maxItems = 250): Promise<AppUserItem[]> {
   const context = await getCurrentCompanyAccessContext();
   const resultLimit = clampQueryLimit(maxItems, 250, 250);
-  const source = getUserDirectoryCollectionName() === "userOperationalViews"
-    ? userOperationalViewsCollection
-    : usersCollection;
+  const source = getUserDirectorySource(context);
   const snap = await getDocs(query(
     source,
     ...buildUserDirectoryConstraints(context),
@@ -160,9 +172,7 @@ export function subscribeUsers(
   void getCurrentCompanyAccessContext()
     .then((context) => {
       if (cancelled) return;
-      const source = getUserDirectoryCollectionName() === "userOperationalViews"
-        ? userOperationalViewsCollection
-        : usersCollection;
+      const source = getUserDirectorySource(context);
       unsubscribe = onSnapshot(
         query(
           source,
@@ -194,7 +204,11 @@ export async function getUserById(userId: string): Promise<AppUserItem | null> {
   return mapUserDoc(snap.id, snap.data());
 }
 
-export async function getUserAvatar(userId: string): Promise<{ avatarUrl: string; avatarThumbUrl: string } | null> {
+export async function getUserAvatar(userId: string): Promise<{
+  avatarUrl: string;
+  avatarThumbUrl: string;
+  themeKey: string | null;
+} | null> {
   if (!userId) return null;
   const snap = await getDoc(doc(db, "users", userId));
   if (!snap.exists()) return null;
@@ -202,6 +216,7 @@ export async function getUserAvatar(userId: string): Promise<{ avatarUrl: string
   return {
     avatarUrl: toText(data.avatarUrl),
     avatarThumbUrl: toText(data.avatarThumbUrl) || toText(data.avatarUrl),
+    themeKey: toText(data.themeKey) || null,
   };
 }
 

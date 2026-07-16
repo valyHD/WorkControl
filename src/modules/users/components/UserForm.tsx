@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { UserRole } from "../../../types/user";
+import type { CompanyChoice } from "../../companies/services/companiesService";
 
 type UserFormValues = {
   fullName: string;
@@ -8,6 +9,7 @@ type UserFormValues = {
   role: UserRole;
   roleTitle: string;
   department: string;
+  companyId: string;
   active: boolean;
 };
 
@@ -40,6 +42,7 @@ type Props = {
   initialValues: UserFormValues;
   isEdit?: boolean;
   submitting: boolean;
+  companyChoices?: CompanyChoice[];
   onSubmit: (values: UserFormValues) => Promise<void>;
 };
 
@@ -47,6 +50,7 @@ export default function UserForm({
   initialValues,
   isEdit = false,
   submitting,
+  companyChoices = [],
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<UserFormValues>(initialValues);
@@ -95,6 +99,30 @@ export default function UserForm({
               value={values.password}
               onChange={(e) => setValues((prev) => ({ ...prev, password: e.target.value }))}
             />
+          </div>
+        )}
+
+        {!isEdit && companyChoices.length > 0 && (
+          <div className="tool-form-block">
+            <label className="tool-form-label" htmlFor="user-company">Firma</label>
+            <select
+              id="user-company"
+              className="tool-input"
+              data-assistant-field="companyId"
+              value={values.companyId}
+              onChange={(event) => setValues((current) => ({
+                ...current,
+                companyId: event.target.value,
+              }))}
+              required
+            >
+              <option value="">Alege firma</option>
+              {companyChoices.map((company) => (
+                <option key={company.companyId} value={company.companyId}>
+                  {company.companyName}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

@@ -39,6 +39,17 @@ describe("dashboardService cost bounds", () => {
     await getDashboardData("user-1", "2026-07-12");
 
     expect(firestoreMocks.where).toHaveBeenCalledWith("workDate", "==", "2026-07-12");
+    expect(firestoreMocks.where).toHaveBeenCalledWith(
+      "stopAt",
+      ">=",
+      new Date("2026-07-12T00:00:00").getTime()
+    );
+    expect(firestoreMocks.where).toHaveBeenCalledWith(
+      "stopAt",
+      "<=",
+      new Date("2026-07-12T23:59:59.999").getTime()
+    );
+    expect(firestoreMocks.where).toHaveBeenCalledWith("periodEnd", ">=", "2026-07-12");
     expect(firestoreMocks.where).toHaveBeenCalledWith("userId", "==", "user-1");
     expect(firestoreMocks.limit).toHaveBeenCalledWith(10);
     expect(firestoreMocks.limit).toHaveBeenCalledWith(100);
@@ -58,13 +69,15 @@ describe("dashboardService cost bounds", () => {
     expect(notificationQuery?.at(-1)).toMatchObject({ kind: "limit", value: 10 });
 
     await getDashboardData("user-1", "2026-07-12");
-    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "users")).toHaveLength(1);
+    expect(
+      firestoreMocks.query.mock.calls.filter(([base]) => base === "userOperationalViews")
+    ).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "tools")).toHaveLength(1);
-    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "vehicles")).toHaveLength(1);
+    expect(
+      firestoreMocks.query.mock.calls.filter(([base]) => base === "vehicleOperationalViews")
+    ).toHaveLength(1);
     expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "projects")).toHaveLength(1);
-    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "timesheets")).toHaveLength(
-      4
-    );
+    expect(firestoreMocks.query.mock.calls.filter(([base]) => base === "timesheets")).toHaveLength(6);
     expect(
       firestoreMocks.query.mock.calls.filter(([base]) => base === "notifications")
     ).toHaveLength(2);
@@ -135,5 +148,76 @@ describe("dashboardService cost bounds", () => {
     ]);
     expect(result.stats.activeTimesheets).toBe(1);
     expect(firestoreMocks.where).toHaveBeenCalledWith("status", "==", "activ");
+  });
+
+  it("summarizes scheduled, active and pending leave without a full collection scan", async () => {
+    firestoreMocks.getDocs.mockImplementation(async (request: { base?: string }) => {
+      if (request?.base !== "leaveRequests") return { docs: [], size: 0 };
+      const docs = [
+        {
+          id: "active-approved",
+          data: () => ({
+            status: "aprobat",
+            periodStart: "2026-08-09",
+            periodEnd: "2026-08-12",
+          }),
+        },
+        {
+          id: "future-pending",
+          data: () => ({
+            status: "in_asteptare",
+            periodStart: "2026-08-20",
+            periodEnd: "2026-08-22",
+          }),
+        },
+        {
+          id: "rejected",
+          data: () => ({
+            status: "respins",
+            periodStart: "2026-08-10",
+            periodEnd: "2026-08-11",
+          }),
+        },
+      ];
+      return { docs, size: docs.length };
+    });
+
+    const { getDashboardData } = await import("./dashboardService");
+    const result = await getDashboardData("user-1", "2026-08-10", "admin");
+
+    expect(result.leave).toEqual({
+      scheduled: 2,
+      activeToday: 1,
+      pending: 1,
+      isPartial: false,
+    });
+    const leaveQuery = firestoreMocks.query.mock.calls.find(([base]) => base === "leaveRequests");
+    expect(leaveQuery?.at(-1)).toMatchObject({ kind: "limit", value: 100 });
+  });
+
+  it("keeps a personal cross-day active timesheet visible", async () => {
+    firestoreMocks.getDocs.mockImplementation(async (request: { base?: string }) => {
+      if (request?.base !== "timesheets") return { docs: [], size: 0 };
+      return {
+        docs: [
+          {
+            id: "personal-active-yesterday",
+            data: () => ({
+              userId: "employee-1",
+              status: "activ",
+              workDate: "2026-08-31",
+              startAt: new Date("2026-08-31T22:00:00+03:00").getTime(),
+            }),
+          },
+        ],
+        size: 1,
+      };
+    });
+
+    const { getDashboardData } = await import("./dashboardService");
+    const result = await getDashboardData("employee-1", "2026-09-01", "angajat");
+
+    expect(result.timesheets.map((item) => item.id)).toContain("personal-active-yesterday");
+    expect(result.stats.activeTimesheets).toBe(1);
   });
 });

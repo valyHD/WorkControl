@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { TimesheetItem } from "../../../types/timesheet";
 import { formatMinutes } from "../services/timesheetsService";
 import StatusBadge from "../../../components/StatusBadge";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 import {
-  getEffectiveWorkedMinutes,
   getLocalDateKey,
   getProjectLabel,
+  getTimesheetMinutesForDay,
   getTimesheetStatusLabel,
   getTimesheetStatusTone,
   isIncompleteTimesheet,
@@ -14,6 +16,8 @@ import {
 
 type Props = {
   timesheets: TimesheetItem[];
+  userThemeKey?: string | null;
+  initialMonth?: Date;
 };
 
 function getMonthDays(now = new Date()) {
@@ -44,23 +48,45 @@ function getDayLabel(tone: string) {
   return "Liber";
 }
 
-export default function TimesheetCalendar({ timesheets }: Props) {
+function firstDayOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+export default function TimesheetCalendar({ timesheets, userThemeKey, initialMonth }: Props) {
   const todayKey = getLocalDateKey();
   const [selectedDay, setSelectedDay] = useState(todayKey);
-
+  const [visibleMonth, setVisibleMonth] = useState(() => firstDayOfMonth(initialMonth ?? new Date()));
+  const monthDays = useMemo(() => getMonthDays(visibleMonth), [visibleMonth]);
   const byDay = useMemo(() => {
     const map = new Map<string, TimesheetItem[]>();
-    for (const item of timesheets) {
-      const list = map.get(item.workDate) ?? [];
-      list.push(item);
-      map.set(item.workDate, list);
+    for (const date of monthDays) {
+      const dayKey = getLocalDateKey(date.getTime());
+      const items = timesheets.filter((item) =>
+        item.workDate === dayKey || getTimesheetMinutesForDay(item, dayKey) > 0
+      );
+      map.set(dayKey, items);
     }
     return map;
-  }, [timesheets]);
-
-  const monthDays = useMemo(() => getMonthDays(), []);
+  }, [monthDays, timesheets]);
   const selectedItems = byDay.get(selectedDay) ?? [];
-  const selectedTotalMinutes = selectedItems.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0);
+  const selectedTotalMinutes = selectedItems.reduce(
+    (sum, item) => sum + getTimesheetMinutesForDay(item, selectedDay),
+    0
+  );
+  const monthTitle = visibleMonth.toLocaleDateString("ro-RO", { month: "long", year: "numeric" });
+  const monthEntryCount = useMemo(
+    () => new Set([...byDay.values()].flat().map((item) => item.id)).size,
+    [byDay]
+  );
+  function changeMonth(offset: number) {
+    const nextMonth = new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + offset, 1);
+    setVisibleMonth(nextMonth);
+    const currentMonth = new Date();
+    const nextSelected = nextMonth.getFullYear() === currentMonth.getFullYear() && nextMonth.getMonth() === currentMonth.getMonth()
+      ? todayKey
+      : getLocalDateKey(nextMonth.getTime());
+    setSelectedDay(nextSelected);
+  }
 
   return (
     <div className="panel timesheet-calendar-panel">
@@ -69,7 +95,15 @@ export default function TimesheetCalendar({ timesheets }: Props) {
           <h2 className="panel-title">Calendar pontaj</h2>
           <p className="panel-subtitle">Verde complet, portocaliu incomplet, rosu lipsa, albastru activ.</p>
         </div>
-        <StatusBadge tone="blue">{new Date().toLocaleDateString("ro-RO", { month: "long", year: "numeric" })}</StatusBadge>
+        <div className="timesheet-calendar-nav" aria-label="Navigare calendar pontaje">
+          <button className="secondary-btn icon-btn" type="button" onClick={() => changeMonth(-1)} aria-label="Luna anterioara">
+            <ChevronLeft size={16} />
+          </button>
+          <StatusBadge tone="blue">{monthTitle} · {monthEntryCount} pontaje</StatusBadge>
+          <button className="secondary-btn icon-btn" type="button" onClick={() => changeMonth(1)} aria-label="Luna urmatoare">
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="timesheet-month-grid">
@@ -77,12 +111,13 @@ export default function TimesheetCalendar({ timesheets }: Props) {
           const dayKey = getLocalDateKey(date.getTime());
           const items = byDay.get(dayKey) ?? [];
           const tone = getDayTone(items, date);
-          const totalMinutes = items.reduce((sum, item) => sum + getEffectiveWorkedMinutes(item), 0);
+          const totalMinutes = items.reduce((sum, item) => sum + getTimesheetMinutesForDay(item, dayKey), 0);
+          const themeClass = getUserThemeClass(items[0]?.userThemeKey ?? userThemeKey);
           return (
             <button
               key={dayKey}
               type="button"
-              className={`timesheet-day-cell timesheet-day-cell--${tone} ${selectedDay === dayKey ? "is-selected" : ""}`}
+              className={`timesheet-day-cell user-accent-surface ${themeClass} timesheet-day-cell--${tone} ${selectedDay === dayKey ? "is-selected" : ""}`}
               onClick={() => setSelectedDay(dayKey)}
             >
               <strong>{date.getDate()}</strong>
@@ -100,17 +135,21 @@ export default function TimesheetCalendar({ timesheets }: Props) {
         </div>
         {selectedItems.length ? (
           <div className="simple-list">
-            {selectedItems.map((item) => (
-              <Link key={item.id} to={`/timesheets/${item.id}`} className="simple-list-item">
+            {selectedItems.map((item) => {
+              const dayMinutes = getTimesheetMinutesForDay(item, selectedDay);
+              const shortSession = item.status !== "activ" && dayMinutes <= 1;
+              return (
+              <Link key={item.id} to={`/timesheets/${item.id}`} className={`simple-list-item user-history-row ${getUserThemeClass(item.userThemeKey ?? userThemeKey)}`}>
                 <div className="simple-list-text">
-                  <div className="simple-list-label">{getProjectLabel(item)}</div>
+                  <div className="simple-list-label user-accent-name">{getProjectLabel(item)}</div>
                   <div className="simple-list-subtitle">
                     Start: {new Date(item.startAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" })}
                     {" - "}
                     Stop: {item.stopAt ? new Date(item.stopAt).toLocaleTimeString("ro-RO", { hour: "2-digit", minute: "2-digit" }) : "-"}
                     {" - "}
-                    Ore: {formatMinutes(getEffectiveWorkedMinutes(item))}
+                    Ore: {formatMinutes(dayMinutes)}
                   </div>
+                  {shortSession ? <div className="simple-list-subtitle timesheet-short-session">Sesiune foarte scurta inregistrata (1 minut sau mai putin).</div> : null}
                   {item.explanation || item.startExplanation || item.stopExplanation ? (
                     <div className="simple-list-subtitle">
                       Observatii: {item.explanation || item.startExplanation || item.stopExplanation}
@@ -119,7 +158,8 @@ export default function TimesheetCalendar({ timesheets }: Props) {
                 </div>
                 <StatusBadge tone={getTimesheetStatusTone(item.status)}>{getTimesheetStatusLabel(item.status)}</StatusBadge>
               </Link>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="tools-subtitle">Nu exista start/stop in ziua selectata.</p>

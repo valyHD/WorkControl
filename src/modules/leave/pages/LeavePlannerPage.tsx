@@ -32,6 +32,7 @@ import {
   parseAssistantLeaveDate,
   toLeaveIsoDate,
 } from "../utils/leaveDateUtils";
+import { getUserThemeClass } from "../../../lib/ui/userTheme";
 
 const weekDays = ["L", "Ma", "Mi", "J", "V", "S", "D"];
 
@@ -199,6 +200,10 @@ function assistantLeaveField(fields: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
+function getProfileCompanyName(user: ReturnType<typeof useAuth>["user"]): string {
+  return user?.primaryCompanyName?.trim() || user?.companyNames?.find((name) => name.trim())?.trim() || "";
+}
+
 export default function LeavePlannerPage() {
   const { user, role } = useAuth();
   const location = useLocation();
@@ -223,7 +228,7 @@ export default function LeavePlannerPage() {
   const [drawingSignature, setDrawingSignature] = useState(false);
   const [formValues, setFormValues] = useState<LeaveRequestFormValues>(
     {
-      ...defaultForm(user?.displayName || user?.email || "", user?.email || "", user?.primaryCompanyName || ""),
+      ...defaultForm(user?.displayName || user?.email || "", user?.email || "", getProfileCompanyName(user)),
       roleTitle: user?.roleTitle || "",
       department: user?.department || "",
     }
@@ -231,13 +236,13 @@ export default function LeavePlannerPage() {
   const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const signatureStrokeRef = useRef<SignaturePoint[]>([]);
   const signatureStrokesRef = useRef<SignaturePoint[][]>([]);
-  const previousProfileCompanyNameRef = useRef(user?.primaryCompanyName || "");
+  const previousProfileCompanyNameRef = useRef(getProfileCompanyName(user));
   const previousProfileRoleTitleRef = useRef(user?.roleTitle || "");
   const previousProfileDepartmentRef = useRef(user?.department || "");
   const assistantLeaveKeyRef = useRef("");
 
   useEffect(() => {
-    const profileCompanyName = user?.primaryCompanyName || "";
+    const profileCompanyName = getProfileCompanyName(user);
     const previousProfileCompanyName = previousProfileCompanyNameRef.current;
     const profileRoleTitle = user?.roleTitle || "";
     const previousProfileRoleTitle = previousProfileRoleTitleRef.current;
@@ -266,7 +271,7 @@ export default function LeavePlannerPage() {
     previousProfileRoleTitleRef.current = profileRoleTitle;
     previousProfileDepartmentRef.current = profileDepartment;
     signatureStrokesRef.current = [];
-  }, [user?.department, user?.displayName, user?.email, user?.primaryCompanyName, user?.roleTitle]);
+  }, [user, user?.companyNames, user?.department, user?.displayName, user?.email, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -279,7 +284,7 @@ export default function LeavePlannerPage() {
 
     setFormValues((prev) => ({
       ...prev,
-      companyName: user?.primaryCompanyName || prev.companyName,
+      companyName: getProfileCompanyName(user) || prev.companyName,
       roleTitle: user?.roleTitle || prev.roleTitle,
       department: user?.department || prev.department,
       requestType: "concediu_odihna",
@@ -290,7 +295,7 @@ export default function LeavePlannerPage() {
     window.setTimeout(() => {
       document.getElementById("leave-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 150);
-  }, [location.search, user?.department, user?.primaryCompanyName, user?.roleTitle]);
+  }, [location.search, user, user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     const handleAssistantLeaveFill = (detail: Readonly<Record<string, unknown>>) => {
@@ -315,7 +320,7 @@ export default function LeavePlannerPage() {
       setSuccess("Asistentul a completat perioada. Verifica semnatura si trimite cererea.");
       setFormValues((prev) => ({
         ...prev,
-        companyName: user?.primaryCompanyName || prev.companyName,
+        companyName: getProfileCompanyName(user) || prev.companyName,
         roleTitle: user?.roleTitle || prev.roleTitle,
         department: user?.department || prev.department,
         requestType:
@@ -341,7 +346,7 @@ export default function LeavePlannerPage() {
     };
 
     return registerAssistantFormDraftAdapter(ASSISTANT_FILL_LEAVE_EVENT, handleAssistantLeaveFill);
-  }, [user?.department, user?.primaryCompanyName, user?.roleTitle]);
+  }, [user, user?.department, user?.primaryCompanyName, user?.roleTitle]);
 
   useEffect(() => {
     if (!showYearCalendar) return undefined;
@@ -377,6 +382,10 @@ export default function LeavePlannerPage() {
       snap.docs.forEach((docItem) => {
         const data = docItem.data();
         const uid = data.uid ?? docItem.id;
+        const companyNames = Array.isArray(data.companyNames)
+          ? data.companyNames.map((name: unknown) => String(name || "").trim()).filter(Boolean)
+          : [];
+        const primaryCompanyName = String(data.primaryCompanyName || companyNames[0] || "").trim();
         mappedByUser.set(uid, {
           id: uid,
           uid,
@@ -388,11 +397,14 @@ export default function LeavePlannerPage() {
           department: data.department ?? "",
           themeKey: data.themeKey ?? undefined,
           companyIds: [data.companyId].filter(Boolean),
-          companyNames: [],
-          primaryCompanyId: data.companyId ?? "",
-          primaryCompanyName: "",
+          companyNames,
+          primaryCompanyId: data.primaryCompanyId ?? data.companyId ?? "",
+          primaryCompanyName,
           createdAt: Number(data.createdAt ?? 0),
           updatedAt: Number(data.updatedAt ?? 0),
+          isOnline: data.isOnline === true,
+          lastSeenAt: Number(data.lastSeenAt ?? 0),
+          lastActiveAt: Number(data.lastActiveAt ?? 0),
         } as AppUserItem);
       });
       const mapped = [...mappedByUser.values()];
@@ -400,7 +412,10 @@ export default function LeavePlannerPage() {
       setUsers(mapped);
       setExpandedUserId((current) => current || mapped[0]?.uid || "");
       });
-    }).catch((error) => console.error("[LeavePlannerPage][users]", error));
+    }).catch((error) => {
+      console.error("[LeavePlannerPage][users]", error);
+      setError("Lista utilizatorilor nu a putut fi incarcata.");
+    });
     return () => {
       cancelled = true;
       unsubscribe();
@@ -432,6 +447,11 @@ export default function LeavePlannerPage() {
         (snap) => {
         const mapped = snap.docs.map((docItem) => mapTimesheetDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, timesheets: mapped, timesheetsLoaded: true }));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][timesheets]", snapshotError);
+          setCalendarData((prev) => ({ ...prev, timesheetsLoaded: true }));
+          setError("Pontajele din calendar nu au putut fi incarcate.");
         }
       );
 
@@ -446,6 +466,11 @@ export default function LeavePlannerPage() {
         (snap) => {
         const mapped = snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data()));
         setCalendarData((prev) => ({ ...prev, leaveRequests: mapped, leaveLoaded: true }));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][leave calendar]", snapshotError);
+          setCalendarData((prev) => ({ ...prev, leaveLoaded: true }));
+          setError("Concediile din calendar nu au putut fi incarcate.");
         }
       );
     }).catch((error) => console.error("[LeavePlannerPage][calendar]", error));
@@ -471,10 +496,20 @@ export default function LeavePlannerPage() {
         orderBy("createdAt", "desc"),
         limit(managementScope ? 100 : 30)
       );
-      unsubscribe = onSnapshot(requestsQuery, (snap) => {
-        setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
-      });
-    }).catch((error) => console.error("[LeavePlannerPage][requests]", error));
+      unsubscribe = onSnapshot(
+        requestsQuery,
+        (snap) => {
+          setAdminRequests(snap.docs.map((docItem) => mapLeaveDoc(docItem.id, docItem.data())));
+        },
+        (snapshotError) => {
+          console.error("[LeavePlannerPage][requests]", snapshotError);
+          setError("Cererile de concediu nu au putut fi incarcate.");
+        }
+      );
+    }).catch((error) => {
+      console.error("[LeavePlannerPage][requests]", error);
+      setError("Cererile de concediu nu au putut fi incarcate.");
+    });
     return () => {
       cancelled = true;
       unsubscribe();
@@ -522,6 +557,10 @@ export default function LeavePlannerPage() {
   );
   const expandedUser = useMemo(() => users.find((userItem) => userItem.uid === expandedUserId), [expandedUserId, users]);
   const expandedUserName = expandedUser ? buildUserLabel(expandedUser) : "Utilizator";
+  const userThemeById = useMemo(
+    () => new Map(users.flatMap((userItem) => [userItem.uid, userItem.id].filter(Boolean).map((id) => [id, userItem.themeKey ?? null] as const))),
+    [users]
+  );
   const attentionClass = (condition: boolean) => (condition ? "attention-pulse" : "");
 
   useEffect(() => {
@@ -654,7 +693,7 @@ export default function LeavePlannerPage() {
       setExpandedUserId(user.uid);
       setSuccess("Cererea a fost trimisa si apare mai jos in Cererile mele.");
       setFormValues((prev) => ({
-        ...defaultForm(user.displayName || user.email || "", user.email || "", user.primaryCompanyName || prev.companyName),
+        ...defaultForm(user.displayName || user.email || "", user.email || "", getProfileCompanyName(user) || prev.companyName),
         roleTitle: user.roleTitle || prev.roleTitle,
         department: user.department || prev.department,
       }));
@@ -807,13 +846,14 @@ export default function LeavePlannerPage() {
             const uid = userItem.uid;
             const isExpanded = expandedUserId === uid;
             const isLoading = isExpanded && (!calendarData.timesheetsLoaded || !calendarData.leaveLoaded);
+            const userThemeClass = getUserThemeClass(userItem.themeKey);
 
             return (
-              <div key={uid} className="leave-user-item">
+              <div key={uid} className={`leave-user-item ${userThemeClass}`}>
                 <button
                   type="button"
                   data-assistant-action="view-leave-calendar"
-                  className={`leave-user-trigger ${attentionClass(uid === user.uid)}`}
+                  className={`leave-user-trigger user-accent-surface ${userThemeClass} ${attentionClass(uid === user.uid)}`}
                   title="Deschide calendarul acestui utilizator"
                   onClick={() => setExpandedUserId(isExpanded ? "" : uid)}
                 >
@@ -822,7 +862,7 @@ export default function LeavePlannerPage() {
                 </button>
 
                 {isExpanded && (
-                  <div className="leave-user-dropdown">
+                  <div className={`leave-user-dropdown user-accent-surface ${userThemeClass}`}>
                     <div className="leave-inline-calendar-header">
                       <strong className="leave-month-title">{monthTitle}</strong>
                       <div className="leave-inline-calendar-actions">
@@ -953,7 +993,7 @@ export default function LeavePlannerPage() {
               <div
                 id={`leave-request-${request.id}`}
                 key={request.id}
-                className={`simple-list-item leave-history-item leave-history-item-vertical ${attentionClass(request.id === submittedLeaveRequestId)}`}
+                className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item leave-history-item-vertical ${attentionClass(request.id === submittedLeaveRequestId)}`}
               >
                 <div className="simple-list-text">
                   <div className="simple-list-label">{requestTypeLabel(request.requestType)}</div>
@@ -1002,10 +1042,10 @@ export default function LeavePlannerPage() {
         ) : (
           <div className="simple-list">
             {pendingLeaveRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item">
+              <div key={request.id} className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item`}>
                 <div className="simple-list-text">
                   <div className="simple-list-label">
-                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    <UserProfileLink userId={request.userId} name={request.userName} themeKey={userThemeById.get(request.userId)} />
                     {" "}· {requestTypeLabel(request.requestType)}
                   </div>
                   <div className="simple-list-subtitle">
@@ -1049,10 +1089,10 @@ export default function LeavePlannerPage() {
         ) : (
           <div className="simple-list">
             {approvedRequests.map((request) => (
-              <div key={request.id} className="simple-list-item leave-history-item leave-history-item-vertical">
+              <div key={request.id} className={`simple-list-item user-history-row ${getUserThemeClass(userThemeById.get(request.userId))} leave-history-item leave-history-item-vertical`}>
                 <div className="simple-list-text">
                   <div className="simple-list-label">
-                    <UserProfileLink userId={request.userId} name={request.userName} />
+                    <UserProfileLink userId={request.userId} name={request.userName} themeKey={userThemeById.get(request.userId)} />
                     {" "}· {requestTypeLabel(request.requestType)}
                   </div>
                   <div className="simple-list-subtitle">
