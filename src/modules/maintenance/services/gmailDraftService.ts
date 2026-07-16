@@ -1,4 +1,4 @@
-const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send";
+const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
 const GIS_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GMAIL_REDIRECT_STATE_KEY = "workcontrol.gmailRedirectState.v1";
@@ -163,7 +163,7 @@ export function shouldUseGmailRedirectAuthorization(): boolean {
 
 export function createGmailRedirectAuthorizationRequest(senderEmail: string): GmailRedirectAuthorizationRequest {
   const clientId = getGoogleClientId();
-  const redirectUri = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+  const redirectUri = `${window.location.origin}/maintenance?tab=report`;
   const state = `wc_gmail_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const params = new URLSearchParams({
     client_id: clientId,
