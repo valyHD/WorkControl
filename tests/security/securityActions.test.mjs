@@ -277,6 +277,33 @@ test("vehicle assignments and administrative mileage are transactionally control
   assert.equal(audit.docs[0].get("after.currentDriverUserId"), "employee-a2");
 });
 
+test("manual mileage correction resets the runtime base and preserves future GPS deltas", async () => {
+  const vehicleRef = db.collection("vehicles").doc("vehicle-a");
+  const runtimeRef = vehicleRef.collection("positions").doc("_runtime");
+  await vehicleRef.update({
+    currentKm: 7459,
+    initialRecordedKm: 6000,
+    mileageAdjustmentKm: 0,
+  });
+  await runtimeRef.set({
+    schemaVersion: 1,
+    vehicleId: "vehicle-a",
+    mileageBaseKm: 7459,
+    pendingCurrentKm: 1.067,
+  });
+
+  await handlers.updateVehicleMileage({
+    auth: { uid: "manager-a" },
+    data: { vehicleId: "vehicle-a", currentKm: 7200, initialRecordedKm: 6000 },
+  });
+
+  const [vehicle, runtime] = await Promise.all([vehicleRef.get(), runtimeRef.get()]);
+  assert.equal(vehicle.get("currentKm"), 7200);
+  assert.equal(vehicle.get("mileageAdjustmentKm"), -260.067);
+  assert.equal(runtime.get("mileageBaseKm"), 7200);
+  assert.equal(runtime.get("pendingCurrentKm"), 0);
+});
+
 test("client audit allowlist rejects arbitrary fake audit actions", async () => {
   await assert.rejects(
     handlers.recordAuditEvent({

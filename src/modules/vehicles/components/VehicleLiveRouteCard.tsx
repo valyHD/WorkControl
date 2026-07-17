@@ -57,6 +57,7 @@ import {
 } from "../utils/vehicleRouteVisibility";
 import { loadSelectedDayRouteWithRecovery } from "../utils/vehicleRouteRecovery";
 import { selectStopItemsForRender } from "../utils/vehicleStopRender";
+import { getTrustedVehicleOdometerKm } from "../utils/vehicleMileage";
 import VehicleGpsStatsCard from "./VehicleGpsStatsCard";
 import VehicleTripTimeline from "./VehicleTripTimeline";
 import { useAuth } from "../../../providers/AuthProvider";
@@ -207,12 +208,6 @@ function isFiniteCoord(value: unknown): value is number {
 function isValidCoordPair(lat: unknown, lng: unknown) {
   if (!isFiniteCoord(lat) || !isFiniteCoord(lng)) return false;
   return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
-}
-
-function getTrustedTotalOdometerKm(value: unknown, initialRecordedKm: number) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
-  if (initialRecordedKm > 0 && value < initialRecordedKm) return 0;
-  return value;
 }
 
 function safeRoutePoints(items: VehiclePositionItem[]) {
@@ -1475,7 +1470,11 @@ export default function VehicleLiveRouteCard({
       ? vehicle.currentKm
       : initialRecordedKm;
   const initialOdometerEstimateKm =
-    getTrustedTotalOdometerKm(vehicle.gpsSnapshot?.odometerKm, initialRecordedKm) ||
+    getTrustedVehicleOdometerKm(
+      vehicle.gpsSnapshot?.odometerKm,
+      initialRecordedKm,
+      vehicle.mileageAdjustmentKm
+    ) ||
     storedInitialKm;
   const monotonicEstimatedKmRef = useRef(initialOdometerEstimateKm);
   const monotonicRouteDistanceRef = useRef({ key: "", distanceKm: 0 });
@@ -2315,13 +2314,15 @@ export default function VehicleLiveRouteCard({
   }, [historyPeriodsOpen, normalizedHistorySegments]);
 
   const historyStats = useMemo(() => {
-    const physicalSnapshotOdometerKm = getTrustedTotalOdometerKm(
+    const physicalSnapshotOdometerKm = getTrustedVehicleOdometerKm(
       vehicle.gpsSnapshot?.odometerKm,
-      initialRecordedKm
+      initialRecordedKm,
+      vehicle.mileageAdjustmentKm
     );
-    const liveRealOdometerKm = getTrustedTotalOdometerKm(
+    const liveRealOdometerKm = getTrustedVehicleOdometerKm(
       latestRealLivePosition?.odometerKm,
-      initialRecordedKm
+      initialRecordedKm,
+      vehicle.mileageAdjustmentKm
     );
     const hasRealOdometer = physicalSnapshotOdometerKm > 0 || liveRealOdometerKm > 0;
     const absoluteRealOdometerKm = Math.max(
@@ -2348,7 +2349,9 @@ export default function VehicleLiveRouteCard({
     const calculatedEstimatedCurrentKm = Number(
       Math.max(
         absoluteCurrentKm,
-        initialRecordedKm + totalTrackedKm
+        initialRecordedKm +
+          baseHistoryStats.totalTrackedKm +
+          (vehicle.mileageAdjustmentKm || 0)
       ).toFixed(2)
     );
     const activeRouteStartedAt =
@@ -2387,6 +2390,7 @@ export default function VehicleLiveRouteCard({
     vehicle.currentKm,
     vehicle.gpsSim?.startedAt,
     vehicle.gpsSnapshot?.odometerKm,
+    vehicle.mileageAdjustmentKm,
     vehicle.id,
   ]);
 

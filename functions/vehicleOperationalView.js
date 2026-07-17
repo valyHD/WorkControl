@@ -1,4 +1,4 @@
-const VEHICLE_OPERATIONAL_VIEW_VERSION = 3;
+const VEHICLE_OPERATIONAL_VIEW_VERSION = 4;
 
 function pick(source, fields) {
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
@@ -52,6 +52,10 @@ function buildVehicleOperationalView(vehicleId, source) {
     initialRecordedKm: Number.isFinite(Number(data.initialRecordedKm))
       ? Number(data.initialRecordedKm)
       : 0,
+    mileageAdjustmentKm: Number.isFinite(Number(data.mileageAdjustmentKm))
+      ? Number(data.mileageAdjustmentKm)
+      : 0,
+    mileageAdjustedAt: Number(data.mileageAdjustedAt || 0),
     ownerUserId: String(data.ownerUserId || ''),
     ownerUserName: String(data.ownerUserName || ''),
     ownerThemeKey: data.ownerThemeKey || null,

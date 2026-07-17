@@ -1024,6 +1024,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
   const storedCurrentKm = toSafeNumber(data.currentKm, 0);
   const currentKm = storedCurrentKm;
   const initialRecordedKm = toSafeNumber(data.initialRecordedKm, storedCurrentKm || currentKm);
+  const mileageAdjustmentKm = toSafeNumber(data.mileageAdjustmentKm, 0);
   const serviceStrategy = data.serviceStrategy === "absolute" ? "absolute" : "interval";
   const serviceIntervalKm = toSafeNumber(data.serviceIntervalKm, 15000);
   const documents: VehicleDocumentItem[] = documentsRaw.map((item: any) => ({
@@ -1092,6 +1093,8 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
     status: toVehicleStatus(data.status),
     currentKm,
     initialRecordedKm,
+    mileageAdjustmentKm,
+    mileageAdjustedAt: toSafeNumber(data.mileageAdjustedAt, 0) || undefined,
 
     ownerUserId: toSafeString(data.ownerUserId),
     ownerUserName: toSafeString(data.ownerUserName),

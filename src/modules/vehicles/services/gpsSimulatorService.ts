@@ -9,6 +9,7 @@
 
 import { doc, runTransaction, writeBatch } from 'firebase/firestore';
 import { db } from '../../../lib/firebase/firebase';
+import { applyVehicleMileageAdjustment } from '../utils/vehicleMileage';
 
 export interface RoutePoint {
   lat: number;
@@ -199,7 +200,9 @@ function toSafeKm(value: unknown) {
 function getVehicleKmBase(data: Record<string, any>) {
   const initialKm = toSafeKm(data.initialRecordedKm);
   const currentKm = toSafeKm(data.currentKm);
-  const snapshotKm = toSafeKm(data.gpsSnapshot?.odometerKm);
+  const snapshotKm = toSafeKm(
+    applyVehicleMileageAdjustment(data.gpsSnapshot?.odometerKm, data.mileageAdjustmentKm)
+  );
   const trustedSnapshotKm = initialKm > 0 && snapshotKm < initialKm ? 0 : snapshotKm;
   const trustedCurrentKm = initialKm > 0 && currentKm < initialKm ? 0 : currentKm;
 

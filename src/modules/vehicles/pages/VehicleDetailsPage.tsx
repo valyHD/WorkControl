@@ -19,6 +19,7 @@ import GpsSimulatorPanel from "../components/GpsSimulatorPanel";
 import ProductTabs from "../../../components/product/ProductTabs";
 import UniversalTimeline from "../../../components/product/UniversalTimeline";
 import { canUseGpsSimulator } from "../hooks/useGpsSimulator";
+import { getTrustedVehicleOdometerKm } from "../utils/vehicleMileage";
 import {
   acceptVehicleDriverChange,
   addVehicleComment,
@@ -58,12 +59,6 @@ interface VehicleUndoAction {
 function formatDate(ts?: number) {
   if (!ts) return "?";
   return new Date(ts).toLocaleString("ro-RO");
-}
-
-function getTrustedTotalOdometerKm(value: unknown, initialRecordedKm: number) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
-  if (initialRecordedKm > 0 && value < initialRecordedKm) return 0;
-  return value;
 }
 
 function MaintenanceAlert({ label, date }: { label: string; date?: string }) {
@@ -408,9 +403,10 @@ export default function VehicleDetailsPage() {
     if (typeof estimatedCurrentKm === "number" && Number.isFinite(estimatedCurrentKm)) {
       return estimatedCurrentKm;
     }
-    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+    const trustedGpsOdometerKm = getTrustedVehicleOdometerKm(
       vehicle.gpsSnapshot?.odometerKm,
-      initialRecordedKm
+      initialRecordedKm,
+      vehicle.mileageAdjustmentKm
     );
     if (trustedGpsOdometerKm > 0) {
       return Math.max(
@@ -440,9 +436,10 @@ export default function VehicleDetailsPage() {
     if (hasActiveRoute) return;
 
     const initialRecordedKm = vehicle.initialRecordedKm || 0;
-    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+    const trustedGpsOdometerKm = getTrustedVehicleOdometerKm(
       vehicle.gpsSnapshot?.odometerKm,
-      initialRecordedKm
+      initialRecordedKm,
+      vehicle.mileageAdjustmentKm
     );
     const storedKm =
       typeof vehicle.currentKm === "number" &&
@@ -459,6 +456,7 @@ export default function VehicleDetailsPage() {
     vehicle?.gpsSnapshot?.gpsTimestamp,
     vehicle?.gpsSnapshot?.odometerKm,
     vehicle?.initialRecordedKm,
+    vehicle?.mileageAdjustmentKm,
   ]);
 
   const handleKmEstimateChange = useCallback((km: number) => {
@@ -471,9 +469,10 @@ export default function VehicleDetailsPage() {
 
     if (!changedEnough && !waitedEnough) return;
 
-    const trustedGpsOdometerKm = getTrustedTotalOdometerKm(
+    const trustedGpsOdometerKm = getTrustedVehicleOdometerKm(
       vehicle?.gpsSnapshot?.odometerKm,
-      vehicle?.initialRecordedKm || 0
+      vehicle?.initialRecordedKm || 0,
+      vehicle?.mileageAdjustmentKm
     );
     const nextKm = Math.max(km, trustedGpsOdometerKm);
 
@@ -482,7 +481,11 @@ export default function VehicleDetailsPage() {
       if (typeof current === "number" && Math.abs(current - nextKm) < 0.01) return current;
       return nextKm;
     });
-  }, [vehicle?.gpsSnapshot?.odometerKm, vehicle?.initialRecordedKm]);
+  }, [
+    vehicle?.gpsSnapshot?.odometerKm,
+    vehicle?.initialRecordedKm,
+    vehicle?.mileageAdjustmentKm,
+  ]);
 
   async function handleAddComment() {
     if (!vehicle || !user?.uid || commentBusy) return;

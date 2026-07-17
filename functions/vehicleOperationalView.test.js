@@ -53,3 +53,18 @@ test('GPS-only updates produce the same operational payload', () => {
     buildVehicleOperationalView('vehicle-1', next)
   );
 });
+
+test('operational view preserves the safe mileage correction fields', () => {
+  const view = buildVehicleOperationalView('vehicle-1', {
+    companyId: 'company-a',
+    plateNumber: 'B33LGR',
+    currentKm: 7200,
+    initialRecordedKm: 6044,
+    mileageAdjustmentKm: -260.067,
+    mileageAdjustedAt: 123456,
+  });
+
+  assert.equal(view.currentKm, 7200);
+  assert.equal(view.mileageAdjustmentKm, -260.067);
+  assert.equal(view.mileageAdjustedAt, 123456);
+});

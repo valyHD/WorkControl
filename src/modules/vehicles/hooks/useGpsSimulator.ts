@@ -21,6 +21,7 @@ import {
   type SimulationProgress,
 } from '../services/gpsSimulatorService';
 import { getLatestVehiclePosition } from '../services/vehiclesService';
+import { applyVehicleMileageAdjustment } from '../utils/vehicleMileage';
 
 export const SIMULATOR_ALLOWED_EMAIL = 'ionut.matura23@gmail.com';
 
@@ -179,9 +180,15 @@ export function useGpsSimulator(vehicle: VehicleItem | null) {
     const startOdometerKm = currentSimulationPoint
        ? Math.max(0, currentSimulationPoint.odometerKm ?? 0)
       : Math.max(
-          latestRealPosition?.odometerKm ?? 0,
+          applyVehicleMileageAdjustment(
+            latestRealPosition?.odometerKm,
+            vehicle.mileageAdjustmentKm
+          ),
           vehicle.currentKm ?? 0,
-          vehicle.gpsSnapshot?.odometerKm ?? 0
+          applyVehicleMileageAdjustment(
+            vehicle.gpsSnapshot?.odometerKm,
+            vehicle.mileageAdjustmentKm
+          )
         );
 
     const route = await fetchRouteFromOSRM(startLat, startLng, geo.lat, geo.lng);

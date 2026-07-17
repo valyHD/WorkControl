@@ -7,6 +7,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import type { VehicleItem, VehiclePositionItem } from "../../../types/vehicle";
+import { getTrustedVehicleOdometerKm } from "../utils/vehicleMileage";
 
 type Props = {
   vehicle: VehicleItem;
@@ -19,12 +20,6 @@ const ONLINE_MS = 3 * 60 * 1000;
 const RECENT_MS = 10 * 60 * 1000;
 const FRESH_GPS_MOTION_MS = 90 * 1000;
 const MOVING_SPEED_THRESHOLD_KMH = 4;
-
-function getTrustedTotalOdometerKm(value: unknown, initialRecordedKm: number) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
-  if (initialRecordedKm > 0 && value < initialRecordedKm) return 0;
-  return value;
-}
 
 function getLastSavedRouteEndTs(vehicle: VehicleItem) {
   let lastEndTs = 0;
@@ -188,12 +183,20 @@ export default function VehicleGpsStatsCard({
   const displayedOdometerKm = useMemo(() => {
     const initialRecordedKm = vehicle.initialRecordedKm || 0;
     const candidates = [
-      getTrustedTotalOdometerKm(vehicle.gpsSnapshot?.odometerKm, initialRecordedKm),
+      getTrustedVehicleOdometerKm(
+        vehicle.gpsSnapshot?.odometerKm,
+        initialRecordedKm,
+        vehicle.mileageAdjustmentKm
+      ),
       livePositionOverrideIsVirtual
         ? 0
-        : getTrustedTotalOdometerKm(snapshot?.odometerKm, initialRecordedKm),
+        : getTrustedVehicleOdometerKm(
+            snapshot?.odometerKm,
+            initialRecordedKm,
+            vehicle.mileageAdjustmentKm
+          ),
       odometerKmOverride,
-      getTrustedTotalOdometerKm(vehicle.currentKm, initialRecordedKm),
+      getTrustedVehicleOdometerKm(vehicle.currentKm, initialRecordedKm, 0),
       initialRecordedKm,
     ].filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
 
@@ -205,6 +208,7 @@ export default function VehicleGpsStatsCard({
     vehicle.currentKm,
     vehicle.gpsSnapshot?.odometerKm,
     vehicle.initialRecordedKm,
+    vehicle.mileageAdjustmentKm,
   ]);
 
   return (

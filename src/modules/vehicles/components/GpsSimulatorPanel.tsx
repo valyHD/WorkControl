@@ -22,6 +22,7 @@ import {
   type GpsRouteStateSnapshot,
   type SimulationConfig,
 } from "../services/gpsSimulatorService";
+import { applyVehicleMileageAdjustment } from "../utils/vehicleMileage";
 
 const SIMULATION_UI_REFRESH_MS = 3_000;
 const MAX_SIM_DISPLAY_SPEED_KMH = 63;
@@ -323,8 +324,20 @@ export default function GpsSimulatorPanel({
     [vehicle.gpsSimHistory]
   );
   const realBaseKm = useMemo(
-    () => Math.max(vehicle.gpsSnapshot?.odometerKm || 0, vehicle.initialRecordedKm || 0),
-    [vehicle.gpsSnapshot?.odometerKm, vehicle.initialRecordedKm]
+    () => Math.max(
+      applyVehicleMileageAdjustment(
+        vehicle.gpsSnapshot?.odometerKm,
+        vehicle.mileageAdjustmentKm
+      ),
+      vehicle.currentKm || 0,
+      vehicle.initialRecordedKm || 0
+    ),
+    [
+      vehicle.currentKm,
+      vehicle.gpsSnapshot?.odometerKm,
+      vehicle.initialRecordedKm,
+      vehicle.mileageAdjustmentKm,
+    ]
   );
   const plannedRoutePositions = useMemo(() => {
     if (!state.config) return [];

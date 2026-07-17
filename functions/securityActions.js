@@ -1548,15 +1548,31 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     }
     const vehicleRef = db.collection('vehicles').doc(vehicleId);
     await db.runTransaction(async (tx) => {
-      const snap = await tx.get(vehicleRef);
+      const runtimeRef = vehicleRef.collection('positions').doc('_runtime');
+      const [snap, runtimeSnap] = await Promise.all([
+        tx.get(vehicleRef),
+        tx.get(runtimeRef),
+      ]);
       if (!snap.exists) throw new HttpsError('not-found', 'Vehiculul nu exista.');
       const vehicle = snap.data() || {};
       const companyId = cleanText(vehicle.companyId, 120);
       if (!canAccessCompany(actor, companyId)) throw new HttpsError('permission-denied', 'Vehicul cross-company.');
       const assigned = [vehicle.ownerUserId, vehicle.currentDriverUserId].includes(actor.uid);
       const manages = canManageCompany(actor, companyId);
-      const previousKm = Number(vehicle.currentKm || 0);
+      const storedKm = Number(vehicle.currentKm || 0);
+      const runtimeKm = runtimeSnap.exists
+        ? Number(runtimeSnap.get('mileageBaseKm') || 0) + Number(runtimeSnap.get('pendingCurrentKm') || 0)
+        : 0;
+      const previousKm = Math.max(
+        Number.isFinite(storedKm) ? storedKm : 0,
+        Number.isFinite(runtimeKm) ? runtimeKm : 0
+      );
       const previousInitialKm = Number(vehicle.initialRecordedKm || 0);
+      const previousMileageAdjustmentKm = Number(vehicle.mileageAdjustmentKm || 0);
+      const mileageAdjustmentKm = Number((
+        (Number.isFinite(previousMileageAdjustmentKm) ? previousMileageAdjustmentKm : 0) +
+        (currentKm - previousKm)
+      ).toFixed(3));
       const initialRecordedKm = requestedInitialKm == null
         ? previousInitialKm
         : Number(requestedInitialKm);
@@ -1573,12 +1589,22 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       const after = {
         currentKm,
         initialRecordedKm,
+        mileageAdjustmentKm,
+        mileageAdjustedAt: Date.now(),
       };
       tx.update(vehicleRef, {
         ...after,
         updatedAt: Date.now(),
         updatedAtServer: fieldValue.serverTimestamp(),
       });
+      tx.set(runtimeRef, {
+        schemaVersion: 1,
+        vehicleId,
+        mileageBaseKm: currentKm,
+        pendingCurrentKm: 0,
+        updatedAt: Date.now(),
+        updatedAtServer: fieldValue.serverTimestamp(),
+      }, { merge: true });
       tx.create(db.collection('auditLogs').doc(), buildAuditPayload(fieldValue, actor, {
         companyId,
         category: 'vehicles',
@@ -1586,8 +1612,19 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         title: 'Kilometraj actualizat',
         message: `Kilometraj actualizat de la ${previousKm} la ${currentKm}.`,
         entityId: vehicleId,
-        metadata: { previousKm, currentKm, previousInitialKm, initialRecordedKm },
-        before: { currentKm: previousKm, initialRecordedKm: previousInitialKm },
+        metadata: {
+          previousKm,
+          currentKm,
+          previousInitialKm,
+          initialRecordedKm,
+          previousMileageAdjustmentKm,
+          mileageAdjustmentKm,
+        },
+        before: {
+          currentKm: previousKm,
+          initialRecordedKm: previousInitialKm,
+          mileageAdjustmentKm: previousMileageAdjustmentKm,
+        },
         after,
       }));
     });

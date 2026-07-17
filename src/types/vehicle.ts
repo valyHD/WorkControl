@@ -380,6 +380,9 @@ export interface VehicleItem {
   status: VehicleStatus;
   currentKm: number;
   initialRecordedKm: number;
+  /** Corectie cumulata aplicata odometrului brut dupa editari manuale ale kilometrajului. */
+  mileageAdjustmentKm?: number;
+  mileageAdjustedAt?: number;
 
   ownerUserId: string;
   ownerUserName: string;
