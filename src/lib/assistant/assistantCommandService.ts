@@ -12,6 +12,7 @@ import {
   buildLocalContextualNavigationContract,
   buildSafeAssistantClarificationContract,
 } from "./core/assistantHumanLanguage";
+import { buildLocalRepeatedActionContract } from "./core/assistantConversationResolver";
 import {
   buildLocalAssistantHelpContract,
   buildLocalCurrentEntityUpdateContract,
@@ -109,6 +110,16 @@ export type AssistantCommandContext = {
     lastPage?: string;
     previousPage?: string;
     lastCommand?: string;
+    lastCompletedAction?: {
+      command?: string;
+      commandType?: AssistantCommandType;
+      intent?: AssistantCommandIntent;
+      toolId?: string;
+      entityType?: string;
+      entityQuery?: string;
+      fields?: Record<string, AssistantCommandFieldValue>;
+      targetPage?: string;
+    };
   };
 };
 
@@ -226,8 +237,7 @@ export async function interpretAssistantCommand(
   const localNotificationSettings = buildLocalNotificationSettingsContract(cleanCommand);
   if (localNotificationSettings) {
     const fields = localNotificationSettings.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localNotificationSettings, {
       entityType: "none",
       entityQuery: "",
@@ -238,8 +248,7 @@ export async function interpretAssistantCommand(
   const localSiteSettings = buildLocalSiteSettingsContract(cleanCommand);
   if (localSiteSettings) {
     const fields = localSiteSettings.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localSiteSettings, {
       entityType: "none",
       entityQuery: "",
@@ -263,8 +272,7 @@ export async function interpretAssistantCommand(
   if (localNamedEntityUpdate) {
     const entity = localNamedEntityUpdate.entityReferences[0];
     const fields = localNamedEntityUpdate.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localNamedEntityUpdate, {
       entityType: entity?.type || "none",
       entityQuery: entity?.query || "",
@@ -340,8 +348,7 @@ export async function interpretAssistantCommand(
   if (localCurrentEntityUpdate) {
     const entity = localCurrentEntityUpdate.entityReferences[0];
     const fields = localCurrentEntityUpdate.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localCurrentEntityUpdate, {
       entityType: entity?.type || "none",
       entityQuery: entity?.query || "",
@@ -352,8 +359,7 @@ export async function interpretAssistantCommand(
   const localPersonalSettings = buildLocalPersonalSettingsContract(cleanCommand);
   if (localPersonalSettings) {
     const fields = localPersonalSettings.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localPersonalSettings, {
       entityType: "user",
       entityQuery: "__current_user__",
@@ -361,11 +367,22 @@ export async function interpretAssistantCommand(
     });
   }
 
+  const localRepeatedAction = buildLocalRepeatedActionContract(cleanCommand, context);
+  if (localRepeatedAction) {
+    const entity = localRepeatedAction.entityReferences[0];
+    const fields = localRepeatedAction.toolCalls[0]?.input.fields as
+      Record<string, AssistantCommandFieldValue> | undefined;
+    return buildLocalInterpretation(localRepeatedAction, {
+      entityType: entity?.type || "none",
+      entityQuery: entity?.query || "",
+      fields: fields || {},
+    });
+  }
+
   const localContextualForm = buildLocalContextualFormContract(cleanCommand, context);
   if (localContextualForm) {
     const fields = localContextualForm.toolCalls[0]?.input.fields as
-      | Record<string, AssistantCommandFieldValue>
-      | undefined;
+      Record<string, AssistantCommandFieldValue> | undefined;
     return buildLocalInterpretation(localContextualForm, {
       entityType: localContextualForm.entityReferences[0]?.type || "currentPage",
       entityQuery: localContextualForm.entityReferences[0]?.query || "",

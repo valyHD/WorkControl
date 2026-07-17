@@ -275,6 +275,7 @@ export default function VoiceCommandAssistant() {
         return;
       }
       if (outcome.status === "executed") {
+        memoryRef.current.rememberCompletedAction(command, outcome.contract);
         outcome.results.forEach((result) => {
           if (result.entityId && outcome.contract?.entityReferences[0]) {
             const reference = outcome.contract.entityReferences[0];

@@ -35,6 +35,12 @@ export type AssistantHumanLanguageHints = {
   hasPreviousCommand: boolean;
   previousAction?: AssistantHumanAction;
   previousModules: string[];
+  previousIntent?: string;
+  previousToolId?: string;
+  previousEntityType?: string;
+  previousEntityQuery?: string;
+  previousFieldKeys: string[];
+  forbidsMutation: boolean;
 };
 
 const MODULE_TERMS: Record<string, string[]> = {
@@ -259,7 +265,7 @@ function inferHumanAction(normalized: string): AssistantHumanAction {
 function splitHumanClauses(normalized: string) {
   return normalized
     .split(
-      /[;.!?]+|\b(?:si\s+apoi|iar\s+apoi|dupa\s+aia|dupa\s+aceea|dupa\s+care|pe\s+urma|iar\s+dupa|si\s+dupa)\b/g
+      /[;.!?]+|\b(?:si\s+apoi|iar\s+apoi|dupa\s+aia|dupa\s+aceea|dupa\s+care|pe\s+urma|iar\s+dupa|si\s+dupa)\b|\b(?:si|iar)\s+(?=(?:deschide|arata|mergi|intra|du\s+ma|modifica|schimba|pune|seteaza|actualizeaza|creeaza|adauga|porneste|opreste|trimite|genereaza|spune|afiseaza)\b)/g
     )
     .map((clause) => clause.trim())
     .filter(Boolean)
@@ -268,9 +274,26 @@ function splitHumanClauses(normalized: string) {
 
 export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLanguageHints {
   const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
-  const action = inferHumanAction(normalized);
+  const forbidsMutation =
+    /\b(?:nu|fara\s+sa)\s+(?:modifica|schimba|completa|salva|trimite|sterge|porni|opreste)\s+(?:nimic|ceva|datele?)\b/.test(
+      normalized
+    );
+  const actionText = normalized.replace(
+    /\b(?:si\s+)?(?:nu|fara\s+sa)\s+(?:modifica|schimba|completa|salva|trimite|sterge|porni|opreste)\s+(?:nimic|ceva|datele?)\b/g,
+    " "
+  );
+  const action = inferHumanAction(actionText);
   const clauses = splitHumanClauses(normalized);
-  const actionSequence = clauses.map(inferHumanAction).filter((item) => item !== "unknown");
+  const actionSequence = clauses
+    .map((clause) =>
+      inferHumanAction(
+        clause.replace(
+          /\b(?:nu|fara\s+sa)\s+(?:modifica|schimba|completa|salva|trimite|sterge|porni|opreste)\s+(?:nimic|ceva|datele?)\b/g,
+          " "
+        )
+      )
+    )
+    .filter((item) => item !== "unknown");
 
   const modules = Object.entries(MODULE_TERMS)
     .filter(([, terms]) => terms.some((term) => includesTerm(normalized, term)))
@@ -305,6 +328,8 @@ export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLa
     isContinuation,
     hasPreviousCommand: false,
     previousModules: [],
+    previousFieldKeys: [],
+    forbidsMutation,
   };
 }
 
@@ -476,11 +501,17 @@ export function buildAssistantLanguageHints(
   const hints = analyzeAssistantHumanLanguage(command);
   const previousCommand = context?.memory?.lastCommand?.trim() || "";
   const previous = previousCommand ? analyzeAssistantHumanLanguage(previousCommand) : null;
+  const completed = context?.memory?.lastCompletedAction;
   return {
     ...hints,
     hasPreviousCommand: Boolean(previous),
     previousAction: previous?.action,
     previousModules: previous?.modules || [],
+    previousIntent: completed?.intent,
+    previousToolId: completed?.toolId,
+    previousEntityType: completed?.entityType,
+    previousEntityQuery: completed?.entityQuery,
+    previousFieldKeys: Object.keys(completed?.fields || {}),
   };
 }
 

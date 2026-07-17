@@ -59,6 +59,16 @@ export type AssistantV3Memory = {
   lastPage?: string;
   previousPage?: string;
   lastCommand?: string;
+  lastCompletedAction?: {
+    command: string;
+    commandType: AssistantV3CommandType;
+    intent: AssistantCommandIntent;
+    toolId: string;
+    entityType: AssistantV3EntityType;
+    entityQuery: string;
+    fields: Record<string, AssistantCommandFieldValue>;
+    targetPage: string;
+  };
 };
 
 export type AssistantV3PageContext = {

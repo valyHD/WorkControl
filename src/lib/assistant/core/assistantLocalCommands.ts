@@ -814,13 +814,17 @@ export function buildLocalPageNavigationContract(
   role: NavigationRole = "angajat"
 ): AssistantV3Contract | null {
   const normalized = normalizeForMatching(command);
+  const navigationOnly = normalized.replace(
+    /\b(?:si\s+)?(?:nu|fara\s+sa)\s+(?:modifica|schimba|completa|salva|trimite|sterge|porni|opreste)\s+(?:nimic|ceva|datele?)\b/g,
+    " "
+  );
   const requestsNavigation =
     /\b(?:deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|du\s+ma|vreau\s+sa\s+vad|unde\s+(?:este|e|gasesc))\b/.test(
-      normalized
+      navigationOnly
     ) || /^(?:hai|la|pe|vreau)\s+/.test(normalized);
   const requestsMutation =
     /\b(?:adauga|completeaza|creeaza|modifica|porneste|salveaza|schimba|seteaza|sterge|trimite)\b/.test(
-      normalized
+      navigationOnly
     );
   if (!requestsNavigation || requestsMutation) return null;
 
@@ -943,6 +947,65 @@ function extractCurrentEntityFieldChange(command: string, entityType: AssistantR
   return null;
 }
 
+function expandFieldChanges(
+  entityType: AssistantRuntimeEntityType,
+  initial: { fieldKey: string; fieldLabel: string; value: string }
+) {
+  const aliases = getAssistantFieldDefinitions(entityType)
+    .flatMap((field) =>
+      [field.label, field.key, ...field.aliases]
+        .map(normalizeForMatching)
+        .filter(Boolean)
+        .map((alias) => ({ field, alias }))
+    )
+    .sort((left, right) => right.alias.length - left.alias.length);
+  const markers: Array<{
+    start: number;
+    end: number;
+    fieldKey: string;
+    fieldLabel: string;
+  }> = [];
+
+  aliases.forEach(({ field, alias }) => {
+    const pattern = new RegExp(
+      `\\s+(?:(?:si|iar|apoi|dupa)\\s+)(?:mai\\s+)?${escapeLocalRegExp(alias)}(?=\\s|$)`,
+      "g"
+    );
+    for (const match of initial.value.matchAll(pattern)) {
+      if (match.index === undefined) continue;
+      markers.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        fieldKey: field.key,
+        fieldLabel: field.label,
+      });
+    }
+  });
+
+  const orderedMarkers = markers
+    .sort((left, right) => left.start - right.start || right.end - left.end)
+    .filter((marker, index, all) => index === 0 || marker.start > all[index - 1].start);
+  const cleanValue = (value: string) =>
+    value
+      .trim()
+      .replace(/^(?:la|in|cu|pe|sa\s+fie|devina|drept)\s+/, "")
+      .replace(/\b(?:te\s+rog|acum)\s*$/g, "")
+      .trim();
+  const firstValue = cleanValue(initial.value.slice(0, orderedMarkers[0]?.start));
+  const fields: Record<string, string> = firstValue ? { [initial.fieldKey]: firstValue } : {};
+  const labels = firstValue ? [initial.fieldLabel] : [];
+
+  orderedMarkers.forEach((marker, index) => {
+    const next = orderedMarkers[index + 1];
+    const value = cleanValue(initial.value.slice(marker.end, next?.start));
+    if (!value) return;
+    fields[marker.fieldKey] = value;
+    if (!labels.includes(marker.fieldLabel)) labels.push(marker.fieldLabel);
+  });
+
+  return { fields, labels };
+}
+
 export function buildLocalCurrentEntityUpdateContract(
   command: string,
   context?: LocalEntityContext
@@ -953,6 +1016,8 @@ export function buildLocalCurrentEntityUpdateContract(
   const toolId = LOCAL_UPDATE_TOOL[entity.type];
   const intent = LOCAL_UPDATE_INTENT[entity.type];
   if (!change || !toolId || !intent) return null;
+  const expanded = expandFieldChanges(entity.type, change);
+  if (Object.keys(expanded.fields).length === 0) return null;
 
   return {
     version: "3",
@@ -961,7 +1026,7 @@ export function buildLocalCurrentEntityUpdateContract(
     toolCalls: [
       {
         id: toolId,
-        input: { entityQuery: entity.query, fields: { [change.fieldKey]: change.value } },
+        input: { entityQuery: entity.query, fields: expanded.fields },
       },
     ],
     targetPage: "",
@@ -975,7 +1040,7 @@ export function buildLocalCurrentEntityUpdateContract(
     missingInformation: [],
     confidence: 0.96,
     confirmationRequired: true,
-    response: `Schimb ${change.fieldLabel} pentru ${entity.query}?`,
+    response: `Schimb ${expanded.labels.join(" si ")} pentru ${entity.query}?`,
   };
 }
 
@@ -1031,7 +1096,7 @@ function inferEntityTypeFromUniqueField(value: string): AssistantRuntimeEntityTy
 }
 
 function splitNamedEntityAndValue(value: string) {
-  const connectors = [...value.matchAll(/\b(?:la|in|cu|pe|sa\s+fie|devina)\b/g)].reverse();
+  const connectors = [...value.matchAll(/\b(?:la|in|cu|pe|sa\s+fie|devina)\b/g)];
   for (const connector of connectors) {
     const index = connector.index ?? -1;
     if (index <= 0) continue;
@@ -1176,6 +1241,12 @@ export function buildLocalNamedEntityUpdateContract(command: string): AssistantV
   const toolId = LOCAL_UPDATE_TOOL[parsed.type];
   const intent = LOCAL_UPDATE_INTENT[parsed.type];
   if (!toolId || !intent) return null;
+  const expanded = expandFieldChanges(parsed.type, {
+    fieldKey: parsed.field.key,
+    fieldLabel: parsed.field.label,
+    value: parsed.fieldValue,
+  });
+  if (Object.keys(expanded.fields).length === 0) return null;
 
   return {
     version: "3",
@@ -1186,7 +1257,7 @@ export function buildLocalNamedEntityUpdateContract(command: string): AssistantV
         id: toolId,
         input: {
           entityQuery: parsed.entityQuery,
-          fields: { [parsed.field.key]: parsed.fieldValue },
+          fields: expanded.fields,
         },
       },
     ],
@@ -1201,7 +1272,7 @@ export function buildLocalNamedEntityUpdateContract(command: string): AssistantV
     missingInformation: [],
     confidence: 0.97,
     confirmationRequired: true,
-    response: `Schimb ${parsed.field.label} pentru ${parsed.entityQuery}?`,
+    response: `Schimb ${expanded.labels.join(" si ")} pentru ${parsed.entityQuery}?`,
   };
 }
 

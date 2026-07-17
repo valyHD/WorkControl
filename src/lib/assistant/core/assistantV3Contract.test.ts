@@ -106,4 +106,38 @@ describe("Assistant V3 contract", () => {
     expect(context).not.toHaveProperty("token");
     expect(context).not.toHaveProperty("currentSearch");
   });
+
+  it("sanitizes the last completed action before sending conversation context", () => {
+    const context = sanitizeAssistantV3PageContext({
+      currentPathname: "/users",
+      memory: {
+        lastCompletedAction: {
+          command: "schimba functia lui Mihai in electrician",
+          commandType: "entity_update",
+          intent: "update_user",
+          toolId: "users.update",
+          entityType: "user",
+          entityQuery: "Mihai",
+          fields: {
+            roleTitle: "electrician",
+            active: true,
+            nested: { shouldNotLeaveBrowser: true },
+          },
+          targetPage: "/users",
+          secret: "discard-me",
+        },
+      },
+    });
+
+    expect(context.memory.lastCompletedAction).toEqual({
+      command: "schimba functia lui Mihai in electrician",
+      commandType: "entity_update",
+      intent: "update_user",
+      toolId: "users.update",
+      entityType: "user",
+      entityQuery: "Mihai",
+      fields: { roleTitle: "electrician", active: true },
+      targetPage: "/users",
+    });
+  });
 });

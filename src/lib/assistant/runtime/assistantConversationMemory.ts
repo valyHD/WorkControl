@@ -2,6 +2,48 @@ import type {
   AssistantConversationMemorySnapshot,
   AssistantResolvedEntitySummary,
 } from "./assistantTypes";
+import type { AssistantV3Contract } from "../core/assistantV3Types";
+
+function primitiveFields(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(
+        ([, fieldValue]) =>
+          ["string", "number", "boolean"].includes(typeof fieldValue) || fieldValue === null
+      )
+      .slice(0, 20)
+  ) as Record<string, string | number | boolean | null>;
+}
+
+function actionSummary(command: string, contract?: AssistantV3Contract | null) {
+  if (!contract || contract.commandType === "unknown" || contract.commandType === "question") {
+    return null;
+  }
+  const call =
+    [...contract.toolCalls].reverse().find((candidate) => candidate.id !== "navigation.open") ||
+    contract.toolCalls.at(-1);
+  const reference = contract.entityReferences[0];
+  const input = call?.input || {};
+  const type = reference?.type;
+  return {
+    command: command.slice(0, 600),
+    commandType: contract.commandType,
+    intent: contract.intent,
+    toolId: call?.id || "",
+    entityType:
+      type === "vehicle" ||
+      type === "tool" ||
+      type === "project" ||
+      type === "user" ||
+      type === "maintenanceClient"
+        ? type
+        : "none",
+    entityQuery: String(reference?.query || input.entityQuery || "").slice(0, 200),
+    fields: primitiveFields(input.fields),
+    targetPage: contract.targetPage.slice(0, 300),
+  } as const;
+}
 
 export function getVehicleIdFromAssistantPath(pathname?: string) {
   const match = String(pathname || "").match(
@@ -46,6 +88,11 @@ export function createAssistantConversationMemory(initial?: AssistantConversatio
     },
     rememberCommand(command: string) {
       snapshot = { ...snapshot, lastCommand: command };
+    },
+    rememberCompletedAction(command: string, contract?: AssistantV3Contract | null) {
+      const completedAction = actionSummary(command, contract);
+      if (!completedAction) return;
+      snapshot = { ...snapshot, lastCompletedAction: completedAction };
     },
     syncPath(pathname: string) {
       const vehicleId = getVehicleIdFromAssistantPath(pathname);

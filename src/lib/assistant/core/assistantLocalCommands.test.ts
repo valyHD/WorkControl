@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocalAssistantHelpContract,
+  buildLocalCurrentEntityUpdateContract,
   buildLocalNamedEntityUpdateContract,
   buildLocalNotificationSettingsContract,
+  buildLocalPageNavigationContract,
   buildLocalPersonalSettingsContract,
   buildLocalSiteSettingsContract,
   buildLocalVehicleMileageContract,
@@ -108,6 +110,58 @@ describe("local named entity updates", () => {
 
   it("does not guess the entity type for an ambiguous field", () => {
     expect(buildLocalNamedEntityUpdateContract("schimba statusul la Bosch in defect")).toBeNull();
+  });
+
+  it("separates multiple user fields from one natural sentence", () => {
+    expect(
+      buildLocalNamedEntityUpdateContract(
+        "schimba functia lui Mihai in electrician si departamentul in service"
+      )
+    ).toMatchObject({
+      entityReferences: [{ type: "user", query: "mihai" }],
+      toolCalls: [
+        {
+          id: "users.update",
+          input: {
+            entityQuery: "mihai",
+            fields: { roleTitle: "electrician", department: "service" },
+          },
+        },
+      ],
+      confirmationRequired: true,
+    });
+  });
+
+  it("separates multiple fields for the entity selected on the current page", () => {
+    expect(
+      buildLocalCurrentEntityUpdateContract("pune functia electrician iar departamentul service", {
+        selectedEntity: { type: "user", id: "user-1", label: "Mihai Popescu" },
+      })
+    ).toMatchObject({
+      toolCalls: [
+        {
+          id: "users.update",
+          input: {
+            entityQuery: "Mihai Popescu",
+            fields: { roleTitle: "electrician", department: "service" },
+          },
+        },
+      ],
+      confirmationRequired: true,
+    });
+  });
+});
+
+describe("local safe navigation", () => {
+  it("honors an explicit request to navigate without changing data", () => {
+    expect(
+      buildLocalPageNavigationContract("deschide concedii si nu modifica nimic")
+    ).toMatchObject({
+      commandType: "navigation",
+      intent: "open_leave",
+      toolCalls: [{ id: "navigation.open", input: { path: "/my-leave", query: "" } }],
+      confirmationRequired: false,
+    });
   });
 });
 

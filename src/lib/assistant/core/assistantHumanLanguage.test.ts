@@ -44,6 +44,50 @@ describe("assistant human language", () => {
     });
   });
 
+  it("exposes the last completed action as structured conversation context", () => {
+    expect(
+      buildAssistantLanguageHints("fa la fel si pentru Razvan", {
+        memory: {
+          lastCompletedAction: {
+            command: "schimba functia lui Mihai in electrician",
+            commandType: "entity_update",
+            intent: "update_user",
+            toolId: "users.update",
+            entityType: "user",
+            entityQuery: "Mihai",
+            fields: { roleTitle: "electrician" },
+            targetPage: "/users",
+          },
+        },
+      })
+    ).toMatchObject({
+      isContinuation: true,
+      previousIntent: "update_user",
+      previousToolId: "users.update",
+      previousEntityType: "user",
+      previousEntityQuery: "Mihai",
+      previousFieldKeys: ["roleTitle"],
+    });
+  });
+
+  it("detects when the user explicitly forbids a mutation", () => {
+    expect(buildAssistantLanguageHints("deschide concedii si nu modifica nimic")).toMatchObject({
+      action: "navigate",
+      forbidsMutation: true,
+      isMutation: false,
+    });
+  });
+
+  it("understands natural action chaining joined only with si", () => {
+    expect(
+      analyzeAssistantHumanLanguage("deschide utilizatorii si schimba functia lui Mihai")
+    ).toMatchObject({
+      hasMultipleSteps: true,
+      actionSequence: ["navigate", "update"],
+      modules: expect.arrayContaining(["users"]),
+    });
+  });
+
   it.each([
     ["muta echipamentul asta la George", "update", "tools"],
     ["arata-mi oamenii firmei", "navigate", "users"],

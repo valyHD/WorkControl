@@ -78,6 +78,72 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
+  it("repeats the last completed safe update for a newly named entity", async () => {
+    const result = await interpretAssistantCommand("fa la fel si pentru Logan", {
+      memory: {
+        lastCompletedAction: {
+          command: "schimba kilometrii Toyotei la 7200",
+          commandType: "entity_update",
+          intent: "update_vehicle",
+          toolId: "vehicles.update",
+          entityType: "vehicle",
+          entityQuery: "Toyota",
+          fields: { currentKm: 7200 },
+          targetPage: "/vehicles",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      intent: "update_vehicle",
+      entityQuery: "logan",
+      fieldsToUpdate: { currentKm: 7200 },
+      toolCalls: [
+        {
+          id: "vehicles.update",
+          input: { entityQuery: "logan", fields: { currentKm: 7200 } },
+        },
+      ],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("keeps navigation read-only when the user explicitly forbids changes", async () => {
+    const result = await interpretAssistantCommand("deschide concedii si nu modifica nimic");
+
+    expect(result).toMatchObject({
+      commandType: "navigation",
+      intent: "open_leave",
+      toolCalls: [{ id: "navigation.open", input: { path: "/my-leave", query: "" } }],
+      confirmationRequired: false,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("updates multiple named user fields in one controlled action", async () => {
+    const result = await interpretAssistantCommand(
+      "schimba functia lui Mihai in electrician si departamentul in service"
+    );
+
+    expect(result).toMatchObject({
+      intent: "update_user",
+      entityQuery: "mihai",
+      fieldsToUpdate: { roleTitle: "electrician", department: "service" },
+      toolCalls: [
+        {
+          id: "users.update",
+          input: {
+            entityQuery: "mihai",
+            fields: { roleTitle: "electrician", department: "service" },
+          },
+        },
+      ],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["duma la concedii", "open_leave", "/my-leave"],
     ["du-te la dashboard", "open_dashboard", "/dashboard"],

@@ -2724,12 +2724,30 @@ function buildWorkControlAssistantExamples() {
     '192. "pune tema siteului pe mov" => entity_update/update_site_settings, settings.update, fields {"uiPalette":"violet"}, confirmation required.',
     '193. "opreste animatiile in aplicatie" => entity_update/update_site_settings, settings.update, fields {"uiAnimations":"none"}, confirmation required.',
     '194. "mareste fontul" => entity_update/update_site_settings, settings.update, fields {"uiFontScale":"mai mare"}, confirmation required.',
+    '195. "schimba functia lui Mihai in electrician si departamentul in service" => un singur users.update, entityQuery Mihai, fields {"roleTitle":"electrician","department":"service"}, confirmation required.',
+    '196. Dupa o actiune users.update finalizata, "fa la fel si pentru Razvan" => copiaza numai campurile actiunii finalizate, schimba entityQuery in Razvan si cere confirmare.',
+    '197. "deschide concedii si nu modifica nimic" => navigation/open_leave, fara tool de scriere si fara confirmare.',
+    '198. Dupa un vehicles.update finalizat, "fa si pentru Logan" => vehicles.update pentru Logan cu aceleasi campuri, numai cu confirmare; nu repeta start/stop/create/delete.',
   ];
 }
 
 function buildAssistantPrompt(today, context) {
   const safeContext = context && typeof context === 'object' && !Array.isArray(context) ? context : {};
   const memory = safeContext.memory && typeof safeContext.memory === 'object' && !Array.isArray(safeContext.memory) ? safeContext.memory : {};
+  const lastCompletedAction =
+    memory.lastCompletedAction && typeof memory.lastCompletedAction === 'object' &&
+    !Array.isArray(memory.lastCompletedAction)
+      ? memory.lastCompletedAction
+      : null;
+  const completedFields =
+    lastCompletedAction?.fields && typeof lastCompletedAction.fields === 'object' &&
+    !Array.isArray(lastCompletedAction.fields)
+      ? Object.fromEntries(
+          Object.entries(lastCompletedAction.fields)
+            .filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value))
+            .slice(0, 20)
+        )
+      : {};
   const contextText = JSON.stringify({
     route: toSafeString(safeContext.route || safeContext.currentPathname),
     page: toSafeString(safeContext.page),
@@ -2764,6 +2782,18 @@ function buildAssistantPrompt(today, context) {
       lastPage: toSafeString(memory.lastPage),
       previousPage: toSafeString(memory.previousPage),
       lastCommand: toSafeString(memory.lastCommand),
+      lastCompletedAction: lastCompletedAction
+        ? {
+            command: toSafeString(lastCompletedAction.command).slice(0, 600),
+            commandType: toSafeString(lastCompletedAction.commandType).slice(0, 40),
+            intent: toSafeString(lastCompletedAction.intent).slice(0, 80),
+            toolId: toSafeString(lastCompletedAction.toolId).slice(0, 120),
+            entityType: toSafeString(lastCompletedAction.entityType).slice(0, 40),
+            entityQuery: toSafeString(lastCompletedAction.entityQuery).slice(0, 200),
+            fields: completedFields,
+            targetPage: toSafeString(lastCompletedAction.targetPage).slice(0, 300),
+          }
+        : null,
     },
   });
 
@@ -2801,6 +2831,10 @@ function buildAssistantPrompt(today, context) {
     'Foloseste pagina curenta, selectedEntity si lastEntity pentru pronume precum "asta", "aici", "al meu" sau "schimba si...". Daca exista doua entitati posibile, cere alegerea.',
     'Foloseste previousPage numai pentru cereri explicite precum "revino unde eram" sau "inapoi acolo". Nu repeta automat actiunea ori modificarea din pagina anterioara.',
     'Cand indiciile spun isContinuation, leaga noua clauza de lastCommand si lastEntity numai daca tipul entitatii si campul sunt compatibile. Nu copia valoarea veche si nu repeta o scriere fara confirmare.',
+    'lastCompletedAction poate fi refolosit numai cand utilizatorul cere explicit "la fel", "tot asa", "acelasi lucru" sau "fa si pentru" si numeste noua entitate. Copiaza numai fields primitive si cere confirmare.',
+    'Nu relua niciodata din memorie navigation.open, start/stop pontaj, creare sau stergere. Memoria descrie contextul, nu acorda permisiune si nu inlocuieste entity resolver-ul.',
+    'Daca utilizatorul spune "nu modifica nimic", "fara sa schimbi" sau echivalent, forbidsMutation este obligatoriu: accepta numai navigare sau citire si nu emite niciun tool de scriere.',
+    'Pentru o cerere cu mai multe campuri, emite un singur toolCall controlat cu fiecare valoare in cheia sa; nu include restul propozitiei in primul camp.',
     'Comenzile cu mai multi pasi se pastreaza in ordinea rostita. Nu executa pasul urmator daca primul necesita clarificare.',
     'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
     'entity_update inseamna update prin servicii Firestore dupa resolve entity, nu prin formular si nu prin DOM.',
@@ -2891,6 +2925,14 @@ exports.interpretAssistantCommand = onCall(
       previousModules: Array.isArray(rawLanguageHints.previousModules)
         ? rawLanguageHints.previousModules.slice(0, 10).map((item) => toSafeString(item).slice(0, 40)).filter(Boolean)
         : [],
+      previousIntent: toSafeString(rawLanguageHints.previousIntent).slice(0, 80),
+      previousToolId: toSafeString(rawLanguageHints.previousToolId).slice(0, 120),
+      previousEntityType: toSafeString(rawLanguageHints.previousEntityType).slice(0, 40),
+      previousEntityQuery: toSafeString(rawLanguageHints.previousEntityQuery).slice(0, 200),
+      previousFieldKeys: Array.isArray(rawLanguageHints.previousFieldKeys)
+        ? rawLanguageHints.previousFieldKeys.slice(0, 20).map((item) => toSafeString(item).slice(0, 80)).filter(Boolean)
+        : [],
+      forbidsMutation: rawLanguageHints.forbidsMutation === true,
     };
     const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;
     const model = toSafeString(process.env.OPENAI_ASSISTANT_MODEL) || 'gpt-4.1-mini';

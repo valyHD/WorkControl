@@ -1,4 +1,5 @@
 import type {
+  AssistantCommandFieldValue,
   AssistantCommandInterpretation,
   AssistantCommandIntent,
 } from "../assistantCommandService";
@@ -289,6 +290,9 @@ export function sanitizeAssistantV3PageContext(input: unknown): AssistantV3PageC
   const openForm = isRecord(value.openForm) ? value.openForm : null;
   const memory = isRecord(value.memory) ? value.memory : {};
   const legacyLastEntity = isRecord(memory.lastEntity) ? memory.lastEntity : null;
+  const lastCompletedAction = isRecord(memory.lastCompletedAction)
+    ? memory.lastCompletedAction
+    : null;
   const selectedType =
     selected && ENTITY_TYPES.has(selected.type as AssistantV3EntityType)
       ? (selected.type as AssistantV3EntityType)
@@ -334,6 +338,36 @@ export function sanitizeAssistantV3PageContext(input: unknown): AssistantV3PageC
       lastPage: safeString(memory.lastPage, 300) || undefined,
       previousPage: safeString(memory.previousPage, 300) || undefined,
       lastCommand: safeString(memory.lastCommand, 600) || undefined,
+      lastCompletedAction: lastCompletedAction
+        ? {
+            command: safeString(lastCompletedAction.command, 600),
+            commandType: COMMAND_TYPES.has(
+              lastCompletedAction.commandType as AssistantV3CommandType
+            )
+              ? (lastCompletedAction.commandType as AssistantV3CommandType)
+              : "unknown",
+            intent: INTENTS.has(lastCompletedAction.intent as AssistantCommandIntent)
+              ? (lastCompletedAction.intent as AssistantCommandIntent)
+              : "unknown",
+            toolId: safeString(lastCompletedAction.toolId, 120),
+            entityType: ENTITY_TYPES.has(lastCompletedAction.entityType as AssistantV3EntityType)
+              ? (lastCompletedAction.entityType as AssistantV3EntityType)
+              : "none",
+            entityQuery: safeString(lastCompletedAction.entityQuery, 200),
+            fields: isRecord(lastCompletedAction.fields)
+              ? (Object.fromEntries(
+                  Object.entries(lastCompletedAction.fields)
+                    .filter(
+                      ([, fieldValue]) =>
+                        ["string", "number", "boolean"].includes(typeof fieldValue) ||
+                        fieldValue === null
+                    )
+                    .slice(0, 20)
+                ) as Record<string, AssistantCommandFieldValue>)
+              : {},
+            targetPage: safeString(lastCompletedAction.targetPage, 300),
+          }
+        : undefined,
     },
   };
 }

@@ -1,7 +1,8 @@
 import type { AiCommandRisk, AiEntityType, AiFieldValue } from "../aiCommandRegistry";
 import type { AssistantCommandInterpretation } from "../assistantCommandService";
 
-export type AssistantRuntimeEntityType = Exclude<AiEntityType, "notification" | "report" | "unknown"> | "none";
+export type AssistantRuntimeEntityType =
+  Exclude<AiEntityType, "notification" | "report" | "unknown"> | "none";
 
 export type AssistantRuntimeUser = {
   uid: string;
@@ -26,6 +27,18 @@ export type AssistantConversationMemorySnapshot = {
   lastPage?: string;
   previousPage?: string;
   lastCommand?: string;
+  lastCompletedAction?: AssistantConversationActionSummary;
+};
+
+export type AssistantConversationActionSummary = {
+  command: string;
+  commandType: NonNullable<AssistantCommandInterpretation["commandType"]>;
+  intent: AssistantCommandInterpretation["intent"];
+  toolId: string;
+  entityType: AssistantRuntimeEntityType;
+  entityQuery: string;
+  fields: Record<string, string | number | boolean | null>;
+  targetPage: string;
 };
 
 export type AssistantResolvedEntitySummary = {
@@ -68,7 +81,15 @@ export type AssistantValidationResult = {
 
 export type AssistantExecutionPlanStep = {
   id: string;
-  type: "navigate" | "resolve_entity" | "validate_fields" | "service_update" | "form_event" | "highlight" | "confirm" | "audit";
+  type:
+    | "navigate"
+    | "resolve_entity"
+    | "validate_fields"
+    | "service_update"
+    | "form_event"
+    | "highlight"
+    | "confirm"
+    | "audit";
   label: string;
   target?: string;
   fields?: string[];
@@ -95,7 +116,8 @@ export type AssistantRuntimePlan = {
   run?: () => Promise<{ result: string; afterData?: Record<string, unknown> | null }>;
 };
 
-export type AssistantAuditStatus = "success" | "failed" | "cancelled" | "executed" | "needs_clarification";
+export type AssistantAuditStatus =
+  "success" | "failed" | "cancelled" | "executed" | "needs_clarification";
 
 export type AssistantAuditParams = {
   userId: string;

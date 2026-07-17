@@ -51,6 +51,12 @@ export function buildAssistantV3PageContext(params: {
       lastPage: params.memory.lastPage,
       previousPage: params.memory.previousPage,
       lastCommand: params.memory.lastCommand,
+      lastCompletedAction: params.memory.lastCompletedAction
+        ? {
+            ...params.memory.lastCompletedAction,
+            entityType: params.memory.lastCompletedAction.entityType as AssistantV3EntityType,
+          }
+        : undefined,
     },
   };
 }
