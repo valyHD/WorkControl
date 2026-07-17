@@ -38,15 +38,111 @@ export type AssistantHumanLanguageHints = {
 };
 
 const MODULE_TERMS: Record<string, string[]> = {
-  vehicles: ["masina", "masini", "vehicul", "gps", "tracker", "itp", "rca", "kilometri", "km"],
-  tools: ["scula", "scule", "unealta", "unelte", "flex", "bormasina", "qr"],
-  timesheets: ["pontaj", "pontaje", "proiect", "proiecte", "ore lucrate"],
-  leave: ["concediu", "cerere concediu", "zile libere"],
-  maintenance: ["mentenanta", "revizie", "interventie", "lift", "client"],
-  expenses: ["bon", "bonul", "bonuri", "factura", "facturi", "cheltuiala", "ocr"],
-  users: ["utilizator", "user", "angajat", "profil", "functie", "departament"],
-  notifications: ["notificare", "notificari", "regula", "reminder"],
-  settings: ["setare", "setari", "tema", "interfata", "font", "animatii"],
+  vehicles: [
+    "masina",
+    "masini",
+    "vehicul",
+    "auto",
+    "duba",
+    "flota",
+    "gps",
+    "tracker",
+    "harta",
+    "itp",
+    "rca",
+    "casco",
+    "rovinieta",
+    "kilometri",
+    "km",
+    "bord",
+    "odometru",
+    "sofer",
+  ],
+  tools: [
+    "scula",
+    "scule",
+    "unealta",
+    "unelte",
+    "echipament",
+    "inventar",
+    "flex",
+    "bormasina",
+    "hilti",
+    "bosch",
+    "qr",
+    "detinator",
+  ],
+  timesheets: [
+    "pontaj",
+    "pontaje",
+    "proiect",
+    "proiecte",
+    "lucrare",
+    "santier",
+    "ore lucrate",
+    "program de lucru",
+    "cronometru",
+  ],
+  leave: ["concediu", "cerere concediu", "zile libere", "vacanta", "liber", "medical"],
+  maintenance: [
+    "mentenanta",
+    "service lifturi",
+    "revizie",
+    "interventie",
+    "lift",
+    "ascensor",
+    "client",
+    "piese",
+    "raport tehnic",
+  ],
+  expenses: [
+    "bon",
+    "bonul",
+    "bonuri",
+    "factura",
+    "facturi",
+    "cheltuiala",
+    "cheltuieli",
+    "ocr",
+    "decont",
+    "document fiscal",
+  ],
+  users: [
+    "utilizator",
+    "user",
+    "angajat",
+    "coleg",
+    "salariat",
+    "om",
+    "oameni",
+    "personal",
+    "profil",
+    "functie",
+    "departament",
+    "rol",
+    "drepturi",
+  ],
+  notifications: [
+    "notificare",
+    "notificari",
+    "alerta",
+    "mesaj",
+    "regula",
+    "reminder",
+    "avertizare",
+  ],
+  settings: [
+    "setare",
+    "setari",
+    "preferinta",
+    "tema",
+    "culoare",
+    "interfata",
+    "font",
+    "animatii",
+    "contrast",
+    "densitate",
+  ],
 };
 
 const FIELD_WORDS = [
@@ -71,6 +167,14 @@ const FIELD_WORDS = [
   "observatii",
   "motiv",
   "proiect",
+  "firma",
+  "companie",
+  "categorie",
+  "detinator",
+  "garantie",
+  "cod",
+  "data inceput",
+  "data sfarsit",
 ];
 
 const CONTEXT_REFERENCE_TERMS = [
@@ -95,6 +199,12 @@ const CONTEXT_REFERENCE_TERMS = [
   "acelasi",
   "curent",
   "curenta",
+  "de aici",
+  "din pagina asta",
+  "pe cel selectat",
+  "pe cea selectata",
+  "ultimul",
+  "ultima",
 ];
 
 const ENTITY_TYPE_BY_MODULE: Record<string, string> = {
@@ -119,23 +229,27 @@ function includesTerm(text: string, term: string) {
 }
 
 function inferHumanAction(normalized: string): AssistantHumanAction {
-  return /\b(?:opreste|stop|inchide|termina)\b/.test(normalized)
+  return /\b(?:opreste|stop|inchide|termina|dezactiveaza|anuleaza)\b/.test(normalized)
     ? "stop"
-    : /\b(?:porneste|start|incepe|da drumul)\b/.test(normalized)
+    : /\b(?:porneste|start|incepe|da drumul|activeaza|continua)\b/.test(normalized)
       ? "start"
-      : /\b(?:trimite|expediaza)\b/.test(normalized)
+      : /\b(?:trimite|expediaza|transmite|da send)\b/.test(normalized)
         ? "send"
-        : /\b(?:pregateste|completeaza|draft|asteapta)\b/.test(normalized)
+        : /\b(?:pregateste|completeaza|draft|asteapta|precompleteaza)\b/.test(normalized)
           ? "prepare"
-          : /\b(?:creeaza|adauga|genereaza|fa un|fa o)\b/.test(normalized)
+          : /\b(?:creeaza|adauga|genereaza|inregistreaza|fa un|fa o)\b/.test(normalized)
             ? "create"
-            : /\b(?:modifica|schimba|seteaza|actualizeaza|corecteaza|pune|trece|marcheaza|muta|baga|fa sa fie|lasa)\b/.test(
+            : /\b(?:modifica|schimba|seteaza|actualizeaza|corecteaza|pune|trece|marcheaza|muta|baga|fa sa fie|lasa|redenumeste|atribuie|asigneaza)\b/.test(
                   normalized
                 )
               ? "update"
-              : /\b(?:deschide|arata|mergi|intra|du ma|vreau sa vad)\b/.test(normalized)
+              : /\b(?:deschide|arata|mergi|intra|du ma|vreau sa vad|acceseaza|navigheaza)\b/.test(
+                    normalized
+                  )
                 ? "navigate"
-                : /\b(?:cat|cate|care|ce|unde|cand|cum|spune mi|zi mi)\b/.test(normalized)
+                : /\b(?:cat|cate|care|ce|unde|cand|cum|spune\s*-?\s*mi|zi\s*-?\s*mi)\b/.test(
+                      normalized
+                    )
                   ? "question"
                   : /\b(?:vad|vezi|afiseaza|citeste)\b/.test(normalized)
                     ? "read"
@@ -144,7 +258,9 @@ function inferHumanAction(normalized: string): AssistantHumanAction {
 
 function splitHumanClauses(normalized: string) {
   return normalized
-    .split(/[;.!?]+|\b(?:si\s+apoi|iar\s+apoi|dupa\s+aia|dupa\s+aceea|dupa\s+care)\b/g)
+    .split(
+      /[;.!?]+|\b(?:si\s+apoi|iar\s+apoi|dupa\s+aia|dupa\s+aceea|dupa\s+care|pe\s+urma|iar\s+dupa|si\s+dupa)\b/g
+    )
     .map((clause) => clause.trim())
     .filter(Boolean)
     .slice(0, 8);
@@ -160,10 +276,14 @@ export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLa
     .filter(([, terms]) => terms.some((term) => includesTerm(normalized, term)))
     .map(([module]) => module);
   const fieldWords = FIELD_WORDS.filter((field) => includesTerm(normalized, field));
-  const contextReferences = CONTEXT_REFERENCE_TERMS.filter((term) => includesTerm(normalized, term));
+  const contextReferences = CONTEXT_REFERENCE_TERMS.filter((term) =>
+    includesTerm(normalized, term)
+  );
   const usesCurrentContext =
     contextReferences.length > 0 ||
-    /\b(?:lui|ei|si\s+(?:pe|la)\s+(?:el|ea)|mai\s+pune|mai\s+schimba)\b/.test(normalized);
+    /\b(?:lui|ei|lor|si\s+(?:pe|la)\s+(?:el|ea)|mai\s+pune|mai\s+schimba|schimba\s+i|pune\s+i)\b/.test(
+      normalized
+    );
   const hasMultipleSteps = clauses.length > 1 || actionSequence.length > 1;
   const isContinuation =
     /^(?:si|iar|mai|tot|acum|atunci|inca)\b/.test(normalized) || usesCurrentContext;
@@ -330,7 +450,8 @@ export function buildLocalContextualNavigationContract(
   if (!requestsPreviousPage) return null;
 
   const current = contextPath(context);
-  const memory = context?.memory as (AssistantCommandContext["memory"] & { previousPage?: string }) | undefined;
+  const memory = context?.memory as
+    (AssistantCommandContext["memory"] & { previousPage?: string }) | undefined;
   const target = safePreviousPage(memory?.previousPage || memory?.lastPage || "");
   if (!target || target.split(/[?#]/)[0] === current) return null;
 

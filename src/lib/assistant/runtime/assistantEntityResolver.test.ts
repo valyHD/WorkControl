@@ -91,6 +91,10 @@ describe("resolveAssistantEntity context safety", () => {
     ["tool", "deschide scula Hilti H2", "hilti h2"],
     ["project", "arata proiectul Service Lifturi", "service lifturi"],
     ["user", "cauta utilizatorul lui Razvan", "razvan"],
+    ["vehicle", "te rog gaseste autoutilitara Ford", "ford"],
+    ["tool", "vezi echipamentul Hilti H2", "hilti h2"],
+    ["project", "arata santierul Service Lifturi", "service lifturi"],
+    ["user", "gaseste colegul Razvan", "razvan"],
   ] as const)("removes command descriptors from a %s query", (entityType, query, expected) => {
     expect(normalizeAssistantEntityQuery(entityType, query)).toBe(expected);
   });

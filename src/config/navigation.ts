@@ -23,12 +23,7 @@ import {
 
 export type NavigationRole = "admin" | "manager" | "angajat" | string;
 export type NavigationSectionId =
-  | "overview"
-  | "team"
-  | "operations"
-  | "maintenance"
-  | "communication"
-  | "administration";
+  "overview" | "team" | "operations" | "maintenance" | "communication" | "administration";
 
 export type NavigationColorClass =
   | "menu-icon-blue"
@@ -90,7 +85,16 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: "/my-profile",
     icon: User,
     section: "overview",
-    aliases: ["profil personal", "contul meu", "datele mele", "setarile mele", "setari profil", "preferintele mele"],
+    aliases: [
+      "profil personal",
+      "contul meu",
+      "datele mele",
+      "date personale",
+      "informatiile mele",
+      "setarile mele",
+      "setari profil",
+      "preferintele mele",
+    ],
     keywords: ["profil", "functie", "departament", "setari", "preferinte"],
     mobilePriority: 4,
     colorClass: "menu-icon-violet",
@@ -102,7 +106,14 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: "/my-leave",
     icon: CalendarDays,
     section: "overview",
-    aliases: ["concediul meu", "cerere concediu", "zi libera", "vacanta"],
+    aliases: [
+      "concediul meu",
+      "cerere concediu",
+      "cererile mele",
+      "zi libera",
+      "zile libere",
+      "vacanta",
+    ],
     keywords: ["calendar", "liber", "programare"],
     quickAction: true,
     mobilePriority: 5,
@@ -117,7 +128,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     section: "overview",
     requiredRole: ["admin", "manager"],
     requiredPermission: "users:read",
-    aliases: ["angajati", "echipa", "colegi"],
+    aliases: ["angajati", "echipa", "colegi", "personal", "oamenii firmei"],
     keywords: ["roluri", "permisiuni", "personal"],
     mobilePriority: 12,
     colorClass: "menu-icon-cyan",
@@ -130,7 +141,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: Clock3,
     section: "team",
     requiredPermission: "timesheets:read",
-    aliases: ["pontaje", "pontaje echipa", "toate pontajele"],
+    aliases: ["pontaje", "pontaje echipa", "toate pontajele", "situatie pontaje", "ore echipa"],
     keywords: ["ore", "raport", "prezenta"],
     mobilePriority: 7,
     colorClass: "menu-icon-blue",
@@ -142,7 +153,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: "/my-timesheets",
     icon: Clock4,
     section: "team",
-    aliases: ["pontaj personal", "orele mele", "cronometru"],
+    aliases: [
+      "pontaj personal",
+      "orele mele",
+      "orele lucrate de mine",
+      "programul meu",
+      "cronometru",
+    ],
     keywords: ["start", "stop", "program"],
     quickAction: true,
     mobilePriority: 2,
@@ -156,7 +173,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: Briefcase,
     section: "team",
     requiredPermission: "projects:read",
-    aliases: ["lucrari", "santiere", "lista proiecte"],
+    aliases: ["lucrari", "santiere", "joburi", "obiective", "lista proiecte"],
     keywords: ["pontaj", "activ", "client"],
     mobilePriority: 9,
     colorClass: "menu-icon-cyan",
@@ -168,7 +185,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: "/expenses/scan",
     icon: ReceiptText,
     section: "operations",
-    aliases: ["bonuri", "incarca bon", "scanare factura"],
+    aliases: ["bonuri", "incarca bon", "poza bon", "deconturi", "scanare factura"],
     keywords: ["ocr", "cheltuieli", "poza"],
     quickAction: true,
     mobilePriority: 6,
@@ -181,7 +198,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: "/expenses/invoices",
     icon: ReceiptText,
     section: "operations",
-    aliases: ["facturi", "documente fiscale"],
+    aliases: ["facturi", "facturi de plata", "documente fiscale"],
     keywords: ["cheltuieli", "furnizor", "plata"],
     mobilePriority: 15,
     colorClass: "menu-icon-cyan",
@@ -219,7 +236,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: Wrench,
     section: "operations",
     requiredPermission: "tools:read",
-    aliases: ["unelte", "echipamente", "inventar scule"],
+    aliases: ["unelte", "echipamente", "aparate", "sculele firmei", "inventar scule"],
     keywords: ["qr", "detinator", "depozit"],
     mobilePriority: 10,
     colorClass: "menu-icon-orange",
@@ -232,7 +249,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: CarFront,
     section: "operations",
     requiredPermission: "vehicles:read",
-    aliases: ["vehicule", "flota", "lista masini"],
+    aliases: ["vehicule", "flota", "parc auto", "masinile firmei", "lista masini"],
     keywords: ["auto", "documente", "sofer"],
     mobilePriority: 8,
     colorClass: "menu-icon-green",
@@ -245,7 +262,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: MapPinned,
     section: "operations",
     requiredPermission: "vehicles:read",
-    aliases: ["harta gps", "toate gps", "harta flotei"],
+    aliases: ["harta gps", "toate gps", "harta flotei", "unde sunt masinile", "pozitii masini"],
     keywords: ["trackere", "trasee", "pozitii live"],
     quickAction: true,
     mobilePriority: 11,
@@ -273,7 +290,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: Building2,
     section: "maintenance",
     requiredPermission: "maintenance:read",
-    aliases: ["service lifturi", "revizii", "clienti mentenanta"],
+    aliases: ["service lifturi", "service ascensoare", "lifturi", "revizii", "clienti mentenanta"],
     keywords: ["lifturi", "rapoarte", "interventii"],
     quickAction: true,
     mobilePriority: 13,
@@ -325,7 +342,12 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     icon: BellRing,
     section: "communication",
     requiredRole: ["admin", "manager"],
-    aliases: ["automatizari notificari", "reguli alerte", "setari notificari", "preferinte notificari"],
+    aliases: [
+      "automatizari notificari",
+      "reguli alerte",
+      "setari notificari",
+      "preferinte notificari",
+    ],
     keywords: ["program", "push", "email", "sunet", "reminder"],
     mobilePriority: 22,
     colorClass: "menu-icon-blue",
@@ -406,11 +428,16 @@ function roleMatches(requiredRole: NavigationItem["requiredRole"], role: Navigat
   return roles.includes(role);
 }
 
-function permissionMatches(requiredPermission: NavigationItem["requiredPermission"], role: NavigationRole) {
+function permissionMatches(
+  requiredPermission: NavigationItem["requiredPermission"],
+  role: NavigationRole
+) {
   if (!requiredPermission) return true;
   const permissions = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
   const rolePermissions = ROLE_PERMISSIONS[role] || ROLE_PERMISSIONS.angajat;
-  return rolePermissions.has("*") || permissions.every((permission) => rolePermissions.has(permission));
+  return (
+    rolePermissions.has("*") || permissions.every((permission) => rolePermissions.has(permission))
+  );
 }
 
 export function canAccessNavigationItem(item: NavigationItem, role: NavigationRole) {
@@ -430,7 +457,10 @@ export function getNavigationSectionsForRole(role: NavigationRole) {
 }
 
 export function cleanNavigationPath(path: string) {
-  return String(path || "").split("?")[0].split("#")[0].trim();
+  return String(path || "")
+    .split("?")[0]
+    .split("#")[0]
+    .trim();
 }
 
 export function navigationPathMatches(pathname: string, itemPath: string) {
@@ -440,9 +470,14 @@ export function navigationPathMatches(pathname: string, itemPath: string) {
 }
 
 export function getNavigationItemForPath(pathname: string) {
-  return [...NAVIGATION_ITEMS]
-    .sort((left, right) => cleanNavigationPath(right.path).length - cleanNavigationPath(left.path).length)
-    .find((item) => navigationPathMatches(pathname, item.path)) || null;
+  return (
+    [...NAVIGATION_ITEMS]
+      .sort(
+        (left, right) =>
+          cleanNavigationPath(right.path).length - cleanNavigationPath(left.path).length
+      )
+      .find((item) => navigationPathMatches(pathname, item.path)) || null
+  );
 }
 
 export function isNavigationItemActive({

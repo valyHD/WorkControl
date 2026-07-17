@@ -105,6 +105,14 @@ function cleanVehicleMileageQuery(value: string) {
     "actuali",
     "curent",
     "curenti",
+    "deschide",
+    "duba",
+    "dubei",
+    "du",
+    "ma",
+    "apoi",
+    "si",
+    "aici",
     "in",
     "la",
     "lui",
@@ -141,7 +149,6 @@ function extractVehicleMileageParts(command: string) {
   }
 
   const afterField = normalized.slice(fieldMatch.index + fieldMatch[0].length).trim();
-  if (!afterField) return null;
 
   let value: number | null = null;
   let queryPart = "";
@@ -158,7 +165,7 @@ function extractVehicleMileageParts(command: string) {
     break;
   }
 
-  if (value === null) {
+  if (value === null && afterField) {
     const tokens = afterField.split(" ").filter(Boolean);
     for (let index = 0; index < tokens.length; index += 1) {
       const parsed = parseVehicleMileageValue(tokens.slice(index).join(" "));
@@ -166,6 +173,24 @@ function extractVehicleMileageParts(command: string) {
       value = parsed;
       queryPart = tokens.slice(0, index).join(" ");
       break;
+    }
+  }
+
+  // Oamenii spun frecvent "pune masina la 7200 kilometri", cu valoarea
+  // inaintea numelui campului. Pastreaza aceeasi actiune controlata si
+  // extrage tinta numai din textul dintre verb si valoare.
+  if (value === null && fieldMatch.index > actionMatch.index) {
+    const beforeField = normalized
+      .slice(actionMatch.index + actionMatch[0].length, fieldMatch.index)
+      .trim();
+    const numericMatches = [...beforeField.matchAll(/-?\d[\d.,]*(?:\s+\d{3})*/g)];
+    const numeric = numericMatches[numericMatches.length - 1];
+    if (numeric?.index !== undefined) {
+      value = parseVehicleMileageValue(numeric[0]);
+      queryPart = beforeField
+        .slice(0, numeric.index)
+        .replace(/\b(?:la|in|cu|pe|sa\s+fie|devina)\s*$/, "")
+        .trim();
     }
   }
 
@@ -963,22 +988,25 @@ type NamedEntityMarker = {
 const NAMED_ENTITY_MARKERS: NamedEntityMarker[] = [
   {
     type: "vehicle",
-    pattern: /\b(?:masina|masinii|vehiculul|vehiculului|autoturismul|autoturismului)\s+/,
+    pattern:
+      /\b(?:masina|masinii|vehiculul|vehiculului|autoturismul|autoturismului|duba|dubei|auto)\s+/,
     implicitField: "status",
   },
   {
     type: "tool",
-    pattern: /\b(?:scula|sculei|unealta|uneltei|flexul|flexului|bormasina|bormasinii)\s+/,
+    pattern:
+      /\b(?:scula|sculei|unealta|uneltei|echipamentul|echipamentului|flexul|flexului|bormasina|bormasinii)\s+/,
     implicitField: "status",
   },
   {
     type: "project",
-    pattern: /\b(?:proiectul|proiectului)\s+/,
+    pattern: /\b(?:proiectul|proiectului|santierul|santierului|lucrarea|lucrarii)\s+/,
     implicitField: "status",
   },
   {
     type: "user",
-    pattern: /\b(?:utilizatorul|utilizatorului|userul|userului|angajatul|angajatului)\s+/,
+    pattern:
+      /\b(?:utilizatorul|utilizatorului|userul|userului|angajatul|angajatului|colegul|colegului|salariatul|salariatului)\s+/,
   },
 ];
 
@@ -1017,20 +1045,56 @@ function splitNamedEntityAndValue(value: string) {
   return null;
 }
 
+function escapeLocalRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveEntityBeforeFieldPayload(payload: string) {
+  const entityTypes: AssistantRuntimeEntityType[] = ["vehicle", "tool", "user"];
+  for (const type of entityTypes) {
+    const aliases = getAssistantFieldDefinitions(type)
+      .flatMap((field) => [field.label, field.key, ...field.aliases].map(normalizeForMatching))
+      .filter((alias) => inferEntityTypeFromUniqueField(alias) === type)
+      .sort((left, right) => right.length - left.length);
+
+    for (const alias of aliases) {
+      const match = new RegExp(
+        `\\s+(?:(?:la|pe|in|cu)\\s+)?${escapeLocalRegExp(alias)}(?=\\s|$)`
+      ).exec(payload);
+      if (match?.index === undefined || match.index <= 0) continue;
+      const entityQuery = payload
+        .slice(0, match.index)
+        .replace(/^(?:l|o|i|pe)\s+/, "")
+        .trim();
+      const fieldValue = payload.slice(match.index + match[0].length).trim();
+      const field = resolveAssistantField(type, alias);
+      if (
+        /^(?:campul|data|denumirea|numele|numarul|statusul|termenul|valoarea)$/i.test(entityQuery)
+      ) {
+        continue;
+      }
+      if (entityQuery && fieldValue && field) return { type, field, entityQuery, fieldValue };
+    }
+  }
+  return null;
+}
+
 function namedEntityUpdateParts(command: string) {
   const normalized = normalizeForMatching(command);
 
   for (const marker of NAMED_ENTITY_MARKERS) {
     const entityMarker = marker.pattern.exec(normalized);
     if (entityMarker?.index === undefined) continue;
-    const afterMarker = normalized
-      .slice(entityMarker.index + entityMarker[0].length)
-      .trim();
-    const nestedAction = /\b(?:actualizeaza|baga|corecteaza|fa|lasa|modifica|pune|schimba|seteaza|trece|marcheaza)\b/.exec(
-      afterMarker
-    );
+    const afterMarker = normalized.slice(entityMarker.index + entityMarker[0].length).trim();
+    const nestedAction =
+      /\b(?:actualizeaza|baga|corecteaza|fa|lasa|modifica|pune|schimba|seteaza|trece|marcheaza)\b/.exec(
+        afterMarker
+      );
     if (nestedAction?.index === undefined || nestedAction.index <= 0) continue;
-    const entityQuery = afterMarker.slice(0, nestedAction.index).replace(/\b(?:te\s+rog|acum)\b/g, " ").trim();
+    const entityQuery = afterMarker
+      .slice(0, nestedAction.index)
+      .replace(/\b(?:te\s+rog|acum)\b/g, " ")
+      .trim();
     const fieldPayload = afterMarker.slice(nestedAction.index + nestedAction[0].length).trim();
     if (!entityQuery || !fieldPayload) continue;
 
@@ -1098,6 +1162,9 @@ function namedEntityUpdateParts(command: string) {
       return { type: inferredType, field, ...split };
     }
   }
+
+  const entityBeforeField = resolveEntityBeforeFieldPayload(payload);
+  if (entityBeforeField) return entityBeforeField;
 
   return null;
 }

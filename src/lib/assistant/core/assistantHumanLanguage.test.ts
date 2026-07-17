@@ -45,6 +45,32 @@ describe("assistant human language", () => {
   });
 
   it.each([
+    ["muta echipamentul asta la George", "update", "tools"],
+    ["arata-mi oamenii firmei", "navigate", "users"],
+    ["trimite raportul tehnic al liftului", "send", "maintenance"],
+    ["pune bonul pe santierul Service 2", "update", "expenses"],
+    ["dezactiveaza alerta de dimineata", "stop", "notifications"],
+    ["spune-mi odometrul masinii", "question", "vehicles"],
+  ])("recognizes broader workplace wording: %s", (command, action, module) => {
+    expect(analyzeAssistantHumanLanguage(command)).toMatchObject({
+      action,
+      modules: expect.arrayContaining([module]),
+    });
+  });
+
+  it("recognizes conversational sequencing without executing partial writes", () => {
+    expect(
+      analyzeAssistantHumanLanguage(
+        "deschide proiectele, pe urma creeaza Service 5 si dupa aia porneste pontajul"
+      )
+    ).toMatchObject({
+      hasMultipleSteps: true,
+      actionSequence: ["navigate", "create", "start"],
+      modules: expect.arrayContaining(["timesheets"]),
+    });
+  });
+
+  it.each([
     ["si aproba cererea de concediu respectiva", "leaveRequest"],
     ["la bonul ala schimba proiectul", "expense"],
     ["opreste regula respectiva", "notificationRule"],

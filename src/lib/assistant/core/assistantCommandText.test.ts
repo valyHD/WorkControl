@@ -81,6 +81,13 @@ describe("normalizeAssistantCommandText", () => {
     ["muta-l la Razvan", "muta la Razvan"],
     ["fa-l defect", "seteaza status defect"],
     ["schimba si la ala", "schimba aici"],
+    ["am nevoie sa deschizi masinile firmei", "deschide masinile firmei"],
+    ["trebuie sa imi arati pontajele", "deschide pontajele"],
+    ["ia modifica masina lu Razvan", "modifica masina lui Razvan"],
+    ["mi-am terminat treaba", "opreste pontajul"],
+    ["nu mai lucrez", "opreste pontajul"],
+    ["dupa asta deschide facturile", "si apoi deschide facturile"],
+    ["du-ma la autoutilitara Ford", "deschide duba Ford"],
   ])("normalizes colloquial Romanian without changing the payload: %s", (input, expected) => {
     expect(normalizeAssistantCommandText(input)).toBe(expected);
   });

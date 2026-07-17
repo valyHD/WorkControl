@@ -15,6 +15,13 @@ describe("assistant field resolver", () => {
     ["tool", "cine o are", "holder"],
     ["user", "ce lucreaza", "roleTitle"],
     ["user", "unde lucreaza", "department"],
+    ["vehicle", "odometru", "currentKm"],
+    ["vehicle", "inspectie tehnica", "nextItpDate"],
+    ["vehicle", "cine merge cu ea", "driver"],
+    ["tool", "unde se afla", "locationLabel"],
+    ["tool", "cine tine scula", "holder"],
+    ["user", "ce meserie are", "roleTitle"],
+    ["user", "in ce echipa", "department"],
   ])("maps rough field wording for %s: %s", (entityType, alias, expected) => {
     expect(resolveAssistantField(entityType as AssistantRuntimeEntityType, alias)?.key).toBe(
       expected

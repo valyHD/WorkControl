@@ -11,10 +11,7 @@ import {
   canAccessNavigationItem,
   type NavigationRole,
 } from "../../config/navigation";
-import {
-  normalizeAssistantText,
-  scoreAssistantText,
-} from "./runtime/assistantFuzzy";
+import { normalizeAssistantText, scoreAssistantText } from "./runtime/assistantFuzzy";
 
 export const ASSISTANT_ACTION_IDS = {
   openGlobalSearch: "open-global-search",
@@ -168,45 +165,59 @@ export function resolveAssistantNavigationAction(text: string, role: NavigationR
 
   const ignoredWords = new Set([
     "acceseaza",
+    "am",
     "arata",
     "aratami",
+    "as",
+    "avea",
     "deschide",
     "du",
     "duma",
     "gasesc",
+    "gaseste",
+    "gasesti",
     "hai",
     "intra",
     "la",
     "ma",
     "mergi",
     "mi",
+    "nevoie",
     "pagina",
     "pe",
     "te",
     "rog",
+    "spune",
+    "trebuie",
     "vreau",
     "sa",
     "unde",
     "vad",
+    "vezi",
   ]);
   const normalizeTargetToken = (token: string) => {
+    const frequentTypos: Record<string, string> = {
+      masni: "masini",
+      notficari: "notificari",
+      ponta: "pontaj",
+      scul: "scule",
+    };
+    if (frequentTypos[token]) return frequentTypos[token];
     const endings = ["ului", "lor", "ul", "le", "u"];
     const ending = endings.find(
       (candidate) => token.endsWith(candidate) && token.length - candidate.length >= 4
     );
     return ending ? token.slice(0, -ending.length) : token;
   };
-  const target = normalized
-    .split(" ")
-    .filter((token) => token && !ignoredWords.has(token))
-    .map(normalizeTargetToken)
-    .join(" ")
-    .trim() || normalized;
-  const normalizeCandidate = (value: string) =>
-    normalizeAssistantText(value)
+  const target =
+    normalized
       .split(" ")
+      .filter((token) => token && !ignoredWords.has(token))
       .map(normalizeTargetToken)
-      .join(" ");
+      .join(" ")
+      .trim() || normalized;
+  const normalizeCandidate = (value: string) =>
+    normalizeAssistantText(value).split(" ").map(normalizeTargetToken).join(" ");
 
   const ranked = getAssistantNavigationActions(role)
     .map((action) => {

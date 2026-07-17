@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  interpretAssistantCommand,
-  type AssistantCommandContext,
-} from "./assistantCommandService";
+import { interpretAssistantCommand, type AssistantCommandContext } from "./assistantCommandService";
 
 const mocks = vi.hoisted(() => ({ callable: vi.fn() }));
 
@@ -116,7 +113,9 @@ describe("assistant command service local routing", () => {
       intent: "open_my_timesheets",
       toolCalls: [{ id: "navigation.open" }],
     });
-    expect(result?.toolCalls).not.toContainEqual(expect.objectContaining({ id: "timesheets.start" }));
+    expect(result?.toolCalls).not.toContainEqual(
+      expect.objectContaining({ id: "timesheets.start" })
+    );
   });
 
   it("understands a colloquial timesheet start and keeps confirmation", async () => {
@@ -556,4 +555,88 @@ describe("assistant command service local routing", () => {
     });
     expect(mocks.callable).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["am nevoie sa deschizi masinile firmei", "open_page", "/vehicles"],
+    ["trebuie sa imi arati pontajele", "open_page", "/timesheets"],
+    ["unde sunt masinile", "open_gps_maps", "/vehicles/gps-map"],
+    ["du-ma la facturile de plata", "open_expense_invoices", "/expenses/invoices"],
+    ["vreau la sculele firmei", "open_page", "/tools"],
+    ["arata-mi oamenii firmei", "open_page", "/users"],
+  ])("navigates from informal business wording: %s", async (command, intent, path) => {
+    const result = await interpretAssistantCommand(command, { role: "admin" });
+
+    expect(result).toMatchObject({
+      commandType: "navigation",
+      intent,
+      toolCalls: [{ id: "navigation.open", input: { path, query: "" } }],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it.each(["mi-am terminat treaba", "nu mai lucrez"])(
+    "understands an indirect timesheet stop: %s",
+    async (command) => {
+      const result = await interpretAssistantCommand(command);
+
+      expect(result).toMatchObject({
+        intent: "stop_timesheet",
+        confirmationRequired: true,
+        toolCalls: [{ id: "timesheets.stop" }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    ["pune masina mea la 7600 kilometri", "", 7600],
+    ["pune masina Toyota la 7200 km", "toyota", 7200],
+    ["ia modifica duba Ford la 8100 kilometri", "ford", 8100],
+  ])(
+    "understands mileage spoken before the field name: %s",
+    async (command, entityQuery, currentKm) => {
+      const result = await interpretAssistantCommand(command);
+
+      expect(result).toMatchObject({
+        intent: "update_vehicle",
+        entityQuery,
+        fieldsToUpdate: { currentKm },
+        confirmationRequired: true,
+        toolCalls: [{ id: "vehicles.update", input: { entityQuery } }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [
+      "pune Mihai la departamentul Service",
+      "user",
+      "mihai",
+      "users.update",
+      { department: "service" },
+    ],
+    [
+      "trece Loganul la ITP 20 august 2026",
+      "vehicle",
+      "loganul",
+      "vehicles.update",
+      { nextItpDate: "20 august 2026" },
+    ],
+  ])(
+    "understands the entity before the field in natural updates: %s",
+    async (command, entityType, entityQuery, toolId, fields) => {
+      const result = await interpretAssistantCommand(command);
+
+      expect(result).toMatchObject({
+        commandType: "entity_update",
+        entityType,
+        entityQuery,
+        fieldsToUpdate: fields,
+        confirmationRequired: true,
+        toolCalls: [{ id: toolId, input: { entityQuery, fields } }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
 });

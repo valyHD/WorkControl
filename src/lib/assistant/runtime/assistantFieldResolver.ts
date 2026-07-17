@@ -12,22 +12,89 @@ const VEHICLE_FIELDS: FieldMapItem[] = [
   {
     key: "currentKm",
     label: "Km curenti",
-    aliases: ["kilometri", "km", "kilometraj", "km actuali", "km curenti", "cati km", "bord"],
+    aliases: [
+      "kilometri",
+      "km",
+      "kilometraj",
+      "km actuali",
+      "km curenti",
+      "cati km",
+      "bord",
+      "kilometri din bord",
+      "index bord",
+      "odometru",
+      "rulaj",
+    ],
     kind: "number",
   },
-  { key: "nextItpDate", label: "ITP", aliases: ["itp"], kind: "date" },
-  { key: "nextRcaDate", label: "RCA", aliases: ["rca", "asigurare"], kind: "date" },
+  {
+    key: "nextItpDate",
+    label: "ITP",
+    aliases: ["itp", "inspectie tehnica", "data inspectiei"],
+    kind: "date",
+  },
+  {
+    key: "nextRcaDate",
+    label: "RCA",
+    aliases: ["rca", "asigurare", "polita", "asigurarea obligatorie"],
+    kind: "date",
+  },
   { key: "nextCascoDate", label: "CASCO", aliases: ["casco"], kind: "date" },
   { key: "nextRovinietaDate", label: "Rovinieta", aliases: ["rovinieta"], kind: "date" },
-  { key: "nextOilServiceKm", label: "Schimb ulei", aliases: ["ulei", "schimb ulei"], kind: "number" },
-  { key: "nextServiceKm", label: "Revizie", aliases: ["revizie", "service"], kind: "number" },
-  { key: "plateNumber", label: "Numar inmatriculare", aliases: ["numar", "numar inmatriculare", "placuta"], kind: "text" },
+  {
+    key: "nextOilServiceKm",
+    label: "Schimb ulei",
+    aliases: ["ulei", "schimb ulei", "urmatorul schimb", "revizie ulei"],
+    kind: "number",
+  },
+  {
+    key: "nextServiceKm",
+    label: "Revizie",
+    aliases: ["revizie", "service", "urmatorul service", "revizie masina"],
+    kind: "number",
+  },
+  {
+    key: "plateNumber",
+    label: "Numar inmatriculare",
+    aliases: ["numar", "numar inmatriculare", "placuta", "numarul masinii", "numar auto"],
+    kind: "text",
+  },
   { key: "brand", label: "Marca", aliases: ["marca", "brand"], kind: "text" },
   { key: "model", label: "Model", aliases: ["model"], kind: "text" },
   { key: "vin", label: "VIN", aliases: ["vin", "serie sasiu"], kind: "text" },
-  { key: "status", label: "Status", aliases: ["status", "stare", "situatie", "functionare"], kind: "status" },
-  { key: "driver", label: "Sofer", aliases: ["sofer", "conducator", "driver", "cine conduce", "sofer curent"], kind: "user" },
-  { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner", "cine raspunde"], kind: "user" },
+  {
+    key: "status",
+    label: "Status",
+    aliases: ["status", "stare", "situatie", "functionare"],
+    kind: "status",
+  },
+  {
+    key: "driver",
+    label: "Sofer",
+    aliases: [
+      "sofer",
+      "conducator",
+      "driver",
+      "cine conduce",
+      "sofer curent",
+      "cine merge cu ea",
+      "cel care o conduce",
+    ],
+    kind: "user",
+  },
+  {
+    key: "owner",
+    label: "Responsabil",
+    aliases: [
+      "responsabil",
+      "proprietar",
+      "owner",
+      "cine raspunde",
+      "in grija cui",
+      "cine are masina",
+    ],
+    kind: "user",
+  },
 ];
 
 const TOOL_FIELDS: FieldMapItem[] = [
@@ -35,22 +102,79 @@ const TOOL_FIELDS: FieldMapItem[] = [
   { key: "internalCode", label: "Cod intern", aliases: ["cod", "cod intern"], kind: "text" },
   { key: "qrCodeValue", label: "Cod QR", aliases: ["qr", "cod qr"], kind: "text" },
   { key: "status", label: "Status", aliases: ["status", "stare"], kind: "status" },
-  { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner"], kind: "user" },
-  { key: "holder", label: "Detinator", aliases: ["detinator", "utilizator", "la cine este", "la cine e", "cine o are", "cine il are"], kind: "user" },
-  { key: "locationLabel", label: "Locatie", aliases: ["locatie", "locatia", "unde este"], kind: "text" },
-  { key: "description", label: "Observatii", aliases: ["observatii", "descriere", "note"], kind: "text" },
+  {
+    key: "owner",
+    label: "Responsabil",
+    aliases: ["responsabil", "proprietar", "owner", "cine raspunde", "in grija cui"],
+    kind: "user",
+  },
+  {
+    key: "holder",
+    label: "Detinator",
+    aliases: [
+      "detinator",
+      "utilizator",
+      "la cine este",
+      "la cine e",
+      "cine o are",
+      "cine il are",
+      "cine tine scula",
+      "la ce om e",
+    ],
+    kind: "user",
+  },
+  {
+    key: "locationLabel",
+    label: "Locatie",
+    aliases: ["locatie", "locatia", "unde este", "unde se afla", "unde am pus-o"],
+    kind: "text",
+  },
+  {
+    key: "description",
+    label: "Observatii",
+    aliases: ["observatii", "descriere", "note", "mentiuni", "comentariu"],
+    kind: "text",
+  },
   { key: "warrantyUntil", label: "Garantie", aliases: ["garantie"], kind: "date" },
 ];
 
 const PROJECT_FIELDS: FieldMapItem[] = [
-  { key: "name", label: "Nume proiect", aliases: ["nume", "proiect"], kind: "text" },
+  {
+    key: "name",
+    label: "Nume proiect",
+    aliases: ["nume", "proiect", "denumire", "numele lucrarii", "numele santierului"],
+    kind: "text",
+  },
   { key: "status", label: "Status", aliases: ["status", "stare"], kind: "status" },
 ];
 
 const USER_FIELDS: FieldMapItem[] = [
-  { key: "roleTitle", label: "Functie", aliases: ["functie", "meserie", "post", "functia", "ce lucreaza"], kind: "text" },
-  { key: "department", label: "Departament", aliases: ["departament", "echipa", "departamentul", "unde lucreaza", "sector"], kind: "text" },
-  { key: "role", label: "Rol aplicatie", aliases: ["rol", "drepturi", "rol aplicatie"], kind: "status" },
+  {
+    key: "roleTitle",
+    label: "Functie",
+    aliases: ["functie", "meserie", "post", "functia", "ce lucreaza", "ce meserie are", "ocupatie"],
+    kind: "text",
+  },
+  {
+    key: "department",
+    label: "Departament",
+    aliases: [
+      "departament",
+      "echipa",
+      "departamentul",
+      "unde lucreaza",
+      "sector",
+      "la ce departament",
+      "in ce echipa",
+    ],
+    kind: "text",
+  },
+  {
+    key: "role",
+    label: "Rol aplicatie",
+    aliases: ["rol", "drepturi", "rol aplicatie"],
+    kind: "status",
+  },
   { key: "fullName", label: "Nume", aliases: ["nume", "nume complet"], kind: "text" },
 ];
 
@@ -97,25 +221,29 @@ export function resolveAssistantField(entityType: AssistantRuntimeEntityType, na
   const normalized = normalizeAssistantText(naturalName);
   const fields = getFieldMap(entityType);
 
-  return fields
-    .map((field) => {
-      let score = 0;
-      if (normalizeAssistantText(field.key) === normalized) score += 2;
-      if (normalizeAssistantText(field.label) === normalized) score += 1.5;
-      field.aliases.forEach((alias) => {
-        const normalizedAlias = normalizeAssistantText(alias);
-        if (normalized.includes(normalizedAlias) || normalizedAlias.includes(normalized)) score += 1;
-        if (tokenMatches(normalizedAlias, normalized)) score += 0.5;
-      });
-      return { field, score };
-    })
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score)[0]?.field || null;
+  return (
+    fields
+      .map((field) => {
+        let score = 0;
+        if (normalizeAssistantText(field.key) === normalized) score += 2;
+        if (normalizeAssistantText(field.label) === normalized) score += 1.5;
+        field.aliases.forEach((alias) => {
+          const normalizedAlias = normalizeAssistantText(alias);
+          if (normalized.includes(normalizedAlias) || normalizedAlias.includes(normalized))
+            score += 1;
+          if (tokenMatches(normalizedAlias, normalized)) score += 0.5;
+        });
+        return { field, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)[0]?.field || null
+  );
 }
 
 function toIsoDate(day: number, month: number, year: number) {
   const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return "";
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
+    return "";
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -125,13 +253,17 @@ export function parseAssistantDate(value: unknown) {
   const normalized = normalizeAssistantText(raw);
   const numeric = normalized.match(/\b(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\b/);
   if (numeric) {
-    const year = numeric[3] ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3]) : new Date().getFullYear();
+    const year = numeric[3]
+      ? Number(numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3])
+      : new Date().getFullYear();
     return toIsoDate(Number(numeric[1]), Number(numeric[2]), year);
   }
   const named = normalized.match(/\b(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?\b/);
   if (named) {
     const month = MONTHS[named[2]];
-    const year = named[3] ? Number(named[3].length === 2 ? `20${named[3]}` : named[3]) : new Date().getFullYear();
+    const year = named[3]
+      ? Number(named[3].length === 2 ? `20${named[3]}` : named[3])
+      : new Date().getFullYear();
     if (month) return toIsoDate(Number(named[1]), month, year);
   }
   return raw;
@@ -139,19 +271,32 @@ export function parseAssistantDate(value: unknown) {
 
 export function normalizeVehicleStatus(value: unknown) {
   const normalized = normalizeAssistantText(String(value ?? ""));
-  if (["activa", "activ", "functionala", "buna", "merge"].some((term) => normalized.includes(term))) return "activa";
-  if (["in service", "la service", "service", "revizie"].some((term) => normalized.includes(term))) return "in_service";
-  if (["indisponibila", "indisponibil", "nu merge"].some((term) => normalized.includes(term))) return "indisponibila";
-  if (["avariata", "avariat", "lovita", "defecta", "defect"].some((term) => normalized.includes(term))) return "avariata";
+  if (["activa", "activ", "functionala", "buna", "merge"].some((term) => normalized.includes(term)))
+    return "activa";
+  if (["in service", "la service", "service", "revizie"].some((term) => normalized.includes(term)))
+    return "in_service";
+  if (["indisponibila", "indisponibil", "nu merge"].some((term) => normalized.includes(term)))
+    return "indisponibila";
+  if (
+    ["avariata", "avariat", "lovita", "defecta", "defect"].some((term) => normalized.includes(term))
+  )
+    return "avariata";
   return normalized;
 }
 
 export function normalizeToolStatus(value: unknown) {
   const normalized = normalizeAssistantText(String(value ?? ""));
-  if (["depozit", "disponibila", "disponibil", "libera", "liber"].some((term) => normalized.includes(term))) return "depozit";
-  if (["atribuita", "la utilizator", "folosita"].some((term) => normalized.includes(term))) return "atribuita";
+  if (
+    ["depozit", "disponibila", "disponibil", "libera", "liber"].some((term) =>
+      normalized.includes(term)
+    )
+  )
+    return "depozit";
+  if (["atribuita", "la utilizator", "folosita"].some((term) => normalized.includes(term)))
+    return "atribuita";
   if (["defecta", "defect", "stricata"].some((term) => normalized.includes(term))) return "defecta";
-  if (["pierduta", "pierdut", "disparuta"].some((term) => normalized.includes(term))) return "pierduta";
+  if (["pierduta", "pierdut", "disparuta"].some((term) => normalized.includes(term)))
+    return "pierduta";
   return normalized;
 }
 
@@ -159,11 +304,16 @@ export function normalizeProjectStatus(value: unknown) {
   const normalized = normalizeAssistantText(String(value ?? ""));
   if (["activ", "activa"].some((term) => normalized.includes(term))) return "activ";
   if (["inactiv", "inactiva"].some((term) => normalized.includes(term))) return "inactiv";
-  if (["finalizat", "terminat", "inchis"].some((term) => normalized.includes(term))) return "finalizat";
+  if (["finalizat", "terminat", "inchis"].some((term) => normalized.includes(term)))
+    return "finalizat";
   return normalized;
 }
 
-function normalizeFieldValue(entityType: AssistantRuntimeEntityType, field: FieldMapItem, value: unknown) {
+function normalizeFieldValue(
+  entityType: AssistantRuntimeEntityType,
+  field: FieldMapItem,
+  value: unknown
+) {
   if (field.kind === "number") {
     const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
     return Number.isFinite(parsed) ? parsed : null;
@@ -172,8 +322,15 @@ function normalizeFieldValue(entityType: AssistantRuntimeEntityType, field: Fiel
   if (field.kind === "status" && entityType === "vehicle") return normalizeVehicleStatus(value);
   if (field.kind === "status" && entityType === "tool") return normalizeToolStatus(value);
   if (field.kind === "status" && entityType === "project") return normalizeProjectStatus(value);
-  if (field.key === "plateNumber" || field.key === "vin" || field.key === "internalCode" || field.key === "qrCodeValue") {
-    return String(value ?? "").replace(/\s+/g, "").toUpperCase();
+  if (
+    field.key === "plateNumber" ||
+    field.key === "vin" ||
+    field.key === "internalCode" ||
+    field.key === "qrCodeValue"
+  ) {
+    return String(value ?? "")
+      .replace(/\s+/g, "")
+      .toUpperCase();
   }
   return String(value ?? "").trim();
 }
@@ -209,7 +366,9 @@ export function resolveAssistantFieldChanges(
       displayOldValue: String(oldValue || "-"),
       displayNewValue: String(normalizedValue),
       requiresSpecialConfirmation:
-        entityType === "vehicle" && field.key === "currentKm" && Number(normalizedValue) < Number(oldValue || 0),
+        entityType === "vehicle" &&
+        field.key === "currentKm" &&
+        Number(normalizedValue) < Number(oldValue || 0),
     });
   });
 
