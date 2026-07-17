@@ -4,6 +4,7 @@ import { getToolsList } from "../../modules/tools/services/toolsService";
 import { getAllUsers } from "../../modules/users/services/usersService";
 import { getProjectsList } from "../../modules/timesheets/services/timesheetsService";
 import { getMaintenanceClients } from "../../modules/maintenance/services/maintenanceService";
+import { filterActiveMaintenanceClients } from "../../modules/maintenance/utils/maintenanceClientStatus";
 
 export type GlobalSearchResult = {
   id: string;
@@ -36,7 +37,7 @@ async function loadSearchDataset(role: string): Promise<SearchDataset> {
     privileged ? getAllUsers(SEARCH_DATASET_LIMIT).catch(() => []) : Promise.resolve([]),
     privileged ? getMaintenanceClients(SEARCH_DATASET_LIMIT).catch(() => []) : Promise.resolve([]),
   ]);
-  return { vehicles, tools, projects, users, clients };
+  return { vehicles, tools, projects, users, clients: filterActiveMaintenanceClients(clients) };
 }
 
 async function getSearchDataset(role: string) {

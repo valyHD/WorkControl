@@ -11,6 +11,7 @@ import type {
   MaintenancePartOrderStatus,
 } from "../../../types/maintenance";
 import { subscribeMaintenanceClients } from "../services/maintenanceService";
+import { isMaintenanceClientActive } from "../utils/maintenanceClientStatus";
 import {
   createMaintenancePartOrder,
   deleteMaintenancePartOrder,
@@ -278,6 +279,11 @@ export default function MaintenancePartOrdersPage() {
     [clients, form.clientId]
   );
 
+  const selectableClients = useMemo(
+    () => clients.filter((client) => isMaintenanceClientActive(client) || client.id === form.clientId),
+    [clients, form.clientId]
+  );
+
   const liftOptions = useMemo(() => getClientLiftOptions(selectedClient), [selectedClient]);
 
   const filteredOrders = useMemo(() => {
@@ -519,7 +525,7 @@ export default function MaintenancePartOrdersPage() {
                 }}
               >
                 <option value="">Fara client selectat</option>
-                {clients.map((client) => (
+                {selectableClients.map((client) => (
                   <option key={client.id} value={client.id}>
                     {client.name || client.address || client.id}
                   </option>

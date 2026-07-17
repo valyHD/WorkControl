@@ -64,4 +64,9 @@ describe("maintenance client assistant matcher", () => {
       clients[1],
     ]);
   });
+
+  it("does not select inactive clients for a new report", () => {
+    const inactive = { ...clients[0], status: "inactive" as const };
+    expect(findMaintenanceClientsForAssistant([inactive], "Oltenita C1")).toEqual([]);
+  });
 });

@@ -22,9 +22,12 @@ export type ClientAddress = {
   lifts: LiftUnit[];
 };
 
+export type MaintenanceClientStatus = "active" | "inactive";
+
 export type MaintenanceClient = {
   id: string;
   companyId?: string;
+  status?: MaintenanceClientStatus;
   name: string;
   email: string;
   emails: string[];

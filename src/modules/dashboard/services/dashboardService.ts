@@ -15,6 +15,7 @@ import {
   getUserDirectoryCollectionName,
   getVehicleDirectoryCollectionName,
 } from "../../../lib/firebase/companyIsolationRollout";
+import { isMaintenanceClientStatusActive } from "../../maintenance/utils/maintenanceClientStatus";
 
 export type DashboardNotificationItem = {
   id: string;
@@ -372,9 +373,12 @@ async function getDashboardMaintenanceSummary(context: CompanyAccessContext): Pr
   let lifts = 0;
   let expiredLifts = 0;
   let expiringSoonLifts = 0;
+  let activeClients = 0;
 
   snap.docs.forEach((item) => {
     const data = item.data();
+    if (!isMaintenanceClientStatusActive(data.status)) return;
+    activeClients += 1;
     const legacyLifts = Array.isArray(data.liftNumbers)
       ? data.liftNumbers
       : data.liftNumber
@@ -415,7 +419,7 @@ async function getDashboardMaintenanceSummary(context: CompanyAccessContext): Pr
   });
 
   const data = {
-    clients: snap.size,
+    clients: activeClients,
     lifts,
     expiredLifts,
     expiringSoonLifts,

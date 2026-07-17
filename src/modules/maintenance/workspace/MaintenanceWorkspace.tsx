@@ -26,6 +26,7 @@ import {
   subscribeMaintenanceClients,
   subscribeMaintenanceCompanyBranding,
   subscribeMaintenanceReportsOverview,
+  updateMaintenanceClient,
   uploadMaintenanceBrandingAsset,
 } from "../services/maintenanceService";
 import { getAllUsers } from "../../users/services/usersService";
@@ -37,6 +38,7 @@ import {
 } from "../services/maintenanceReportBackgroundTask";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
 import { generateReportId, reviewStandardText } from "../utils/reportUtils";
+import { isMaintenanceClientActive } from "../utils/maintenanceClientStatus";
 import type {
   MaintenanceClient,
   MaintenanceCompanyBranding,
@@ -483,6 +485,7 @@ export default function MaintenanceWorkspace() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [searchText, setSearchText] = useState("");
+  const [clientStatusUpdatingId, setClientStatusUpdatingId] = useState("");
   const [clientForm, setClientForm] = useState(initialClientForm);
   const [brandingItems, setBrandingItems] = useState<MaintenanceCompanyBranding[]>([]);
   const [brandingCompanyName, setBrandingCompanyName] = useState("");
@@ -855,31 +858,40 @@ export default function MaintenanceWorkspace() {
     });
   }, [clients, searchText]);
 
+  const activeClients = useMemo(
+    () => clients.filter(isMaintenanceClientActive),
+    [clients]
+  );
+  const inactiveClientCount = clients.length - activeClients.length;
+
   const allReportHistory = useMemo(
     () => Object.values(reportHistoryByClient).flat(),
     [reportHistoryByClient]
   );
 
   const liveMonthlyMissingReviews = useMemo(
-    () => getMissingMonthlyReviews(clients, allReportHistory),
-    [clients, allReportHistory]
+    () => getMissingMonthlyReviews(activeClients, allReportHistory),
+    [activeClients, allReportHistory]
   );
 
   const liveTotalLifts = useMemo(
-    () => clients.reduce((total, client) => total + getClientLiftRows(client).length, 0),
-    [clients]
+    () => activeClients.reduce((total, client) => total + getClientLiftRows(client).length, 0),
+    [activeClients]
   );
 
-  const allLiftRows = useMemo(() => clients.flatMap((client) => getClientLiftRows(client)), [clients]);
+  const allLiftRows = useMemo(
+    () => activeClients.flatMap((client) => getClientLiftRows(client)),
+    [activeClients]
+  );
 
   const liveExpiredAndNextMonthExpiringLifts = useMemo(
-    () => getExpiredAndNextMonthExpiringLifts(clients),
-    [clients]
+    () => getExpiredAndNextMonthExpiringLifts(activeClients),
+    [activeClients]
   );
 
   const clientsWithoutEmail = useMemo(
-    () => clients.filter((client) => !getClientEmail(client)),
-    [clients]
+    () => activeClients.filter((client) => !getClientEmail(client)),
+    [activeClients]
   );
 
   const sortedReportHistory = useMemo(
@@ -891,28 +903,28 @@ export default function MaintenanceWorkspace() {
 
   const maintenanceCompanyOptions = useMemo(
     () =>
-      Array.from(new Set(clients.map((client) => client.maintenanceCompany.trim()).filter(Boolean))).sort((left, right) =>
+      Array.from(new Set(activeClients.map((client) => client.maintenanceCompany.trim()).filter(Boolean))).sort((left, right) =>
         left.localeCompare(right, "ro")
       ),
-    [clients]
+    [activeClients]
   );
 
   const checkClientOptions = useMemo(
-    () => Array.from(new Set(clients.map((client) => client.name.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ro")),
-    [clients]
+    () => Array.from(new Set(activeClients.map((client) => client.name.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, "ro")),
+    [activeClients]
   );
 
   const checkAddressOptions = useMemo(
     () =>
       Array.from(
         new Set(
-          clients
+          activeClients
             .flatMap((client) => [client.address, ...(client.addresses || []).map((address) => address.label || address.street || "")])
             .map((value) => value.trim())
             .filter(Boolean)
         )
       ).sort((left, right) => left.localeCompare(right, "ro")),
-    [clients]
+    [activeClients]
   );
 
   const filteredReportHistory = useMemo(() => {
@@ -963,7 +975,7 @@ export default function MaintenanceWorkspace() {
   );
 
   function getTabBadge(tab: MaintenanceTab) {
-    if (tab === "clients") return String(clients.length);
+    if (tab === "clients") return String(activeClients.length);
     if (tab === "lifts") return String(liveTotalLifts);
     if (tab === "history") return String(allReportHistory.length);
     if (tab === "checks") return String(liveMonthlyMissingReviews.length + liveExpiredAndNextMonthExpiringLifts.length);
@@ -1170,7 +1182,7 @@ export default function MaintenanceWorkspace() {
       return [] as MaintenanceClient[];
     }
 
-    return clients
+    return activeClients
       .filter((client) => {
         const addresses = [
           client.address,
@@ -1196,7 +1208,7 @@ export default function MaintenanceWorkspace() {
         return `${client.name} ${addresses} ${lifts}`.toLowerCase().includes(query);
       })
       .slice(0, 8);
-  }, [clients, reportSearch]);
+  }, [activeClients, reportSearch]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1206,14 +1218,14 @@ export default function MaintenanceWorkspace() {
     if (assistantReportKeyRef.current === key) return;
 
     const clientQuery = (params.get("client") || "").trim();
-    if (clientQuery && clients.length === 0) return;
+    if (clientQuery && activeClients.length === 0) return;
 
     assistantReportKeyRef.current = key;
     setReportError("");
 
     if (clientQuery) {
       const needle = normalizeMaintenanceAssistantText(clientQuery);
-      const match = clients.find((client) => {
+      const match = activeClients.find((client) => {
         const clientText = normalizeMaintenanceAssistantText(
           [
             client.name,
@@ -1253,11 +1265,11 @@ export default function MaintenanceWorkspace() {
     window.setTimeout(() => {
       document.getElementById("maintenance-report-form-start")?.scrollIntoView?.({ behavior: "smooth", block: "start" });
     }, 180);
-  }, [clients, location.search]);
+  }, [activeClients, location.search]);
 
   const selectedClient = useMemo(
-    () => clients.find((item) => item.id === selectedClientId) || null,
-    [clients, selectedClientId]
+    () => activeClients.find((item) => item.id === selectedClientId) || null,
+    [activeClients, selectedClientId]
   );
 
   useEffect(() => {
@@ -1349,7 +1361,7 @@ export default function MaintenanceWorkspace() {
     if (!assistantReportRequest || assistantReportRequest.resolvedClientId || loading) return;
 
     const matches = findMaintenanceClientsForAssistantV2(
-      clients,
+      activeClients,
       assistantReportRequest.clientQuery
     );
     const safeMatches =
@@ -1409,7 +1421,7 @@ export default function MaintenanceWorkspace() {
         );
       }, 260);
     }
-  }, [assistantReportRequest, clients, loading]);
+  }, [activeClients, assistantReportRequest, loading]);
 
   function selectReportClient(client: MaintenanceClient) {
     setSelectedClientId(client.id);
@@ -1455,6 +1467,39 @@ export default function MaintenanceWorkspace() {
     } catch (err) {
       console.error(err);
       setError("Nu am putut sterge clientul.");
+    }
+  }
+
+  async function handleClientInactiveChange(client: MaintenanceClient, inactive: boolean) {
+    if (clientStatusUpdatingId) return;
+
+    try {
+      setClientStatusUpdatingId(client.id);
+      setError("");
+      setMessage("");
+      const status = inactive ? "inactive" : "active";
+      await updateMaintenanceClient(client.id, { status });
+      setClients((current) =>
+        current.map((item) => (item.id === client.id ? { ...item, status } : item))
+      );
+
+      if (inactive && selectedClientId === client.id) {
+        setSelectedClientId("");
+        setReportSearch("");
+        setReportAddress("");
+        setReportLift("");
+      }
+
+      setMessage(
+        inactive
+          ? `${client.name || "Clientul"} este inactiv. Ramane in istoric, dar nu mai intra in revizii si calcule.`
+          : `${client.name || "Clientul"} a fost reactivat si intra din nou in operatiunile de mentenanta.`
+      );
+    } catch (err) {
+      console.error(err);
+      setError("Nu am putut actualiza statusul clientului.");
+    } finally {
+      setClientStatusUpdatingId("");
     }
   }
 
@@ -1824,7 +1869,7 @@ export default function MaintenanceWorkspace() {
         <div className="maintenance-dashboard-grid">
           <div className="kpi-card">
             <div className="kpi-label">Total clienti</div>
-            <div className="kpi-value">{clients.length}</div>
+            <div className="kpi-value">{activeClients.length}</div>
           </div>
           <div className="kpi-card">
             <div className="kpi-label">Total lifturi</div>
@@ -2180,7 +2225,9 @@ export default function MaintenanceWorkspace() {
         <div className="panel maintenance-clients-head">
           <div>
             <h2 className="panel-title">Clienti mentenanta</h2>
-            <p className="panel-subtitle">Cauta dupa nume, adresa sau lift si gestioneaza fiecare client.</p>
+            <p className="panel-subtitle">
+              {activeClients.length} activi · {inactiveClientCount} inactivi. Clientii inactivi raman in istoric.
+            </p>
           </div>
           <button className="primary-btn maintenance-big-action" data-assistant-action="maintenance-add-client" type="button" title="Adauga client nou cu adrese si lifturi" onClick={() => setClientFormVisible(true)}>
             <PlusCircle size={17} /> Adauga client nou
@@ -2207,17 +2254,25 @@ export default function MaintenanceWorkspace() {
               {filteredClients.map((client) => {
                 const displayEmails = Array.from(new Set(((client.emails || []).length ? client.emails : client.email ? [client.email] : []).filter(Boolean)));
                 const liftCount = getClientLiftCount(client);
+                const clientIsActive = isMaintenanceClientActive(client);
                 const clientExpiring = liveExpiredAndNextMonthExpiringLifts.filter((item) => item.clientId === client.id);
                 return (
-                  <article key={client.id} className="maintenance-client-card">
+                  <article
+                    key={client.id}
+                    className={`maintenance-client-card ${clientIsActive ? "" : "is-inactive"}`.trim()}
+                  >
                     <div className="maintenance-client-card__head">
                       <div>
                         <h3>{client.name || "Fara nume"}</h3>
                         <span>{client.maintenanceCompany || "Fara firma"}</span>
                       </div>
-                      <span className={clientExpiring.length ? "badge-orange" : "badge-normal"}>
-                        {clientExpiring.length ? `${clientExpiring.length} atentionari` : "OK"}
-                      </span>
+                      {clientIsActive ? (
+                        <span className={clientExpiring.length ? "badge-orange" : "badge-normal"}>
+                          {clientExpiring.length ? `${clientExpiring.length} atentionari` : "OK"}
+                        </span>
+                      ) : (
+                        <span className="maintenance-client-inactive-badge">Inactiv</span>
+                      )}
                     </div>
                     <div className="maintenance-client-card__meta">
                       <span>{displayEmails.length ? displayEmails.join(", ") : "Fara email"}</span>
@@ -2227,6 +2282,20 @@ export default function MaintenanceWorkspace() {
                     <div className="maintenance-actions">
                       <button className="secondary-btn" type="button" onClick={() => navigate(`/maintenance/${client.id}`)}>Detalii</button>
                       <button className="secondary-btn" type="button" onClick={() => navigate(`/maintenance/${client.id}`)}>Editeaza</button>
+                      <label className="maintenance-client-status-toggle">
+                        <input
+                          type="checkbox"
+                          checked={!clientIsActive}
+                          disabled={clientStatusUpdatingId === client.id}
+                          onChange={(event) => void handleClientInactiveChange(client, event.target.checked)}
+                          aria-label={
+                            clientIsActive
+                              ? `Marcheaza ${client.name || "clientul"} ca inactiv`
+                              : `Reactiveaza ${client.name || "clientul"}`
+                          }
+                        />
+                        <span>{clientStatusUpdatingId === client.id ? "Se salveaza" : "Inactiv"}</span>
+                      </label>
                       <button className="danger-btn" type="button" onClick={() => void handleDeleteClient(client)}>
                         <Trash2 size={14} /> Sterge
                       </button>

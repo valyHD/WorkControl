@@ -32,6 +32,7 @@ import type {
   MaintenanceReportAttachment,
   MaintenanceReportHistoryItem,
 } from "../../../types/maintenance";
+import { normalizeMaintenanceClientStatus } from "../utils/maintenanceClientStatus";
 
 const maintenanceClientsCollection = collection(db, "maintenanceClients");
 const maintenanceBrandingCollection = collection(db, "firmeMentenanta");
@@ -92,6 +93,7 @@ function mapClient(id: string, data: Record<string, unknown>): MaintenanceClient
   return {
     id,
     companyId: toText(data.companyId),
+    status: normalizeMaintenanceClientStatus(data.status),
     name: toText(data.name),
     email: fallbackEmail,
     emails,
@@ -281,6 +283,7 @@ export async function createMaintenanceClient(input: {
 
   const docRef = await addDoc(maintenanceClientsCollection, {
     companyId,
+    status: "active",
     name: input.name.trim(),
     email: input.email.trim(),
     address: primaryAddress,
@@ -360,6 +363,9 @@ export async function updateMaintenanceClient(clientId: string, payload: Partial
   const nextLiftNumber = payload.liftNumbers?.[0] ?? payload.liftNumber ?? "";
 
   await updateDoc(clientRef, {
+    ...(payload.status !== undefined
+      ? { status: normalizeMaintenanceClientStatus(payload.status) }
+      : {}),
     ...(payload.name !== undefined ? { name: payload.name.trim() } : {}),
     ...(payload.address !== undefined ? { address: payload.address.trim() } : {}),
     ...(payload.expiryDate !== undefined ? { expiryDate: payload.expiryDate.trim() } : {}),

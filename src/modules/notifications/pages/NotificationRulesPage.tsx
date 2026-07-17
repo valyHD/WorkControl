@@ -16,6 +16,7 @@ import {
 import { getVehiclesList } from "../../vehicles/services/vehiclesService";
 import { getProjectsList } from "../../timesheets/services/timesheetsService";
 import { getMaintenanceClients } from "../../maintenance/services/maintenanceService";
+import { filterActiveMaintenanceClients } from "../../maintenance/utils/maintenanceClientStatus";
 
 const emptyValues: NotificationRuleFormValues = {
   name: "",
@@ -92,7 +93,7 @@ export default function NotificationRulesPage() {
       setTools(toolsData);
       setVehicles(vehiclesData);
       setProjects(projectsData);
-      setMaintenanceClients(maintenanceClientsData);
+      setMaintenanceClients(filterActiveMaintenanceClients(maintenanceClientsData));
     } catch (err) {
       console.error("[NotificationRulesPage][loadDependencies]", err);
       if (!isMountedRef.current) return;

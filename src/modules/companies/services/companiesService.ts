@@ -38,6 +38,7 @@ import { getExpenseUsers } from "../../expenses/services/expensesService";
 import { getTimesheetsList } from "../../timesheets/services/timesheetsService";
 import { getToolsList } from "../../tools/services/toolsService";
 import { getVehiclesList } from "../../vehicles/services/vehiclesService";
+import { isMaintenanceClientStatusActive } from "../../maintenance/utils/maintenanceClientStatus";
 
 const companiesCollection = collection(db, "firmeMentenanta");
 const maintenanceClientsCollection = collection(db, "maintenanceClients");
@@ -310,7 +311,7 @@ export async function getCompanyDirectoryData(): Promise<{
   companies: CompanyItem[];
   users: AppUser[];
   expenses: ExpenseDocumentItem[];
-  maintenanceClients: Array<{ id: string; name: string; maintenanceCompany: string }>;
+  maintenanceClients: Array<{ id: string; name: string; maintenanceCompany: string; status?: string }>;
   tools: ToolItem[];
   vehicles: VehicleItem[];
   timesheets: TimesheetItem[];
@@ -366,6 +367,7 @@ export async function getCompanyDirectoryData(): Promise<{
         companyId: toText(data.companyId),
         name: toText(data.name),
         maintenanceCompany: toText(data.maintenanceCompany),
+        status: toText(data.status),
       };
     }) || [],
     tools,
@@ -418,12 +420,14 @@ export async function getCompanyDirectoryData(): Promise<{
 export function buildCompanySummary(params: {
   company: CompanyItem;
   expenses: ExpenseDocumentItem[];
-  maintenanceClients: Array<{ id: string; name: string; maintenanceCompany: string }>;
+  maintenanceClients: Array<{ id: string; name: string; maintenanceCompany: string; status?: string }>;
 }): CompanySummary {
   const companyName = params.company.companyName.trim().toLowerCase();
   const companyExpenses = params.expenses.filter((item) => item.companyName.trim().toLowerCase() === companyName);
   const companyMaintenanceClients = params.maintenanceClients.filter(
-    (item) => item.maintenanceCompany.trim().toLowerCase() === companyName
+    (item) =>
+      isMaintenanceClientStatusActive(item.status) &&
+      item.maintenanceCompany.trim().toLowerCase() === companyName
   );
 
   return {

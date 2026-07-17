@@ -28,6 +28,7 @@ const maintenanceMocks = vi.hoisted(() => ({
     onData([]);
     return vi.fn();
   }),
+  updateMaintenanceClient: vi.fn(),
   uploadMaintenanceBrandingAsset: vi.fn(),
 }));
 
@@ -158,6 +159,7 @@ describe("MaintenancePage client form", () => {
       onData([]);
       return vi.fn();
     });
+    maintenanceMocks.updateMaintenanceClient.mockResolvedValue(undefined);
     usersMocks.getAllUsers.mockResolvedValue([]);
     gmailMocks.sendSharedMaintenanceGmailReport.mockResolvedValue({
       messageId: "message-test",
@@ -228,6 +230,68 @@ describe("MaintenancePage client form", () => {
         "[data-assistant-action='maintenance-save-client']"
       )
     );
+  });
+
+  it("keeps inactive clients in the client history and excludes them from operational totals", async () => {
+    const activeClient = createMaintenanceClientTest("client-active", "Client Activ");
+    const inactiveClient = {
+      ...createMaintenanceClientTest("client-inactive", "Client Inactiv"),
+      status: "inactive" as const,
+      liftNumber: "LIFT-INACTIVE",
+      liftNumbers: ["LIFT-INACTIVE"],
+    };
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([activeClient, inactiveClient]);
+      return vi.fn();
+    });
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/maintenance?tab=clients"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Client Activ")).toBeInTheDocument();
+    expect(screen.getByText("Client Inactiv")).toBeInTheDocument();
+    expect(screen.getByText("1 activi · 1 inactivi. Clientii inactivi raman in istoric.")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Reactiveaza Client Inactiv" })).toBeChecked();
+
+    unmount();
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=dashboard"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    expect((await screen.findByText("Total clienti")).parentElement).toHaveTextContent("1");
+    expect(screen.getByText("Total lifturi").parentElement).toHaveTextContent("1");
+  });
+
+  it("changes the client status from the checkbox before delete", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createMaintenanceClientTest("client-toggle", "Client Toggle")]);
+      return vi.fn();
+    });
+    const user = userEvent.setup();
+
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=clients"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Marcheaza Client Toggle ca inactiv" })
+    );
+
+    await waitFor(() =>
+      expect(maintenanceMocks.updateMaintenanceClient).toHaveBeenCalledWith(
+        "client-toggle",
+        { status: "inactive" }
+      )
+    );
+    expect(screen.getByRole("checkbox", { name: "Reactiveaza Client Toggle" })).toBeChecked();
+    expect(screen.getByText("Inactiv", { selector: ".maintenance-client-inactive-badge" })).toBeInTheDocument();
   });
 
   it("defaults the report technician to the signed-in user", async () => {

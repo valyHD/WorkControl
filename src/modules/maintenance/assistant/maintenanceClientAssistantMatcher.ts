@@ -1,5 +1,6 @@
 import { tokenMatches } from "../../../lib/assistant/runtime/assistantFuzzy";
 import type { MaintenanceClient } from "../../../types/maintenance";
+import { filterActiveMaintenanceClients } from "../utils/maintenanceClientStatus";
 
 export type MaintenanceAddressLiftGroup = {
   key: string;
@@ -199,7 +200,7 @@ export function findMaintenanceClientsForAssistant(
   clients: MaintenanceClient[],
   clientQuery: string
 ) {
-  return findMatches(clients, clientQuery).map((item) => item.client);
+  return findMatches(filterActiveMaintenanceClients(clients), clientQuery).map((item) => item.client);
 }
 
 export function isExactMaintenanceClientAssistantMatch(

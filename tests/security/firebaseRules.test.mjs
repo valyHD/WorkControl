@@ -278,6 +278,18 @@ test("users, tools and maintenance are isolated between companies", async () => 
   await assertFails(getDoc(doc(db, "maintenanceClients", "client-b")));
 });
 
+test("only a manager from the client company can change maintenance client status", async () => {
+  await assertSucceeds(updateDoc(doc(firestore("manager-a"), "maintenanceClients", "client-a"), {
+    status: "inactive",
+  }));
+  await assertFails(updateDoc(doc(firestore("employee-a"), "maintenanceClients", "client-a"), {
+    status: "active",
+  }));
+  await assertFails(updateDoc(doc(firestore("manager-b"), "maintenanceClients", "client-a"), {
+    status: "active",
+  }));
+});
+
 test("maintenance report collection group requires company-scoped queries", async () => {
   const db = firestore("manager-a");
   await assertSucceeds(getDocs(query(
