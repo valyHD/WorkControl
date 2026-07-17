@@ -35,7 +35,14 @@ export function createAssistantConversationMemory(initial?: AssistantConversatio
       if (entity.entityType === "user") snapshot.lastUserId = entity.entityId;
     },
     rememberPage(pathname: string) {
-      snapshot = { ...snapshot, lastPage: pathname };
+      snapshot = {
+        ...snapshot,
+        previousPage:
+          snapshot.lastPage && snapshot.lastPage !== pathname
+            ? snapshot.lastPage
+            : snapshot.previousPage,
+        lastPage: pathname,
+      };
     },
     rememberCommand(command: string) {
       snapshot = { ...snapshot, lastCommand: command };
@@ -45,6 +52,10 @@ export function createAssistantConversationMemory(initial?: AssistantConversatio
       const toolId = getToolIdFromAssistantPath(pathname);
       snapshot = {
         ...snapshot,
+        previousPage:
+          snapshot.lastPage && snapshot.lastPage !== pathname
+            ? snapshot.lastPage
+            : snapshot.previousPage,
         lastPage: pathname,
         ...(vehicleId ? { lastVehicleId: vehicleId } : {}),
         ...(toolId ? { lastToolId: toolId } : {}),

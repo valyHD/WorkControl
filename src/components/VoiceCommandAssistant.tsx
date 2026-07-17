@@ -250,6 +250,8 @@ export default function VoiceCommandAssistant() {
 
   const applyOutcome = useCallback(
     (command: string, outcome: AssistantOrchestratorResult) => {
+      // Preserve the previous command until interpretation finishes so follow-ups can use it.
+      memoryRef.current.rememberCommand(command);
       setLastOutcome(outcome);
       setMessage(outcome.message);
       if (outcome.status === "confirmation_required" && outcome.contract) {
@@ -321,7 +323,6 @@ export default function VoiceCommandAssistant() {
       setChoices([]);
       setUiState("thinking");
       setMessage("Inteleg comanda si construiesc planul...");
-      memoryRef.current.rememberCommand(command);
       try {
         const outcome = await orchestrator.run({
           command,

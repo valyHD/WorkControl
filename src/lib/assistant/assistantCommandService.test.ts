@@ -428,7 +428,9 @@ describe("assistant command service local routing", () => {
       },
     });
 
-    await interpretAssistantCommand("fami ceva cu asta");
+    await interpretAssistantCommand("fami ceva cu asta", {
+      memory: { lastCommand: "deschide masina Toyota" },
+    });
 
     expect(mocks.callable).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -436,9 +438,34 @@ describe("assistant command service local routing", () => {
         originalCommand: "fami ceva cu asta",
         languageHints: expect.objectContaining({
           usesCurrentContext: true,
+          hasPreviousCommand: true,
+          previousAction: "navigate",
+          previousModules: expect.arrayContaining(["vehicles"]),
         }),
       })
     );
+  });
+
+  it("returns to the previous route locally without calling OpenAI", async () => {
+    const result = await interpretAssistantCommand("revino unde eram", {
+      route: "/notifications",
+      memory: {
+        lastPage: "/notifications",
+        previousPage: "/vehicles/vehicle-1?tab=gps",
+      },
+    });
+
+    expect(result).toMatchObject({
+      commandType: "navigation",
+      intent: "open_page",
+      toolCalls: [
+        {
+          id: "navigation.open",
+          input: { path: "/vehicles/vehicle-1?tab=gps", query: "" },
+        },
+      ],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
   });
 
   it("returns a human clarification instead of a technical OpenAI error", async () => {

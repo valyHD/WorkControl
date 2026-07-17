@@ -332,6 +332,7 @@ export function sanitizeAssistantV3PageContext(input: unknown): AssistantV3PageC
             }
           : undefined,
       lastPage: safeString(memory.lastPage, 300) || undefined,
+      previousPage: safeString(memory.previousPage, 300) || undefined,
       lastCommand: safeString(memory.lastCommand, 600) || undefined,
     },
   };

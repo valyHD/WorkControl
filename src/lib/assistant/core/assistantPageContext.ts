@@ -49,6 +49,7 @@ export function buildAssistantV3PageContext(params: {
           }
         : undefined,
       lastPage: params.memory.lastPage,
+      previousPage: params.memory.previousPage,
       lastCommand: params.memory.lastCommand,
     },
   };

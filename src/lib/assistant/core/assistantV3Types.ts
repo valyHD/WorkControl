@@ -57,6 +57,7 @@ export type AssistantV3OpenForm = {
 export type AssistantV3Memory = {
   lastEntity?: AssistantV3SelectedEntity;
   lastPage?: string;
+  previousPage?: string;
   lastCommand?: string;
 };
 

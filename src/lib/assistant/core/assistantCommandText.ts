@@ -99,6 +99,8 @@ function normalizeColloquialRomanian(value: string) {
       "pune $1",
     ],
     [/\bschimba\s*-?\s*i\b/giu, "schimba"],
+    [/\b(muta|trece|baga|lasa)\s*-?\s*(?:l|o|i)\b/giu, "$1"],
+    [/\bfa\s*-?\s*(?:l|o)\s+(?:ca\s+)?\b/giu, "seteaza status "],
     [/\bpune\s*-?\s*mi\b/giu, "pune"],
     [/\bpune\s*-?\s*i\b/giu, "pune"],
     [
@@ -142,6 +144,7 @@ function normalizeColloquialRomanian(value: string) {
     [/\b(?:mentenata|mentenenta)\b/giu, "mentenanta"],
     [/\b(?:cheltueli|cheltuelile)\b/giu, "cheltuieli"],
     [/\b(?:genereala|generala|generaza)\b/giu, "genereaza"],
+    [/\b(?:schimb|schimba|schimbi)\s+si\s+la\s+(?:asta|ala)\b/giu, "schimba aici"],
     [/\b(?:revisie|revizzie|revize|revizi)\b/giu, "revizie"],
     [/\b(?:interventi|interventzie)\b/giu, "interventie"],
     [/\b(?:petru|pentry|pentu|pentr|pentruu)\b/giu, "pentru"],

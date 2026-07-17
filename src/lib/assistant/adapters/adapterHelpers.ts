@@ -60,6 +60,7 @@ export function toLegacyRuntimeContext(
           }
         : undefined,
       lastPage: context.pageContext.memory.lastPage,
+      previousPage: context.pageContext.memory.previousPage,
       lastCommand: context.pageContext.memory.lastCommand,
     },
   };

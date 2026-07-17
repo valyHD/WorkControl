@@ -9,6 +9,7 @@ import {
 import {
   buildAssistantLanguageHints,
   buildLocalContextualFormContract,
+  buildLocalContextualNavigationContract,
   buildSafeAssistantClarificationContract,
 } from "./core/assistantHumanLanguage";
 import {
@@ -106,6 +107,7 @@ export type AssistantCommandContext = {
     lastProjectId?: string;
     lastUserId?: string;
     lastPage?: string;
+    previousPage?: string;
     lastCommand?: string;
   };
 };
@@ -371,6 +373,9 @@ export async function interpretAssistantCommand(
     });
   }
 
+  const localContextualNavigation = buildLocalContextualNavigationContract(cleanCommand, context);
+  if (localContextualNavigation) return buildLocalInterpretation(localContextualNavigation);
+
   const localNavigation = buildLocalPageNavigationContract(
     cleanCommand,
     context?.role || context?.userRole || "angajat"
@@ -393,7 +398,7 @@ export async function interpretAssistantCommand(
       command: cleanCommand,
       originalCommand,
       context: safeContext,
-      languageHints: buildAssistantLanguageHints(cleanCommand),
+      languageHints: buildAssistantLanguageHints(cleanCommand, context),
     });
   } catch {
     return buildLocalInterpretation(

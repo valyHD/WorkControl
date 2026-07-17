@@ -233,7 +233,8 @@ function renderAssistant(initialPath: string, withVehicleForm = false) {
 }
 
 async function sendCommand(command: string) {
-  fireEvent.click(screen.getByRole("button", { name: "Deschide asistentul vocal" }));
+  const launcher = screen.queryByRole("button", { name: "Deschide asistentul vocal" });
+  if (launcher) fireEvent.click(launcher);
   const input = await screen.findByPlaceholderText("Sau scrie comanda...");
   const user = userEvent.setup();
   await user.type(input, command);
@@ -319,6 +320,19 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     await sendCommand("schimba data");
     expect(await screen.findAllByText(/am nevoie de: campul exact/i)).not.toHaveLength(0);
     expect(mocks.updateVehicle).not.toHaveBeenCalled();
+  });
+
+  it("keeps the previous command available while interpreting a follow-up", async () => {
+    renderAssistant("/vehicles/vehicle-1/edit");
+
+    await sendCommand("schimba data");
+    await screen.findAllByText(/am nevoie de: campul exact/i);
+    await sendCommand("si pune-o pe 20 august");
+
+    await waitFor(() => expect(mocks.interpret).toHaveBeenCalledTimes(2));
+    expect(mocks.interpret.mock.calls[1][1]).toMatchObject({
+      memory: { lastCommand: "schimba data" },
+    });
   });
 
   it("shows old and new values and updates only after confirmation", async () => {

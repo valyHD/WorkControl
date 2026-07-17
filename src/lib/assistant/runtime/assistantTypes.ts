@@ -24,6 +24,7 @@ export type AssistantConversationMemorySnapshot = {
   lastProjectId?: string;
   lastUserId?: string;
   lastPage?: string;
+  previousPage?: string;
   lastCommand?: string;
 };
 

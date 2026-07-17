@@ -2762,6 +2762,7 @@ function buildAssistantPrompt(today, context) {
             }
           : null,
       lastPage: toSafeString(memory.lastPage),
+      previousPage: toSafeString(memory.previousPage),
       lastCommand: toSafeString(memory.lastCommand),
     },
   });
@@ -2798,6 +2799,8 @@ function buildAssistantPrompt(today, context) {
     'Pastreaza numele proprii, numerele, datele si identificatorii. Corecteaza numai forma instructiunii, nu inventa valori.',
     'Separa strict instructiunea de valoare: in "la observatii baga liftul merge normal", valoarea observatiei este doar "Liftul merge normal", nu restul comenzii.',
     'Foloseste pagina curenta, selectedEntity si lastEntity pentru pronume precum "asta", "aici", "al meu" sau "schimba si...". Daca exista doua entitati posibile, cere alegerea.',
+    'Foloseste previousPage numai pentru cereri explicite precum "revino unde eram" sau "inapoi acolo". Nu repeta automat actiunea ori modificarea din pagina anterioara.',
+    'Cand indiciile spun isContinuation, leaga noua clauza de lastCommand si lastEntity numai daca tipul entitatii si campul sunt compatibile. Nu copia valoarea veche si nu repeta o scriere fara confirmare.',
     'Comenzile cu mai multi pasi se pastreaza in ordinea rostita. Nu executa pasul urmator daca primul necesita clarificare.',
     'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
     'entity_update inseamna update prin servicii Firestore dupa resolve entity, nu prin formular si nu prin DOM.',
@@ -2869,6 +2872,24 @@ exports.interpretAssistantCommand = onCall(
       isMutation: rawLanguageHints.isMutation === true,
       fieldWords: Array.isArray(rawLanguageHints.fieldWords)
         ? rawLanguageHints.fieldWords.slice(0, 20).map((item) => toSafeString(item).slice(0, 50)).filter(Boolean)
+        : [],
+      actionSequence: Array.isArray(rawLanguageHints.actionSequence)
+        ? rawLanguageHints.actionSequence.slice(0, 8).map((item) => toSafeString(item).slice(0, 30)).filter(Boolean)
+        : [],
+      clauses: Array.isArray(rawLanguageHints.clauses)
+        ? rawLanguageHints.clauses.slice(0, 8).map((item) => toSafeString(item).slice(0, 160)).filter(Boolean)
+        : [],
+      contextReferences: Array.isArray(rawLanguageHints.contextReferences)
+        ? rawLanguageHints.contextReferences.slice(0, 12).map((item) => toSafeString(item).slice(0, 40)).filter(Boolean)
+        : [],
+      possibleEntityTypes: Array.isArray(rawLanguageHints.possibleEntityTypes)
+        ? rawLanguageHints.possibleEntityTypes.slice(0, 8).map((item) => toSafeString(item).slice(0, 40)).filter(Boolean)
+        : [],
+      isContinuation: rawLanguageHints.isContinuation === true,
+      hasPreviousCommand: rawLanguageHints.hasPreviousCommand === true,
+      previousAction: toSafeString(rawLanguageHints.previousAction).slice(0, 30),
+      previousModules: Array.isArray(rawLanguageHints.previousModules)
+        ? rawLanguageHints.previousModules.slice(0, 10).map((item) => toSafeString(item).slice(0, 40)).filter(Boolean)
         : [],
     };
     const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;

@@ -22,11 +22,19 @@ export type AssistantHumanAction =
 
 export type AssistantHumanLanguageHints = {
   action: AssistantHumanAction;
+  actionSequence: AssistantHumanAction[];
   modules: string[];
   usesCurrentContext: boolean;
   hasMultipleSteps: boolean;
   isMutation: boolean;
   fieldWords: string[];
+  clauses: string[];
+  contextReferences: string[];
+  possibleEntityTypes: string[];
+  isContinuation: boolean;
+  hasPreviousCommand: boolean;
+  previousAction?: AssistantHumanAction;
+  previousModules: string[];
 };
 
 const MODULE_TERMS: Record<string, string[]> = {
@@ -35,7 +43,7 @@ const MODULE_TERMS: Record<string, string[]> = {
   timesheets: ["pontaj", "pontaje", "proiect", "proiecte", "ore lucrate"],
   leave: ["concediu", "cerere concediu", "zile libere"],
   maintenance: ["mentenanta", "revizie", "interventie", "lift", "client"],
-  expenses: ["bon", "bonuri", "factura", "facturi", "cheltuiala", "ocr"],
+  expenses: ["bon", "bonul", "bonuri", "factura", "facturi", "cheltuiala", "ocr"],
   users: ["utilizator", "user", "angajat", "profil", "functie", "departament"],
   notifications: ["notificare", "notificari", "regula", "reminder"],
   settings: ["setare", "setari", "tema", "interfata", "font", "animatii"],
@@ -65,6 +73,42 @@ const FIELD_WORDS = [
   "proiect",
 ];
 
+const CONTEXT_REFERENCE_TERMS = [
+  "asta",
+  "acesta",
+  "aceasta",
+  "ala",
+  "aia",
+  "acolo",
+  "aici",
+  "al meu",
+  "a mea",
+  "pe el",
+  "pe ea",
+  "cel",
+  "cea",
+  "respectiv",
+  "respectiva",
+  "la fel",
+  "tot acolo",
+  "aceeasi",
+  "acelasi",
+  "curent",
+  "curenta",
+];
+
+const ENTITY_TYPE_BY_MODULE: Record<string, string> = {
+  vehicles: "vehicle",
+  tools: "tool",
+  timesheets: "project",
+  maintenance: "maintenanceClient",
+  users: "user",
+  leave: "leaveRequest",
+  expenses: "expense",
+  notifications: "notificationRule",
+  settings: "siteSettings",
+};
+
 function includesTerm(text: string, term: string) {
   const normalizedTerm = normalizeAssistantText(term);
   if (` ${text} `.includes(` ${normalizedTerm} `)) return true;
@@ -74,9 +118,8 @@ function includesTerm(text: string, term: string) {
     .some((token) => token.startsWith(normalizedTerm) || normalizedTerm.startsWith(token));
 }
 
-export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLanguageHints {
-  const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
-  const action: AssistantHumanAction = /\b(?:opreste|stop|inchide|termina)\b/.test(normalized)
+function inferHumanAction(normalized: string): AssistantHumanAction {
+  return /\b(?:opreste|stop|inchide|termina)\b/.test(normalized)
     ? "stop"
     : /\b(?:porneste|start|incepe|da drumul)\b/.test(normalized)
       ? "start"
@@ -86,7 +129,7 @@ export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLa
           ? "prepare"
           : /\b(?:creeaza|adauga|genereaza|fa un|fa o)\b/.test(normalized)
             ? "create"
-            : /\b(?:modifica|schimba|seteaza|actualizeaza|corecteaza|pune|trece|marcheaza|fa sa fie|lasa)\b/.test(
+            : /\b(?:modifica|schimba|seteaza|actualizeaza|corecteaza|pune|trece|marcheaza|muta|baga|fa sa fie|lasa)\b/.test(
                   normalized
                 )
               ? "update"
@@ -97,24 +140,51 @@ export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLa
                   : /\b(?:vad|vezi|afiseaza|citeste)\b/.test(normalized)
                     ? "read"
                     : "unknown";
+}
+
+function splitHumanClauses(normalized: string) {
+  return normalized
+    .split(/[;.!?]+|\b(?:si\s+apoi|iar\s+apoi|dupa\s+aia|dupa\s+aceea|dupa\s+care)\b/g)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLanguageHints {
+  const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
+  const action = inferHumanAction(normalized);
+  const clauses = splitHumanClauses(normalized);
+  const actionSequence = clauses.map(inferHumanAction).filter((item) => item !== "unknown");
 
   const modules = Object.entries(MODULE_TERMS)
     .filter(([, terms]) => terms.some((term) => includesTerm(normalized, term)))
     .map(([module]) => module);
   const fieldWords = FIELD_WORDS.filter((field) => includesTerm(normalized, field));
+  const contextReferences = CONTEXT_REFERENCE_TERMS.filter((term) => includesTerm(normalized, term));
   const usesCurrentContext =
-    /\b(?:asta|acesta|aceasta|aici|al meu|a mea|curent|curenta|lui|ei|si pe el|si pe ea)\b/.test(
-      normalized
-    );
-  const hasMultipleSteps = /\b(?:apoi|dupa aia|dupa aceea|iar dupa|si apoi)\b/.test(normalized);
+    contextReferences.length > 0 ||
+    /\b(?:lui|ei|si\s+(?:pe|la)\s+(?:el|ea)|mai\s+pune|mai\s+schimba)\b/.test(normalized);
+  const hasMultipleSteps = clauses.length > 1 || actionSequence.length > 1;
+  const isContinuation =
+    /^(?:si|iar|mai|tot|acum|atunci|inca)\b/.test(normalized) || usesCurrentContext;
+  const possibleEntityTypes = Array.from(
+    new Set(modules.map((module) => ENTITY_TYPE_BY_MODULE[module]).filter(Boolean))
+  );
 
   return {
     action,
+    actionSequence,
     modules,
     usesCurrentContext,
     hasMultipleSteps,
     isMutation: ["update", "create", "start", "stop", "send", "prepare"].includes(action),
     fieldWords,
+    clauses,
+    contextReferences,
+    possibleEntityTypes,
+    isContinuation,
+    hasPreviousCommand: false,
+    previousModules: [],
   };
 }
 
@@ -242,8 +312,55 @@ export function buildLocalContextualFormContract(
   };
 }
 
-export function buildAssistantLanguageHints(command: string) {
-  return analyzeAssistantHumanLanguage(command);
+function safePreviousPage(value: string) {
+  const path = value.trim();
+  return path.startsWith("/") && !path.startsWith("//") && !/[\r\n]/.test(path) ? path : "";
+}
+
+/** Returns to the previous known WorkControl page without replaying any previous write. */
+export function buildLocalContextualNavigationContract(
+  command: string,
+  context?: AssistantCommandContext
+): AssistantV3Contract | null {
+  const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
+  const requestsPreviousPage =
+    /\b(?:revino|intoarce\s+ma|du\s+ma\s+inapoi|mergi\s+inapoi|deschide)\b.*\b(?:unde\s+(?:am\s+ramas|eram)|pagina\s+(?:anterioara|de\s+mai\s+devreme)|inapoi|acolo)\b/.test(
+      normalized
+    ) || /^(?:inapoi|tot\s+acolo|unde\s+am\s+ramas)$/.test(normalized);
+  if (!requestsPreviousPage) return null;
+
+  const current = contextPath(context);
+  const memory = context?.memory as (AssistantCommandContext["memory"] & { previousPage?: string }) | undefined;
+  const target = safePreviousPage(memory?.previousPage || memory?.lastPage || "");
+  if (!target || target.split(/[?#]/)[0] === current) return null;
+
+  return {
+    version: "3",
+    commandType: "navigation",
+    intent: "open_page",
+    toolCalls: [{ id: "navigation.open", input: { path: target, query: "" } }],
+    targetPage: target,
+    entityReferences: [],
+    missingInformation: [],
+    confidence: 0.99,
+    confirmationRequired: false,
+    response: "Revin la pagina anterioara.",
+  };
+}
+
+export function buildAssistantLanguageHints(
+  command: string,
+  context?: AssistantCommandContext
+): AssistantHumanLanguageHints {
+  const hints = analyzeAssistantHumanLanguage(command);
+  const previousCommand = context?.memory?.lastCommand?.trim() || "";
+  const previous = previousCommand ? analyzeAssistantHumanLanguage(previousCommand) : null;
+  return {
+    ...hints,
+    hasPreviousCommand: Boolean(previous),
+    previousAction: previous?.action,
+    previousModules: previous?.modules || [],
+  };
 }
 
 export function buildSafeAssistantClarificationContract(

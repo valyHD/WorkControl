@@ -9,7 +9,12 @@ type FieldMapItem = {
 };
 
 const VEHICLE_FIELDS: FieldMapItem[] = [
-  { key: "currentKm", label: "Km curenti", aliases: ["kilometri", "km", "kilometraj"], kind: "number" },
+  {
+    key: "currentKm",
+    label: "Km curenti",
+    aliases: ["kilometri", "km", "kilometraj", "km actuali", "km curenti", "cati km", "bord"],
+    kind: "number",
+  },
   { key: "nextItpDate", label: "ITP", aliases: ["itp"], kind: "date" },
   { key: "nextRcaDate", label: "RCA", aliases: ["rca", "asigurare"], kind: "date" },
   { key: "nextCascoDate", label: "CASCO", aliases: ["casco"], kind: "date" },
@@ -20,9 +25,9 @@ const VEHICLE_FIELDS: FieldMapItem[] = [
   { key: "brand", label: "Marca", aliases: ["marca", "brand"], kind: "text" },
   { key: "model", label: "Model", aliases: ["model"], kind: "text" },
   { key: "vin", label: "VIN", aliases: ["vin", "serie sasiu"], kind: "text" },
-  { key: "status", label: "Status", aliases: ["status", "stare"], kind: "status" },
-  { key: "driver", label: "Sofer", aliases: ["sofer", "conducator", "driver"], kind: "user" },
-  { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner"], kind: "user" },
+  { key: "status", label: "Status", aliases: ["status", "stare", "situatie", "functionare"], kind: "status" },
+  { key: "driver", label: "Sofer", aliases: ["sofer", "conducator", "driver", "cine conduce", "sofer curent"], kind: "user" },
+  { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner", "cine raspunde"], kind: "user" },
 ];
 
 const TOOL_FIELDS: FieldMapItem[] = [
@@ -31,7 +36,7 @@ const TOOL_FIELDS: FieldMapItem[] = [
   { key: "qrCodeValue", label: "Cod QR", aliases: ["qr", "cod qr"], kind: "text" },
   { key: "status", label: "Status", aliases: ["status", "stare"], kind: "status" },
   { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner"], kind: "user" },
-  { key: "holder", label: "Detinator", aliases: ["detinator", "utilizator", "la cine este"], kind: "user" },
+  { key: "holder", label: "Detinator", aliases: ["detinator", "utilizator", "la cine este", "la cine e", "cine o are", "cine il are"], kind: "user" },
   { key: "locationLabel", label: "Locatie", aliases: ["locatie", "locatia", "unde este"], kind: "text" },
   { key: "description", label: "Observatii", aliases: ["observatii", "descriere", "note"], kind: "text" },
   { key: "warrantyUntil", label: "Garantie", aliases: ["garantie"], kind: "date" },
@@ -43,8 +48,8 @@ const PROJECT_FIELDS: FieldMapItem[] = [
 ];
 
 const USER_FIELDS: FieldMapItem[] = [
-  { key: "roleTitle", label: "Functie", aliases: ["functie", "meserie", "post", "functia"], kind: "text" },
-  { key: "department", label: "Departament", aliases: ["departament", "echipa", "departamentul"], kind: "text" },
+  { key: "roleTitle", label: "Functie", aliases: ["functie", "meserie", "post", "functia", "ce lucreaza"], kind: "text" },
+  { key: "department", label: "Departament", aliases: ["departament", "echipa", "departamentul", "unde lucreaza", "sector"], kind: "text" },
   { key: "role", label: "Rol aplicatie", aliases: ["rol", "drepturi", "rol aplicatie"], kind: "status" },
   { key: "fullName", label: "Nume", aliases: ["nume", "nume complet"], kind: "text" },
 ];

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeAssistantHumanLanguage,
+  buildAssistantLanguageHints,
   buildLocalContextualFormContract,
+  buildLocalContextualNavigationContract,
   buildSafeAssistantClarificationContract,
 } from "./assistantHumanLanguage";
 
@@ -16,6 +18,73 @@ describe("assistant human language", () => {
       isMutation: true,
       fieldWords: expect.arrayContaining(["kilometri"]),
     });
+  });
+
+  it("describes a natural multi-step request without executing it prematurely", () => {
+    expect(
+      analyzeAssistantHumanLanguage("du-ma la masina Toyota si apoi schimba km la 7200")
+    ).toMatchObject({
+      modules: expect.arrayContaining(["vehicles"]),
+      hasMultipleSteps: true,
+      actionSequence: expect.arrayContaining(["navigate", "update"]),
+      possibleEntityTypes: expect.arrayContaining(["vehicle"]),
+    });
+  });
+
+  it("marks a follow-up as contextual and exposes only safe previous-command hints", () => {
+    expect(
+      buildAssistantLanguageHints("si pune-i ITP-ul pe 20 august", {
+        memory: { lastCommand: "deschide masina Toyota" },
+      })
+    ).toMatchObject({
+      isContinuation: true,
+      hasPreviousCommand: true,
+      previousAction: "navigate",
+      previousModules: expect.arrayContaining(["vehicles"]),
+    });
+  });
+
+  it.each([
+    ["si aproba cererea de concediu respectiva", "leaveRequest"],
+    ["la bonul ala schimba proiectul", "expense"],
+    ["opreste regula respectiva", "notificationRule"],
+    ["fa tema aia verde", "siteSettings"],
+  ])("recognizes contextual entities across modules: %s", (command, entityType) => {
+    expect(analyzeAssistantHumanLanguage(command)).toMatchObject({
+      usesCurrentContext: true,
+      possibleEntityTypes: expect.arrayContaining([entityType]),
+    });
+  });
+
+  it("returns to the previous WorkControl page without replaying a previous write", () => {
+    expect(
+      buildLocalContextualNavigationContract("revino unde eram", {
+        route: "/notifications",
+        memory: {
+          lastPage: "/notifications",
+          previousPage: "/vehicles/vehicle-1?tab=gps",
+          lastCommand: "schimba kilometrii la 7200",
+        },
+      })
+    ).toMatchObject({
+      commandType: "navigation",
+      confirmationRequired: false,
+      toolCalls: [
+        {
+          id: "navigation.open",
+          input: { path: "/vehicles/vehicle-1?tab=gps", query: "" },
+        },
+      ],
+    });
+  });
+
+  it("rejects an unsafe remembered route", () => {
+    expect(
+      buildLocalContextualNavigationContract("tot acolo", {
+        route: "/dashboard",
+        memory: { previousPage: "//outside.example" },
+      })
+    ).toBeNull();
   });
 
   it.each([

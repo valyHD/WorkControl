@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { resolveAssistantField, resolveAssistantFieldChanges } from "./assistantFieldResolver";
+import type { AssistantRuntimeEntityType } from "./assistantTypes";
 
 describe("assistant field resolver", () => {
   it.each(["kilometri", "km", "kilometraj"])("maps %s to currentKm", (alias) => {
     expect(resolveAssistantField("vehicle", alias)?.key).toBe("currentKm");
+  });
+
+  it.each([
+    ["vehicle", "cati km", "currentKm"],
+    ["vehicle", "bord", "currentKm"],
+    ["vehicle", "cine conduce", "driver"],
+    ["vehicle", "cine raspunde", "owner"],
+    ["tool", "cine o are", "holder"],
+    ["user", "ce lucreaza", "roleTitle"],
+    ["user", "unde lucreaza", "department"],
+  ])("maps rough field wording for %s: %s", (entityType, alias, expected) => {
+    expect(resolveAssistantField(entityType as AssistantRuntimeEntityType, alias)?.key).toBe(
+      expected
+    );
   });
 
   it("normalizes plate updates without spaces", () => {
