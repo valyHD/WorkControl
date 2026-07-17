@@ -56,4 +56,21 @@ describe("assistant command service local routing", () => {
     });
     expect(mocks.callable).not.toHaveBeenCalled();
   });
+
+  it("routes a current vehicle mileage update locally without OpenAI", async () => {
+    const result = await interpretAssistantCommand("modifică kilometri curenți la 7200");
+
+    expect(result).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_vehicle",
+      entityType: "vehicle",
+      entityQuery: "",
+      fieldsToUpdate: { currentKm: 7200 },
+      toolCalls: [
+        { id: "vehicles.update", input: { entityQuery: "", fields: { currentKm: 7200 } } },
+      ],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
 });

@@ -5,6 +5,7 @@ import { buildLocalMaintenanceReportContract } from "./core/assistantMaintenance
 import { normalizeAssistantCommandText } from "./core/assistantCommandText";
 import {
   buildLocalAssistantHelpContract,
+  buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./core/assistantLocalCommands";
 import {
@@ -201,6 +202,18 @@ export async function interpretAssistantCommand(
 
   const localHelp = buildLocalAssistantHelpContract(cleanCommand);
   if (localHelp) return buildLocalInterpretation(localHelp);
+
+  const localVehicleMileage = buildLocalVehicleMileageContract(cleanCommand);
+  if (localVehicleMileage) {
+    const entityQuery = localVehicleMileage.entityReferences[0]?.query || "";
+    const fields = localVehicleMileage.toolCalls[0]?.input.fields as
+      Record<string, AssistantCommandFieldValue> | undefined;
+    return buildLocalInterpretation(localVehicleMileage, {
+      entityType: "vehicle",
+      entityQuery,
+      fields: fields || {},
+    });
+  }
 
   const localVehicleTracker = buildLocalVehicleTrackerContract(cleanCommand);
   if (localVehicleTracker) {

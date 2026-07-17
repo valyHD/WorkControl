@@ -1,7 +1,12 @@
-import type { AssistantConversationMemorySnapshot, AssistantResolvedEntitySummary } from "./assistantTypes";
+import type {
+  AssistantConversationMemorySnapshot,
+  AssistantResolvedEntitySummary,
+} from "./assistantTypes";
 
 export function getVehicleIdFromAssistantPath(pathname?: string) {
-  const match = String(pathname || "").match(/^\/vehicles\/([^/?#]+)(?:\/edit|\/live)?\/?$/);
+  const match = String(pathname || "").match(
+    /^\/vehicles\/([^/?#]+)(?:\/(?:edit|live))?\/?(?:[?#].*)?$/
+  );
   const vehicleId = match?.[1] || "";
   if (!vehicleId || vehicleId === "new" || vehicleId === "gps-map") return "";
   return vehicleId;

@@ -120,20 +120,18 @@ function navigationContract(path: string) {
   });
 }
 
-function updateVehicleContract(query = "B33LGR") {
+function updateVehicleContract(query = "B33LGR", currentKm = 6616) {
   return contract({
     commandType: "entity_update",
     intent: "update_vehicle",
-    toolCalls: [
-      { id: "vehicles.update", input: { entityQuery: query, fields: { currentKm: 6616 } } },
-    ],
+    toolCalls: [{ id: "vehicles.update", input: { entityQuery: query, fields: { currentKm } } }],
     targetPage: "",
     entityReferences: [{ type: "vehicle", query, id: "" }],
     confirmationRequired: true,
     response: "Schimb kilometrii masinii.",
     entityType: "vehicle",
     entityQuery: query,
-    fieldsToUpdate: { currentKm: 6616 },
+    fieldsToUpdate: { currentKm },
     risk: "medium",
     needsConfirmation: true,
     spokenSummary: "Schimb kilometrii masinii.",
@@ -332,6 +330,28 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     expect(mocks.updateVehicle).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Confirmă" }));
     await waitFor(() => expect(mocks.updateVehicle).toHaveBeenCalledTimes(1));
+  });
+
+  it("updates the current vehicle mileage from the personal vehicle route", async () => {
+    mocks.interpret.mockResolvedValue(updateVehicleContract("", 7200));
+    renderAssistant("/vehicles/vehicle-1?view=my-vehicle");
+
+    await sendCommand("modifică kilometri curenți la 7200");
+
+    expect(await screen.findByRole("heading", { name: /Confirm/ })).toBeInTheDocument();
+    expect(screen.getByText("6000")).toBeInTheDocument();
+    expect(screen.getByText("7200")).toBeInTheDocument();
+    expect(mocks.updateVehicle).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /Confirm/ }));
+
+    await waitFor(() =>
+      expect(mocks.updateVehicle).toHaveBeenCalledWith(
+        "vehicle-1",
+        expect.objectContaining({ currentKm: 7200 })
+      )
+    );
+    expect(screen.getByRole("button", { name: "Deschide asistentul vocal" })).toBeInTheDocument();
   });
 
   it("renders controlled choices when entity resolution is ambiguous", async () => {

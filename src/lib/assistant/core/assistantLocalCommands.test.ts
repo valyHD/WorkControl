@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocalAssistantHelpContract,
+  buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./assistantLocalCommands";
 
@@ -28,6 +29,29 @@ describe("local assistant help commands", () => {
     });
     expect(contract?.response).toContain("genereaza raport revizie pentru Vali");
     expect(contract?.response).toContain("GPS-ul Toyota");
+  });
+});
+
+describe("local vehicle mileage commands", () => {
+  it.each([
+    ["modifica kilometri curenti la 7200", "", 7200],
+    ["schimba kilometrii Loganului la 6200", "logan", 6200],
+    ["la Toyota pune km 7.200", "toyota", 7200],
+    ["seteaza kilometrajul la sase mii doua sute", "", 6200],
+  ])("builds a controlled mileage update: %s", (command, query, value) => {
+    expect(buildLocalVehicleMileageContract(command)).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_vehicle",
+      toolCalls: [
+        { id: "vehicles.update", input: { entityQuery: query, fields: { currentKm: value } } },
+      ],
+      confirmationRequired: true,
+      confidence: 0.99,
+    });
+  });
+
+  it("does not turn a mileage question into an update", () => {
+    expect(buildLocalVehicleMileageContract("arata-mi kilometrii masinii")).toBeNull();
   });
 });
 

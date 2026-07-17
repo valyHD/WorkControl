@@ -1,4 +1,5 @@
 import type { AssistantV3Contract } from "./assistantV3Types";
+import { correctRomanianKilometers } from "../speech/romanianSpeechCorrections";
 
 const HELP_RESPONSE = [
   "Pot sa te ajut direct cu:",
@@ -63,6 +64,129 @@ function normalizeVehicleQueryToken(value: string) {
   if (normalized.endsWith("ului") && normalized.length > 6) return normalized.slice(0, -4);
   if (normalized.endsWith("ei") && normalized.length > 4) return `${normalized.slice(0, -2)}a`;
   return normalized;
+}
+
+const VEHICLE_MILEAGE_ACTION_PATTERN =
+  /\b(?:modifica|schimba|pune|seteaza|actualizeaza|corecteaza|trece)\b/;
+const VEHICLE_MILEAGE_FIELD_PATTERN = /\b(?:km|kilometri|kilometrii|kilometraj|kilometrajul)\b/;
+
+function parseVehicleMileageValue(value: string) {
+  const candidate = value.replace(/\s+/g, " ").trim();
+  if (!candidate) return null;
+  if (/^-?\d[\d\s.,]*$/.test(candidate)) {
+    const compact = candidate.replace(/(?<=\d)[.\s](?=\d{3}\b)/g, "").replace(",", ".");
+    const numeric = Number(compact);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return correctRomanianKilometers(candidate);
+}
+
+function cleanVehicleMileageQuery(value: string) {
+  const filler = new Set([
+    "a",
+    "al",
+    "actual",
+    "actuali",
+    "curent",
+    "curenti",
+    "in",
+    "la",
+    "lui",
+    "masina",
+    "masinii",
+    "mea",
+    "mei",
+    "mele",
+    "meu",
+    "pe",
+    "pentru",
+    "vehicul",
+    "vehiculului",
+  ]);
+  return normalizeForMatching(value)
+    .split(" ")
+    .filter((token) => token && !filler.has(token))
+    .map(normalizeVehicleQueryToken)
+    .join(" ")
+    .trim();
+}
+
+function extractVehicleMileageParts(command: string) {
+  const normalized = normalizeForMatching(command);
+  const actionMatch = normalized.match(VEHICLE_MILEAGE_ACTION_PATTERN);
+  const fieldMatch = normalized.match(VEHICLE_MILEAGE_FIELD_PATTERN);
+  if (
+    !actionMatch ||
+    actionMatch.index === undefined ||
+    !fieldMatch ||
+    fieldMatch.index === undefined
+  ) {
+    return null;
+  }
+
+  const afterField = normalized.slice(fieldMatch.index + fieldMatch[0].length).trim();
+  if (!afterField) return null;
+
+  let value: number | null = null;
+  let queryPart = "";
+  const connectors = [...afterField.matchAll(/\b(?:la|in|cu|pe|sa\s+fie|devina)\b/g)].reverse();
+
+  for (const connector of connectors) {
+    const connectorIndex = connector.index ?? -1;
+    if (connectorIndex < 0) continue;
+    const candidate = afterField.slice(connectorIndex + connector[0].length);
+    const parsed = parseVehicleMileageValue(candidate);
+    if (parsed === null) continue;
+    value = parsed;
+    queryPart = afterField.slice(0, connectorIndex);
+    break;
+  }
+
+  if (value === null) {
+    const tokens = afterField.split(" ").filter(Boolean);
+    for (let index = 0; index < tokens.length; index += 1) {
+      const parsed = parseVehicleMileageValue(tokens.slice(index).join(" "));
+      if (parsed === null) continue;
+      value = parsed;
+      queryPart = tokens.slice(0, index).join(" ");
+      break;
+    }
+  }
+
+  if (value === null) return null;
+
+  let entityQuery = cleanVehicleMileageQuery(queryPart);
+  if (!entityQuery) {
+    entityQuery = cleanVehicleMileageQuery(normalized.slice(0, actionMatch.index));
+  }
+  return { entityQuery, value };
+}
+
+export function buildLocalVehicleMileageContract(command: string): AssistantV3Contract | null {
+  const parsed = extractVehicleMileageParts(command);
+  if (!parsed) return null;
+
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent: "update_vehicle",
+    toolCalls: [
+      {
+        id: "vehicles.update",
+        input: { entityQuery: parsed.entityQuery, fields: { currentKm: parsed.value } },
+      },
+    ],
+    targetPage: "",
+    entityReferences: parsed.entityQuery
+      ? [{ type: "vehicle", query: parsed.entityQuery, id: "" }]
+      : [],
+    missingInformation: [],
+    confidence: 0.99,
+    confirmationRequired: true,
+    response: parsed.entityQuery
+      ? `Schimb kilometrajul masinii ${parsed.entityQuery} la ${parsed.value} km.`
+      : `Schimb kilometrajul masinii curente la ${parsed.value} km.`,
+  };
 }
 
 function extractVehicleQuery(command: string, destination: "details" | "tracker") {
