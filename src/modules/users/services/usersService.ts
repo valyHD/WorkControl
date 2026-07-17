@@ -25,7 +25,7 @@ import {
   getCurrentCompanyAccessContext,
   type CompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
-import { getUserDirectoryCollectionName } from "../../../lib/firebase/companyIsolationRollout";
+import { getUserDirectoryCollectionNameForAccess } from "../../../lib/firebase/companyIsolationRollout";
 import { buildAuditChanges, type AuditFieldDescriptor } from "../../audit/utils/auditMetadata";
 import type { AppUserItem, UserRole } from "../../../types/user";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
@@ -135,8 +135,7 @@ function mapUserDoc(id: string, data: Record<string, unknown>): AppUserItem {
 export function getUserDirectorySourceName(
   context: CompanyAccessContext
 ): "users" | "userOperationalViews" {
-  if (context.globalAdmin) return "users";
-  return getUserDirectoryCollectionName();
+  return getUserDirectoryCollectionNameForAccess(context.globalAdmin);
 }
 
 function getUserDirectorySource(context: CompanyAccessContext) {

@@ -14,10 +14,7 @@ const firestoreMocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("firebase/firestore", () => firestoreMocks);
-vi.mock("../../../lib/firebase/firebase", () => ({ db: {}, auth: { currentUser: { uid: "user-1" } } }));
-vi.mock("../../../lib/firebase/companyAccess", () => ({
-  buildCompanyScopeConstraints: () => [{ kind: "where", field: "companyId", operator: "==", value: "company-test" }],
+const companyAccessMocks = vi.hoisted(() => ({
   getCurrentCompanyAccessContext: vi.fn().mockResolvedValue({
     uid: "user-1",
     role: "admin",
@@ -27,10 +24,42 @@ vi.mock("../../../lib/firebase/companyAccess", () => ({
   }),
 }));
 
+vi.mock("firebase/firestore", () => firestoreMocks);
+vi.mock("../../../lib/firebase/firebase", () => ({ db: {}, auth: { currentUser: { uid: "user-1" } } }));
+vi.mock("../../../lib/firebase/companyAccess", () => ({
+  buildCompanyScopeConstraints: () => [{ kind: "where", field: "companyId", operator: "==", value: "company-test" }],
+  getCurrentCompanyAccessContext: companyAccessMocks.getCurrentCompanyAccessContext,
+}));
+
 describe("dashboardService cost bounds", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    companyAccessMocks.getCurrentCompanyAccessContext.mockResolvedValue({
+      uid: "user-1",
+      role: "admin",
+      primaryCompanyId: "company-test",
+      companyIds: ["company-test"],
+      globalAdmin: false,
+    });
     firestoreMocks.getDocs.mockResolvedValue({ docs: [] });
+  });
+
+  it("loads the complete users directory for global admins", async () => {
+    companyAccessMocks.getCurrentCompanyAccessContext.mockResolvedValueOnce({
+      uid: "global-admin",
+      role: "admin",
+      primaryCompanyId: "",
+      companyIds: [],
+      globalAdmin: true,
+    });
+    const { getDashboardData } = await import("./dashboardService");
+
+    await getDashboardData("global-admin", "2026-07-17", "admin");
+
+    expect(firestoreMocks.query.mock.calls.some(([base]) => base === "users")).toBe(true);
+    expect(
+      firestoreMocks.query.mock.calls.some(([base]) => base === "userOperationalViews")
+    ).toBe(false);
   });
 
   it("loads only the selected day and limits recent notifications", async () => {

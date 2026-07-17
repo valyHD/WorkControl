@@ -122,7 +122,14 @@ export default function TimesheetCalendar({ timesheets, userThemeKey, initialMon
             >
               <strong>{date.getDate()}</strong>
               <span>{getDayLabel(tone)}</span>
-              {totalMinutes > 0 ? <small>{formatMinutes(totalMinutes)}</small> : null}
+              {totalMinutes > 0 ? (
+                <small
+                  className="timesheet-day-hours"
+                  aria-label={`Ore pontate: ${formatMinutes(totalMinutes)}`}
+                >
+                  {formatMinutes(totalMinutes)}
+                </small>
+              ) : null}
             </button>
           );
         })}

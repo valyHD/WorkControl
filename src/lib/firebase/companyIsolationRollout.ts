@@ -8,6 +8,12 @@ export function getUserDirectoryCollectionName(): "users" | "userOperationalView
   return areCompanyIsolationReadsEnabled() ? "userOperationalViews" : "users";
 }
 
+export function getUserDirectoryCollectionNameForAccess(
+  globalAdmin: boolean
+): "users" | "userOperationalViews" {
+  return globalAdmin ? "users" : getUserDirectoryCollectionName();
+}
+
 export function getVehicleDirectoryCollectionName(): "vehicles" | "vehicleOperationalViews" {
   return areCompanyIsolationReadsEnabled() ? "vehicleOperationalViews" : "vehicles";
 }

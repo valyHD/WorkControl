@@ -48,7 +48,7 @@ describe("TimesheetCalendar", () => {
     expect(screen.getByText(/iulie 2026/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Luna anterioara" }));
     expect(screen.getByText(/iunie 2026/i)).toBeInTheDocument();
-    expect(screen.getByText("8h 00m")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ore pontate: 8h 00m")).toHaveClass("timesheet-day-hours");
   });
 
   it("uses the user's visual theme and identifies one-minute sessions", async () => {
@@ -63,7 +63,9 @@ describe("TimesheetCalendar", () => {
       </MemoryRouter>
     );
 
-    const dayButton = screen.getByRole("button", { name: /12\s*complet\s*0h 01m/i });
+    const dayButton = screen.getByRole("button", {
+      name: /12\s*complet\s*ore pontate:\s*0h 01m/i,
+    });
     expect(dayButton).toHaveClass("user-theme-u6");
     await user.click(dayButton);
     expect(screen.getByText(/sesiune foarte scurta/i)).toBeInTheDocument();

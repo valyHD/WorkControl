@@ -12,7 +12,7 @@ import {
   type CompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
 import {
-  getUserDirectoryCollectionName,
+  getUserDirectoryCollectionNameForAccess,
   getVehicleDirectoryCollectionName,
 } from "../../../lib/firebase/companyIsolationRollout";
 import { isMaintenanceClientStatusActive } from "../../maintenance/utils/maintenanceClientStatus";
@@ -289,7 +289,7 @@ async function getDashboardReferenceData(context: CompanyAccessContext): Promise
     const [usersSnap, toolsSnap, vehiclesSnap, projectsSnap] = await Promise.all([
       getDocs(
         query(
-          collection(db, getUserDirectoryCollectionName()),
+          collection(db, getUserDirectoryCollectionNameForAccess(context.globalAdmin)),
           ...scope,
           orderBy("fullName", "asc"),
           limit(DASHBOARD_LIMITS.users)

@@ -482,6 +482,27 @@ textarea.tool-input {
   border-color: rgba(127, 145, 173, 0.18);
 }
 
+.leave-cell-minutes,
+.timesheet-day-cell small.timesheet-day-hours {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  margin-top: 5px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 1px solid #99e2d0;
+  border-radius: 7px;
+  background: #e1f8f2;
+  color: #087563;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .vehicle-live-route-card__mapWrap,
 .vehicle-live-route-card__empty,
 .vehicle-gps-map-card .leaflet-container,
