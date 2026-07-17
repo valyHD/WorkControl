@@ -2,6 +2,11 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase/firebase";
 import type { AssistantCommandType } from "./runtime/assistantClassifier";
 import { buildLocalMaintenanceReportContract } from "./core/assistantMaintenanceReportCommand";
+import { normalizeAssistantCommandText } from "./core/assistantCommandText";
+import {
+  buildLocalAssistantHelpContract,
+  buildLocalVehicleTrackerContract,
+} from "./core/assistantLocalCommands";
 import {
   normalizeAndValidateAssistantV3Contract,
   sanitizeAssistantV3PageContext,
@@ -51,7 +56,8 @@ export type AssistantCommandIntent =
   | "update_profile_field"
   | "update_current_page_field"
   | "open_user_activity"
-  | "create_manual_notification";
+  | "create_manual_notification"
+  | "assistant_help";
 
 export type AssistantCommandEntityType =
   "vehicle" | "tool" | "project" | "user" | "maintenanceClient" | "page" | "currentPage" | "none";
@@ -153,12 +159,57 @@ export type AssistantCommandInterpretation = {
 
 export type AssistantCommandInterpretationV3 = AssistantCommandInterpretation & AssistantV3Contract;
 
+function buildLocalInterpretation(
+  contract: AssistantV3Contract,
+  overrides: {
+    entityType?: AssistantCommandEntityType;
+    entityQuery?: string;
+    fields?: Record<string, AssistantCommandFieldValue>;
+    buttonHint?: string;
+    reportType?: "revizie" | "interventie" | "";
+  } = {}
+): AssistantCommandInterpretationV3 {
+  const fields = overrides.fields || {};
+  return {
+    ...contract,
+    entityType: overrides.entityType || "none",
+    entityQuery: overrides.entityQuery || "",
+    fields,
+    fieldsToUpdate: fields,
+    shouldNavigate: contract.commandType === "navigation" || Boolean(contract.targetPage),
+    shouldFillForm: contract.commandType === "form_fill",
+    shouldUpdateFirestore: false,
+    targetText: overrides.entityQuery || "",
+    pageHint: contract.targetPage,
+    buttonHint: overrides.buttonHint || "",
+    missingFields: contract.missingInformation,
+    risk: contract.confirmationRequired ? "medium" : "low",
+    needsConfirmation: contract.confirmationRequired,
+    spokenSummary: contract.response,
+    reportType: overrides.reportType || "",
+    startDate: "",
+    endDate: "",
+  };
+}
+
 export async function interpretAssistantCommand(
   command: string,
   context?: AssistantCommandContext
 ): Promise<AssistantCommandInterpretationV3 | null> {
-  const cleanCommand = command.trim();
+  const cleanCommand = normalizeAssistantCommandText(command);
   if (!cleanCommand) return null;
+
+  const localHelp = buildLocalAssistantHelpContract(cleanCommand);
+  if (localHelp) return buildLocalInterpretation(localHelp);
+
+  const localVehicleTracker = buildLocalVehicleTrackerContract(cleanCommand);
+  if (localVehicleTracker) {
+    const entityQuery = localVehicleTracker.entityReferences[0]?.query || "";
+    return buildLocalInterpretation(localVehicleTracker, {
+      entityType: entityQuery ? "vehicle" : "none",
+      entityQuery,
+    });
+  }
 
   const localMaintenanceReport = buildLocalMaintenanceReportContract(cleanCommand, context);
   if (localMaintenanceReport) {

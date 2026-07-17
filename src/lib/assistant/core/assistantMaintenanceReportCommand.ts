@@ -30,9 +30,9 @@ function cleanExtractedValue(value: string) {
 
 function sliceUntilCommandMarker(original: string, normalized: string) {
   const stopPatterns = [
-    /\s+(?:si\s+)?cu\s+(?:observatia|observatie|mentiunea|comentariul|comentariu)\b/,
-    /\s+(?:si\s+)?(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/,
-    /\s+(?:si\s+)?(?:asteapta|apoi)\b/,
+    /(?:^|\s)(?:si\s+)?cu\s+(?:observatia|observatie|mentiunea|comentariul|comentariu)\b/,
+    /(?:^|\s)(?:si\s+)?(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/,
+    /(?:^|\s)(?:si\s+)?(?:asteapta|apoi)\b/,
   ];
   const indexes = stopPatterns
     .map((pattern) => normalized.search(pattern))
@@ -51,6 +51,15 @@ function extractClientQuery(command: string, normalized: string) {
   const forMarker = /\bpentru\s+/.exec(normalized);
   if (forMarker?.index !== undefined) {
     const start = forMarker.index + forMarker[0].length;
+    return sliceUntilCommandMarker(command.slice(start), normalized.slice(start)).replace(
+      /^(?:client(?:ului|ul|u)?|lift(?:ul)?)\s+/i,
+      ""
+    );
+  }
+
+  const reportTypeMarker = /\b(?:revizie|revizia|interventie|interventia)\s+/.exec(normalized);
+  if (reportTypeMarker?.index !== undefined) {
+    const start = reportTypeMarker.index + reportTypeMarker[0].length;
     return sliceUntilCommandMarker(command.slice(start), normalized.slice(start)).replace(
       /^(?:client(?:ului|ul|u)?|lift(?:ul)?)\s+/i,
       ""

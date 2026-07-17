@@ -7,6 +7,7 @@ import {
   createProjectUpdateTool,
   createToolUpdateTool,
   createUserUpdateTool,
+  createVehicleTrackerTool,
   createVehicleUpdateTool,
 } from "./entityAdapters";
 import {
@@ -45,10 +46,11 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
     },
     {
       module: "vehicles",
-      toolIds: ["vehicles.update", "vehicles.draft"],
+      toolIds: ["vehicles.update", "vehicles.draft", "vehicles.openTracker"],
       register: (registry) => {
         registry.register(createVehicleUpdateTool());
         registry.register(createVehicleDraftTool());
+        registry.register(createVehicleTrackerTool());
       },
     },
     {

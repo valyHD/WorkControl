@@ -24,6 +24,14 @@ describe("TranscriptAccumulator", () => {
     );
   });
 
+  it("collapses a complete command repeated inside one browser result", () => {
+    expect(
+      mergeTranscriptParts([
+        "genereaza raport revizie pentru Vali genereaza raport revizie pentru Vali",
+      ])
+    ).toBe("genereaza raport revizie pentru Vali");
+  });
+
   it("replaces interim results with final results at the same index", () => {
     const accumulator = new TranscriptAccumulator();
     expect(accumulator.apply(event([result("schimbă kilometrii", false)]))).toMatchObject({

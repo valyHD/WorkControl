@@ -70,6 +70,7 @@ const INTENTS = new Set<AssistantCommandIntent>([
   "update_current_page_field",
   "open_user_activity",
   "create_manual_notification",
+  "assistant_help",
 ]);
 
 const LEGACY_TOOL_BY_INTENT: Partial<Record<AssistantCommandIntent, string>> = {

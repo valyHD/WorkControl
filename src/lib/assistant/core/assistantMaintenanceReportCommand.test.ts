@@ -30,6 +30,18 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("keeps the exact client from a short revision report command", () => {
+    const { fields } = reportFields("Genereaza raport revizie pentru Vali");
+
+    expect(fields).toMatchObject({ clientQuery: "Vali", reportType: "revizie" });
+  });
+
+  it("accepts the client directly after the report type", () => {
+    const { fields } = reportFields("Genereaza raport revizie Vali");
+
+    expect(fields).toMatchObject({ clientQuery: "Vali", reportType: "revizie" });
+  });
+
   it("prefills an intervention report and waits for photos without sending", () => {
     const { contract, fields } = reportFields(
       "Genereaza raport interventie pentru clientu Vali cu observatia usa nu se inchide si asteapta sa atasez pozele"
