@@ -4,6 +4,7 @@ import type {
   AssistantV3SelectedEntity,
 } from "./assistantV3Types";
 import { formatAssistantReportObservation } from "./assistantReportText";
+import { normalizeAssistantCommandText } from "./assistantCommandText";
 
 export type AssistantMaintenanceReportFields = {
   clientQuery: string;
@@ -76,9 +77,10 @@ function extractObservations(command: string, normalized: string) {
     /\b(?:(?:iar|si)\s+)?(?:cu|la|in)?\s*(?:(?:rubrica|campul)\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)(?:\s+tehnicianului)?\s*[:;-]?\s*/.exec(
       normalized
     );
-  const conversationalMarker = /\b(?:iar|si)\s+(?:scrie|pune|trece|noteaza|baga|zi|spune|completeaza)(?:\s+(?:asa|ca))?\s+(?!poze\b|fotografii\b)/.exec(
-    normalized
-  );
+  const conversationalMarker =
+    /\b(?:iar|si)\s+(?:scrie|pune|trece|noteaza|baga|zi|spune|completeaza)(?:\s+(?:asa|ca))?\s+(?!poze\b|fotografii\b)/.exec(
+      normalized
+    );
   const marker = explicitMarker || conversationalMarker;
   if (marker?.index === undefined) return "";
   const start = marker.index + marker[0].length;
@@ -141,11 +143,11 @@ export function buildLocalMaintenanceReportContract(
   command: string,
   context?: MaintenanceReportContext
 ): AssistantV3Contract | null {
-  const cleanCommand = command.replace(/\s+/g, " ").trim();
+  const cleanCommand = normalizeAssistantCommandText(command);
   const normalized = normalizeForMatching(cleanCommand);
   const isReportCommand =
     (/\braport(?:ul)?\b/.test(normalized) ||
-      /\b(?:revizia|interventia)\b/.test(normalized)) &&
+      /\b(?:revizie|revizia|interventie|interventia)\b/.test(normalized)) &&
     (/\b(?:genereaza|creeaza|pregateste|fa|trimite|expediaza)\b/.test(normalized) ||
       /^(?:raport(?:ul)?\s+)?(?:de\s+)?(?:revizie|interventie)\b/.test(normalized));
   const reportType = /\binterventi(?:e|a)\b/.test(normalized)

@@ -22,8 +22,9 @@ function collapseConsecutiveSpeechRepeats(value: string) {
     for (let blockSize = maxBlockSize; blockSize >= 1 && !changed; blockSize -= 1) {
       for (let start = 0; start + blockSize * 2 <= tokens.length; start += 1) {
         if (tokens.slice(start, start + blockSize).some((token) => /\d/.test(token))) continue;
-        const repeated = Array.from({ length: blockSize }, (_, offset) =>
-          comparable[start + offset] === comparable[start + blockSize + offset]
+        const repeated = Array.from(
+          { length: blockSize },
+          (_, offset) => comparable[start + offset] === comparable[start + blockSize + offset]
         ).every(Boolean);
         if (!repeated) continue;
 
@@ -43,9 +44,7 @@ export function cleanAssistantCommandTranscript(value: string) {
 }
 
 function normalizeColloquialRomanian(value: string) {
-  let output = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  let output = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   const replacements: Array<[RegExp, string]> = [
     [
@@ -76,10 +75,7 @@ function normalizeColloquialRomanian(value: string) {
       "porneste pontajul",
     ],
     [/\bponteaza\s*-?\s*ma\s+(?:la|pe)\b/giu, "porneste pontajul pe"],
-    [
-      /\b(?:incep|m\s*-?\s*am\s+apucat\s+de)\s+(?:munca\s+)?(?:la|pe)\b/giu,
-      "porneste pontajul pe",
-    ],
+    [/\b(?:incep|m\s*-?\s*am\s+apucat\s+de)\s+(?:munca\s+)?(?:la|pe)\b/giu, "porneste pontajul pe"],
     [/\bda\s*-?\s*i\s+drumu(?:l)?\s+la\s+pontaju(?:l)?\b/giu, "porneste pontajul"],
     [/\bda\s+drumu(?:l)?\s+la\s+pontaju(?:l)?\b/giu, "porneste pontajul"],
     [/\b(?:zimi|zi\s*-?\s*mi)\b/giu, "spune-mi"],
@@ -141,6 +137,7 @@ function normalizeColloquialRomanian(value: string) {
     [/\butilizatoru\b/giu, "utilizatorul"],
     [/\bgpsu\b/giu, "gps-ul"],
     [/\bgpesu\b/giu, "gps-ul"],
+    [/\b(?:gpsurile|gps\s*urile|gpesurile|gpes\s*urile)\b/giu, "gps-urile"],
     [/\bbonu\b/giu, "bonul"],
     [/\bconcediu(?:l|lui)?\b/giu, "concediu"],
   ];

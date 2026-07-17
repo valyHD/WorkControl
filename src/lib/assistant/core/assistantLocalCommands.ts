@@ -214,6 +214,9 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
       token.startsWith("tracker") ||
       token === "harta";
     const isVehicleMarker = [
+      "duba",
+      "dubei",
+      "dubita",
       "masina",
       "masinii",
       "vehicul",
@@ -244,6 +247,7 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
     "al",
     "ale",
     "lui",
+    "cu",
     "pe",
     "la",
     "de",
@@ -251,6 +255,9 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
     "pentru",
     "masina",
     "masinii",
+    "duba",
+    "dubei",
+    "dubita",
     "vehicul",
     "vehiculul",
     "vehiculului",
@@ -296,6 +303,8 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
       "deschide",
       "du",
       "ma",
+      "imi",
+      "mi",
       "mergi",
       "intra",
       "pagina",
@@ -307,8 +316,7 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
     return tokens
       .slice(start, markerIndex)
       .filter(
-        (token) =>
-          !navigationWords.has(token) && !descriptorWords.has(token) && !filler.has(token)
+        (token) => !navigationWords.has(token) && !descriptorWords.has(token) && !filler.has(token)
       )
       .map(normalizeVehicleQueryToken)
       .join(" ")
@@ -512,11 +520,11 @@ function buildSiteSettingsContract(fields: Record<string, string | number>) {
 export function buildLocalSiteSettingsContract(command: string): AssistantV3Contract | null {
   const normalized = normalizeForMatching(normalizeAssistantCommandText(command));
   const mentionsSettings =
-    /\b(?:site|siteul|aplicatie|aplicatia|interfata|aspect|design|tema|paleta|font|fontul|text|textul|litere|literele|card|carduri|cardurile|contrast|animatii|densitate|compact|compacta|aerisit|aerisita|spatios|spatioasa|glass|sticla)\b/.test(
+    /\b(?:site|siteul|aplicatie|aplicatia|interfata|aspect|design|tema|paleta|font|fontul|scris|scrisul|text|textul|litere|literele|card|carduri|cardurile|contrast|animatie|animatii|animatiile|densitate|compact|compacta|aerisit|aerisita|spatios|spatioasa|glass|sticla)\b/.test(
       normalized
     );
   const requestsMutation =
-    /\b(?:fa|pune|schimba|seteaza|modifica|mareste|micsoreaza|opreste|redu|activeaza|dezactiveaza)\b/.test(
+    /\b(?:fa|pune|schimba|seteaza|modifica|mareste|micsoreaza|opreste|scoate|redu|activeaza|dezactiveaza)\b/.test(
       normalized
     );
   if (!mentionsSettings || !requestsMutation) return null;
@@ -527,7 +535,10 @@ export function buildLocalSiteSettingsContract(command: string): AssistantV3Cont
     fields.uiDensity = "compact";
   } else if (/\b(?:aerisit|spatios|spatioasa|mai\s+larg|mai\s+lejera)\b/.test(normalized)) {
     fields.uiDensity = "spacious";
-  } else if (/\b(?:confortabil|normal)\b/.test(normalized) && /\b(?:densitate|interfata)\b/.test(normalized)) {
+  } else if (
+    /\b(?:confortabil|normal)\b/.test(normalized) &&
+    /\b(?:densitate|interfata)\b/.test(normalized)
+  ) {
     fields.uiDensity = "comfortable";
   }
 
@@ -558,7 +569,9 @@ export function buildLocalSiteSettingsContract(command: string): AssistantV3Cont
     fields.uiAnimations = "full";
   }
 
-  const mentionsFont = /\b(?:font|fontul|scris|text|textul|litere|literele)\b/.test(normalized);
+  const mentionsFont = /\b(?:font|fontul|scris|scrisul|text|textul|litere|literele)\b/.test(
+    normalized
+  );
   const font = SITE_SETTING_FONTS.find((candidate) => candidate.pattern.test(normalized));
   if (font && mentionsFont) fields.uiFontFamily = font.value;
 
@@ -584,6 +597,28 @@ function referencesPersonalVehicle(normalizedCommand: string) {
   ].some((pattern) => pattern.test(normalizedCommand));
 }
 
+const VEHICLE_MAKE_TOKENS = new Set([
+  "audi",
+  "bmw",
+  "citroen",
+  "dacia",
+  "fiat",
+  "ford",
+  "hyundai",
+  "iveco",
+  "kia",
+  "mercedes",
+  "opel",
+  "peugeot",
+  "renault",
+  "seat",
+  "skoda",
+  "toyota",
+  "volkswagen",
+  "volvo",
+  "vw",
+]);
+
 function asksForCurrentVehicleMileage(normalizedCommand: string) {
   return (
     /\b(?:cati|cat|ce)\s+(?:km|kilometri|kilometraj)\b/.test(normalizedCommand) ||
@@ -594,38 +629,55 @@ function asksForCurrentVehicleMileage(normalizedCommand: string) {
   );
 }
 
+function extractLooseVehicleQuery(command: string) {
+  const tokens = normalizeForMatching(command).split(" ").filter(Boolean);
+  if (!tokens.some((token) => VEHICLE_MAKE_TOKENS.has(normalizeVehicleQueryToken(token)))) {
+    return "";
+  }
+  const ignored = new Set([
+    "acceseaza",
+    "arata",
+    "deschide",
+    "du",
+    "ma",
+    "mi",
+    "imi",
+    "intra",
+    "la",
+    "masina",
+    "masinii",
+    "mergi",
+    "pagina",
+    "paginii",
+    "pe",
+    "spune",
+    "vezi",
+    "vreau",
+    "sa",
+    "vad",
+  ]);
+  return tokens
+    .filter((token) => !ignored.has(token))
+    .map(normalizeVehicleQueryToken)
+    .join(" ")
+    .trim();
+}
+
 export function buildLocalVehicleTrackerContract(command: string): AssistantV3Contract | null {
-  const normalized = normalizeForMatching(command);
+  const cleanCommand = normalizeAssistantCommandText(command);
+  const normalized = normalizeForMatching(cleanCommand);
   const tokens = normalized.split(" ");
   const referencesMyVehicle = referencesPersonalVehicle(normalized);
   const asksMileage = asksForCurrentVehicleMileage(normalized);
   const mentionsTracker = tokens.some(
     (token) => token.startsWith("gps") || token.startsWith("tracker") || token === "harta"
   );
-  const knownVehicleMakes = new Set([
-    "audi",
-    "bmw",
-    "citroen",
-    "dacia",
-    "fiat",
-    "ford",
-    "hyundai",
-    "iveco",
-    "kia",
-    "mercedes",
-    "opel",
-    "peugeot",
-    "renault",
-    "seat",
-    "skoda",
-    "toyota",
-    "volkswagen",
-    "volvo",
-    "vw",
-  ]);
   const mentionsVehicle =
     tokens.some((token) =>
       [
+        "duba",
+        "dubei",
+        "dubita",
         "masina",
         "masinii",
         "vehicul",
@@ -636,8 +688,9 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
         "autoturismului",
       ].includes(token)
     ) ||
+    tokens.some((token) => VEHICLE_MAKE_TOKENS.has(normalizeVehicleQueryToken(token))) ||
     (tokens.some((token) => token === "pagina" || token === "detaliile") &&
-      tokens.some((token) => knownVehicleMakes.has(normalizeVehicleQueryToken(token))));
+      tokens.some((token) => VEHICLE_MAKE_TOKENS.has(normalizeVehicleQueryToken(token))));
   const requestsNavigation =
     /\b(?:du\s+ma|deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|vreau\s+sa\s+vad)\b/.test(
       normalized
@@ -681,7 +734,8 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
   }
 
   const destination = mentionsTracker ? "tracker" : "details";
-  const entityQuery = extractVehicleQuery(command, destination);
+  const entityQuery =
+    extractVehicleQuery(cleanCommand, destination) || extractLooseVehicleQuery(cleanCommand);
   if (entityQuery === "meu" || entityQuery === "mea") {
     return {
       version: "3",
@@ -797,13 +851,11 @@ function contextualEntity(context?: LocalEntityContext) {
   }
   const remembered = context?.memory?.lastEntity;
   const rememberedType = (remembered?.type || remembered?.entityType) as
-    | AssistantRuntimeEntityType
-    | undefined;
+    AssistantRuntimeEntityType | undefined;
   if (rememberedType && LOCAL_UPDATE_TOOL[rememberedType]) {
     return {
       type: rememberedType,
-      query:
-        remembered?.label || remembered?.query || remembered?.id || remembered?.entityId || "",
+      query: remembered?.label || remembered?.query || remembered?.id || remembered?.entityId || "",
     };
   }
   return null;
@@ -811,10 +863,13 @@ function contextualEntity(context?: LocalEntityContext) {
 
 function extractCurrentEntityFieldChange(command: string, entityType: AssistantRuntimeEntityType) {
   const normalized = normalizeForMatching(command);
-  const action = normalized.match(/\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/);
-  let payload = action?.index === undefined
-    ? normalized
-    : normalized.slice(action.index + action[0].length).trim();
+  const action = normalized.match(
+    /\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/
+  );
+  let payload =
+    action?.index === undefined
+      ? normalized
+      : normalized.slice(action.index + action[0].length).trim();
   payload = payload.replace(
     /^(?:si\s+)?(?:aici|la\s+(?:asta|ala)|pe\s+(?:asta|ala)|pentru\s+(?:asta|ala)|(?:asta|ala))\s+/,
     ""
@@ -827,7 +882,10 @@ function extractCurrentEntityFieldChange(command: string, entityType: AssistantR
   for (const connector of connectors) {
     const index = connector.index ?? -1;
     if (index <= 0) continue;
-    const naturalField = payload.slice(0, index).replace(/^(?:si\s+)?/, "").trim();
+    const naturalField = payload
+      .slice(0, index)
+      .replace(/^(?:si\s+)?/, "")
+      .trim();
     const value = payload.slice(index + connector[0].length).trim();
     const field = resolveAssistantField(entityType, naturalField);
     if (field && value) return { fieldKey: field.key, fieldLabel: field.label, value };
@@ -932,7 +990,9 @@ function inferEntityTypeFromUniqueField(value: string): AssistantRuntimeEntityTy
   if (/\b(?:garantie|garantia|cod\s+intern|qr|cod\s+qr|detinator|detinatorul)\b/.test(normalized)) {
     return "tool";
   }
-  if (/\b(?:functie|functia|meserie|post|departament|departamentul|rol|drepturi)\b/.test(normalized)) {
+  if (
+    /\b(?:functie|functia|meserie|post|departament|departamentul|rol|drepturi)\b/.test(normalized)
+  ) {
     return "user";
   }
   return null;
@@ -1068,7 +1128,10 @@ function extractTimesheetProject(command: string) {
     /\b(?:alege|selecteaza)\s+proiect(?:ul)?\s+(.+?)\s+(?:si\s+)?porneste\s+pontaj(?:ul)?\b/
   );
   if (selectAndStart) {
-    return { projectQuery: cleanExtractedProject(selectAndStart[1]), createProjectIfMissing: false };
+    return {
+      projectQuery: cleanExtractedProject(selectAndStart[1]),
+      createProjectIfMissing: false,
+    };
   }
 
   const projectAfterStart = normalized.match(

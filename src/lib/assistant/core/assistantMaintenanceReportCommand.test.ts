@@ -156,6 +156,17 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("understands a casual intervention command with an observation marker", () => {
+    const { fields } = reportFields("Fa interventie la Vali observatii liftul functioneaza normal");
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "Liftul functioneaza normal.",
+      submitMode: "send",
+    });
+  });
+
   it("keeps the client separate when the observation is introduced with zi ca", () => {
     const { fields } = reportFields(
       "Fa raport interventie la Vali si zi ca liftul functioneaza normal"

@@ -145,6 +145,7 @@ describe("local vehicle tracker commands", () => {
     ["deschide masina Toyota la tracker live", "toyota"],
     ["arata Toyota pe GPS", "toyota"],
     ["du-ma la gps-ul dubei cu 04 in numarul de inmatriculare", "04"],
+    ["arata-mi toyota corolla pe gps", "toyota corolla"],
   ])("builds a controlled tracker command: %s", (command, query) => {
     expect(buildLocalVehicleTrackerContract(command)).toMatchObject({
       commandType: "navigation",
@@ -157,6 +158,8 @@ describe("local vehicle tracker commands", () => {
 
   it.each([
     ["Du-ma pe pagina masinii Toyota", "toyota"],
+    ["du-ma la Toyota", "toyota"],
+    ["du-ma la duba cu 04", "04"],
     ["deschide masina Toyota Corolla", "toyota corolla"],
     ["intra la detaliile vehiculului IF 82 GDY", "if 82 gdy"],
     ["arata-mi pagina Toyotei", "toyota"],
@@ -186,6 +189,7 @@ describe("local vehicle tracker commands", () => {
 
   it.each([
     "Du-ma pe pagina masina mea si arata-mi cati kilometri curenti am",
+    "Du-m\u0103 pe pagina ma\u0219ina mea \u0219i Arat\u0103 mi c\u00e2\u021bi kilometri curen\u021bi am",
     "arata-mi cati kilometri are masina mea",
     "intra la vehiculul meu si spune-mi kilometrajul",
     "du-ma la masina pe care o conduc si arata km curenti",
@@ -225,9 +229,7 @@ describe("local personal settings", () => {
     expect(buildLocalPersonalSettingsContract(command)).toMatchObject({
       commandType: "entity_update",
       intent: "update_user",
-      toolCalls: [
-        { id: "users.update", input: { entityQuery: "__current_user__", fields } },
-      ],
+      toolCalls: [{ id: "users.update", input: { entityQuery: "__current_user__", fields } }],
       confirmationRequired: true,
       confidence: 0.98,
     });
@@ -241,11 +243,7 @@ describe("local personal settings", () => {
 describe("local notification settings", () => {
   it.each([
     ["opreste regula Pontaj dimineata", "pontaj dimineata", { enabled: false }],
-    [
-      "da drumul la sunet pentru regula Pontaj start",
-      "pontaj start",
-      { soundEnabled: true },
-    ],
+    ["da drumul la sunet pentru regula Pontaj start", "pontaj start", { soundEnabled: true }],
     ["pune ora regulii Pontaj dimineata la 7", "pontaj dimineata", { scheduleTime: "7" }],
     [
       "schimba ora de oprire la regula Pontaj interval la 18 30",
@@ -278,7 +276,9 @@ describe("local site settings", () => {
     ["pune tema siteului pe mov", { uiPalette: "violet" }],
     ["pune cardurile glass", { uiCardStyle: "glass" }],
     ["mareste fontul", { uiFontScale: "mai mare" }],
+    ["fa scrisul mai mare in aplicatie", { uiFontScale: "mai mare" }],
     ["opreste animatiile in aplicatie", { uiAnimations: "none" }],
+    ["scoate animatiile", { uiAnimations: "none" }],
     ["pune contrast mare pe site", { uiContrast: "high" }],
   ])("builds controlled UI setting updates: %s", (command, fields) => {
     expect(buildLocalSiteSettingsContract(command)).toMatchObject({

@@ -63,6 +63,7 @@ describe("normalizeAssistantCommandText", () => {
     ["seteaza-mi tema siteului pe mov", "seteaza tema siteului pe mov"],
     ["aratami kilometriii de la masinamea", "deschide kilometri de la masina mea"],
     ["du-ma pe gpesu Toyota", "deschide gps-ul Toyota"],
+    ["du-ma pe gpesurile toate", "deschide gps-urile toate"],
     ["fa-mi un raport de revizie pentru Vali", "genereaza raport de revizie pentru Vali"],
     ["pune-mi functia electrician", "pune functia electrician"],
     ["vreau ca departamentul meu sa fie Service", "seteaza departamentul Service"],
