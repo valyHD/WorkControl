@@ -1,5 +1,8 @@
 import type { VehiclePositionItem } from "../../../types/vehicle";
-import { filterStationaryGpsJitter } from "./vehicleGps";
+import {
+  filterStationaryGpsJitter,
+  getMaximumPositionSpeedKmh,
+} from "./vehicleGps";
 
 export type HiddenGpsInterval = { startTs: number; endTs: number };
 
@@ -15,6 +18,17 @@ export function filterHiddenRealGpsPositions(
       (interval) => timestamp >= interval.startTs && timestamp <= interval.endTs
     );
   });
+}
+
+export function getMaximumVisibleRouteSpeedKmh(
+  realPositions: VehiclePositionItem[],
+  hiddenRealIntervals: HiddenGpsInterval[],
+  ...simulationSources: VehiclePositionItem[][]
+) {
+  return getMaximumPositionSpeedKmh(
+    filterHiddenRealGpsPositions(realPositions, hiddenRealIntervals),
+    ...simulationSources
+  );
 }
 
 function crossesHiddenRealGpsInterval(

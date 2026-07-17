@@ -44,7 +44,6 @@ import {
   filterStationaryGpsJitter,
   filterTrackableRoutePositions,
   formatDuration,
-  getMaximumPositionSpeedKmh,
   samplePositions,
   sanitizePositions,
   type DateRangePreset,
@@ -56,6 +55,7 @@ import {
 } from "../utils/vehicleLiveTrail";
 import {
   filterHiddenRealGpsPositions,
+  getMaximumVisibleRouteSpeedKmh,
   splitVisibleRealGpsSegments,
 } from "../utils/vehicleRouteVisibility";
 import { loadSelectedDayRouteWithRecovery } from "../utils/vehicleRouteRecovery";
@@ -2154,11 +2154,12 @@ export default function VehicleLiveRouteCard({
               (activeSimulationPositionsInRange[0]?.gpsTimestamp || 0)
           )
         : 0;
-    const unsampledRealAnalysisPoints = realAnalysisSourceSegments.flatMap((segment) =>
-      filterTrackableRoutePositions(segment)
-    );
-    const calculatedMaxSpeed = getMaximumPositionSpeedKmh(
-      unsampledRealAnalysisPoints.length ? unsampledRealAnalysisPoints : realAnalysisPoints,
+    const rawRealPositions = analysisRoutePositions.length
+      ? analysisRoutePositions
+      : positions;
+    const calculatedMaxSpeed = getMaximumVisibleRouteSpeedKmh(
+      rawRealPositions,
+      hiddenRealGpsIntervals,
       gpsSimHistorySegments.flat(),
       activeSimulationPositionsInRange
     );
@@ -2212,16 +2213,17 @@ export default function VehicleLiveRouteCard({
     };
   }, [
     analysisPoints,
+    analysisRoutePositions,
     activeSimulationPositionsInRange,
     displayPositions,
     fromTs,
     gpsSimVisible,
     hasLiveSimulation,
     historySimulationAnalysisSegments,
+    hiddenRealGpsIntervals,
     gpsSimHistorySegments,
-    realAnalysisPoints,
-    realAnalysisSourceSegments,
     realStatsSegments,
+    positions,
     simulationActive,
     toTs,
     vehicle.gpsSim?.startedAt,

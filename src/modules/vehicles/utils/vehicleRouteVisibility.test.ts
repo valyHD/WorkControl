@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { VehiclePositionItem } from "../../../types/vehicle";
-import { splitVisibleRealGpsSegments } from "./vehicleRouteVisibility";
+import {
+  getMaximumVisibleRouteSpeedKmh,
+  splitVisibleRealGpsSegments,
+} from "./vehicleRouteVisibility";
 
 function point(id: string, gpsTimestamp: number, lat: number): VehiclePositionItem {
   return {
@@ -67,5 +70,24 @@ describe("vehicle route visibility", () => {
       ["before-1", "before-2"],
       ["after-1", "after-2"],
     ]);
+  });
+
+  it("keeps a real maximum recorded before simulation and ignores hidden real speed", () => {
+    const baseTs = 1_783_940_000_000;
+    const realPositions = [
+      { ...point("real-peak", baseTs, 44.4), speedKmh: 140 },
+      { ...point("hidden-real", baseTs + 120_000, 44.401), speedKmh: 180 },
+    ];
+    const simulatedPositions = [
+      { ...point("simulated", baseTs + 130_000, 44.402), speedKmh: 70 },
+    ];
+
+    expect(
+      getMaximumVisibleRouteSpeedKmh(
+        realPositions,
+        [{ startTs: baseTs + 100_000, endTs: baseTs + 200_000 }],
+        simulatedPositions
+      )
+    ).toBe(140);
   });
 });
