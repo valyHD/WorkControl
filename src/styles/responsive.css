@@ -272,40 +272,88 @@
   gap: 10px;
 }
 
-.maintenance-order-card {
-  border-left: 4px solid var(--line-strong);
-  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+.maintenance-orders-list > .maintenance-order-card {
+  --order-accent: #64748b;
+  --order-accent-rgb: 100, 116, 139;
+  --order-bg-strong: #f1f5f9;
+  --order-bg-soft: #f8fafc;
+  overflow: hidden;
+  border: 1px solid rgba(var(--order-accent-rgb), .55);
+  border-left: 8px solid var(--order-accent);
+  border-radius: 12px;
+  background-color: var(--order-bg-soft);
+  background-image: linear-gradient(105deg, var(--order-bg-strong) 0%, var(--order-bg-soft) 72%);
+  box-shadow: 0 5px 16px rgba(var(--order-accent-rgb), .14), inset 0 0 0 1px rgba(255, 255, 255, .72);
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 
-.maintenance-order-card--pending,
-.maintenance-order-card--waiting {
-  border-left-color: #eab308;
-  background: linear-gradient(135deg, #fff7cc, #fffef4);
+html.wc-force-light .maintenance-orders-list > .maintenance-order-card,
+html.is-samsung-internet .maintenance-orders-list > .maintenance-order-card {
+  background-color: var(--order-bg-soft) !important;
+  background-image: linear-gradient(105deg, var(--order-bg-strong) 0%, var(--order-bg-soft) 72%) !important;
+  background-repeat: no-repeat !important;
+  box-shadow: 0 5px 16px rgba(var(--order-accent-rgb), .14), inset 0 0 0 1px rgba(255, 255, 255, .72) !important;
 }
 
-.maintenance-order-card--urgent {
-  border-left-color: #9333ea;
-  background: linear-gradient(135deg, #f3e8ff, #fff7ff);
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--pending,
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--waiting {
+  --order-accent: #d6a600;
+  --order-accent-rgb: 214, 166, 0;
+  --order-bg-strong: #fff0a8;
+  --order-bg-soft: #fffbea;
 }
 
-.maintenance-order-card--quoted {
-  border-left-color: #f97316;
-  background: linear-gradient(135deg, #ffedd5, #fff7ed);
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--urgent {
+  --order-accent: #8b2bd9;
+  --order-accent-rgb: 139, 43, 217;
+  --order-bg-strong: #ead5ff;
+  --order-bg-soft: #fbf4ff;
 }
 
-.maintenance-order-card--ordered {
-  border-left-color: #0ea5e9;
-  background: linear-gradient(135deg, #e0f2fe, #f0f9ff);
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--quoted {
+  --order-accent: #e85d04;
+  --order-accent-rgb: 232, 93, 4;
+  --order-bg-strong: #ffd6b3;
+  --order-bg-soft: #fff5ec;
 }
 
-.maintenance-order-card--resolved {
-  border-left-color: #16a34a;
-  background: linear-gradient(135deg, #dcfce7, #f0fdf4);
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--ordered {
+  --order-accent: #0284c7;
+  --order-accent-rgb: 2, 132, 199;
+  --order-bg-strong: #c8ebff;
+  --order-bg-soft: #effaff;
 }
 
-.maintenance-order-card--cancelled {
-  border-left-color: #94a3b8;
-  background: #f8fafc;
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--resolved {
+  --order-accent: #15803d;
+  --order-accent-rgb: 21, 128, 61;
+  --order-bg-strong: #c9f3d8;
+  --order-bg-soft: #effcf3;
+}
+
+.maintenance-orders-list > .maintenance-order-card.maintenance-order-card--cancelled {
+  --order-accent: #64748b;
+  --order-accent-rgb: 100, 116, 139;
+  --order-bg-strong: #e2e8f0;
+  --order-bg-soft: #f8fafc;
+}
+
+.maintenance-orders-list > .maintenance-order-card:hover,
+.maintenance-orders-list > .maintenance-order-card[open] {
+  border-color: var(--order-accent);
+  background-color: var(--order-bg-soft);
+  background-image: linear-gradient(105deg, var(--order-bg-strong) 0%, var(--order-bg-soft) 72%);
+  box-shadow: 0 9px 24px rgba(var(--order-accent-rgb), .22), inset 0 0 0 1px rgba(255, 255, 255, .78);
+  transform: translateY(-1px);
+}
+
+html.wc-force-light .maintenance-orders-list > .maintenance-order-card:hover,
+html.wc-force-light .maintenance-orders-list > .maintenance-order-card[open],
+html.is-samsung-internet .maintenance-orders-list > .maintenance-order-card:hover,
+html.is-samsung-internet .maintenance-orders-list > .maintenance-order-card[open] {
+  background-color: var(--order-bg-soft) !important;
+  background-image: linear-gradient(105deg, var(--order-bg-strong) 0%, var(--order-bg-soft) 72%) !important;
+  box-shadow: 0 9px 24px rgba(var(--order-accent-rgb), .22), inset 0 0 0 1px rgba(255, 255, 255, .78) !important;
 }
 
 .maintenance-order-card summary {
@@ -469,6 +517,22 @@
   font-weight: 900;
 }
 
+.maintenance-order-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid rgba(var(--order-accent-rgb), .55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .72);
+  color: var(--order-accent);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 2px 7px rgba(var(--order-accent-rgb), .12);
+}
+
 .maintenance-offer-dialog small {
   color: var(--text-soft);
   font-size: 11px;
@@ -624,6 +688,15 @@
   .maintenance-order-card summary {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .maintenance-orders-list > .maintenance-order-card {
+    border-left-width: 7px;
+    box-shadow: 0 6px 18px rgba(var(--order-accent-rgb), .2), inset 0 0 0 1px rgba(255, 255, 255, .8) !important;
+  }
+
+  .maintenance-order-state {
+    min-height: 28px;
   }
 
   .maintenance-order-actions,

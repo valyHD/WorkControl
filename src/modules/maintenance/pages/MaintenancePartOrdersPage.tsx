@@ -64,6 +64,15 @@ const priorityOptions: Array<{ value: MaintenancePartOrderPriority; label: strin
   { value: "urgent", label: "Urgenta" },
 ];
 
+const visualStateLabels: Record<ReturnType<typeof getPartOrderVisualState>, string> = {
+  waiting: "Fara actiune",
+  urgent: "Urgenta",
+  quoted: "Oferta primita",
+  ordered: "Comandata / primita",
+  resolved: "Montata",
+  cancelled: "Anulata",
+};
+
 const emptyLine = (): MaintenancePartOrderLine => ({
   id: `line_${Date.now()}_${Math.random().toString(16).slice(2)}`,
   name: "",
@@ -871,8 +880,9 @@ export default function MaintenancePartOrdersPage() {
           <div className="simple-list maintenance-orders-list">
             {filteredOrders.map((order) => {
               const displayAmount = getPartOrderDisplayAmount(order);
+              const visualState = getPartOrderVisualState(order);
               return (
-              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${getPartOrderVisualState(order)}`}>
+              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${visualState}`}>
                 <summary>
                   <span className="simple-list-text">
                     <span className="simple-list-label">{order.title || "Comanda piese"} - {order.clientName || "fara client"}</span>
@@ -881,6 +891,9 @@ export default function MaintenancePartOrdersPage() {
                     </span>
                   </span>
                   <span className="maintenance-order-actions">
+                    <span className={`maintenance-order-state maintenance-order-state--${visualState}`}>
+                      {visualStateLabels[visualState]}
+                    </span>
                     <button className="secondary-btn" type="button" onClick={(event) => { event.preventDefault(); startEdit(order); }}>
                       <Pencil size={15} />
                       Edit
