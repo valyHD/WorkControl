@@ -47,6 +47,9 @@ const MaintenancePage = lazyWithRetry(() => import("../modules/maintenance/pages
 const MaintenancePartOrdersPage = lazyWithRetry(
   () => import("../modules/maintenance/pages/MaintenancePartOrdersPage")
 );
+const MaintenanceOrderedPartsHistoryPage = lazyWithRetry(
+  () => import("../modules/maintenance/pages/MaintenanceOrderedPartsHistoryPage")
+);
 const MaintenanceClientDetailsPage = lazyWithRetry(
   () => import("../modules/maintenance/pages/MaintenanceClientDetailsPage")
 );
@@ -177,6 +180,7 @@ export const router = createBrowserRouter([
       { path: "/maintenance/manage", element: withSuspense(<MaintenancePage />) },
       { path: "/maintenance/parts", element: withSuspense(<MaintenancePartOrdersPage />) },
       { path: "/maintenance/orders", element: withSuspense(<MaintenancePartOrdersPage />) },
+      { path: "/maintenance/orders/history", element: withSuspense(<MaintenanceOrderedPartsHistoryPage />) },
       { path: "/maintenance/:clientId", element: withSuspense(<MaintenanceClientDetailsPage />) },
       { path: "/expenses", element: <Navigate to="/expenses/scan" replace /> },
       { path: "/expenses/scan", element: withSuspense(<ExpenseScanPage />) },

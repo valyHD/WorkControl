@@ -217,16 +217,24 @@
   border-left: 4px solid var(--line-strong);
 }
 
+.maintenance-order-card--pending {
+  border-left-color: #eab308;
+  background: #fffdf0;
+}
+
 .maintenance-order-card--urgent {
-  border-left-color: #ef4444;
+  border-left-color: #9333ea;
+  background: #faf5ff;
 }
 
-.maintenance-order-card--normal {
-  border-left-color: #2563eb;
-}
-
-.maintenance-order-card--low {
+.maintenance-order-card--resolved {
   border-left-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.maintenance-order-card--cancelled {
+  border-left-color: #94a3b8;
+  background: #f8fafc;
 }
 
 .maintenance-order-card summary {
@@ -281,7 +289,7 @@
 
 .maintenance-order-part {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(160px, 1fr) auto minmax(170px, auto) minmax(170px, auto);
   gap: 10px;
   align-items: center;
   padding: 8px 10px;
@@ -293,6 +301,186 @@
 .maintenance-order-part span,
 .maintenance-order-part strong {
   min-width: 0;
+}
+
+.maintenance-offer-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 48%);
+  backdrop-filter: blur(4px);
+}
+
+.maintenance-offer-dialog {
+  width: min(720px, 100%);
+  max-height: min(820px, calc(100dvh - 40px));
+  overflow: auto;
+  border: 1px solid var(--line-mid);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+}
+
+.maintenance-offer-dialog__header,
+.maintenance-offer-dialog__actions {
+  position: sticky;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--surface);
+}
+
+.maintenance-offer-dialog__header {
+  top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.maintenance-offer-dialog__header h2,
+.maintenance-offer-dialog__header p {
+  margin: 0;
+}
+
+.maintenance-offer-dialog__header h2 {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.maintenance-offer-dialog__header p {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.maintenance-offer-dialog__body,
+.maintenance-offer-dialog__lines {
+  display: grid;
+  gap: 12px;
+}
+
+.maintenance-offer-dialog__body {
+  padding: 18px;
+}
+
+.maintenance-offer-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, .65fr);
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+}
+
+.maintenance-offer-line > span,
+.maintenance-offer-line__price {
+  display: grid;
+  gap: 4px;
+}
+
+.maintenance-offer-line small,
+.maintenance-offer-line__price span {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.maintenance-offer-dialog__total {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 900;
+}
+
+.maintenance-offer-dialog__actions {
+  bottom: 0;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line);
+}
+
+.maintenance-history-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.maintenance-history-search > svg {
+  position: absolute;
+  left: 13px;
+  color: var(--text-soft);
+  pointer-events: none;
+}
+
+.maintenance-history-search .tool-input {
+  padding-left: 40px;
+}
+
+.maintenance-ordered-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.maintenance-ordered-history-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.maintenance-ordered-history-card__head,
+.maintenance-ordered-history-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.maintenance-ordered-history-card__head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.maintenance-ordered-history-card__head span,
+.maintenance-ordered-history-card footer {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.maintenance-ordered-history-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.maintenance-ordered-history-card dl div {
+  padding: 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.maintenance-ordered-history-card dt {
+  color: var(--text-soft);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.maintenance-ordered-history-card dd {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 @media (min-width: 641px) and (max-width: 1100px) {
@@ -352,6 +540,34 @@
   }
 
   .maintenance-order-part {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-offer-dialog-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .maintenance-offer-dialog {
+    max-height: 92dvh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .maintenance-offer-line,
+  .maintenance-ordered-history-card dl {
+    grid-template-columns: 1fr;
+  }
+
+  .maintenance-offer-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .maintenance-offer-dialog__actions button,
+  .maintenance-ordered-history-grid {
+    width: 100%;
+  }
+
+  .maintenance-ordered-history-grid {
     grid-template-columns: 1fr;
   }
 

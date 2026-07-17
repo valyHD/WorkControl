@@ -61,6 +61,8 @@ function normalizeLine(line: Partial<MaintenancePartOrderLine>, index: number): 
     unit: toText(line.unit, "buc") || "buc",
     supplier: toText(line.supplier),
     estimatedPrice: Math.max(0, toNumber(line.estimatedPrice, 0)),
+    supplierOfferUnitPrice: Math.max(0, toNumber(line.supplierOfferUnitPrice, toNumber(line.estimatedPrice, 0))),
+    clientOfferUnitPrice: Math.max(0, toNumber(line.clientOfferUnitPrice, 0)),
     notes: toText(line.notes),
   };
 }
@@ -120,6 +122,9 @@ function mapOrder(id: string, data: Record<string, unknown>): MaintenancePartOrd
     supplierQuoteReceivedByUserId: toText(data.supplierQuoteReceivedByUserId),
     supplierQuoteReceivedByUserName: toText(data.supplierQuoteReceivedByUserName),
     supplierOfferAmount: toNumber(data.supplierOfferAmount, 0),
+    orderedAt: toNullableNumber(data.orderedAt),
+    orderedByUserId: toText(data.orderedByUserId),
+    orderedByUserName: toText(data.orderedByUserName),
     clientOfferEmailSentAt: toNullableNumber(data.clientOfferEmailSentAt),
     clientOfferEmailSentByUserId: toText(data.clientOfferEmailSentByUserId),
     clientOfferEmailSentByUserName: toText(data.clientOfferEmailSentByUserName),
@@ -241,12 +246,16 @@ export async function updateMaintenancePartOrder(
   previousStatus?: MaintenancePartOrderStatus
 ): Promise<void> {
   const lines = input.lines.map((line, index) => normalizeLine(line, index)).filter((line) => line.name);
+  const isNowOrdered = ["ordered", "partial", "received", "installed"].includes(input.status);
   const payload = {
     ...input,
     title: input.title.trim() || "Comanda piese lift",
     lines,
     totalEstimated: calculateTotal(lines),
     reminderIntervalMinutes: clampReminderMinutes(input.reminderIntervalMinutes),
+    orderedAt: input.orderedAt || (isNowOrdered ? Date.now() : null),
+    orderedByUserId: input.orderedByUserId || (isNowOrdered ? actor?.id || actor?.uid || "" : ""),
+    orderedByUserName: input.orderedByUserName || (isNowOrdered ? actorName(actor) : ""),
     nextReminderAt:
       input.notifyUserId && !input.notificationSeenAt && input.status !== "installed" && input.status !== "cancelled"
         ? input.nextReminderAt || Date.now() + clampReminderMinutes(input.reminderIntervalMinutes) * 60_000
@@ -310,6 +319,18 @@ export async function markMaintenancePartOrderSeen(order: MaintenancePartOrder, 
   });
 }
 
+export async function unmarkMaintenancePartOrderSeen(order: MaintenancePartOrder): Promise<void> {
+  const now = Date.now();
+  await updateDoc(doc(partOrdersCollection, order.id), {
+    notificationSeenAt: null,
+    notificationSeenByUserId: "",
+    notificationSeenByUserName: "",
+    nextReminderAt: order.notifyUserId ? now + clampReminderMinutes(order.reminderIntervalMinutes) * 60_000 : null,
+    updatedAt: now,
+    updatedAtServer: serverTimestamp(),
+  });
+}
+
 export async function markSupplierEmailSent(order: MaintenancePartOrder, actor: AppUser | null): Promise<void> {
   const now = Date.now();
   await updateDoc(doc(partOrdersCollection, order.id), {
@@ -325,17 +346,50 @@ export async function markSupplierEmailSent(order: MaintenancePartOrder, actor: 
 export async function markSupplierQuoteReceived(
   order: MaintenancePartOrder,
   actor: AppUser | null,
-  values: { supplierOfferAmount: number; clientOfferAmount?: number; clientOfferNotes?: string }
+  values: {
+    supplierOfferAmount: number;
+    lineSupplierPrices?: Record<string, number>;
+    clientOfferAmount?: number;
+    clientOfferNotes?: string;
+  }
 ): Promise<void> {
   const now = Date.now();
+  const lines = order.lines.map((line) => ({
+    ...line,
+    supplierOfferUnitPrice: Math.max(
+      0,
+      Number(values.lineSupplierPrices?.[line.id] ?? line.supplierOfferUnitPrice ?? line.estimatedPrice ?? 0)
+    ),
+  }));
   await updateDoc(doc(partOrdersCollection, order.id), {
     status: "quote_received",
     supplierQuoteReceivedAt: now,
     supplierQuoteReceivedByUserId: actor?.id || actor?.uid || "",
     supplierQuoteReceivedByUserName: actorName(actor),
     supplierOfferAmount: Math.max(0, Number(values.supplierOfferAmount || 0)),
+    lines,
     clientOfferAmount: Math.max(0, Number(values.clientOfferAmount || values.supplierOfferAmount || 0)),
     clientOfferNotes: toText(values.clientOfferNotes),
+    updatedAt: now,
+    updatedAtServer: serverTimestamp(),
+  });
+}
+
+export async function saveClientPartOffer(
+  order: MaintenancePartOrder,
+  _actor: AppUser | null,
+  values: { clientEmail: string; clientOfferAmount: number; clientOfferNotes: string; lineClientPrices: Record<string, number> }
+): Promise<void> {
+  const now = Date.now();
+  const lines = order.lines.map((line) => ({
+    ...line,
+    clientOfferUnitPrice: Math.max(0, Number(values.lineClientPrices[line.id] ?? line.clientOfferUnitPrice ?? 0)),
+  }));
+  await updateDoc(doc(partOrdersCollection, order.id), {
+    clientEmail: toText(values.clientEmail),
+    clientOfferAmount: Math.max(0, Number(values.clientOfferAmount || 0)),
+    clientOfferNotes: toText(values.clientOfferNotes),
+    lines,
     updatedAt: now,
     updatedAtServer: serverTimestamp(),
   });

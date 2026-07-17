@@ -278,6 +278,33 @@ test("users, tools and maintenance are isolated between companies", async () => 
   await assertFails(getDoc(doc(db, "maintenanceClients", "client-b")));
 });
 
+test("part order preferences belong only to the authenticated user", async () => {
+  const ownPreferences = doc(firestore("employee-a"), "maintenancePartOrderPreferences", "employee-a");
+  await assertSucceeds(setDoc(ownPreferences, {
+    userId: "employee-a",
+    companyId: "company-a",
+    supplierName: "Furnizor Test",
+    supplierContact: "0722000000",
+    supplierEmail: "oferta@test.ro",
+    lineSupplier: "Furnizor Test",
+    lastPartName: "Rola usa",
+    updatedAt: 1000,
+  }));
+  await assertSucceeds(getDoc(ownPreferences));
+  await assertFails(getDoc(doc(firestore("employee-a2"), "maintenancePartOrderPreferences", "employee-a")));
+  await assertFails(setDoc(doc(firestore("employee-a2"), "maintenancePartOrderPreferences", "employee-a"), {
+    userId: "employee-a",
+    companyId: "company-a",
+    supplierName: "Alt furnizor",
+  }));
+  await assertFails(setDoc(ownPreferences, {
+    userId: "employee-a",
+    companyId: "company-a",
+    supplierName: "Furnizor Test",
+    unexpected: true,
+  }));
+});
+
 test("only a manager from the client company can change maintenance client status", async () => {
   await assertSucceeds(updateDoc(doc(firestore("manager-a"), "maintenanceClients", "client-a"), {
     status: "inactive",

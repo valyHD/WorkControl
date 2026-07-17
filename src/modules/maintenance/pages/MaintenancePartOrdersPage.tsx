@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Eye, Mail, PackagePlus, Pencil, RefreshCw, Save, Send, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Eye, EyeOff, History, Mail, PackagePlus, Pencil, RefreshCw, Save, Send, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { AppUser } from "../../../types/tool";
 import type { AppUserItem } from "../../../types/user";
@@ -8,6 +9,7 @@ import type {
   MaintenancePartOrder,
   MaintenancePartOrderLine,
   MaintenancePartOrderPriority,
+  MaintenancePartOrderPreferences,
   MaintenancePartOrderStatus,
 } from "../../../types/maintenance";
 import { subscribeMaintenanceClients } from "../services/maintenanceService";
@@ -15,15 +17,31 @@ import { isMaintenanceClientActive } from "../utils/maintenanceClientStatus";
 import {
   createMaintenancePartOrder,
   deleteMaintenancePartOrder,
-  markClientOfferEmailSent,
   markMaintenancePartOrderResolved,
   markMaintenancePartOrderSeen,
-  markSupplierEmailSent,
   markSupplierQuoteReceived,
+  saveClientPartOffer,
   subscribeMaintenancePartOrders,
+  unmarkMaintenancePartOrderSeen,
   updateMaintenancePartOrder,
 } from "../services/partOrdersService";
 import { subscribeUsers } from "../../users/services/usersService";
+import { sendMaintenancePartOrderEmail } from "../services/partOrderEmailService";
+import {
+  loadPartOrderPreferences,
+  readLocalPartOrderPreferences,
+  savePartOrderPreferences,
+  writeLocalPartOrderPreferences,
+} from "../services/partOrderPreferencesService";
+import {
+  applyPartOrderPreferences,
+  uniqueOrderedPartNames,
+  uniqueSupplierNames,
+} from "../utils/partOrdersDomain";
+import {
+  ClientOfferDialog,
+  SupplierQuoteDialog,
+} from "../components/MaintenancePartOrderOfferDialogs";
 
 const statusOptions: Array<{ value: MaintenancePartOrderStatus; label: string }> = [
   { value: "draft", label: "Draft" },
@@ -51,6 +69,8 @@ const emptyLine = (): MaintenancePartOrderLine => ({
   unit: "buc",
   supplier: "",
   estimatedPrice: 0,
+  supplierOfferUnitPrice: 0,
+  clientOfferUnitPrice: 0,
   notes: "",
 });
 
@@ -74,7 +94,7 @@ type FormState = {
   lines: MaintenancePartOrderLine[];
 };
 
-const emptyForm = (): FormState => ({
+const emptyForm = (preferences?: Partial<MaintenancePartOrderPreferences>): FormState => applyPartOrderPreferences({
   title: "",
   status: "requested",
   priority: "normal",
@@ -92,7 +112,7 @@ const emptyForm = (): FormState => ({
   clientEmail: "",
   notes: "",
   lines: [emptyLine()],
-});
+}, preferences || {});
 
 function getCurrentAppUser(user: ReturnType<typeof useAuth>["user"]): AppUser | null {
   if (!user?.uid) return null;
@@ -132,61 +152,15 @@ function getUserDisplayName(user: AppUserItem) {
   return user.fullName || user.email || user.id;
 }
 
-function encodeMailTo(to: string, subject: string, body: string) {
-  return `mailto:${encodeURIComponent(to.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+function orderVisualState(order: MaintenancePartOrder) {
+  if (order.status === "installed") return "resolved";
+  if (order.status === "cancelled") return "cancelled";
+  if (order.priority === "urgent") return "urgent";
+  return "pending";
 }
 
-function getOrderEmailTitle(order: MaintenancePartOrder) {
-  return order.title || [order.clientName, order.liftSerialNumber].filter(Boolean).join(" - ") || "Comanda piese";
-}
-
-function buildPartsText(order: MaintenancePartOrder) {
-  return order.lines
-    .map((line, index) => `${index + 1}. ${line.name || "Piesa"}${line.code ? `, cod ${line.code}` : ""}, cantitate ${line.quantity} ${line.unit || "buc"}${line.notes ? `, observatii: ${line.notes}` : ""}`)
-    .join("\n");
-}
-
-function buildSupplierEmail(order: MaintenancePartOrder) {
-  const title = getOrderEmailTitle(order);
-  return {
-    subject: `Cerere oferta piese - ${title}`,
-    body: [
-      "Buna ziua,",
-      "",
-      "Va rog sa ne trimiteti oferta pentru urmatoarele piese:",
-      "",
-      buildPartsText(order),
-      "",
-      `Client/locatie: ${order.clientName || "-"}${order.addressLabel ? `, ${order.addressLabel}` : ""}`,
-      `Lift/echipament: ${order.liftSerialNumber || "-"}`,
-      order.neededByDate ? `Necesar pana la: ${order.neededByDate}` : "",
-      order.notes ? `Observatii: ${order.notes}` : "",
-      "",
-      "Va multumesc.",
-    ].filter(Boolean).join("\n"),
-  };
-}
-
-function buildClientOfferEmail(order: MaintenancePartOrder) {
-  const amount = order.clientOfferAmount || order.supplierOfferAmount || order.totalEstimated;
-  return {
-    subject: `Oferta piese - ${getOrderEmailTitle(order)}`,
-    body: [
-      "Buna ziua,",
-      "",
-      `Va transmitem oferta pentru piesele necesare la ${order.liftSerialNumber || "echipamentul mentionat"}.`,
-      "",
-      buildPartsText(order),
-      "",
-      amount ? `Valoare oferta: ${formatMoney(amount)}` : "",
-      order.clientOfferNotes ? `Observatii: ${order.clientOfferNotes}` : "",
-      order.addressLabel ? `Locatie: ${order.addressLabel}` : "",
-      "",
-      "Va rugam sa ne confirmati daca aprobati oferta.",
-      "",
-      "Multumim.",
-    ].filter(Boolean).join("\n"),
-  };
+function statusLabel(status: MaintenancePartOrderStatus) {
+  return statusOptions.find((item) => item.value === status)?.label || status;
 }
 
 function getClientLiftOptions(client: MaintenanceClient | null) {
@@ -240,8 +214,13 @@ export default function MaintenancePartOrdersPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [workflowSaving, setWorkflowSaving] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [preferences, setPreferences] = useState<MaintenancePartOrderPreferences | null>(null);
+  const [supplierQuoteOrder, setSupplierQuoteOrder] = useState<MaintenancePartOrder | null>(null);
+  const [clientOfferOrder, setClientOfferOrder] = useState<MaintenancePartOrder | null>(null);
+  const preferenceSaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const unsubClients = subscribeMaintenanceClients(
@@ -272,6 +251,23 @@ export default function MaintenancePartOrdersPage() {
       unsubOrders();
       unsubUsers();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const local = readLocalPartOrderPreferences(currentUser.id);
+    setPreferences(local);
+    setForm((current) => applyPartOrderPreferences(current, local));
+    void loadPartOrderPreferences(currentUser.id)
+      .then((loaded) => {
+        setPreferences(loaded);
+        setForm((current) => applyPartOrderPreferences(current, loaded));
+      })
+      .catch((err) => console.error("[MaintenancePartOrdersPage][preferences]", err));
+  }, [currentUser?.id]);
+
+  useEffect(() => () => {
+    if (preferenceSaveTimer.current !== null) window.clearTimeout(preferenceSaveTimer.current);
   }, []);
 
   const selectedClient = useMemo(
@@ -310,15 +306,35 @@ export default function MaintenancePartOrdersPage() {
     });
   }, [orders, search, statusFilter]);
 
+  const orderedPartSuggestions = useMemo(() => uniqueOrderedPartNames(orders), [orders]);
+  const supplierSuggestions = useMemo(() => uniqueSupplierNames(orders), [orders]);
+
+  function rememberPreferences(patch: Partial<MaintenancePartOrderPreferences>) {
+    if (!currentUser?.id) return;
+    const next = writeLocalPartOrderPreferences(currentUser.id, { ...(preferences || {}), ...patch });
+    setPreferences(next);
+    if (preferenceSaveTimer.current !== null) window.clearTimeout(preferenceSaveTimer.current);
+    preferenceSaveTimer.current = window.setTimeout(() => {
+      void savePartOrderPreferences(currentUser.id, next).catch((err) =>
+        console.error("[MaintenancePartOrdersPage][preferences-save]", err)
+      );
+    }, 700);
+  }
+
   function updateLine(lineId: string, patch: Partial<MaintenancePartOrderLine>) {
     setForm((prev) => ({
       ...prev,
       lines: prev.lines.map((line) => (line.id === lineId ? { ...line, ...patch } : line)),
     }));
+    if (typeof patch.name === "string" && patch.name.trim()) rememberPreferences({ lastPartName: patch.name });
+    if (typeof patch.supplier === "string" && patch.supplier.trim()) rememberPreferences({ lineSupplier: patch.supplier });
   }
 
   function addLine() {
-    setForm((prev) => ({ ...prev, lines: [...prev.lines, emptyLine()] }));
+    setForm((prev) => ({
+      ...prev,
+      lines: [...prev.lines, { ...emptyLine(), supplier: preferences?.lineSupplier || "" }],
+    }));
   }
 
   function removeLine(lineId: string) {
@@ -326,7 +342,7 @@ export default function MaintenancePartOrdersPage() {
   }
 
   function resetForm() {
-    setForm(emptyForm());
+    setForm(emptyForm(preferences || undefined));
     setEditingOrder(null);
     setError("");
     setStatus("");
@@ -376,6 +392,9 @@ export default function MaintenancePartOrdersPage() {
         supplierQuoteReceivedByUserId: editingOrder?.supplierQuoteReceivedByUserId || "",
         supplierQuoteReceivedByUserName: editingOrder?.supplierQuoteReceivedByUserName || "",
         supplierOfferAmount: editingOrder?.supplierOfferAmount || 0,
+        orderedAt: editingOrder?.orderedAt ?? null,
+        orderedByUserId: editingOrder?.orderedByUserId || "",
+        orderedByUserName: editingOrder?.orderedByUserName || "",
         clientOfferEmailSentAt: editingOrder?.clientOfferEmailSentAt ?? null,
         clientOfferEmailSentByUserId: editingOrder?.clientOfferEmailSentByUserId || "",
         clientOfferEmailSentByUserName: editingOrder?.clientOfferEmailSentByUserName || "",
@@ -388,6 +407,15 @@ export default function MaintenancePartOrdersPage() {
         nextReminderAt: editingOrder?.nextReminderAt ?? null,
         lines,
       };
+
+      await savePartOrderPreferences(currentUser.id, {
+        ...(preferences || {}),
+        supplierName: form.supplierName,
+        supplierContact: form.supplierContact,
+        supplierEmail: form.supplierEmail,
+        lineSupplier: lines.find((line) => line.supplier.trim())?.supplier || preferences?.lineSupplier || "",
+        lastPartName: lines.at(-1)?.name || preferences?.lastPartName || "",
+      });
 
       if (editingOrder) {
         await updateMaintenancePartOrder(editingOrder.id, payload, currentUser, editingOrder.status);
@@ -420,8 +448,13 @@ export default function MaintenancePartOrdersPage() {
   async function handleSeen(order: MaintenancePartOrder) {
     setError("");
     try {
-      await markMaintenancePartOrderSeen(order, currentUser);
-      setStatus("Comanda a fost marcata ca vazuta. Reamintirile se opresc pentru utilizatorul notificat.");
+      if (order.notificationSeenAt) {
+        await unmarkMaintenancePartOrderSeen(order);
+        setStatus("Marcajul Vazut a fost retras. Reamintirile pot porni din nou.");
+      } else {
+        await markMaintenancePartOrderSeen(order, currentUser);
+        setStatus("Comanda a fost marcata ca vazuta. Reamintirile se opresc pentru utilizatorul notificat.");
+      }
     } catch (err) {
       console.error("[MaintenancePartOrdersPage][seen]", err);
       setError("Nu am putut marca aceasta comanda ca vazuta.");
@@ -429,46 +462,75 @@ export default function MaintenancePartOrdersPage() {
   }
 
   async function handleSupplierEmail(order: MaintenancePartOrder) {
-    const email = order.supplierEmail || order.supplierContact;
+    const email = order.supplierEmail;
     if (!email.trim()) {
       setError("Completeaza emailul furnizorului in comanda.");
       return;
     }
-    const content = buildSupplierEmail(order);
-    window.location.href = encodeMailTo(email, content.subject, content.body);
-    await markSupplierEmailSent(order, currentUser);
-    setStatus("Emailul catre furnizor a fost deschis si comanda a fost marcata ca Oferta ceruta.");
+    if (!window.confirm(`Trimiti cererea de oferta catre ${email} din liftultau@gmail.com?`)) return;
+    setWorkflowSaving(true);
+    setError("");
+    try {
+      await sendMaintenancePartOrderEmail(order.id, "supplier_quote_request");
+      setStatus(`Cererea de oferta a fost trimisa catre ${email}.`);
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][supplier-email]", err);
+      setError("Nu am putut trimite cererea de oferta prin Gmail.");
+    } finally {
+      setWorkflowSaving(false);
+    }
   }
 
-  async function handleQuoteReceived(order: MaintenancePartOrder) {
-    const supplierAmountRaw = window.prompt("Suma oferta primita de la furnizor (RON)", String(order.supplierOfferAmount || order.totalEstimated || ""));
-    if (supplierAmountRaw === null) return;
-    const supplierOfferAmount = Number(String(supplierAmountRaw).replace(",", "."));
-    if (!Number.isFinite(supplierOfferAmount) || supplierOfferAmount < 0) {
-      setError("Suma oferta furnizor nu este valida.");
-      return;
+  async function saveSupplierQuote(values: {
+    supplierOfferAmount: number;
+    lineSupplierPrices: Record<string, number>;
+  }) {
+    if (!supplierQuoteOrder) return;
+    setWorkflowSaving(true);
+    setError("");
+    try {
+      await markSupplierQuoteReceived(supplierQuoteOrder, currentUser, values);
+      setSupplierQuoteOrder(null);
+      setStatus("Oferta furnizor a fost salvata, inclusiv preturile individuale.");
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][supplier-quote]", err);
+      setError("Nu am putut salva oferta furnizorului.");
+    } finally {
+      setWorkflowSaving(false);
     }
-    const clientAmountRaw = window.prompt("Suma oferta catre client (RON). Poti lasa aceeasi suma.", String(order.clientOfferAmount || supplierOfferAmount));
-    if (clientAmountRaw === null) return;
-    const clientOfferAmount = Number(String(clientAmountRaw).replace(",", "."));
-    const clientOfferNotes = window.prompt("Observatii oferta client / montaj / OP", order.clientOfferNotes || "") || "";
-    await markSupplierQuoteReceived(order, currentUser, {
-      supplierOfferAmount,
-      clientOfferAmount: Number.isFinite(clientOfferAmount) ? clientOfferAmount : supplierOfferAmount,
-      clientOfferNotes,
-    });
-    setStatus("Oferta furnizor a fost marcata ca primita.");
   }
 
-  async function handleClientOfferEmail(order: MaintenancePartOrder) {
-    if (!order.clientEmail.trim()) {
-      setError("Completeaza emailul clientului in comanda.");
+  async function saveClientOffer(
+    values: {
+      clientEmail: string;
+      clientOfferAmount: number;
+      clientOfferNotes: string;
+      lineClientPrices: Record<string, number>;
+    },
+    sendEmail: boolean
+  ) {
+    if (!clientOfferOrder) return;
+    if (sendEmail && !values.clientEmail.trim()) {
+      setError("Completeaza emailul clientului.");
       return;
     }
-    const content = buildClientOfferEmail(order);
-    window.location.href = encodeMailTo(order.clientEmail, content.subject, content.body);
-    await markClientOfferEmailSent(order, currentUser);
-    setStatus("Emailul catre client a fost deschis si comanda a fost actualizata.");
+    setWorkflowSaving(true);
+    setError("");
+    try {
+      await saveClientPartOffer(clientOfferOrder, currentUser, values);
+      if (sendEmail) {
+        await sendMaintenancePartOrderEmail(clientOfferOrder.id, "client_offer");
+        setStatus(`Oferta clientului a fost salvata si trimisa catre ${values.clientEmail}.`);
+      } else {
+        setStatus("Oferta clientului a fost salvata separat de preturile furnizorului.");
+      }
+      setClientOfferOrder(null);
+    } catch (err) {
+      console.error("[MaintenancePartOrdersPage][client-offer]", err);
+      setError(sendEmail ? "Nu am putut salva sau trimite oferta clientului." : "Nu am putut salva oferta clientului.");
+    } finally {
+      setWorkflowSaving(false);
+    }
   }
 
   async function handleResolved(order: MaintenancePartOrder) {
@@ -488,6 +550,10 @@ export default function MaintenancePartOrdersPage() {
             </p>
           </div>
           <div className="expense-page-actions">
+            <Link className="secondary-btn" to="/maintenance/orders/history">
+              <History size={16} />
+              Piese comandate
+            </Link>
             <button className="secondary-btn" data-assistant-action="maintenance-parts" type="button" onClick={resetForm} disabled={saving}>
               <PackagePlus size={16} />
               Comanda noua
@@ -639,7 +705,11 @@ export default function MaintenancePartOrdersPage() {
               <input
                 className="tool-input"
                 value={form.supplierName}
-                onChange={(event) => setForm((prev) => ({ ...prev, supplierName: event.target.value }))}
+                list="maintenance-supplier-suggestions"
+                onChange={(event) => {
+                  setForm((prev) => ({ ...prev, supplierName: event.target.value }));
+                  rememberPreferences({ supplierName: event.target.value });
+                }}
                 placeholder="Ex: Schindler, Kone, furnizor local"
               />
             </div>
@@ -649,7 +719,10 @@ export default function MaintenancePartOrdersPage() {
               <input
                 className="tool-input"
                 value={form.supplierContact}
-                onChange={(event) => setForm((prev) => ({ ...prev, supplierContact: event.target.value }))}
+                onChange={(event) => {
+                  setForm((prev) => ({ ...prev, supplierContact: event.target.value }));
+                  rememberPreferences({ supplierContact: event.target.value });
+                }}
                 placeholder="telefon / email"
               />
             </div>
@@ -660,7 +733,10 @@ export default function MaintenancePartOrdersPage() {
                 className="tool-input"
                 type="email"
                 value={form.supplierEmail}
-                onChange={(event) => setForm((prev) => ({ ...prev, supplierEmail: event.target.value }))}
+                onChange={(event) => {
+                  setForm((prev) => ({ ...prev, supplierEmail: event.target.value }));
+                  rememberPreferences({ supplierEmail: event.target.value });
+                }}
                 placeholder="ofertare@furnizor.ro"
               />
             </div>
@@ -698,6 +774,12 @@ export default function MaintenancePartOrdersPage() {
           </div>
 
           <div className="maintenance-order-lines">
+            <datalist id="maintenance-part-suggestions">
+              {orderedPartSuggestions.map((name) => <option key={name} value={name} />)}
+            </datalist>
+            <datalist id="maintenance-supplier-suggestions">
+              {supplierSuggestions.map((name) => <option key={name} value={name} />)}
+            </datalist>
             <div className="maintenance-order-lines__head">
               <strong>Piese comandate</strong>
               <button className="secondary-btn" type="button" onClick={addLine}>
@@ -707,12 +789,12 @@ export default function MaintenancePartOrdersPage() {
             </div>
             {form.lines.map((line) => (
               <div key={line.id} className="maintenance-order-line">
-                <input className="tool-input" value={line.name} onChange={(event) => updateLine(line.id, { name: event.target.value })} placeholder="Denumire piesa" />
+                <input className="tool-input" list="maintenance-part-suggestions" value={line.name} onChange={(event) => updateLine(line.id, { name: event.target.value })} placeholder="Denumire piesa" />
                 <input className="tool-input" value={line.code} onChange={(event) => updateLine(line.id, { code: event.target.value })} placeholder="Cod piesa" />
                 <input className="tool-input" type="number" min="1" value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: Number(event.target.value || 1) })} placeholder="Cant." />
                 <input className="tool-input" value={line.unit} onChange={(event) => updateLine(line.id, { unit: event.target.value })} placeholder="UM" />
                 <input className="tool-input" type="number" min="0" step="0.01" value={line.estimatedPrice} onChange={(event) => updateLine(line.id, { estimatedPrice: Number(event.target.value || 0) })} placeholder="Pret estimat" />
-                <input className="tool-input" value={line.supplier} onChange={(event) => updateLine(line.id, { supplier: event.target.value })} placeholder="Furnizor piesa" />
+                <input className="tool-input" list="maintenance-supplier-suggestions" value={line.supplier} onChange={(event) => updateLine(line.id, { supplier: event.target.value })} placeholder="Furnizor piesa" />
                 <button className="danger-btn" type="button" onClick={() => removeLine(line.id)} disabled={form.lines.length <= 1}>
                   <Trash2 size={15} />
                 </button>
@@ -772,12 +854,12 @@ export default function MaintenancePartOrdersPage() {
         ) : (
           <div className="simple-list maintenance-orders-list">
             {filteredOrders.map((order) => (
-              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${order.priority}`}>
+              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${orderVisualState(order)}`}>
                 <summary>
                   <span className="simple-list-text">
                     <span className="simple-list-label">{order.title || "Comanda piese"} - {order.clientName || "fara client"}</span>
                     <span className="simple-list-subtitle">
-                      {order.status} / {order.priority} - {order.lines.length} piese - {formatMoney(order.totalEstimated)} - {formatDateTime(order.updatedAt)}
+                      {statusLabel(order.status)} / {order.priority} - {order.lines.length} piese - {formatMoney(order.totalEstimated)} - {formatDateTime(order.updatedAt)}
                     </span>
                   </span>
                   <span className="maintenance-order-actions">
@@ -808,21 +890,21 @@ export default function MaintenancePartOrdersPage() {
                   <div><strong>Oferta client:</strong> {order.clientOfferEmailSentAt ? `${formatMoney(order.clientOfferAmount || order.supplierOfferAmount)} - trimisa ${formatDateTime(order.clientOfferEmailSentAt)}` : "-"}</div>
                   {order.notes && <p>{order.notes}</p>}
                   <div className="maintenance-order-workflow">
-                    {order.notifyUserId && !order.notificationSeenAt && (
+                    {order.notifyUserId && (
                       <button className="secondary-btn" type="button" onClick={() => void handleSeen(order)}>
-                        <Eye size={15} />
-                        Am vazut
+                        {order.notificationSeenAt ? <EyeOff size={15} /> : <Eye size={15} />}
+                        {order.notificationSeenAt ? "Debifeaza vazut" : "Am vazut"}
                       </button>
                     )}
-                    <button className="secondary-btn" type="button" onClick={() => void handleSupplierEmail(order)}>
+                    <button className="secondary-btn" type="button" disabled={workflowSaving} onClick={() => void handleSupplierEmail(order)}>
                       <Send size={15} />
                       Cere oferta furnizor
                     </button>
-                    <button className="secondary-btn" type="button" onClick={() => void handleQuoteReceived(order)}>
+                    <button className="secondary-btn" type="button" onClick={() => setSupplierQuoteOrder(order)}>
                       <CheckCircle2 size={15} />
                       Oferta primita
                     </button>
-                    <button className="secondary-btn" type="button" onClick={() => void handleClientOfferEmail(order)}>
+                    <button className="secondary-btn" type="button" onClick={() => setClientOfferOrder(order)}>
                       <Mail size={15} />
                       Trimite oferta client
                     </button>
@@ -836,7 +918,8 @@ export default function MaintenancePartOrdersPage() {
                       <div key={line.id} className="maintenance-order-part">
                         <span>{line.name || "Piesa"} {line.code ? `(${line.code})` : ""}</span>
                         <span>{line.quantity} {line.unit || "buc"}</span>
-                        <strong>{formatMoney(Number(line.quantity || 0) * Number(line.estimatedPrice || 0))}</strong>
+                        <span>Furnizor: {formatMoney(line.supplierOfferUnitPrice || line.estimatedPrice || 0)} / {line.unit || "buc"}</span>
+                        <strong>Client: {formatMoney(line.clientOfferUnitPrice || 0)} / {line.unit || "buc"}</strong>
                       </div>
                     ))}
                   </div>
@@ -846,6 +929,22 @@ export default function MaintenancePartOrdersPage() {
           </div>
         )}
       </div>
+      {supplierQuoteOrder && (
+        <SupplierQuoteDialog
+          order={supplierQuoteOrder}
+          saving={workflowSaving}
+          onClose={() => setSupplierQuoteOrder(null)}
+          onSave={saveSupplierQuote}
+        />
+      )}
+      {clientOfferOrder && (
+        <ClientOfferDialog
+          order={clientOfferOrder}
+          saving={workflowSaving}
+          onClose={() => setClientOfferOrder(null)}
+          onSave={saveClientOffer}
+        />
+      )}
     </section>
   );
 }

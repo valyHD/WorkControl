@@ -602,6 +602,16 @@ service cloud.firestore {
       allow delete: if adminFor(resource.data.get('companyId', ''));
     }
 
+    match /maintenancePartOrderPreferences/{userId} {
+      allow read, delete: if self(userId);
+      allow create, update: if self(userId) &&
+        request.resource.data.get('userId', '') == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'userId', 'companyId', 'supplierName', 'supplierContact', 'supplierEmail',
+          'lineSupplier', 'lastPartName', 'updatedAt', 'updatedAtServer'
+        ]);
+    }
+
     match /{parentPath=**}/rapoarte/{reportId} {
       allow read: if sameCompanyData(resource.data);
       allow create: if managerFor(request.resource.data.get('companyId', ''));

@@ -105,7 +105,20 @@ export type MaintenancePartOrderLine = {
   unit: string;
   supplier: string;
   estimatedPrice: number;
+  supplierOfferUnitPrice: number;
+  clientOfferUnitPrice: number;
   notes: string;
+};
+
+export type MaintenancePartOrderPreferences = {
+  userId: string;
+  companyId: string;
+  supplierName: string;
+  supplierContact: string;
+  supplierEmail: string;
+  lineSupplier: string;
+  lastPartName: string;
+  updatedAt: number;
 };
 
 export type MaintenancePartOrder = {
@@ -139,6 +152,9 @@ export type MaintenancePartOrder = {
   supplierQuoteReceivedByUserId: string;
   supplierQuoteReceivedByUserName: string;
   supplierOfferAmount: number;
+  orderedAt: number | null;
+  orderedByUserId: string;
+  orderedByUserName: string;
   clientOfferEmailSentAt: number | null;
   clientOfferEmailSentByUserId: string;
   clientOfferEmailSentByUserName: string;

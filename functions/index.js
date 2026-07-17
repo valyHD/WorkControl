@@ -10,6 +10,10 @@ const { OAuth2Client } = require('google-auth-library');
 const { createGmailMimeBoundary } = require('./gmailMime');
 const { sendRawGmailMessage } = require('./gmailApi');
 const {
+  buildClientPartOfferEmail,
+  buildSupplierQuoteRequestEmail,
+} = require('./partOrderEmail');
+const {
   getEcbRates,
   refreshBillingMetrics: refreshBillingMetricsCache,
 } = require('./billingMetricsRuntime');
@@ -206,6 +210,15 @@ exports.createMaintenanceGmailDraft = onCall(
     secrets: [gmailOAuthClientId, gmailOAuthClientSecret, gmailOAuthRefreshToken],
   },
   sendMaintenanceGmailReport
+);
+exports.sendMaintenancePartOrderEmail = onCall(
+  {
+    ...SECURITY_CALLABLE_OPTIONS,
+    timeoutSeconds: 60,
+    memory: '256MiB',
+    secrets: [gmailOAuthClientId, gmailOAuthClientSecret, gmailOAuthRefreshToken],
+  },
+  sendMaintenancePartOrderEmail
 );
 exports.processDocumentIngestionJob = onDocumentWritten(
   {
@@ -1303,6 +1316,117 @@ async function sendMaintenanceGmailReport(request) {
     threadId: sentMessage?.threadId || '',
     sent: true,
     senderEmail: SHARED_MAINTENANCE_GMAIL_SENDER,
+  };
+}
+
+async function sendMaintenancePartOrderEmail(request) {
+  const context = await assertActiveInternalRequest(request);
+  if (!['admin', 'manager'].includes(toSafeString(context.role))) {
+    throw new HttpsError('permission-denied', 'Nu ai permisiunea sa trimiti oferte de piese.');
+  }
+
+  const orderId = cleanText(request.data?.orderId, 120);
+  const kind = cleanText(request.data?.kind, 40);
+  if (!orderId || !['supplier_quote_request', 'client_offer'].includes(kind)) {
+    throw new HttpsError('invalid-argument', 'Comanda sau tipul emailului nu este valid.');
+  }
+
+  const orderRef = db.collection('maintenancePartOrders').doc(orderId);
+  const orderSnap = await orderRef.get();
+  if (!orderSnap.exists) throw new HttpsError('not-found', 'Comanda de piese nu mai exista.');
+  const order = orderSnap.data() || {};
+  const companyId = cleanText(order.companyId, 120);
+  if (!companyId || !internalContextCanAccessCompany(context, companyId)) {
+    throw new HttpsError('permission-denied', 'Nu ai acces la comanda de piese.');
+  }
+
+  const recipientEmail = kind === 'supplier_quote_request'
+    ? cleanEmail(order.supplierEmail || order.supplierContact)
+    : cleanEmail(order.clientEmail);
+  if (!recipientEmail) {
+    throw new HttpsError(
+      'failed-precondition',
+      kind === 'supplier_quote_request' ? 'Emailul furnizorului nu este completat.' : 'Emailul clientului nu este completat.'
+    );
+  }
+
+  const content = kind === 'supplier_quote_request'
+    ? buildSupplierQuoteRequestEmail(order)
+    : buildClientPartOfferEmail(order);
+  const raw = buildRawGmailMessage({
+    to: recipientEmail,
+    subject: content.subject,
+    body: content.body,
+    attachments: [],
+  });
+  const accessToken = await getSharedGmailAccessToken();
+  const response = await sendRawGmailMessage({ accessToken, raw });
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => '');
+    logger.error('Nu am putut trimite emailul comenzii de piese.', {
+      orderId,
+      kind,
+      companyId,
+      actorUserId: context.userSnap.id,
+      status: response.status,
+      responseSnippet: responseText.slice(0, 200),
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new HttpsError('failed-precondition', 'Gmail a refuzat autorizarea contului liftultau@gmail.com.');
+    }
+    throw new HttpsError('internal', 'Nu am putut trimite emailul prin Gmail.');
+  }
+
+  const sentMessage = await response.json();
+  const now = Date.now();
+  const actorUserId = context.userSnap.id;
+  const actorUserName = context.user.fullName || context.user.email || 'Utilizator';
+  const update = kind === 'supplier_quote_request'
+    ? {
+        status: 'quote_requested',
+        supplierEmailSentAt: now,
+        supplierEmailSentByUserId: actorUserId,
+        supplierEmailSentByUserName: actorUserName,
+      }
+    : {
+        clientOfferEmailSentAt: now,
+        clientOfferEmailSentByUserId: actorUserId,
+        clientOfferEmailSentByUserName: actorUserName,
+      };
+  await orderRef.update({
+    ...update,
+    updatedAt: now,
+    updatedAtServer: FieldValue.serverTimestamp(),
+  });
+  try {
+    await createAuditLog({
+      companyId,
+      category: 'maintenance',
+      action: kind === 'supplier_quote_request' ? 'maintenance_supplier_quote_requested' : 'maintenance_client_offer_sent',
+      title: kind === 'supplier_quote_request' ? 'Oferta ceruta furnizorului' : 'Oferta trimisa clientului',
+      message: `Email trimis prin ${SHARED_MAINTENANCE_GMAIL_SENDER} catre ${recipientEmail}.`,
+      actorUserId,
+      actorUserName,
+      entityId: orderId,
+      entityLabel: cleanText(order.title || order.clientName || orderId, 160),
+      path: '/maintenance/orders',
+      pageTitle: 'Comenzi piese',
+      metadata: { kind, recipientEmail },
+    });
+  } catch (auditError) {
+    logger.warn('Emailul comenzii de piese a fost trimis, dar auditul nu a putut fi salvat.', {
+      orderId,
+      kind,
+      actorUserId,
+      error: auditError instanceof Error ? auditError.message : String(auditError),
+    });
+  }
+
+  return {
+    sent: true,
+    messageId: sentMessage?.id || '',
+    senderEmail: SHARED_MAINTENANCE_GMAIL_SENDER,
+    recipientEmail,
   };
 }
 
