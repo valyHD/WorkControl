@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { VehiclePositionItem } from "../../../types/vehicle";
 import {
+  buildDistanceHistory,
+  buildRouteMetricSegments,
   calculateRouteDistanceKm,
+  calculateRouteMetricDistanceKm,
+  calculateRouteMetricDurationMs,
   filterRouteRenderJitter,
   filterStationaryGpsJitter,
   formatDuration,
@@ -80,5 +84,51 @@ describe("vehicleGps helpers", () => {
     expect(filterStationaryGpsJitter(points)).toHaveLength(1);
     expect(filterRouteRenderJitter(points)).toHaveLength(1);
     expect(calculateRouteDistanceKm(filterRouteRenderJitter(points))).toBe(0);
+  });
+
+  it("recovers daily distance and travel time when GPS movement is clear but ignition is false", () => {
+    const baseTs = new Date(2026, 6, 17, 8, 0, 0).getTime();
+    const points = [26.1025, 26.106, 26.1095, 26.113].map((lng, index) =>
+      position({
+        id: `moving-${index}`,
+        gpsTimestamp: baseTs + index * 2 * 60 * 1000,
+        serverTimestamp: baseTs + index * 2 * 60 * 1000 + 1_000,
+        lng,
+        speedKmh: 0,
+        ignitionOn: false,
+      })
+    );
+
+    const segments = buildRouteMetricSegments(points);
+    const distanceKm = segments.reduce(
+      (total, segment) => total + calculateRouteMetricDistanceKm(segment),
+      0
+    );
+    const durationMs = segments.reduce(
+      (total, segment) => total + calculateRouteMetricDurationMs(segment),
+      0
+    );
+    const history = segments.flatMap((segment) => buildDistanceHistory(segment, "day"));
+
+    expect(segments).toHaveLength(1);
+    expect(distanceKm).toBeGreaterThan(0.7);
+    expect(durationMs).toBe(6 * 60 * 1000);
+    expect(history).toHaveLength(1);
+    expect(history[0].distanceKm).toBeGreaterThan(0.7);
+  });
+
+  it("does not recover an isolated GPS jump as a driven route", () => {
+    const baseTs = Date.UTC(2026, 6, 17, 8, 0, 0);
+    const points = [
+      position({ id: "jump-start", gpsTimestamp: baseTs, ignitionOn: false }),
+      position({
+        id: "jump-end",
+        gpsTimestamp: baseTs + 2 * 60 * 1000,
+        lng: 26.11,
+        ignitionOn: false,
+      }),
+    ];
+
+    expect(buildRouteMetricSegments(points)).toEqual([]);
   });
 });

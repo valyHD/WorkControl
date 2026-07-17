@@ -831,6 +831,60 @@ export function calculateRouteDurationMs(positions: VehiclePositionItem[]): numb
   return totalMs;
 }
 
+function getMetricSegmentDistanceKm(
+  prev: VehiclePositionItem,
+  next: VehiclePositionItem
+): number {
+  const deltaMs = getSegmentDeltaMs(prev, next);
+  if (deltaMs <= 0 || deltaMs > MAX_ROUTE_DURATION_GAP_MS) return 0;
+
+  const prevOdo = toSafeOdometer(prev.odometerKm);
+  const nextOdo = toSafeOdometer(next.odometerKm);
+  const odometerDelta =
+    prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
+
+  if (
+    odometerDelta !== undefined &&
+    odometerDelta > 0 &&
+    odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
+  ) {
+    return odometerDelta;
+  }
+
+  return getPlausibleGeoMovementKm(prev, next);
+}
+
+export function calculateRouteMetricDistanceKm(
+  positions: VehiclePositionItem[]
+): number {
+  const clean = sanitizePositions(positions);
+  if (clean.length <= 1) return 0;
+
+  let total = 0;
+  for (let index = 1; index < clean.length; index += 1) {
+    total += getMetricSegmentDistanceKm(clean[index - 1], clean[index]);
+  }
+
+  return Number(total.toFixed(2));
+}
+
+export function calculateRouteMetricDurationMs(
+  positions: VehiclePositionItem[]
+): number {
+  const clean = sanitizePositions(positions);
+  if (clean.length <= 1) return 0;
+
+  let totalMs = 0;
+  for (let index = 1; index < clean.length; index += 1) {
+    const prev = clean[index - 1];
+    const next = clean[index];
+    if (getMetricSegmentDistanceKm(prev, next) <= 0) continue;
+    totalMs += getSegmentDeltaMs(prev, next);
+  }
+
+  return totalMs;
+}
+
 export function filterTrackableRoutePositions(
   positions: VehiclePositionItem[]
 ): VehiclePositionItem[] {
@@ -897,6 +951,60 @@ export function filterTrackableRoutePositions(
   flushSegment();
 
   return sanitizePositions(result);
+}
+
+export function buildRouteMetricSegments(
+  positions: VehiclePositionItem[]
+): VehiclePositionItem[][] {
+  const clean = filterStationaryGpsJitter(positions);
+  if (clean.length <= 1) return [];
+
+  const strictRoute = filterTrackableRoutePositions(clean);
+  const strictDistanceKm = calculateRouteDistanceKm(strictRoute);
+  const recoveredSegments: VehiclePositionItem[][] = [];
+  let current: VehiclePositionItem[] = [];
+  let currentDistanceKm = 0;
+
+  const flush = () => {
+    // Two connected movements over at least 200 m are strong evidence of a real trip,
+    // even when a tracker incorrectly reports ignition off and zero speed.
+    if (current.length >= 3 && currentDistanceKm >= 0.2) {
+      recoveredSegments.push(current);
+    }
+    current = [];
+    currentDistanceKm = 0;
+  };
+
+  for (let index = 1; index < clean.length; index += 1) {
+    const prev = clean[index - 1];
+    const next = clean[index];
+    const segmentDistanceKm = getMetricSegmentDistanceKm(prev, next);
+
+    if (segmentDistanceKm <= 0) {
+      flush();
+      continue;
+    }
+
+    if (!current.length) current.push(prev);
+    current.push(next);
+    currentDistanceKm += segmentDistanceKm;
+  }
+
+  flush();
+
+  const recoveredDistanceKm = recoveredSegments.reduce(
+    (total, segment) => total + calculateRouteMetricDistanceKm(segment),
+    0
+  );
+
+  if (
+    recoveredDistanceKm > 0 &&
+    (strictDistanceKm <= 0 || recoveredDistanceKm >= strictDistanceKm + 0.3)
+  ) {
+    return recoveredSegments;
+  }
+
+  return strictRoute.length > 1 ? [strictRoute] : [];
 }
 
 function getWeekStart(date: Date): Date {
@@ -990,31 +1098,8 @@ export function buildDistanceHistory(
     const deltaMs = next.gpsTimestamp - prev.gpsTimestamp;
     if (deltaMs <= 0 || deltaMs > MAX_REASONABLE_GAP_MS) continue;
 
-    const prevOdo = toSafeOdometer(prev.odometerKm);
-    const nextOdo = toSafeOdometer(next.odometerKm);
-    const odometerDelta =
-      prevOdo !== undefined && nextOdo !== undefined ? nextOdo - prevOdo : undefined;
-
-    let segmentDistance = 0;
-
-    if (
-      odometerDelta !== undefined &&
-      odometerDelta > 0 &&
-      odometerDelta < MAX_REASONABLE_ODOMETER_STEP_KM
-    ) {
-      segmentDistance = odometerDelta;
-    } else {
-      const geoDelta = haversineKm(prev.lat, prev.lng, next.lat, next.lng);
-      const prevSpeed = toSafeSpeed(prev.speedKmh);
-      const nextSpeed = toSafeSpeed(next.speedKmh);
-      const movingBySpeed = prevSpeed > MIN_MOVING_SPEED_KMH || nextSpeed > MIN_MOVING_SPEED_KMH;
-
-      if (geoDelta <= 0 || geoDelta >= MAX_REASONABLE_POINT_JUMP_KM) continue;
-      if (!movingBySpeed) continue;
-      if (geoDelta < MIN_GEO_MOVEMENT_STEP_KM) continue;
-
-      segmentDistance = geoDelta;
-    }
+    const segmentDistance = getMetricSegmentDistanceKm(prev, next);
+    if (segmentDistance <= 0) continue;
 
     const meta = getBucketMeta(next.gpsTimestamp);
     const existing = buckets.get(meta.key);

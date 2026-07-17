@@ -34,7 +34,9 @@ import {
 } from "../services/vehiclesService";
 import {
   buildDistanceHistory,
-  calculateRouteDurationMs,
+  buildRouteMetricSegments,
+  calculateRouteMetricDistanceKm,
+  calculateRouteMetricDurationMs,
   buildTimelineEvents,
   calculateRouteDistanceKm,
   detectOverspeed,
@@ -262,13 +264,13 @@ function mergeDistanceBuckets(...bucketLists: VehicleDistanceBucket[][]): Vehicl
 function sumRouteDistanceKm(segments: VehiclePositionItem[][]) {
   return Number(
     segments
-      .reduce((total, segment) => total + calculateRouteDistanceKm(segment), 0)
+      .reduce((total, segment) => total + calculateRouteMetricDistanceKm(segment), 0)
       .toFixed(2)
   );
 }
 
 function sumRouteDurationMs(segments: VehiclePositionItem[][]) {
-  return segments.reduce((total, segment) => total + calculateRouteDurationMs(segment), 0);
+  return segments.reduce((total, segment) => total + calculateRouteMetricDurationMs(segment), 0);
 }
 
 function calculateRouteProgressDistanceKm(points: VehiclePositionItem[]) {
@@ -1975,7 +1977,7 @@ export default function VehicleLiveRouteCard({
     () => {
       const source = analysisRoutePositions.length ? analysisRoutePositions : positions;
       return getVisibleRealGpsSegments(source, hiddenRealGpsIntervals)
-        .map((segment) => filterTrackableRoutePositions(segment))
+        .flatMap((segment) => buildRouteMetricSegments(segment))
         .filter((segment) => segment.length > 1);
     },
     [analysisRoutePositions, hiddenRealGpsIntervals, positions]
@@ -2228,7 +2230,7 @@ export default function VehicleLiveRouteCard({
       source,
       hiddenRealGpsIntervals
     )
-      .map((segment) => filterTrackableRoutePositions(segment))
+      .flatMap((segment) => buildRouteMetricSegments(segment))
       .filter((segment) => segment.length > 1)
       .map((segment) =>
         samplePositions(
@@ -2402,6 +2404,20 @@ export default function VehicleLiveRouteCard({
   const selectedPeriodDistanceKm = useMemo(() => {
     return routeStats.distanceKm;
   }, [routeStats.distanceKm]);
+  const metricRoutePointCount = useMemo(
+    () =>
+      realStatsSegments.reduce((total, segment) => total + segment.length, 0) +
+      historySimulationAnalysisSegments.reduce(
+        (total, segment) => total + segment.length,
+        0
+      ) +
+      activeSimulationPositionsInRange.length,
+    [
+      activeSimulationPositionsInRange.length,
+      historySimulationAnalysisSegments,
+      realStatsSegments,
+    ]
+  );
 
   const selectedDayLabel = useMemo(() => {
     const date = new Date(`${selectedDayValue}T12:00:00`);
@@ -3057,12 +3073,22 @@ export default function VehicleLiveRouteCard({
 
       <div className="vehicle-gps-stats-grid">
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Km perioada selectata</span>
+          <span className="vehicle-gps-stat-card__label">Km parcursi · perioada selectata</span>
           <strong>{selectedPeriodDistanceKm.toFixed(2)} km</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Km azi</span>
+          <span className="vehicle-gps-stat-card__label">Timp parcurs</span>
+          <strong>{routeStats.duration}</strong>
+        </div>
+
+        <div className="vehicle-gps-stat-card">
+          <span className="vehicle-gps-stat-card__label">Opriri</span>
+          <strong>{shouldBuildRouteEvents ? renderedStopItems.length : "-"}</strong>
+        </div>
+
+        <div className="vehicle-gps-stat-card">
+          <span className="vehicle-gps-stat-card__label">Km parcursi azi</span>
           <strong>{historyStats.todayKm.toFixed(2)} km</strong>
         </div>
 
@@ -3078,22 +3104,12 @@ export default function VehicleLiveRouteCard({
 
         <div className="vehicle-gps-stat-card">
           <span className="vehicle-gps-stat-card__label">Puncte traseu</span>
-          <strong>{displayPositions.length}</strong>
-        </div>
-
-        <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Durata traseu</span>
-          <strong>{routeStats.duration}</strong>
+          <strong>{metricRoutePointCount}</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
           <span className="vehicle-gps-stat-card__label">Viteza maxima</span>
           <strong>{routeStats.maxSpeed} km/h</strong>
-        </div>
-
-        <div className="vehicle-gps-stat-card">
-          <span className="vehicle-gps-stat-card__label">Opriri detectate</span>
-          <strong>{shouldBuildRouteEvents ? renderedStopItems.length : "-"}</strong>
         </div>
 
         <div className="vehicle-gps-stat-card">
