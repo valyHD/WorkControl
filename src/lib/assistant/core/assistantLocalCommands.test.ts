@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildLocalAssistantHelpContract,
   buildLocalNamedEntityUpdateContract,
+  buildLocalNotificationSettingsContract,
+  buildLocalPersonalSettingsContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./assistantLocalCommands";
@@ -206,5 +208,64 @@ describe("local vehicle tracker commands", () => {
         { id: "vehicles.open", input: { entityQuery: "toyota", destination: "details" } },
       ],
     });
+  });
+});
+
+describe("local personal settings", () => {
+  it.each([
+    ["pune-mi functia electrician", { roleTitle: "electrician" }],
+    [
+      "vreau ca departamentul meu sa fie Service si Intretinere",
+      { department: "service si intretinere" },
+    ],
+    ["schimba numele meu in Ionut Matura", { fullName: "ionut matura" }],
+  ])("updates only the authenticated user's profile: %s", (command, fields) => {
+    expect(buildLocalPersonalSettingsContract(command)).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_user",
+      toolCalls: [
+        { id: "users.update", input: { entityQuery: "__current_user__", fields } },
+      ],
+      confirmationRequired: true,
+      confidence: 0.98,
+    });
+  });
+
+  it("does not steal a command that targets another user", () => {
+    expect(buildLocalPersonalSettingsContract("schimba functia lui Razvan in sofer")).toBeNull();
+  });
+});
+
+describe("local notification settings", () => {
+  it.each([
+    ["opreste regula Pontaj dimineata", "pontaj dimineata", { enabled: false }],
+    [
+      "da drumul la sunet pentru regula Pontaj start",
+      "pontaj start",
+      { soundEnabled: true },
+    ],
+    ["pune ora regulii Pontaj dimineata la 7", "pontaj dimineata", { scheduleTime: "7" }],
+    [
+      "schimba ora de oprire la regula Pontaj interval la 18 30",
+      "pontaj interval",
+      { stopTime: "18 30" },
+    ],
+    [
+      "schimba intervalul regulii Pontaj start la 30 minute",
+      "pontaj start",
+      { reminderRepeatMinutes: 30 },
+    ],
+  ])("builds a controlled rule update: %s", (command, ruleQuery, fields) => {
+    expect(buildLocalNotificationSettingsContract(command)).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_notification_rule",
+      toolCalls: [{ id: "notifications.rules.update", input: { ruleQuery, fields } }],
+      confirmationRequired: true,
+      confidence: 0.98,
+    });
+  });
+
+  it("requires a named notification rule", () => {
+    expect(buildLocalNotificationSettingsContract("opreste regula")).toBeNull();
   });
 });

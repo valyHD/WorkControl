@@ -10,7 +10,9 @@ import {
   buildLocalAssistantHelpContract,
   buildLocalCurrentEntityUpdateContract,
   buildLocalNamedEntityUpdateContract,
+  buildLocalNotificationSettingsContract,
   buildLocalPageNavigationContract,
+  buildLocalPersonalSettingsContract,
   buildLocalTimesheetContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
@@ -62,6 +64,7 @@ export type AssistantCommandIntent =
   | "open_maintenance_report"
   | "update_vehicle_field"
   | "update_profile_field"
+  | "update_notification_rule"
   | "update_current_page_field"
   | "open_user_activity"
   | "create_manual_notification"
@@ -211,6 +214,18 @@ export async function interpretAssistantCommand(
   const localHelp = buildLocalAssistantHelpContract(cleanCommand);
   if (localHelp) return buildLocalInterpretation(localHelp);
 
+  const localNotificationSettings = buildLocalNotificationSettingsContract(cleanCommand);
+  if (localNotificationSettings) {
+    const fields = localNotificationSettings.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localNotificationSettings, {
+      entityType: "none",
+      entityQuery: "",
+      fields: fields || {},
+    });
+  }
+
   const localVehicleMileage = buildLocalVehicleMileageContract(cleanCommand);
   if (localVehicleMileage) {
     const entityQuery = localVehicleMileage.entityReferences[0]?.query || "";
@@ -309,6 +324,18 @@ export async function interpretAssistantCommand(
     return buildLocalInterpretation(localCurrentEntityUpdate, {
       entityType: entity?.type || "none",
       entityQuery: entity?.query || "",
+      fields: fields || {},
+    });
+  }
+
+  const localPersonalSettings = buildLocalPersonalSettingsContract(cleanCommand);
+  if (localPersonalSettings) {
+    const fields = localPersonalSettings.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localPersonalSettings, {
+      entityType: "user",
+      entityQuery: "__current_user__",
       fields: fields || {},
     });
   }

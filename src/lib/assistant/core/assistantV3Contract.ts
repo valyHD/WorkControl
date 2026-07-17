@@ -67,6 +67,7 @@ const INTENTS = new Set<AssistantCommandIntent>([
   "open_maintenance_report",
   "update_vehicle_field",
   "update_profile_field",
+  "update_notification_rule",
   "update_current_page_field",
   "open_user_activity",
   "create_manual_notification",

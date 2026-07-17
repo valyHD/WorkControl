@@ -9,7 +9,12 @@ import type { ProjectItem } from "../../../types/timesheet";
 import type { ToolItem } from "../../../types/tool";
 import type { AppUserItem } from "../../../types/user";
 import type { VehicleItem } from "../../../types/vehicle";
-import { compactVehiclePlate, rankAssistantMatches, scoreAssistantText } from "./assistantFuzzy";
+import {
+  compactVehiclePlate,
+  normalizeAssistantText,
+  rankAssistantMatches,
+  scoreAssistantText,
+} from "./assistantFuzzy";
 import {
   getToolIdFromAssistantPath,
   getVehicleIdFromAssistantPath,
@@ -252,7 +257,31 @@ export async function resolveAssistantEntity(
   }
 
   if (entityType === "user") {
-    const ranked = rankAssistantMatches(await getAllUsers(), cleanQuery, userSearchText, 0.25);
+    const users = await getAllUsers();
+    const normalizedQuery = normalizeAssistantText(cleanQuery);
+    const requestsCurrentUser =
+      cleanQuery === "__current_user__" ||
+      ["eu", "mine", "profilul meu", "contul meu", "utilizatorul curent"].includes(
+        normalizedQuery
+      );
+    if (requestsCurrentUser && context.user?.uid) {
+      const currentUser = users.find((item) => item.id === context.user?.uid);
+      if (currentUser) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType: "user",
+            entityId: currentUser.id,
+            label: userLabel(currentUser),
+            query: cleanQuery,
+            score: 1,
+            data: currentUser,
+          },
+          options: [],
+        };
+      }
+    }
+    const ranked = rankAssistantMatches(users, cleanQuery, userSearchText, 0.25);
     return buildResolution("user", cleanQuery, ranked, (user) => user.id, userLabel);
   }
 

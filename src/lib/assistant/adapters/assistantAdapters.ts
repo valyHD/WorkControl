@@ -28,6 +28,7 @@ import {
   createStartTimesheetTool,
   createStopTimesheetTool,
 } from "./timesheetAdapter";
+import { createNotificationRuleSettingsTool } from "./notificationSettingsAdapter";
 
 export type AssistantModuleAdapter = {
   module: AssistantToolModule;
@@ -107,6 +108,13 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
       toolIds: ["expenses.draft"],
       register: (registry) => {
         registry.register(createExpenseDraftTool());
+      },
+    },
+    {
+      module: "notifications",
+      toolIds: ["notifications.rules.update"],
+      register: (registry) => {
+        registry.register(createNotificationRuleSettingsTool());
       },
     },
   ];

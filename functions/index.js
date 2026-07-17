@@ -651,6 +651,7 @@ const ASSISTANT_COMMAND_SCHEMA = {
         'open_maintenance_report',
         'update_vehicle_field',
         'update_profile_field',
+        'update_notification_rule',
         'open_user_activity',
         'create_manual_notification',
         'unknown',
@@ -671,6 +672,7 @@ const ASSISTANT_COMMAND_SCHEMA = {
               path: { type: 'string' },
               query: { type: 'string' },
               entityQuery: { type: 'string' },
+              ruleQuery: { type: 'string' },
               fields: {
                 type: 'object',
                 additionalProperties: {
@@ -693,6 +695,7 @@ const ASSISTANT_COMMAND_SCHEMA = {
               'path',
               'query',
               'entityQuery',
+              'ruleQuery',
               'fields',
               'projectId',
               'projectQuery',
@@ -2707,6 +2710,15 @@ function buildWorkControlAssistantExamples() {
     '179. "schimba aia la 7200" fara entitate si camp unic => clarification, nu folosi primul input vizibil.',
     '180. "pune si asta la Mihai" cu referinta ambigua => clarification, fara executie.',
     '181. "du-ma pe pagina masina mea si arata-mi cati kilometri curenti am" => navigation/open_my_vehicle /my-vehicle; "masina mea" inseamna vehiculul asignat utilizatorului, fara cautare in flota.',
+    '182. "pune-mi functia electrician" => entity_update/update_user pentru utilizatorul autentificat, users.update, confirmation required.',
+    '183. "vreau ca departamentul meu sa fie service" => entity_update/update_user pentru utilizatorul autentificat, department service.',
+    '184. "opreste regula Pontaj dimineata" => entity_update/update_notification_rule, notifications.rules.update, fields {"enabled":false}.',
+    '185. "da drumul la sunet pentru regula Pontaj start" => entity_update/update_notification_rule, fields {"soundEnabled":true}.',
+    '186. "pune ora regulii Pontaj dimineata la 7" => entity_update/update_notification_rule, fields {"scheduleTime":"07:00"}.',
+    '187. "schimba intervalul regulii Pontaj start la 30 minute" => entity_update/update_notification_rule, fields {"reminderRepeatMinutes":30}.',
+    '188. "deschide setarile mele" => navigation/open_page /my-profile.',
+    '189. "deschide setarile notificarilor" => navigation/open_page /notification-rules daca rolul permite; altfel clarificare.',
+    '190. "fa masina asta indisponibila" pe pagina unei masini => entity_update/update_vehicle pentru selectedEntity, fields {"status":"indisponibila"}.',
   ];
 }
 
@@ -2760,7 +2772,7 @@ function buildAssistantPrompt(today, context) {
     `Data curenta este ${today}. Converteste azi/maine/poimaine si datele relative in YYYY-MM-DD.`,
     `Context pagina si memorie: ${contextText}. Foloseste contextul doar cand comanda se refera clar la "asta", "acesta", "si", "tot aici".`,
     'Returneaza doar JSON. Campurile fields si fieldsToUpdate trebuie sa fie identice pentru modificari/completari.',
-    'Tool id-uri permise: navigation.open, vehicles.update, vehicles.draft, tools.update, tools.draft, timesheets.projects.update, timesheets.projects.create, timesheets.projects.draft, users.update, users.draft, timesheets.start, timesheets.stop, maintenance.draft, maintenance.report.prepare, maintenance.report.send, leave.draft, expenses.draft.',
+    'Tool id-uri permise: navigation.open, vehicles.update, vehicles.draft, tools.update, tools.draft, timesheets.projects.update, timesheets.projects.create, timesheets.projects.draft, users.update, users.draft, timesheets.start, timesheets.stop, maintenance.draft, maintenance.report.prepare, maintenance.report.send, leave.draft, expenses.draft, notifications.rules.update.',
     'Pentru fiecare toolCall completeaza toate cheile input; foloseste string gol, false si obiect gol pentru cheile nefolosite.',
     'response este mesajul scurt pentru utilizator; confirmationRequired reflecta riscul intregului plan.',
     'commandType valori: navigation, form_fill, entity_update, create_entity, timesheet_action, question, unknown.',
@@ -2987,6 +2999,7 @@ exports.interpretAssistantCommand = onCall(
                 path: toSafeString(input.path),
                 query: toSafeString(input.query),
                 entityQuery: toSafeString(input.entityQuery),
+                ruleQuery: toSafeString(input.ruleQuery),
                 fields: input.fields && typeof input.fields === 'object' && !Array.isArray(input.fields) ? input.fields : {},
                 projectId: toSafeString(input.projectId),
                 projectQuery: toSafeString(input.projectQuery),

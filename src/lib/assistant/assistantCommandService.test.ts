@@ -235,6 +235,72 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
+  it("updates the authenticated user's own job title without calling OpenAI", async () => {
+    const result = await interpretAssistantCommand("pune-mi functia electrician");
+
+    expect(result).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_user",
+      entityType: "user",
+      entityQuery: "__current_user__",
+      fieldsToUpdate: { roleTitle: "electrician" },
+      toolCalls: [
+        {
+          id: "users.update",
+          input: { entityQuery: "__current_user__", fields: { roleTitle: "electrician" } },
+        },
+      ],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("updates a named notification rule without calling OpenAI", async () => {
+    const result = await interpretAssistantCommand("pune ora regulii Pontaj dimineata la 7");
+
+    expect(result).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_notification_rule",
+      fieldsToUpdate: { scheduleTime: "7" },
+      toolCalls: [
+        {
+          id: "notifications.rules.update",
+          input: { ruleQuery: "pontaj dimineata", fields: { scheduleTime: "7" } },
+        },
+      ],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["deschide setarile mele", "/my-profile"],
+    ["deschide setarile notificarilor", "/notification-rules"],
+  ])("opens a settings page through the navigation registry: %s", async (command, path) => {
+    const result = await interpretAssistantCommand(command, { role: "admin" });
+
+    expect(result).toMatchObject({
+      commandType: "navigation",
+      toolCalls: [{ id: "navigation.open", input: { path, query: "" } }],
+      confirmationRequired: false,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("uses page context for a rough status change", async () => {
+    const result = await interpretAssistantCommand("fa masina asta indisponibila", {
+      selectedEntity: { type: "vehicle", id: "vehicle-1", label: "B092194 Dacia Logan" },
+    });
+
+    expect(result).toMatchObject({
+      intent: "update_vehicle",
+      fieldsToUpdate: { status: "indisponibila" },
+      toolCalls: [{ id: "vehicles.update" }],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
   it("opens my assigned vehicle for a compound mileage question without fleet resolution", async () => {
     const result = await interpretAssistantCommand(
       "Du-ma pe pagina masina mea si arata-mi cati kilometri curenti am"

@@ -4,12 +4,15 @@ import { resolveAssistantNavigationAction } from "../assistantActionCatalog";
 import type { NavigationRole } from "../../../config/navigation";
 import { resolveAssistantField } from "../runtime/assistantFieldResolver";
 import type { AssistantRuntimeEntityType } from "../runtime/assistantTypes";
+import { normalizeAssistantCommandText } from "./assistantCommandText";
 
 const HELP_RESPONSE = [
   "Pot sa te ajut direct cu:",
   '- Navigare: "deschide pontajul meu" sau "du-ma pe GPS-ul Toyota".',
   '- Pontaj: "porneste pontaj pe proiectul X" sau "opreste pontajul".',
   '- Mentenanta: "genereaza raport revizie pentru Vali".',
+  '- Setari personale: "pune-mi functia electrician" sau "schimba departamentul in Service".',
+  '- Reguli notificari: "opreste regula Pontaj dimineata" sau "pune ora regulii X la 07:00".',
   "- Operatiuni: masini, scule, proiecte, concedii, bonuri, utilizatori si notificari.",
   "Poti cere si mai multi pasi intr-o singura comanda; daca exista doua rezultate, iti cer sa alegi.",
 ].join("\n");
@@ -312,6 +315,165 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
   }
 
   return "";
+}
+
+const PERSONAL_SETTING_FIELDS = [
+  {
+    key: "roleTitle",
+    label: "functia",
+    pattern: /\b(?:functie|functia|meserie|meseria|post|postul)\b/,
+  },
+  {
+    key: "department",
+    label: "departamentul",
+    pattern: /\b(?:departament|departamentul|echipa)\b/,
+  },
+  {
+    key: "fullName",
+    label: "numele",
+    pattern: /\b(?:nume\s+complet|numele|nume)\b/,
+  },
+] as const;
+
+/** Builds a safe update for the authenticated user's own profile settings. */
+export function buildLocalPersonalSettingsContract(command: string): AssistantV3Contract | null {
+  const normalized = normalizeForMatching(normalizeAssistantCommandText(command));
+  const action = normalized.match(
+    /\b(?:actualizeaza|completeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/
+  );
+  if (action?.index === undefined) return null;
+
+  const payload = normalized.slice(action.index + action[0].length).trim();
+  const field = PERSONAL_SETTING_FIELDS.find((candidate) => candidate.pattern.test(payload));
+  if (!field) return null;
+
+  const fieldMatch = field.pattern.exec(payload);
+  if (fieldMatch?.index === undefined) return null;
+  const prefix = payload.slice(0, fieldMatch.index).trim();
+  if (/\b(?:lui|utilizatorului|angajatului|userului)\b/.test(prefix)) return null;
+
+  const value = payload
+    .slice(fieldMatch.index + fieldMatch[0].length)
+    .trim()
+    .replace(/^(?:meu|mea|pentru\s+mine|la\s+mine|mie|mi)\b\s*/, "")
+    .replace(/^(?:la|in|cu|pe|sa\s+fie|devina|drept)\s+/, "")
+    .replace(/\b(?:te\s+rog|acum)\s*$/g, "")
+    .trim();
+  if (!value || /^(?:lui|utilizatorului|angajatului|userului)\b/.test(value)) return null;
+
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent: "update_user",
+    toolCalls: [
+      {
+        id: "users.update",
+        input: { entityQuery: "__current_user__", fields: { [field.key]: value } },
+      },
+    ],
+    targetPage: "",
+    entityReferences: [{ type: "user", query: "__current_user__", id: "" }],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: true,
+    response: `Schimb ${field.label} profilului tau in ${value}?`,
+  };
+}
+
+function cleanNotificationRuleQuery(value: string) {
+  return value
+    .replace(/\b(?:te\s+rog|acum|pentru\s+mine)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildNotificationSettingsContract(
+  ruleQuery: string,
+  fields: Record<string, string | number | boolean>,
+  response: string
+): AssistantV3Contract | null {
+  const query = cleanNotificationRuleQuery(ruleQuery);
+  if (!query) return null;
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent: "update_notification_rule",
+    toolCalls: [
+      {
+        id: "notifications.rules.update",
+        input: { ruleQuery: query, fields },
+      },
+    ],
+    targetPage: "",
+    entityReferences: [],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: true,
+    response,
+  };
+}
+
+/** Parses frequently used notification settings without relying on cloud guessing. */
+export function buildLocalNotificationSettingsContract(
+  command: string
+): AssistantV3Contract | null {
+  const normalized = normalizeForMatching(normalizeAssistantCommandText(command));
+  const ruleMarker = "(?:regula|regulii|notificarea|notificarii|reminderul)";
+
+  const sound = normalized.match(
+    new RegExp(
+      `\\b(activeaza|porneste|dezactiveaza|opreste)\\s+sunet(?:ul)?\\s+(?:la|pentru|din)\\s+${ruleMarker}\\s+(.+)$`
+    )
+  );
+  if (sound) {
+    const enabled = sound[1] === "activeaza" || sound[1] === "porneste";
+    return buildNotificationSettingsContract(
+      sound[2],
+      { soundEnabled: enabled },
+      `${enabled ? "Activez" : "Dezactivez"} sunetul regulii ${sound[2]}?`
+    );
+  }
+
+  const enabled = normalized.match(
+    new RegExp(`\\b(activeaza|porneste|reactiveaza|dezactiveaza|opreste)\\s+${ruleMarker}\\s+(.+)$`)
+  );
+  if (enabled) {
+    const nextEnabled = ["activeaza", "porneste", "reactiveaza"].includes(enabled[1]);
+    return buildNotificationSettingsContract(
+      enabled[2],
+      { enabled: nextEnabled },
+      `${nextEnabled ? "Activez" : "Dezactivez"} regula ${enabled[2]}?`
+    );
+  }
+
+  const time = normalized.match(
+    new RegExp(
+      `\\b(?:schimba|seteaza|pune|modifica)\\s+(ora(?:\\s+de\\s+(pornire|oprire))?|programul)\\s+(?:(?:la|pentru|din)\\s+)?${ruleMarker}\\s+(.+?)\\s+(?:la|pe|in)\\s+(\\d{1,2}(?::|\\s)\\d{2}|\\d{1,2})$`
+    )
+  );
+  if (time) {
+    const field = time[2] === "oprire" ? "stopTime" : "scheduleTime";
+    return buildNotificationSettingsContract(
+      time[3],
+      { [field]: time[4] },
+      `Schimb ${field === "stopTime" ? "ora de oprire" : "ora de pornire"} pentru regula ${time[3]} la ${time[4]}?`
+    );
+  }
+
+  const repeat = normalized.match(
+    new RegExp(
+      `\\b(?:schimba|seteaza|pune|modifica)\\s+(?:repetarea|intervalul|repetitia)\\s+(?:(?:la|pentru|din)\\s+)?${ruleMarker}\\s+(.+?)\\s+(?:la|pe|in|din)\\s+(\\d+)\\s*(?:minute|min)?$`
+    )
+  );
+  if (repeat) {
+    return buildNotificationSettingsContract(
+      repeat[1],
+      { reminderRepeatMinutes: Number(repeat[2]) },
+      `Schimb repetarea regulii ${repeat[1]} la ${repeat[2]} minute?`
+    );
+  }
+
+  return null;
 }
 
 function referencesPersonalVehicle(normalizedCommand: string) {

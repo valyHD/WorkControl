@@ -11,5 +11,7 @@ describe("Assistant V3 tool registry", () => {
     expect(new Set(first.list().map((tool) => tool.id)).size).toBe(first.list().length);
     expect(first.get("vehicles.open")).not.toBeNull();
     expect(first.get("vehicles.openTracker")).not.toBeNull();
+    expect(first.get("notifications.rules.update")).not.toBeNull();
+    expect(first.get("update_notification_rule")).not.toBeNull();
   });
 });

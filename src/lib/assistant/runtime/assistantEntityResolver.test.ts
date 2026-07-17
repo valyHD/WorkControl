@@ -4,6 +4,7 @@ import { resolveAssistantEntity } from "./assistantEntityResolver";
 const mocks = vi.hoisted(() => ({
   vehicles: vi.fn(),
   tools: vi.fn(),
+  users: vi.fn(),
 }));
 
 vi.mock("../../../modules/vehicles/services/vehiclesService", () => ({
@@ -25,7 +26,7 @@ vi.mock("../../../modules/timesheets/services/timesheetsService", () => ({
   getProjectsList: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../../../modules/users/services/usersService", () => ({
-  getAllUsers: vi.fn().mockResolvedValue([]),
+  getAllUsers: mocks.users,
 }));
 
 describe("resolveAssistantEntity context safety", () => {
@@ -44,6 +45,10 @@ describe("resolveAssistantEntity context safety", () => {
     mocks.tools.mockResolvedValue([
       { id: "tool-context", name: "Bosch vechi", internalCode: "A1" },
       { id: "tool-requested", name: "Hilti nou", internalCode: "H2" },
+    ]);
+    mocks.users.mockResolvedValue([
+      { id: "user-current", fullName: "Ionut Matura", email: "ionut@example.com" },
+      { id: "user-other", fullName: "Razvan Frincu", email: "razvan@example.com" },
     ]);
   });
 
@@ -68,5 +73,16 @@ describe("resolveAssistantEntity context safety", () => {
 
     expect(result.status).toBe("resolved");
     expect(result.entity?.entityId).toBe("tool-requested");
+  });
+
+  it("resolves the authenticated user's profile without guessing by name", async () => {
+    const result = await resolveAssistantEntity("user", "__current_user__", {
+      user: { uid: "user-current", role: "angajat" },
+      currentPathname: "/my-profile",
+    });
+
+    expect(result.status).toBe("resolved");
+    expect(result.entity?.entityId).toBe("user-current");
+    expect(result.entity?.label).toBe("Ionut Matura");
   });
 });
