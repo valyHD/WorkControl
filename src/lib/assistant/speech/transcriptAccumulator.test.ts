@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { TranscriptAccumulator, mergeTranscriptParts } from "./transcriptAccumulator";
+import {
+  TranscriptAccumulator,
+  mergeTranscriptParts,
+  selectBestSpeechAlternative,
+} from "./transcriptAccumulator";
 import type { SpeechRecognitionEventLike, SpeechRecognitionResultLike } from "./types";
 
 function result(transcript: string, isFinal: boolean): SpeechRecognitionResultLike {
@@ -34,5 +38,17 @@ describe("TranscriptAccumulator", () => {
       interimTranscript: "la șase mii",
       transcript: "schimbă kilometrii la șase mii",
     });
+  });
+
+  it("chooses the alternative that contains WorkControl command vocabulary", () => {
+    const alternatives = Object.assign(
+      [
+        { transcript: "fa un aport in tre ventie", confidence: 0.82 },
+        { transcript: "fa un raport interventie", confidence: 0.7 },
+      ],
+      { isFinal: true }
+    );
+
+    expect(selectBestSpeechAlternative(alternatives)).toBe("fa un raport interventie");
   });
 });

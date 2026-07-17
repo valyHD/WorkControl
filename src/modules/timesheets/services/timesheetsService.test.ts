@@ -23,6 +23,7 @@ const notificationMocks = vi.hoisted(() => ({
 const callableMocks = vi.hoisted(() => ({
   startTimesheetSecure: vi.fn(),
   stopTimesheetSecure: vi.fn(),
+  updateOwnTimesheetLocation: vi.fn(),
 }));
 
 vi.mock("firebase/firestore", () => firestoreMocks);
@@ -53,6 +54,7 @@ import {
   startTimesheet,
   startTimesheetDetailed,
   stopTimesheet,
+  updateOwnTimesheetLocation,
 } from "./timesheetsService";
 import type { TimesheetItem } from "../../../types/timesheet";
 
@@ -133,7 +135,15 @@ describe("timesheetsService critical rules", () => {
       }),
     });
     callableMocks.stopTimesheetSecure.mockResolvedValue({
-      data: { duplicate: false, workedMinutes: 95, status: "inchis" },
+      data: {
+        duplicate: false,
+        workedMinutes: 95,
+        status: "inchis",
+        userId: "user-test",
+        userName: "Utilizator Test",
+        projectName: "Proiect Test",
+        companyId: "company-test",
+      },
     });
     notificationMocks.dispatchNotificationEvent.mockResolvedValue(undefined);
 
@@ -151,6 +161,22 @@ describe("timesheetsService critical rules", () => {
       })
     );
     expect(firestoreMocks.updateDoc).not.toHaveBeenCalled();
+  });
+
+  it("enriches only the requested own timesheet location through the secure callable", async () => {
+    callableMocks.updateOwnTimesheetLocation.mockResolvedValue({ data: { updated: true } });
+
+    await updateOwnTimesheetLocation({
+      timesheetId: "timesheet-1",
+      kind: "start",
+      location: { lat: 44.43, lng: 26.1, label: "Bucuresti" },
+    });
+
+    expect(callableMocks.updateOwnTimesheetLocation).toHaveBeenCalledWith({
+      timesheetId: "timesheet-1",
+      kind: "start",
+      location: { lat: 44.43, lng: 26.1, label: "Bucuresti" },
+    });
   });
 
   it("ignores client start timestamps for live web starts", async () => {

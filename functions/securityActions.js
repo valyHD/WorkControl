@@ -1077,7 +1077,17 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
       if (!canAccessCompany(actor, companyId)) {
         throw new HttpsError('permission-denied', 'Pontajul nu apartine firmei curente.');
       }
-      if (data.status !== 'activ') return { timesheetId, duplicate: true };
+      if (data.status !== 'activ') {
+        return {
+          timesheetId,
+          duplicate: true,
+          userId: cleanText(data.userId, 160),
+          userName: cleanText(data.userName, 160),
+          userThemeKey: data.userThemeKey || null,
+          projectName: cleanText(data.projectName || data.projectCode, 160),
+          companyId,
+        };
+      }
       const startAt = Number(data.startAt);
       if (!Number.isFinite(startAt) || startAt <= 0) {
         throw new HttpsError('failed-precondition', 'Pontajul nu are o ora valida de start.');
@@ -1116,8 +1126,53 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
         entityId: timesheetId,
         metadata: { workedMinutes, status },
       }));
-      return { timesheetId, duplicate: false, workedMinutes, status };
+      return {
+        timesheetId,
+        duplicate: false,
+        workedMinutes,
+        status,
+        userId: cleanText(data.userId, 160),
+        userName: cleanText(data.userName, 160),
+        userThemeKey: data.userThemeKey || null,
+        projectName: cleanText(data.projectName || data.projectCode, 160),
+        companyId,
+      };
     });
+  }
+
+  async function updateOwnTimesheetLocation(request) {
+    const actor = await loadActor(db, request.auth?.uid, HttpsError);
+    const input = request.data || {};
+    const timesheetId = cleanText(input.timesheetId, 160);
+    const kind = cleanText(input.kind, 20);
+    if (!timesheetId || !['start', 'stop'].includes(kind)) {
+      throw new HttpsError('invalid-argument', 'Actualizarea locatiei este invalida.');
+    }
+
+    const location = normalizeLocation(input.location);
+    if (location.lat === null || location.lng === null) {
+      throw new HttpsError('invalid-argument', 'Coordonatele locatiei nu sunt valide.');
+    }
+
+    const ref = db.collection('timesheets').doc(timesheetId);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new HttpsError('not-found', 'Pontajul nu exista.');
+      const data = snap.data() || {};
+      const companyId = cleanText(data.companyId, 120);
+      if (cleanText(data.userId, 160) !== actor.uid || !canAccessCompany(actor, companyId)) {
+        throw new HttpsError('permission-denied', 'Poti completa numai locatia pontajului propriu.');
+      }
+      if (kind === 'stop' && data.status === 'activ') {
+        throw new HttpsError('failed-precondition', 'Locatia de stop se completeaza dupa oprire.');
+      }
+      tx.update(ref, {
+        [kind === 'start' ? 'startLocation' : 'stopLocation']: location,
+        locationUpdatedAt: Date.now(),
+        locationUpdatedAtServer: fieldValue.serverTimestamp(),
+      });
+    });
+    return { timesheetId, kind, updated: true };
   }
 
   async function requestVehicleTransfer(request) {
@@ -1646,6 +1701,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
     dispatchNotificationEvent,
     startTimesheet,
     stopTimesheet,
+    updateOwnTimesheetLocation,
     requestVehicleTransfer,
     setVehicleAssignments,
     acceptVehicleTransfer,

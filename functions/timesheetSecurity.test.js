@@ -471,3 +471,55 @@ describe("timesheet secure stop", () => {
     assert.equal(db.store.has("activeTimesheets/user-test"), false);
   });
 });
+
+describe("timesheet background location", () => {
+  test("allows a user to enrich only the location of the own timesheet", async () => {
+    const { db, handlers } = createFixture({
+      "timesheets/own-timesheet": {
+        companyId: "company-1",
+        userId: "user-test",
+        status: "activ",
+        startLocation: { lat: null, lng: null, label: "in curs" },
+      },
+    });
+
+    const result = await handlers.updateOwnTimesheetLocation({
+      auth: { uid: "user-test" },
+      data: {
+        timesheetId: "own-timesheet",
+        kind: "start",
+        location: { lat: 44.43, lng: 26.1, label: "Bucuresti" },
+      },
+    });
+
+    assert.equal(result.updated, true);
+    assert.deepEqual(db.store.get("timesheets/own-timesheet").startLocation, {
+      lat: 44.43,
+      lng: 26.1,
+      label: "Bucuresti",
+    });
+  });
+
+  test("rejects location enrichment for another user's timesheet", async () => {
+    const { handlers } = createFixture({
+      "timesheets/other-timesheet": {
+        companyId: "company-1",
+        userId: "another-user",
+        status: "activ",
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        handlers.updateOwnTimesheetLocation({
+          auth: { uid: "user-test" },
+          data: {
+            timesheetId: "other-timesheet",
+            kind: "start",
+            location: { lat: 44.43, lng: 26.1, label: "Bucuresti" },
+          },
+        }),
+      (error) => error?.code === "permission-denied"
+    );
+  });
+});

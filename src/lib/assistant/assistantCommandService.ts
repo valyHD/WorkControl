@@ -160,7 +160,7 @@ export async function interpretAssistantCommand(
   const cleanCommand = command.trim();
   if (!cleanCommand) return null;
 
-  const localMaintenanceReport = buildLocalMaintenanceReportContract(cleanCommand);
+  const localMaintenanceReport = buildLocalMaintenanceReportContract(cleanCommand, context);
   if (localMaintenanceReport) {
     const localFields =
       localMaintenanceReport.toolCalls[0]?.input.fields &&

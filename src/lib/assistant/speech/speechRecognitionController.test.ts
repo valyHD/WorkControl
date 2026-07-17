@@ -33,6 +33,7 @@ describe("SpeechRecognitionController", () => {
     });
 
     expect(controller.press()).toBe(true);
+    expect(recognition.maxAlternatives).toBe(3);
     recognition.onstart?.();
     recognition.onresult?.({
       resultIndex: 0,

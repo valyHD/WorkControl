@@ -54,12 +54,17 @@ type Props = {
     startExplanation?: string,
     startPolicyFlag?: string,
     startExpectedTime?: string
-  ) => Promise<void>;
+  ) => Promise<string | void>;
   onStop: (
     explanation: string,
     location: TimesheetLocation,
     stopPolicyFlag?: string,
     stopExpectedMinutes?: number
+  ) => Promise<void>;
+  onLocationResolved?: (
+    timesheetId: string,
+    kind: "start" | "stop",
+    location: TimesheetLocation
   ) => Promise<void>;
   loading: boolean;
   allowCustomLocation?: boolean;
@@ -75,6 +80,7 @@ export default function TimesheetForm({
   activeTimesheet,
   onStart,
   onStop,
+  onLocationResolved,
   loading,
   allowCustomLocation = false,
   selectedProjectId = "",
@@ -87,7 +93,7 @@ export default function TimesheetForm({
   const [explanation, setExplanation] = useState("");
   const [startCustomAddress, setStartCustomAddress] = useState("");
   const [stopCustomAddress, setStopCustomAddress] = useState("");
-  const [geoLoading, setGeoLoading] = useState(false);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [policyModal, setPolicyModal] = useState<TimesheetPolicyModal | null>(null);
   const [policyExplanation, setPolicyExplanation] = useState("");
@@ -97,9 +103,7 @@ export default function TimesheetForm({
     return projects.find((project) => project.id === projectId) ?? null;
   }, [projects, projectId]);
 
-  const hasStartCustomAddress = allowCustomLocation && startCustomAddress.trim().length > 0;
-  const hasStopCustomAddress = allowCustomLocation && stopCustomAddress.trim().length > 0;
-  const submitting = loading || geoLoading || policySubmitting;
+  const submitting = loading || actionSubmitting || policySubmitting;
 
   useEffect(() => {
     setProjectId(selectedProjectId);
@@ -166,22 +170,56 @@ export default function TimesheetForm({
     return await geocodeAddress(label);
   }
 
+  function pendingLocation(address: string): TimesheetLocation {
+    const customLabel = simplifyTimesheetAddressLabel(address);
+    return {
+      lat: null,
+      lng: null,
+      label: customLabel || "Locatia se completeaza in fundal",
+    };
+  }
+
+  function resolveLocationInBackground(address: string) {
+    return getCustomLocation(address).then((customLocation) => customLocation ?? getBrowserLocation());
+  }
+
+  function enrichLocation(
+    timesheetId: string,
+    kind: "start" | "stop",
+    locationPromise: Promise<TimesheetLocation>
+  ) {
+    if (!onLocationResolved) return;
+    void locationPromise
+      .then((location) => {
+        if (location.lat === null || location.lng === null) return;
+        return onLocationResolved(timesheetId, kind, location);
+      })
+      .catch((error) => console.warn("[TimesheetForm][background location]", error));
+  }
+
   async function runStart(startExplanation = "", startPolicyFlag = ""): Promise<boolean> {
-    setGeoLoading(true);
+    setActionSubmitting(true);
     setMessage("");
 
     try {
-      const customLocation = await getCustomLocation(startCustomAddress);
-      const location = customLocation ?? await getBrowserLocation();
-      await onStart(projectId, location, startExplanation, startPolicyFlag, workdayStartTime);
+      const locationPromise = resolveLocationInBackground(startCustomAddress);
+      const timesheetId = await onStart(
+        projectId,
+        pendingLocation(startCustomAddress),
+        startExplanation,
+        startPolicyFlag,
+        workdayStartTime
+      );
+      if (timesheetId) enrichLocation(timesheetId, "start", locationPromise);
       setStartCustomAddress("");
+      setMessage("Pontaj pornit. Locatia se completeaza in fundal.");
       return true;
     } catch (error: any) {
       console.error(error);
       setMessage(error.message || "Nu am putut porni pontajul.");
       return false;
     } finally {
-      setGeoLoading(false);
+      setActionSubmitting(false);
     }
   }
 
@@ -233,22 +271,30 @@ export default function TimesheetForm({
   }
 
   async function runStop(stopExplanation: string, stopPolicyFlag = ""): Promise<boolean> {
-    setGeoLoading(true);
+    setActionSubmitting(true);
     setMessage("");
 
     try {
-      const customLocation = await getCustomLocation(stopCustomAddress);
-      const location = customLocation ?? await getBrowserLocation();
-      await onStop(stopExplanation, location, stopPolicyFlag, expectedShiftMinutes);
+      if (!activeTimesheet) throw new Error("Nu exista pontaj activ.");
+      const timesheetId = activeTimesheet.id;
+      const locationPromise = resolveLocationInBackground(stopCustomAddress);
+      await onStop(
+        stopExplanation,
+        pendingLocation(stopCustomAddress),
+        stopPolicyFlag,
+        expectedShiftMinutes
+      );
+      enrichLocation(timesheetId, "stop", locationPromise);
       setExplanation("");
       setStopCustomAddress("");
+      setMessage("Pontaj oprit. Locatia se completeaza in fundal.");
       return true;
     } catch (error: any) {
       console.error(error);
       setMessage(error.message || "Nu am putut opri pontajul.");
       return false;
     } finally {
-      setGeoLoading(false);
+      setActionSubmitting(false);
     }
   }
 
@@ -385,7 +431,7 @@ export default function TimesheetForm({
               disabled={submitting}
               data-assistant-action="start-my-timesheet"
             >
-              {geoLoading ? (hasStartCustomAddress ? "Se salveaza..." : "Se ia locatia...") : "Porneste pontaj"}
+              {actionSubmitting ? "Se porneste..." : "Porneste pontaj"}
             </button>
           </div>
         </>
@@ -439,7 +485,7 @@ export default function TimesheetForm({
               disabled={submitting}
               data-assistant-action="stop-my-timesheet"
             >
-              {geoLoading ? (hasStopCustomAddress ? "Se salveaza..." : "Se ia locatia...") : "Opreste pontaj"}
+              {actionSubmitting ? "Se opreste..." : "Opreste pontaj"}
             </button>
           </div>
         </>

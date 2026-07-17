@@ -81,7 +81,8 @@ describe("TimesheetForm", () => {
   });
 
   it("starts only after the user selects a project and presses the highlighted action", async () => {
-    const onStart = vi.fn().mockResolvedValue(undefined);
+    const onStart = vi.fn().mockResolvedValue("timesheet-new");
+    const onLocationResolved = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(
       <TimesheetForm
@@ -89,6 +90,7 @@ describe("TimesheetForm", () => {
         activeTimesheet={null}
         onStart={onStart}
         onStop={vi.fn()}
+        onLocationResolved={onLocationResolved}
         loading={false}
         attentionActive
       />
@@ -104,10 +106,17 @@ describe("TimesheetForm", () => {
     await waitFor(() =>
       expect(onStart).toHaveBeenCalledWith(
         project.id,
-        expect.objectContaining({ lat: 44.4, lng: 26.1 }),
+        expect.objectContaining({ lat: null, lng: null, label: "Locatia se completeaza in fundal" }),
         "",
         "",
         "08:00"
+      )
+    );
+    await waitFor(() =>
+      expect(onLocationResolved).toHaveBeenCalledWith(
+        "timesheet-new",
+        "start",
+        expect.objectContaining({ lat: 44.4, lng: 26.1, label: "Locatie test" })
       )
     );
   });

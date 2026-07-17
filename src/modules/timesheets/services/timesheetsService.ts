@@ -375,7 +375,7 @@ export async function startTimesheetDetailed(
   const duplicate = response.data.duplicate === true;
 
   if (!duplicate) {
-    await dispatchNotificationEvent({
+    void dispatchNotificationEvent({
       module: "timesheets",
       eventType: "timesheet_started",
       entityId: timesheetId,
@@ -398,7 +398,7 @@ export async function startTimesheetDetailed(
       },
       companyId,
       idempotencyKey: `timesheet-started-${timesheetId}`,
-    });
+    }).catch((error) => console.warn("[timesheets][start notification]", error));
   }
 
   notifyTimesheetsChanged({ userId: params.userId, reason: "start" });
@@ -422,14 +422,6 @@ export async function stopTimesheet(params: {
   stopExpectedMinutes?: number;
   occurredAt?: number;
 }): Promise<void> {
-  const refDoc = doc(db, "timesheets", params.timesheetId);
-  const snap = await getDoc(refDoc);
-
-  if (!snap.exists()) {
-    throw new Error("Pontajul nu exista.");
-  }
-
-  const data = snap.data();
   const callable = httpsCallable<
     {
       timesheetId: string;
@@ -440,7 +432,16 @@ export async function stopTimesheet(params: {
       occurredAt?: number;
       stopSource: "web";
     },
-    { duplicate: boolean; workedMinutes?: number; status?: TimesheetItem["status"] }
+    {
+      duplicate: boolean;
+      workedMinutes?: number;
+      status?: TimesheetItem["status"];
+      userId?: string;
+      userName?: string;
+      userThemeKey?: string | null;
+      projectName?: string;
+      companyId?: string;
+    }
   >(functions, "stopTimesheetSecure");
   const response = await callable({
     timesheetId: params.timesheetId,
@@ -451,24 +452,24 @@ export async function stopTimesheet(params: {
     occurredAt: params.occurredAt,
     stopSource: "web",
   });
-  const workedMinutes = response.data.workedMinutes ?? Number(data.workedMinutes ?? 0);
-  const status = response.data.status ?? (data.status as TimesheetItem["status"]);
+  const workedMinutes = response.data.workedMinutes ?? 0;
+  const status = response.data.status ?? "inchis";
 
-  await dispatchNotificationEvent({
+  void dispatchNotificationEvent({
     module: "timesheets",
     eventType: "timesheet_stopped",
     entityId: params.timesheetId,
     title: "Pontaj oprit",
-    message: `${data.userName ?? "Utilizator"} a oprit pontajul pentru ${getProjectDisplayName(data.projectName, data.projectCode)}.`,
-    directUserId: data.userId ?? "",
-    ownerUserId: data.userId ?? "",
-    actorUserId: data.userId ?? "",
-    actorUserName: data.userName ?? "Utilizator",
-    actorUserThemeKey: data.userThemeKey ?? null,
+    message: `${response.data.userName || "Utilizator"} a oprit pontajul pentru ${response.data.projectName || "proiect"}.`,
+    directUserId: response.data.userId || "",
+    ownerUserId: response.data.userId || "",
+    actorUserId: response.data.userId || "",
+    actorUserName: response.data.userName || "Utilizator",
+    actorUserThemeKey: response.data.userThemeKey ?? null,
     metadata: {
       fieldsText: [
-        `User: ${data.userName ?? "Utilizator"}`,
-        `Proiect: ${getProjectDisplayName(data.projectName, data.projectCode)}`,
+        `User: ${response.data.userName || "Utilizator"}`,
+        `Proiect: ${response.data.projectName || "proiect"}`,
         `Minute lucrate: ${workedMinutes}`,
         `Status: ${status}`,
         `Explicatie stop: ${params.explanation.trim() || "-"}`,
@@ -476,11 +477,29 @@ export async function stopTimesheet(params: {
       ],
       fieldsCount: 6,
     },
-    companyId: String(data.companyId ?? ""),
+    companyId: response.data.companyId || "",
     idempotencyKey: `timesheet-stopped-${params.timesheetId}`,
-  });
+  }).catch((error) => console.warn("[timesheets][stop notification]", error));
 
-  notifyTimesheetsChanged({ userId: String(data.userId ?? ""), reason: "stop" });
+  notifyTimesheetsChanged({ userId: response.data.userId || "", reason: "stop" });
+}
+
+export async function updateOwnTimesheetLocation(input: {
+  timesheetId: string;
+  kind: "start" | "stop";
+  location: TimesheetLocation;
+}): Promise<void> {
+  if (input.location.lat === null || input.location.lng === null) return;
+  const callable = httpsCallable<
+    { timesheetId: string; kind: "start" | "stop"; location: TimesheetLocation },
+    { updated: boolean }
+  >(functions, "updateOwnTimesheetLocation");
+  await callable({
+    timesheetId: input.timesheetId,
+    kind: input.kind,
+    location: cleanTimesheetLocation(input.location),
+  });
+  notifyTimesheetsChanged({ reason: "location" });
 }
 
 export async function getTimesheetsList(maxItems = 250): Promise<TimesheetItem[]> {

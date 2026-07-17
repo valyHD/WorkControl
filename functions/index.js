@@ -140,6 +140,10 @@ exports.dispatchNotificationEvent = onCall(
 );
 exports.startTimesheetSecure = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.startTimesheet);
 exports.stopTimesheetSecure = onCall(SECURITY_CALLABLE_OPTIONS, securityHandlers.stopTimesheet);
+exports.updateOwnTimesheetLocation = onCall(
+  SECURITY_CALLABLE_OPTIONS,
+  securityHandlers.updateOwnTimesheetLocation
+);
 exports.requestVehicleTransfer = onCall(
   SECURITY_CALLABLE_OPTIONS,
   securityHandlers.requestVehicleTransfer

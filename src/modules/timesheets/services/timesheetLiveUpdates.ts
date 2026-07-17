@@ -2,7 +2,7 @@ export const TIMESHEETS_CHANGED_EVENT = "workcontrol:timesheets-changed";
 
 export type TimesheetsChangedDetail = {
   userId?: string;
-  reason?: "start" | "stop" | "offline-sync" | "manual";
+  reason?: "start" | "stop" | "location" | "offline-sync" | "manual";
   changedAt: number;
 };
 

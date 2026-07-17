@@ -2,6 +2,7 @@ export * from "./assistantOrchestrator";
 export * from "./assistantMemory";
 export * from "./assistantMaintenanceReportCommand";
 export * from "./assistantPageContext";
+export * from "./assistantPageSelection";
 export * from "./assistantPlanner";
 export * from "./assistantTelemetry";
 export * from "./assistantValidator";

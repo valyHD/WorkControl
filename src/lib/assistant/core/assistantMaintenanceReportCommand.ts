@@ -1,4 +1,8 @@
-import type { AssistantV3Contract } from "./assistantV3Types";
+import type {
+  AssistantV3Contract,
+  AssistantV3PageContext,
+  AssistantV3SelectedEntity,
+} from "./assistantV3Types";
 
 export type AssistantMaintenanceReportFields = {
   clientQuery: string;
@@ -58,7 +62,7 @@ function extractClientQuery(command: string, normalized: string) {
 
 function extractObservations(command: string, normalized: string) {
   const marker =
-    /\b(?:cu\s+)?(?:observatia|observatie|mentiunea|comentariul|comentariu)\s*[:;-]?\s*/.exec(
+    /\b(?:cu\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)(?:\s+tehnicianului)?\s*[:;-]?\s*/.exec(
       normalized
     );
   if (marker?.index === undefined) return "";
@@ -73,10 +77,44 @@ function extractObservations(command: string, normalized: string) {
     .map((pattern) => normalizedTail.search(pattern))
     .filter((index) => index >= 0);
   const end = indexes.length > 0 ? Math.min(...indexes) : originalTail.length;
-  return cleanExtractedValue(originalTail.slice(0, end));
+  return cleanExtractedValue(originalTail.slice(0, end)).replace(/^(?:este|ca|sa fie)\s+/i, "");
 }
 
-export function buildLocalMaintenanceReportContract(command: string): AssistantV3Contract | null {
+type MaintenanceReportContext = Omit<Partial<AssistantV3PageContext>, "memory"> & {
+  selectedEntity?: AssistantV3SelectedEntity | null;
+  memory?: {
+    lastEntity?:
+      | AssistantV3SelectedEntity
+      | {
+          entityType?: string;
+          entityId?: string;
+          label?: string;
+          query?: string;
+        };
+  };
+};
+
+function contextualClient(context?: MaintenanceReportContext) {
+  const selected = context?.selectedEntity;
+  if (selected?.type === "maintenanceClient") return selected.label || selected.id;
+  const remembered = context?.memory?.lastEntity;
+  if (!remembered) return "";
+  const rememberedType = "type" in remembered ? remembered.type : remembered.entityType;
+  if (rememberedType === "maintenanceClient") {
+    return (
+      remembered.label ||
+      ("id" in remembered ? remembered.id : remembered.entityId) ||
+      ("query" in remembered ? remembered.query : "") ||
+      ""
+    );
+  }
+  return "";
+}
+
+export function buildLocalMaintenanceReportContract(
+  command: string,
+  context?: MaintenanceReportContext
+): AssistantV3Contract | null {
   const cleanCommand = command.replace(/\s+/g, " ").trim();
   const normalized = normalizeForMatching(cleanCommand);
   const isReportCommand =
@@ -90,7 +128,7 @@ export function buildLocalMaintenanceReportContract(command: string): AssistantV
 
   if (!isReportCommand || !reportType) return null;
 
-  const clientQuery = extractClientQuery(cleanCommand, normalized);
+  const clientQuery = extractClientQuery(cleanCommand, normalized) || contextualClient(context);
   const observations = extractObservations(cleanCommand, normalized);
   const waitsForUpload =
     (normalized.includes("asteapta") || normalized.includes("astept")) &&

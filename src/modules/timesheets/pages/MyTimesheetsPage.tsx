@@ -17,6 +17,7 @@ import {
   saveUserTimesheetProjectPreference,
   startTimesheet,
   stopTimesheet,
+  updateOwnTimesheetLocation,
 } from "../services/timesheetsService";
 import TimesheetForm from "../components/TimesheetForm";
 import TimesheetCalendar from "../components/TimesheetCalendar";
@@ -446,12 +447,34 @@ export default function MyTimesheetsPage() {
       const action = queueOfflineTimesheetStart(payload);
       setActiveTimesheet(buildOfflineActiveTimesheet(action));
       setOfflineStatus("Pornirea a fost salvata pe dispozitiv si se va sincroniza automat.");
-      return;
+      return undefined;
     }
 
-    await startTimesheet(payload);
-
-    await load();
+    const timesheetId = await startTimesheet(payload);
+    const now = Date.now();
+    const workDate = getLocalDateKey(now);
+    setActiveTimesheet({
+      id: timesheetId,
+      ...payload,
+      status: "activ",
+      explanation: startExplanation,
+      stopExplanation: "",
+      stopPolicyFlag: "",
+      stopExpectedMinutes: null,
+      startAt: now,
+      stopAt: null,
+      workedMinutes: 0,
+      stopLocation: null,
+      startSource: "web",
+      stopSource: "",
+      workDate,
+      yearMonth: workDate.slice(0, 7),
+      weekKey: "",
+      createdAt: now,
+      updatedAt: now,
+    });
+    void load(true);
+    return timesheetId;
   }
 
   async function handleStop(
@@ -480,8 +503,16 @@ export default function MyTimesheetsPage() {
     }
 
     await stopTimesheet(payload);
+    setActiveTimesheet(null);
+    void load(true);
+  }
 
-    await load();
+  async function handleLocationResolved(
+    timesheetId: string,
+    kind: "start" | "stop",
+    location: TimesheetLocation
+  ) {
+    await updateOwnTimesheetLocation({ timesheetId, kind, location });
   }
 
   async function handleCreateProject(values: ProjectFormValues) {
@@ -817,6 +848,7 @@ export default function MyTimesheetsPage() {
           activeTimesheet={currentActiveTimesheet}
           onStart={handleStart}
           onStop={handleStop}
+          onLocationResolved={handleLocationResolved}
           loading={loading}
           allowCustomLocation={canUseCustomTimesheetLocation}
           selectedProjectId={preferredProjectId}

@@ -75,6 +75,38 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("keeps only the spoken technician observation when the selected client is in page context", () => {
+    const contract = buildLocalMaintenanceReportContract(
+      "Fa raport interventie cu observatia liftul functioneaza normal",
+      {
+        route: "/maintenance?tab=report",
+        page: "maintenance",
+        selectedEntity: { type: "maintenanceClient", id: "client-vali", label: "Vali" },
+        openForm: null,
+        availableActions: [],
+        allowedFields: [],
+        role: "admin",
+        memory: {},
+      }
+    );
+    const fields = contract?.toolCalls[0]?.input.fields;
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "liftul functioneaza normal",
+      submitMode: "send",
+    });
+  });
+
+  it("accepts common Romanian observation markers without copying the command", () => {
+    const { fields } = reportFields(
+      "Genereaza raport interventie pentru Vali cu observatii: usa functioneaza normal"
+    );
+
+    expect(fields).toMatchObject({ observations: "usa functioneaza normal" });
+  });
+
   it("does not intercept unrelated navigation commands", () => {
     expect(buildLocalMaintenanceReportContract("Deschide pagina mentenanta")).toBeNull();
   });

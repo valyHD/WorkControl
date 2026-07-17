@@ -165,7 +165,7 @@ export class SpeechRecognitionController {
     recognition.lang = this.options.language ?? "ro-RO";
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = 3;
     recognition.onstart = () => {
       if (this.recognition !== recognition || this.disposed) return;
       this.publish({ ...this.snapshotValue, status: "listening", isHeld: this.held, error: null });

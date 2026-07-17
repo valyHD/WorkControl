@@ -563,7 +563,7 @@ export default function VoiceCommandAssistant() {
             title={pendingReportSend ? "Confirma trimiterea" : undefined}
             summary={
               pendingReportCall
-                ? undefined
+                ? "Verifica rapid clientul, tipul si observatia."
                 : pending.outcome.previews.join(" ") || pending.outcome.message
             }
             rows={outcomeRows(pending.outcome)}

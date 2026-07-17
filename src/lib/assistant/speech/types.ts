@@ -22,6 +22,7 @@ export type SpeechTranscriptSnapshot = {
 
 export type SpeechRecognitionAlternativeLike = {
   transcript: string;
+  confidence?: number;
 };
 
 export type SpeechRecognitionResultLike = {

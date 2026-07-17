@@ -131,15 +131,16 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--surface-alt, #f8fafc);
+  background: var(--surface, #ffffff);
 }
 
 .transcript {
   display: grid;
-  gap: 5px;
-  padding: 10px 11px;
-  border-left: 3px solid var(--primary, #2563eb);
-  background: var(--surface, #ffffff);
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 8px;
+  background: var(--surface-alt, #f8fafc);
 }
 
 .transcript h3,
@@ -150,7 +151,7 @@
 .transcript h3 {
   color: var(--text-muted, #64748b);
   font-size: 0.72rem;
-  text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .transcript p {
@@ -412,12 +413,35 @@
 }
 
 .card[data-compact="true"] {
-  gap: 9px;
-  padding-bottom: 12px;
+  gap: 10px;
+  border-color: var(--primary-glow, rgba(37, 99, 235, 0.24));
+  padding: 12px 12px 0;
+  background: var(--surface, #ffffff);
 }
 
 .card[data-compact="true"] .changeList {
-  gap: 6px;
+  gap: 0;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.card[data-compact="true"] .changeRow {
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 9px;
+  border-top: 1px solid var(--line, #e2e8f0);
+}
+
+.card[data-compact="true"] .changeRow:first-child {
+  border-top: 0;
+}
+
+.card[data-compact="true"] .changeRow dt {
+  padding-top: 2px;
+  font-size: 0.7rem;
+  text-transform: none;
 }
 
 .card[data-compact="true"] .changeRow dd {
@@ -430,7 +454,20 @@
 }
 
 .card[data-compact="true"] .newValue {
-  padding: 7px 9px;
+  padding: 0;
+  color: var(--text, #0f172a);
+  background: transparent;
+  font-size: 0.8rem;
+}
+
+.card[data-compact="true"] .riskBadge,
+.card[data-compact="true"] .contextRow {
+  display: none;
+}
+
+.card[data-compact="true"] .cardActions {
+  bottom: 0;
+  margin-top: 0;
 }
 
 .secondaryButton {
@@ -674,6 +711,19 @@
   .cardActions .primaryButton,
   .cardActions .secondaryButton {
     min-height: 48px;
+  }
+
+  .panel[data-state="confirming"] .panelBody {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .panel[data-state="confirming"] .transcript {
+    padding: 7px 9px;
+  }
+
+  .panel[data-state="confirming"] .transcript h3 {
+    display: none;
   }
 }
 

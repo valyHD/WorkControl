@@ -2,6 +2,7 @@ import { getPageExperience } from "../../../config/pageExperience";
 import { getAssistantGlobalPageActions } from "../assistantGlobalActionRegistry";
 import type { AssistantConversationMemorySnapshot } from "../runtime/assistantTypes";
 import type { AssistantV3EntityType, AssistantV3PageContext } from "./assistantV3Types";
+import { getAssistantPageSelectedEntity } from "./assistantPageSelection";
 
 function selectedEntityFromPath(pathname: string) {
   const match = pathname.match(/^\/(vehicles|tools|users|projects)\/([^/?#]+)/);
@@ -32,7 +33,7 @@ export function buildAssistantV3PageContext(params: {
   return {
     route: `${params.pathname}${params.search || ""}${params.hash || ""}`,
     page: experience?.id || params.pathname,
-    selectedEntity: selectedEntityFromPath(params.pathname),
+    selectedEntity: getAssistantPageSelectedEntity() || selectedEntityFromPath(params.pathname),
     openForm,
     availableActions: actions.map((action) => action.id),
     allowedFields: actions

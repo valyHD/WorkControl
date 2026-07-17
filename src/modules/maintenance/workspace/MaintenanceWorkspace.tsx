@@ -30,6 +30,11 @@ import {
 } from "../services/maintenanceService";
 import { getAllUsers } from "../../users/services/usersService";
 import { sendSharedMaintenanceGmailReport } from "../services/gmailDraftService";
+import { setAssistantPageSelectedEntity } from "../../../lib/assistant/core";
+import {
+  startMaintenanceReportTask,
+  subscribeMaintenanceReportTask,
+} from "../services/maintenanceReportBackgroundTask";
 import { buildMaintenancePdfBlob, resolveBrandingForCompany, type ReportType } from "../services/maintenancePdf";
 import { generateReportId, reviewStandardText } from "../utils/reportUtils";
 import type {
@@ -1253,6 +1258,15 @@ export default function MaintenanceWorkspace() {
     [clients, selectedClientId]
   );
 
+  useEffect(() => {
+    setAssistantPageSelectedEntity(
+      selectedClient
+        ? { type: "maintenanceClient", id: selectedClient.id, label: selectedClient.name || selectedClient.id }
+        : null
+    );
+    return () => setAssistantPageSelectedEntity(null);
+  }, [selectedClient]);
+
   const technicianOptions = useMemo(() => {
     if (!currentTechnicianId || technicians.some((item) => item.id === currentTechnicianId || item.uid === currentTechnicianId)) {
       return technicians;
@@ -1483,34 +1497,42 @@ export default function MaintenanceWorkspace() {
     return { label, subject, body };
   }
 
-  async function handleGenerateReport(type: ReportType) {
+  async function runGenerateReport(
+    type: ReportType,
+    updateBackgroundMessage: (message: string) => void
+  ) {
     if (!selectedClient) {
-      setReportError("Selectează un client din sugestii.");
-      return;
+      const message = "Selecteaza un client din sugestii.";
+      setReportError(message);
+      throw new Error(message);
     }
 
     const liftValue = reportLift.trim();
     const addressValue = reportAddress.trim();
     const commentsValue = reportComments.trim();
     if (!liftValue || !addressValue) {
-      setReportError("Completează adresa și liftul înainte de generare.");
-      return;
+      const message = "Completeaza adresa si liftul inainte de generare.";
+      setReportError(message);
+      throw new Error(message);
     }
 
     if (!selectedTechnician) {
-      setReportError("Selecteaza un tehnician din sugestii.");
-      return;
+      const message = "Selecteaza un tehnician din sugestii.";
+      setReportError(message);
+      throw new Error(message);
     }
 
     const clientEmail = getClientEmail(selectedClient);
     if (!clientEmail) {
-      setReportError("Clientul nu are adresa de email.");
-      return;
+      const message = "Clientul nu are adresa de email.";
+      setReportError(message);
+      throw new Error(message);
     }
 
     setReportGenerating(true);
     setReportError("");
     setReportMessage("Se genereaza PDF-ul si se pregatesc atasamentele...");
+    updateBackgroundMessage("Se genereaza PDF-ul si se pregatesc atasamentele...");
     setLastGeneratedReport(null);
 
     const branding = resolveBrandingForCompany(selectedClient.maintenanceCompany || "", brandingItems);
@@ -1518,6 +1540,7 @@ export default function MaintenanceWorkspace() {
     try {
       setReportError("");
       setReportMessage("Se genereaza PDF-ul si se pregateste emailul cu atasamente...");
+      updateBackgroundMessage("Se genereaza PDF-ul si se pregateste emailul cu atasamente...");
 
       const now = new Date();
       const dateText = now.toLocaleDateString("ro-RO");
@@ -1581,6 +1604,7 @@ export default function MaintenanceWorkspace() {
       });
 
       setReportMessage("PDF-ul este salvat. Se trimite emailul cu PDF-ul si pozele atasate...");
+      updateBackgroundMessage("PDF salvat. Emailul si atasamentele se trimit prin Gmail...");
       const gmailResult = await sendSharedMaintenanceGmailReport({
         companyId: historyItem.companyId,
         clientId: selectedClient.id,
@@ -1621,10 +1645,36 @@ export default function MaintenanceWorkspace() {
       const errorMessage = err instanceof Error ? err.message : "";
       setReportMessage("");
       setReportError(`Nu am putut genera PDF-ul sau trimite emailul Gmail.${errorMessage ? ` Detalii: ${errorMessage}` : ""}`);
+      throw err;
     } finally {
       setReportGenerating(false);
     }
   }
+
+  async function handleGenerateReport(type: ReportType) {
+    const task = startMaintenanceReportTask((updateMessage) =>
+      runGenerateReport(type, updateMessage)
+    );
+    if (!task.started) {
+      setReportMessage("Exista deja un raport in curs. Il finalizez in fundal.");
+    }
+  }
+
+  useEffect(() => {
+    return subscribeMaintenanceReportTask((task) => {
+      if (task.state === "running") {
+        setReportGenerating(true);
+        setReportError("");
+        setReportMessage(task.message);
+      } else if (task.state === "error") {
+        setReportGenerating(false);
+        setReportMessage("");
+        setReportError(`Raportul din fundal a esuat. ${task.error}`);
+      } else if (task.state === "success") {
+        setReportGenerating(false);
+      }
+    });
+  }, []);
 
   generateReportRef.current = handleGenerateReport;
 
