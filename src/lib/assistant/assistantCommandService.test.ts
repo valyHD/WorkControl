@@ -379,18 +379,23 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
-  it("opens my assigned vehicle for a compound mileage question without fleet resolution", async () => {
+  it("opens my assigned vehicle and reads its mileage without fleet guessing", async () => {
     const result = await interpretAssistantCommand(
       "Du-ma pe pagina masina mea si arata-mi cati kilometri curenti am"
     );
 
     expect(result).toMatchObject({
-      commandType: "navigation",
-      intent: "open_my_vehicle",
-      entityType: "none",
-      entityQuery: "",
-      targetPage: "/my-vehicle",
-      toolCalls: [{ id: "navigation.open", input: { path: "/my-vehicle", query: "" } }],
+      commandType: "question",
+      intent: "read_entity",
+      entityType: "vehicle",
+      entityQuery: "__current_vehicle__",
+      toolCalls: [
+        { id: "navigation.open", input: { path: "/my-vehicle", query: "" } },
+        {
+          id: "entities.read",
+          input: { entityQuery: "__current_vehicle__", fields: { currentKm: true } },
+        },
+      ],
       confirmationRequired: false,
     });
     expect(mocks.callable).not.toHaveBeenCalled();

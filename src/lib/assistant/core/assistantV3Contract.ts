@@ -74,6 +74,7 @@ const INTENTS = new Set<AssistantCommandIntent>([
   "open_user_activity",
   "create_manual_notification",
   "assistant_help",
+  "read_entity",
 ]);
 
 const LEGACY_TOOL_BY_INTENT: Partial<Record<AssistantCommandIntent, string>> = {

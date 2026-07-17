@@ -2,6 +2,7 @@ import { getProjectsList } from "../../../modules/timesheets/services/timesheets
 import { getToolsList } from "../../../modules/tools/services/toolsService";
 import { getAllUsers } from "../../../modules/users/services/usersService";
 import {
+  getMyVehicleForUser,
   getVehicleById,
   getVehiclesList,
 } from "../../../modules/vehicles/services/vehiclesService";
@@ -339,6 +340,28 @@ export async function resolveAssistantEntity(
   if (contextEntity && !cleanQuery) return contextEntity;
 
   if (entityType === "vehicle") {
+    const normalizedQuery = normalizeAssistantText(cleanQuery);
+    const requestsCurrentVehicle =
+      cleanQuery === "__current_vehicle__" ||
+      ["masina mea", "vehiculul meu", "gps-ul meu", "gpsul meu"].includes(normalizedQuery);
+    if (requestsCurrentVehicle && context.user?.uid) {
+      const vehicle = await getMyVehicleForUser(context.user.uid);
+      if (vehicle) {
+        return {
+          status: "resolved",
+          entity: {
+            entityType: "vehicle",
+            entityId: vehicle.id,
+            label: vehicleLabel(vehicle),
+            query: cleanQuery,
+            score: 1,
+            data: vehicle,
+          },
+          options: [],
+        };
+      }
+      return { status: "not_found", options: [], message: "Nu am gasit masina ta atribuita." };
+    }
     const vehicles = await getVehiclesList();
     const ranked = vehicles
       .map((vehicle) => {

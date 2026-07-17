@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase/firebase";
 import type { AssistantCommandType } from "./runtime/assistantClassifier";
 import { buildLocalMaintenanceReportContract } from "./core/assistantMaintenanceReportCommand";
+import { buildLocalEntityReadContract } from "./core/assistantEntityReadCommand";
 import {
   cleanAssistantCommandTranscript,
   normalizeAssistantCommandText,
@@ -77,7 +78,8 @@ export type AssistantCommandIntent =
   | "update_current_page_field"
   | "open_user_activity"
   | "create_manual_notification"
-  | "assistant_help";
+  | "assistant_help"
+  | "read_entity";
 
 export type AssistantCommandEntityType =
   "vehicle" | "tool" | "project" | "user" | "maintenanceClient" | "page" | "currentPage" | "none";
@@ -233,6 +235,17 @@ export async function interpretAssistantCommand(
 
   const localHelp = buildLocalAssistantHelpContract(cleanCommand);
   if (localHelp) return buildLocalInterpretation(localHelp);
+
+  const localEntityRead = buildLocalEntityReadContract(cleanCommand, context);
+  if (localEntityRead) {
+    const entity = localEntityRead.entityReferences[0];
+    const readCall = localEntityRead.toolCalls.find((call) => call.id === "entities.read");
+    return buildLocalInterpretation(localEntityRead, {
+      entityType: entity?.type || "none",
+      entityQuery: entity?.query || "",
+      fields: (readCall?.input.fields as Record<string, AssistantCommandFieldValue>) || {},
+    });
+  }
 
   const localNotificationSettings = buildLocalNotificationSettingsContract(cleanCommand);
   if (localNotificationSettings) {

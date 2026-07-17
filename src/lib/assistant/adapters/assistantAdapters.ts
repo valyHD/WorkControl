@@ -30,6 +30,7 @@ import {
 } from "./timesheetAdapter";
 import { createNotificationRuleSettingsTool } from "./notificationSettingsAdapter";
 import { createSettingsUpdateTool } from "./settingsAdapter";
+import { createEntityReadTool } from "./entityReadAdapter";
 
 export type AssistantModuleAdapter = {
   module: AssistantToolModule;
@@ -39,6 +40,13 @@ export type AssistantModuleAdapter = {
 
 export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
   return [
+    {
+      module: "assistant",
+      toolIds: ["entities.read"],
+      register: (registry) => {
+        registry.register(createEntityReadTool());
+      },
+    },
     {
       module: "navigation",
       toolIds: ["navigation.open"],

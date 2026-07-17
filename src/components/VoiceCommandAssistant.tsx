@@ -290,7 +290,9 @@ export default function VoiceCommandAssistant() {
         setChoices([]);
         setUiState("idle");
         addHistory({ transcript: command, message: outcome.message, status: "success" });
-        if (outcome.results.length > 0) setOpen(false);
+        if (outcome.results.length > 0 && outcome.contract?.commandType !== "question") {
+          setOpen(false);
+        }
         return;
       }
       setPending(null);

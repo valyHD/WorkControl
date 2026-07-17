@@ -52,7 +52,13 @@ export function toLegacyRuntimeContext(
       : null,
     currentPathname: context.pageContext.route,
     memory: {
-      lastEntity: context.pageContext.memory.lastEntity
+      lastEntity: context.pageContext.selectedEntity
+        ? {
+            entityType: context.pageContext.selectedEntity.type as AssistantRuntimeEntityType,
+            entityId: context.pageContext.selectedEntity.id,
+            label: context.pageContext.selectedEntity.label,
+          }
+        : context.pageContext.memory.lastEntity
         ? {
             entityType: context.pageContext.memory.lastEntity.type as AssistantRuntimeEntityType,
             entityId: context.pageContext.memory.lastEntity.id,

@@ -3,12 +3,14 @@ import { normalizeAssistantEntityQuery, resolveAssistantEntity } from "./assista
 
 const mocks = vi.hoisted(() => ({
   vehicles: vi.fn(),
+  myVehicle: vi.fn(),
   tools: vi.fn(),
   users: vi.fn(),
 }));
 
 vi.mock("../../../modules/vehicles/services/vehiclesService", () => ({
   getVehiclesList: mocks.vehicles,
+  getMyVehicleForUser: mocks.myVehicle,
   getVehicleById: vi.fn().mockResolvedValue({
     id: "vehicle-context",
     plateNumber: "B33LGR",
@@ -31,6 +33,7 @@ vi.mock("../../../modules/users/services/usersService", () => ({
 
 describe("resolveAssistantEntity context safety", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.vehicles.mockResolvedValue([
       { id: "vehicle-context", plateNumber: "B33LGR", brand: "Dacia", model: "Logan" },
       {
@@ -50,6 +53,12 @@ describe("resolveAssistantEntity context safety", () => {
       { id: "user-current", fullName: "Ionut Matura", email: "ionut@example.com" },
       { id: "user-other", fullName: "Razvan Frincu", email: "razvan@example.com" },
     ]);
+    mocks.myVehicle.mockResolvedValue({
+      id: "vehicle-current-user",
+      plateNumber: "B092194",
+      brand: "Dacia",
+      model: "Logan",
+    });
   });
 
   it("does not replace an explicitly requested vehicle with the remembered vehicle", async () => {
@@ -84,6 +93,18 @@ describe("resolveAssistantEntity context safety", () => {
     expect(result.status).toBe("resolved");
     expect(result.entity?.entityId).toBe("user-current");
     expect(result.entity?.label).toBe("Ionut Matura");
+  });
+
+  it("resolves the authenticated user's assigned vehicle without a fleet guess", async () => {
+    const result = await resolveAssistantEntity("vehicle", "__current_vehicle__", {
+      user: { uid: "user-current", role: "angajat" },
+      currentPathname: "/my-vehicle",
+    });
+
+    expect(result.status).toBe("resolved");
+    expect(result.entity?.entityId).toBe("vehicle-current-user");
+    expect(mocks.myVehicle).toHaveBeenCalledWith("user-current");
+    expect(mocks.vehicles).not.toHaveBeenCalled();
   });
 
   it.each([
