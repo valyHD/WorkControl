@@ -16,7 +16,8 @@ export type AssistantToolModule =
   | "leave"
   | "users"
   | "expenses"
-  | "notifications";
+  | "notifications"
+  | "settings";
 
 export type AssistantToolSchema = {
   type: "object";

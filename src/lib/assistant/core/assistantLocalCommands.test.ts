@@ -4,6 +4,7 @@ import {
   buildLocalNamedEntityUpdateContract,
   buildLocalNotificationSettingsContract,
   buildLocalPersonalSettingsContract,
+  buildLocalSiteSettingsContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./assistantLocalCommands";
@@ -36,6 +37,7 @@ describe("local assistant help commands", () => {
     });
     expect(contract?.response).toContain("genereaza raport revizie pentru Vali");
     expect(contract?.response).toContain("GPS-ul Toyota");
+    expect(contract?.response).toContain("fa interfata compacta");
   });
 });
 
@@ -267,5 +269,28 @@ describe("local notification settings", () => {
 
   it("requires a named notification rule", () => {
     expect(buildLocalNotificationSettingsContract("opreste regula")).toBeNull();
+  });
+});
+
+describe("local site settings", () => {
+  it.each([
+    ["fa interfata compacta", { uiDensity: "compact" }],
+    ["pune tema siteului pe mov", { uiPalette: "violet" }],
+    ["pune cardurile glass", { uiCardStyle: "glass" }],
+    ["mareste fontul", { uiFontScale: "mai mare" }],
+    ["opreste animatiile in aplicatie", { uiAnimations: "none" }],
+    ["pune contrast mare pe site", { uiContrast: "high" }],
+  ])("builds controlled UI setting updates: %s", (command, fields) => {
+    expect(buildLocalSiteSettingsContract(command)).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_site_settings",
+      toolCalls: [{ id: "settings.update", input: { fields } }],
+      confirmationRequired: true,
+      confidence: 0.98,
+    });
+  });
+
+  it("does not treat settings navigation as a write", () => {
+    expect(buildLocalSiteSettingsContract("deschide setarile mele")).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ const HELP_RESPONSE = [
   '- Pontaj: "porneste pontaj pe proiectul X" sau "opreste pontajul".',
   '- Mentenanta: "genereaza raport revizie pentru Vali".',
   '- Setari personale: "pune-mi functia electrician" sau "schimba departamentul in Service".',
+  '- Setari site: "fa interfata compacta", "pune tema pe violet" sau "opreste animatiile".',
   '- Reguli notificari: "opreste regula Pontaj dimineata" sau "pune ora regulii X la 07:00".',
   "- Operatiuni: masini, scule, proiecte, concedii, bonuri, utilizatori si notificari.",
   "Poti cere si mai multi pasi intr-o singura comanda; daca exista doua rezultate, iti cer sa alegi.",
@@ -474,6 +475,105 @@ export function buildLocalNotificationSettingsContract(
   }
 
   return null;
+}
+
+const SITE_SETTING_PALETTES: Array<{ value: string; pattern: RegExp }> = [
+  { value: "violet", pattern: /\b(?:mov|violet|roz|purpuriu)\b/ },
+  { value: "emerald", pattern: /\b(?:verde|smarald|emerald)\b/ },
+  { value: "sunset", pattern: /\b(?:apus|sunset|portocaliu|orange|cald|rosu|rosiatica)\b/ },
+  { value: "slate", pattern: /\b(?:gri|gray|slate|neutru|inchis)\b/ },
+  { value: "blue", pattern: /\b(?:albastru|blue)\b/ },
+];
+
+const SITE_SETTING_FONTS: Array<{ value: string; pattern: RegExp }> = [
+  { value: "inter", pattern: /\binter\b/ },
+  { value: "poppins", pattern: /\bpoppins\b/ },
+  { value: "roboto-slab", pattern: /\broboto(?:\s+slab)?\b/ },
+  { value: "dm-sans", pattern: /\bdm(?:\s+sans)?\b/ },
+];
+
+function buildSiteSettingsContract(fields: Record<string, string | number>) {
+  if (Object.keys(fields).length === 0) return null;
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent: "update_site_settings",
+    toolCalls: [{ id: "settings.update", input: { fields } }],
+    targetPage: "",
+    entityReferences: [],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: true,
+    response: "Schimb setarile site-ului?",
+  } satisfies AssistantV3Contract;
+}
+
+/** Parses global UI setting changes without writing into visible form inputs. */
+export function buildLocalSiteSettingsContract(command: string): AssistantV3Contract | null {
+  const normalized = normalizeForMatching(normalizeAssistantCommandText(command));
+  const mentionsSettings =
+    /\b(?:site|siteul|aplicatie|aplicatia|interfata|aspect|design|tema|paleta|font|fontul|text|textul|litere|literele|card|carduri|cardurile|contrast|animatii|densitate|compact|compacta|aerisit|aerisita|spatios|spatioasa|glass|sticla)\b/.test(
+      normalized
+    );
+  const requestsMutation =
+    /\b(?:fa|pune|schimba|seteaza|modifica|mareste|micsoreaza|opreste|redu|activeaza|dezactiveaza)\b/.test(
+      normalized
+    );
+  if (!mentionsSettings || !requestsMutation) return null;
+
+  const fields: Record<string, string | number> = {};
+
+  if (/\b(?:compact|compacta|inghesuit|inghesuita|mai\s+strans|mai\s+mic)\b/.test(normalized)) {
+    fields.uiDensity = "compact";
+  } else if (/\b(?:aerisit|spatios|spatioasa|mai\s+larg|mai\s+lejera)\b/.test(normalized)) {
+    fields.uiDensity = "spacious";
+  } else if (/\b(?:confortabil|normal)\b/.test(normalized) && /\b(?:densitate|interfata)\b/.test(normalized)) {
+    fields.uiDensity = "comfortable";
+  }
+
+  const palette = SITE_SETTING_PALETTES.find((candidate) => candidate.pattern.test(normalized));
+  if (palette && /\b(?:tema|culoare|culori|paleta|interfata|site|aplicatie)\b/.test(normalized)) {
+    fields.uiPalette = palette.value;
+  }
+
+  if (/\b(?:glass|sticla|transparent|transparente)\b/.test(normalized)) {
+    fields.uiCardStyle = "glass";
+  } else if (/\b(?:flat|plat|plate|simple|fara\s+umbra)\b/.test(normalized)) {
+    fields.uiCardStyle = "flat";
+  } else if (/\b(?:elevat|ridicat|umbra|premium)\b/.test(normalized) && /\bcard/.test(normalized)) {
+    fields.uiCardStyle = "elevated";
+  }
+
+  if (/\b(?:contrast\s+mare|high\s+contrast|mai\s+vizibil)\b/.test(normalized)) {
+    fields.uiContrast = "high";
+  } else if (/\b(?:contrast\s+normal|contrastul\s+normal)\b/.test(normalized)) {
+    fields.uiContrast = "normal";
+  }
+
+  if (/\b(?:opreste|dezactiveaza|scoate|fara)\b.{0,25}\banimati/.test(normalized)) {
+    fields.uiAnimations = "none";
+  } else if (/\b(?:redu|mai\s+putine|mai\s+usoare)\b.{0,25}\banimati/.test(normalized)) {
+    fields.uiAnimations = "reduced";
+  } else if (/\b(?:activeaza|porneste|da\s+drumul)\b.{0,25}\banimati/.test(normalized)) {
+    fields.uiAnimations = "full";
+  }
+
+  const mentionsFont = /\b(?:font|fontul|scris|text|textul|litere|literele)\b/.test(normalized);
+  const font = SITE_SETTING_FONTS.find((candidate) => candidate.pattern.test(normalized));
+  if (font && mentionsFont) fields.uiFontFamily = font.value;
+
+  if (mentionsFont) {
+    const exactScale = normalized.match(/\b(?:font|text|litere)\b[^0-9]{0,20}(\d+(?:[.,]\d+)?)\b/);
+    if (exactScale) {
+      fields.uiFontScale = Number(exactScale[1].replace(",", "."));
+    } else if (/\b(?:mareste|mai\s+mare|marit|mare)\b/.test(normalized)) {
+      fields.uiFontScale = "mai mare";
+    } else if (/\b(?:micsoreaza|mai\s+mic|mic)\b/.test(normalized)) {
+      fields.uiFontScale = "mai mic";
+    }
+  }
+
+  return buildSiteSettingsContract(fields);
 }
 
 function referencesPersonalVehicle(normalizedCommand: string) {

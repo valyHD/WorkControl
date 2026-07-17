@@ -12,6 +12,7 @@ import { LayoutDashboard, LogOut, Menu } from "lucide-react";
 import { collection, getDocs, limit, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../lib/firebase/firebase";
 import { getControlPanelSettings } from "../modules/reports/services/controlPanelService";
+import { applyControlPanelUiPreferences } from "../modules/reports/services/controlPanelUiPreferences";
 import { clearFleetRouteSessionCache } from "../modules/vehicles/services/fleetRouteSync";
 import { getNavigationItemForPath } from "../config/navigation";
 import { getPageExperience } from "../config/pageExperience";
@@ -147,13 +148,7 @@ export default function AppShell() {
     const load = async () => {
       try {
         const settings = await getControlPanelSettings();
-        document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
-        document.documentElement.dataset.uiFontFamily = settings.uiFontFamily;
-        document.documentElement.dataset.uiDensity = settings.uiDensity;
-        document.documentElement.dataset.uiPalette = settings.uiPalette;
-        document.documentElement.dataset.uiCardStyle = settings.uiCardStyle;
-        document.documentElement.dataset.uiContrast = settings.uiContrast;
-        document.documentElement.dataset.uiAnimations = settings.uiAnimations;
+        applyControlPanelUiPreferences(settings);
       } catch (err) {
         console.error("[AppShell][loadUiPreferences]", err);
       }

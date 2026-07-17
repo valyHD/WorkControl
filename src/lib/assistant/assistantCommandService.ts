@@ -13,6 +13,7 @@ import {
   buildLocalNotificationSettingsContract,
   buildLocalPageNavigationContract,
   buildLocalPersonalSettingsContract,
+  buildLocalSiteSettingsContract,
   buildLocalTimesheetContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
@@ -65,6 +66,7 @@ export type AssistantCommandIntent =
   | "update_vehicle_field"
   | "update_profile_field"
   | "update_notification_rule"
+  | "update_site_settings"
   | "update_current_page_field"
   | "open_user_activity"
   | "create_manual_notification"
@@ -220,6 +222,18 @@ export async function interpretAssistantCommand(
       | Record<string, AssistantCommandFieldValue>
       | undefined;
     return buildLocalInterpretation(localNotificationSettings, {
+      entityType: "none",
+      entityQuery: "",
+      fields: fields || {},
+    });
+  }
+
+  const localSiteSettings = buildLocalSiteSettingsContract(cleanCommand);
+  if (localSiteSettings) {
+    const fields = localSiteSettings.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localSiteSettings, {
       entityType: "none",
       entityQuery: "",
       fields: fields || {},

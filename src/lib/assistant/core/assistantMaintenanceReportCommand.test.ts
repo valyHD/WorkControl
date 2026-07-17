@@ -156,6 +156,30 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("keeps the client separate when the observation is introduced with zi ca", () => {
+    const { fields } = reportFields(
+      "Fa raport interventie la Vali si zi ca liftul functioneaza normal"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "Liftul functioneaza normal.",
+      submitMode: "send",
+    });
+  });
+
+  it("accepts completeaza as a natural observation marker", () => {
+    const { fields } = reportFields(
+      "Genereaza raport interventie pentru Vali si completeaza la observatii liftul merge normal"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      observations: "Liftul merge normal.",
+    });
+  });
+
   it("keeps a short revision target clean", () => {
     const { fields } = reportFields("Raport revizie Vali");
 

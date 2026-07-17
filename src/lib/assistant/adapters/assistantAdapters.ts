@@ -29,6 +29,7 @@ import {
   createStopTimesheetTool,
 } from "./timesheetAdapter";
 import { createNotificationRuleSettingsTool } from "./notificationSettingsAdapter";
+import { createSettingsUpdateTool } from "./settingsAdapter";
 
 export type AssistantModuleAdapter = {
   module: AssistantToolModule;
@@ -115,6 +116,13 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
       toolIds: ["notifications.rules.update"],
       register: (registry) => {
         registry.register(createNotificationRuleSettingsTool());
+      },
+    },
+    {
+      module: "settings",
+      toolIds: ["settings.update"],
+      register: (registry) => {
+        registry.register(createSettingsUpdateTool());
       },
     },
   ];

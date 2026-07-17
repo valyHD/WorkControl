@@ -273,6 +273,19 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
+  it("updates global UI settings through the controlled settings tool without calling OpenAI", async () => {
+    const result = await interpretAssistantCommand("pune tema siteului pe mov");
+
+    expect(result).toMatchObject({
+      commandType: "entity_update",
+      intent: "update_site_settings",
+      fieldsToUpdate: { uiPalette: "violet" },
+      toolCalls: [{ id: "settings.update", input: { fields: { uiPalette: "violet" } } }],
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["deschide setarile mele", "/my-profile"],
     ["deschide setarile notificarilor", "/notification-rules"],

@@ -13,5 +13,7 @@ describe("Assistant V3 tool registry", () => {
     expect(first.get("vehicles.openTracker")).not.toBeNull();
     expect(first.get("notifications.rules.update")).not.toBeNull();
     expect(first.get("update_notification_rule")).not.toBeNull();
+    expect(first.get("settings.update")).not.toBeNull();
+    expect(first.get("update_site_settings")).not.toBeNull();
   });
 });

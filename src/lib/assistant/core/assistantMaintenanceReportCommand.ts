@@ -32,7 +32,7 @@ function cleanExtractedValue(value: string) {
 function sliceUntilCommandMarker(original: string, normalized: string) {
   const stopPatterns = [
     /(?:^|\s)(?:(?:si|iar)\s+)?(?:(?:cu|la|in)\s+)?(?:(?:rubrica|campul)\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)\b/,
-    /(?:^|\s)(?:si|iar)\s+(?:scrie|pune|trece|noteaza|baga)\b/,
+    /(?:^|\s)(?:si|iar)\s+(?:scrie|pune|trece|noteaza|baga|zi|spune|completeaza)\b/,
     /(?:^|\s)(?:si\s+)?(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/,
     /(?:^|\s)(?:si\s+)?(?:asteapta|apoi)\b/,
   ];
@@ -76,7 +76,7 @@ function extractObservations(command: string, normalized: string) {
     /\b(?:(?:iar|si)\s+)?(?:cu|la|in)?\s*(?:(?:rubrica|campul)\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)(?:\s+tehnicianului)?\s*[:;-]?\s*/.exec(
       normalized
     );
-  const conversationalMarker = /\b(?:iar|si)\s+(?:scrie|pune|trece|noteaza|baga)(?:\s+asa)?\s+(?!poze\b|fotografii\b)/.exec(
+  const conversationalMarker = /\b(?:iar|si)\s+(?:scrie|pune|trece|noteaza|baga|zi|spune|completeaza)(?:\s+(?:asa|ca))?\s+(?!poze\b|fotografii\b)/.exec(
     normalized
   );
   const marker = explicitMarker || conversationalMarker;
@@ -95,7 +95,7 @@ function extractObservations(command: string, normalized: string) {
   return formatAssistantReportObservation(
     cleanExtractedValue(originalTail.slice(0, end))
       .replace(
-        /^(?:(?:bag(?:a|\u0103)|zi)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|ca|cu))?\s+)+/i,
+        /^(?:(?:bag(?:a|\u0103)|zi|spune)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|ca|cu))?\s+)+/i,
         ""
       )
       .replace(

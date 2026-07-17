@@ -652,6 +652,7 @@ const ASSISTANT_COMMAND_SCHEMA = {
         'update_vehicle_field',
         'update_profile_field',
         'update_notification_rule',
+        'update_site_settings',
         'open_user_activity',
         'create_manual_notification',
         'unknown',
@@ -2719,6 +2720,10 @@ function buildWorkControlAssistantExamples() {
     '188. "deschide setarile mele" => navigation/open_page /my-profile.',
     '189. "deschide setarile notificarilor" => navigation/open_page /notification-rules daca rolul permite; altfel clarificare.',
     '190. "fa masina asta indisponibila" pe pagina unei masini => entity_update/update_vehicle pentru selectedEntity, fields {"status":"indisponibila"}.',
+    '191. "fa interfata compacta" => entity_update/update_site_settings, settings.update, fields {"uiDensity":"compact"}, confirmation required.',
+    '192. "pune tema siteului pe mov" => entity_update/update_site_settings, settings.update, fields {"uiPalette":"violet"}, confirmation required.',
+    '193. "opreste animatiile in aplicatie" => entity_update/update_site_settings, settings.update, fields {"uiAnimations":"none"}, confirmation required.',
+    '194. "mareste fontul" => entity_update/update_site_settings, settings.update, fields {"uiFontScale":"mai mare"}, confirmation required.',
   ];
 }
 
@@ -2772,12 +2777,12 @@ function buildAssistantPrompt(today, context) {
     `Data curenta este ${today}. Converteste azi/maine/poimaine si datele relative in YYYY-MM-DD.`,
     `Context pagina si memorie: ${contextText}. Foloseste contextul doar cand comanda se refera clar la "asta", "acesta", "si", "tot aici".`,
     'Returneaza doar JSON. Campurile fields si fieldsToUpdate trebuie sa fie identice pentru modificari/completari.',
-    'Tool id-uri permise: navigation.open, vehicles.update, vehicles.draft, tools.update, tools.draft, timesheets.projects.update, timesheets.projects.create, timesheets.projects.draft, users.update, users.draft, timesheets.start, timesheets.stop, maintenance.draft, maintenance.report.prepare, maintenance.report.send, leave.draft, expenses.draft, notifications.rules.update.',
+    'Tool id-uri permise: navigation.open, vehicles.update, vehicles.draft, tools.update, tools.draft, timesheets.projects.update, timesheets.projects.create, timesheets.projects.draft, users.update, users.draft, timesheets.start, timesheets.stop, maintenance.draft, maintenance.report.prepare, maintenance.report.send, leave.draft, expenses.draft, notifications.rules.update, settings.update.',
     'Pentru fiecare toolCall completeaza toate cheile input; foloseste string gol, false si obiect gol pentru cheile nefolosite.',
     'response este mesajul scurt pentru utilizator; confirmationRequired reflecta riscul intregului plan.',
     'commandType valori: navigation, form_fill, entity_update, create_entity, timesheet_action, question, unknown.',
     'intent valori permise sunt exact cele din schema. Nu inventa intentii.',
-    'targetModule valori recomandate: navigation, vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, projects, assistant.',
+    'targetModule valori recomandate: navigation, vehicles, tools, timesheets, leave, maintenance, expenses, users, notifications, settings, projects, assistant.',
     'entityType valori: vehicle, tool, project, user, maintenanceClient, page, currentPage, none.',
     'formSchemaId valori: maintenance-client, leave-request, expense, vehicle, tool, user, project, timesheet sau string gol.',
     'Nu transforma navigarea in completare. "du-ma la pontajul meu" nu porneste pontajul.',

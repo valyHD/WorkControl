@@ -16,6 +16,7 @@ import {
   type ProfessionalBackupView,
   saveControlPanelSettings,
 } from "../services/controlPanelService";
+import { applyControlPanelUiPreferences } from "../services/controlPanelUiPreferences";
 import { PageHeader, PageLayout } from "../../../components/experience";
 import ProductTabs from "../../../components/product/ProductTabs";
 import SystemHealthPanel from "../components/SystemHealthPanel";
@@ -114,13 +115,7 @@ export default function ControlPanelPage() {
       setCounters(loadedCounters);
       setLastBackupInfo((backupInfo as Record<string, any> | null) ?? null);
 
-      document.documentElement.style.setProperty("--ui-font-scale", String(loadedSettings.uiFontScale));
-      document.documentElement.dataset.uiFontFamily = loadedSettings.uiFontFamily;
-      document.documentElement.dataset.uiDensity = loadedSettings.uiDensity;
-      document.documentElement.dataset.uiPalette = loadedSettings.uiPalette;
-      document.documentElement.dataset.uiCardStyle = loadedSettings.uiCardStyle;
-      document.documentElement.dataset.uiContrast = loadedSettings.uiContrast;
-      document.documentElement.dataset.uiAnimations = loadedSettings.uiAnimations;
+      applyControlPanelUiPreferences(loadedSettings);
     } finally {
       setLoading(false);
     }
@@ -179,13 +174,7 @@ export default function ControlPanelPage() {
   }
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
-    document.documentElement.dataset.uiFontFamily = settings.uiFontFamily;
-    document.documentElement.dataset.uiDensity = settings.uiDensity;
-    document.documentElement.dataset.uiPalette = settings.uiPalette;
-    document.documentElement.dataset.uiCardStyle = settings.uiCardStyle;
-    document.documentElement.dataset.uiContrast = settings.uiContrast;
-    document.documentElement.dataset.uiAnimations = settings.uiAnimations;
+    applyControlPanelUiPreferences(settings);
   }, [settings.uiCardStyle, settings.uiContrast, settings.uiDensity, settings.uiFontFamily, settings.uiFontScale, settings.uiPalette, settings.uiAnimations]);
 
   async function handleSaveSettings() {
@@ -196,13 +185,7 @@ export default function ControlPanelPage() {
       setPersonalizationMessage("");
 
       await saveControlPanelSettings(settings);
-      document.documentElement.style.setProperty("--ui-font-scale", String(settings.uiFontScale));
-      document.documentElement.dataset.uiFontFamily = settings.uiFontFamily;
-      document.documentElement.dataset.uiDensity = settings.uiDensity;
-      document.documentElement.dataset.uiPalette = settings.uiPalette;
-      document.documentElement.dataset.uiCardStyle = settings.uiCardStyle;
-      document.documentElement.dataset.uiContrast = settings.uiContrast;
-      document.documentElement.dataset.uiAnimations = settings.uiAnimations;
+      applyControlPanelUiPreferences(settings);
       setSaveMessage("Setările au fost salvate.");
     } catch (err) {
       console.error(err);
