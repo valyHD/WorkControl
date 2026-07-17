@@ -209,27 +209,98 @@
   font-weight: 900;
 }
 
+.maintenance-order-form-panel {
+  display: block;
+}
+
+.maintenance-order-form-panel__summary {
+  display: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-weight: 900;
+  list-style: none;
+}
+
+.maintenance-order-form-panel__summary::-webkit-details-marker {
+  display: none;
+}
+
+.maintenance-order-form-panel__summary small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.maintenance-order-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.maintenance-order-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.maintenance-order-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.maintenance-order-legend__dot--waiting { background: #eab308; }
+.maintenance-order-legend__dot--urgent { background: #9333ea; }
+.maintenance-order-legend__dot--quoted { background: #f97316; }
+.maintenance-order-legend__dot--ordered { background: #0ea5e9; }
+.maintenance-order-legend__dot--resolved { background: #16a34a; }
+
 .maintenance-orders-list {
   gap: 10px;
 }
 
 .maintenance-order-card {
   border-left: 4px solid var(--line-strong);
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
 
-.maintenance-order-card--pending {
+.maintenance-order-card--pending,
+.maintenance-order-card--waiting {
   border-left-color: #eab308;
-  background: #fffdf0;
+  background: linear-gradient(135deg, #fff7cc, #fffef4);
 }
 
 .maintenance-order-card--urgent {
   border-left-color: #9333ea;
-  background: #faf5ff;
+  background: linear-gradient(135deg, #f3e8ff, #fff7ff);
+}
+
+.maintenance-order-card--quoted {
+  border-left-color: #f97316;
+  background: linear-gradient(135deg, #ffedd5, #fff7ed);
+}
+
+.maintenance-order-card--ordered {
+  border-left-color: #0ea5e9;
+  background: linear-gradient(135deg, #e0f2fe, #f0f9ff);
 }
 
 .maintenance-order-card--resolved {
   border-left-color: #16a34a;
-  background: #f0fdf4;
+  background: linear-gradient(135deg, #dcfce7, #f0fdf4);
 }
 
 .maintenance-order-card--cancelled {
@@ -398,6 +469,12 @@
   font-weight: 900;
 }
 
+.maintenance-offer-dialog small {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .maintenance-offer-dialog__actions {
   bottom: 0;
   justify-content: flex-end;
@@ -521,6 +598,23 @@
 
   .maintenance-order-line {
     grid-template-columns: 1fr;
+  }
+
+  .maintenance-order-form-panel__summary {
+    display: block;
+  }
+
+  .maintenance-order-form-panel:not([open]) {
+    padding-bottom: 0;
+  }
+
+  .maintenance-order-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .maintenance-order-legend span {
+    justify-content: flex-start;
   }
 
   .maintenance-order-details {

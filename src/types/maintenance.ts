@@ -118,7 +118,17 @@ export type MaintenancePartOrderPreferences = {
   supplierEmail: string;
   lineSupplier: string;
   lastPartName: string;
+  clientOfferNotes: string;
   updatedAt: number;
+};
+
+export type MaintenancePartOrderAttachment = {
+  name: string;
+  url: string;
+  path: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedAt: number;
 };
 
 export type MaintenancePartOrder = {
@@ -160,6 +170,7 @@ export type MaintenancePartOrder = {
   clientOfferEmailSentByUserName: string;
   clientOfferAmount: number;
   clientOfferNotes: string;
+  clientOfferAttachment: MaintenancePartOrderAttachment | null;
   resolvedAt: number | null;
   resolvedByUserId: string;
   resolvedByUserName: string;

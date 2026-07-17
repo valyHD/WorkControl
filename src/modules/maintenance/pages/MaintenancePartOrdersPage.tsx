@@ -35,6 +35,8 @@ import {
 } from "../services/partOrderPreferencesService";
 import {
   applyPartOrderPreferences,
+  getPartOrderDisplayAmount,
+  getPartOrderVisualState,
   uniqueOrderedPartNames,
   uniqueSupplierNames,
 } from "../utils/partOrdersDomain";
@@ -42,6 +44,7 @@ import {
   ClientOfferDialog,
   SupplierQuoteDialog,
 } from "../components/MaintenancePartOrderOfferDialogs";
+import { uploadPartOrderClientAttachment } from "../services/partOrderAttachmentsService";
 
 const statusOptions: Array<{ value: MaintenancePartOrderStatus; label: string }> = [
   { value: "draft", label: "Draft" },
@@ -150,13 +153,6 @@ function orderTotal(lines: MaintenancePartOrderLine[]) {
 
 function getUserDisplayName(user: AppUserItem) {
   return user.fullName || user.email || user.id;
-}
-
-function orderVisualState(order: MaintenancePartOrder) {
-  if (order.status === "installed") return "resolved";
-  if (order.status === "cancelled") return "cancelled";
-  if (order.priority === "urgent") return "urgent";
-  return "pending";
 }
 
 function statusLabel(status: MaintenancePartOrderStatus) {
@@ -400,6 +396,7 @@ export default function MaintenancePartOrdersPage() {
         clientOfferEmailSentByUserName: editingOrder?.clientOfferEmailSentByUserName || "",
         clientOfferAmount: editingOrder?.clientOfferAmount || 0,
         clientOfferNotes: editingOrder?.clientOfferNotes || "",
+        clientOfferAttachment: editingOrder?.clientOfferAttachment ?? null,
         resolvedAt: editingOrder?.resolvedAt ?? null,
         resolvedByUserId: editingOrder?.resolvedByUserId || "",
         resolvedByUserName: editingOrder?.resolvedByUserName || "",
@@ -506,6 +503,7 @@ export default function MaintenancePartOrdersPage() {
       clientOfferAmount: number;
       clientOfferNotes: string;
       lineClientPrices: Record<string, number>;
+      attachmentFile?: File | null;
     },
     sendEmail: boolean
   ) {
@@ -517,7 +515,14 @@ export default function MaintenancePartOrdersPage() {
     setWorkflowSaving(true);
     setError("");
     try {
-      await saveClientPartOffer(clientOfferOrder, currentUser, values);
+      const clientOfferAttachment = values.attachmentFile
+        ? await uploadPartOrderClientAttachment(clientOfferOrder.id, values.attachmentFile)
+        : undefined;
+      await saveClientPartOffer(clientOfferOrder, currentUser, {
+        ...values,
+        clientOfferAttachment,
+      });
+      rememberPreferences({ clientOfferNotes: values.clientOfferNotes });
       if (sendEmail) {
         await sendMaintenancePartOrderEmail(clientOfferOrder.id, "client_offer");
         setStatus(`Oferta clientului a fost salvata si trimisa catre ${values.clientEmail}.`);
@@ -541,7 +546,11 @@ export default function MaintenancePartOrdersPage() {
 
   return (
     <section className="page-section maintenance-orders-page" data-assistant-action="maintenance-parts">
-      <div className="panel">
+      <details className="panel maintenance-order-form-panel" open>
+        <summary className="maintenance-order-form-panel__summary">
+          <span>{editingOrder ? "Editeaza comanda" : "Comanda noua"}</span>
+          <small>Deschide sau inchide formularul pentru acces rapid la istoric pe mobil.</small>
+        </summary>
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Comenzi piese lift</h2>
@@ -818,9 +827,9 @@ export default function MaintenancePartOrdersPage() {
 
         {error && <div className="tool-message">{error}</div>}
         {status && !error && <div className="tool-message tool-message-success">{status}</div>}
-      </div>
+      </details>
 
-      <div className="panel">
+      <div className="panel" id="maintenance-orders-history">
         <div className="panel-head">
           <div>
             <h2 className="panel-title">Istoric comenzi piese</h2>
@@ -828,6 +837,13 @@ export default function MaintenancePartOrdersPage() {
           </div>
         </div>
         <div className="panel-body">
+          <div className="maintenance-order-legend" aria-label="Legenda status comenzi piese">
+            <span><i className="maintenance-order-legend__dot maintenance-order-legend__dot--waiting" />Fara actiune</span>
+            <span><i className="maintenance-order-legend__dot maintenance-order-legend__dot--urgent" />Urgenta</span>
+            <span><i className="maintenance-order-legend__dot maintenance-order-legend__dot--quoted" />Oferta primita</span>
+            <span><i className="maintenance-order-legend__dot maintenance-order-legend__dot--ordered" />Comandata / primita</span>
+            <span><i className="maintenance-order-legend__dot maintenance-order-legend__dot--resolved" />Montata</span>
+          </div>
           <div className="tool-form-grid">
             <div className="tool-form-block">
               <label className="tool-form-label">Status</label>
@@ -853,13 +869,15 @@ export default function MaintenancePartOrdersPage() {
           <p className="tools-subtitle">Nu exista comenzi pentru filtrele selectate.</p>
         ) : (
           <div className="simple-list maintenance-orders-list">
-            {filteredOrders.map((order) => (
-              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${orderVisualState(order)}`}>
+            {filteredOrders.map((order) => {
+              const displayAmount = getPartOrderDisplayAmount(order);
+              return (
+              <details key={order.id} className={`simple-list-item maintenance-order-card maintenance-order-card--${getPartOrderVisualState(order)}`}>
                 <summary>
                   <span className="simple-list-text">
                     <span className="simple-list-label">{order.title || "Comanda piese"} - {order.clientName || "fara client"}</span>
                     <span className="simple-list-subtitle">
-                      {statusLabel(order.status)} / {order.priority} - {order.lines.length} piese - {formatMoney(order.totalEstimated)} - {formatDateTime(order.updatedAt)}
+                      {statusLabel(order.status)} / {order.priority} - {order.lines.length} piese - {formatMoney(displayAmount.amount)} ({displayAmount.label}) - {formatDateTime(order.updatedAt)}
                     </span>
                   </span>
                   <span className="maintenance-order-actions">
@@ -888,6 +906,7 @@ export default function MaintenancePartOrdersPage() {
                   <div><strong>Vazut:</strong> {order.notificationSeenAt ? `${order.notificationSeenByUserName || "utilizator"} - ${formatDateTime(order.notificationSeenAt)}` : "nu"}</div>
                   <div><strong>Oferta furnizor:</strong> {order.supplierQuoteReceivedAt ? `${formatMoney(order.supplierOfferAmount)} - ${formatDateTime(order.supplierQuoteReceivedAt)}` : "-"}</div>
                   <div><strong>Oferta client:</strong> {order.clientOfferEmailSentAt ? `${formatMoney(order.clientOfferAmount || order.supplierOfferAmount)} - trimisa ${formatDateTime(order.clientOfferEmailSentAt)}` : "-"}</div>
+                  <div><strong>Atasament client:</strong> {order.clientOfferAttachment ? order.clientOfferAttachment.name : "-"}</div>
                   {order.notes && <p>{order.notes}</p>}
                   <div className="maintenance-order-workflow">
                     {order.notifyUserId && (
@@ -925,7 +944,8 @@ export default function MaintenancePartOrdersPage() {
                   </div>
                 </div>
               </details>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -941,6 +961,7 @@ export default function MaintenancePartOrdersPage() {
         <ClientOfferDialog
           order={clientOfferOrder}
           saving={workflowSaving}
+          defaultNotes={preferences?.clientOfferNotes || ""}
           onClose={() => setClientOfferOrder(null)}
           onSave={saveClientOffer}
         />

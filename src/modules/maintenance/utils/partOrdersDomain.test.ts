@@ -5,6 +5,8 @@ import {
   buildOrderedPartHistory,
   calculateClientOfferTotal,
   calculateSupplierOfferTotal,
+  getPartOrderDisplayAmount,
+  getPartOrderVisualState,
   uniqueOrderedPartNames,
 } from "./partOrdersDomain";
 
@@ -61,6 +63,7 @@ const order = (patch: Partial<MaintenancePartOrder> = {}): MaintenancePartOrder 
   clientOfferEmailSentByUserName: "",
   clientOfferAmount: 40,
   clientOfferNotes: "",
+  clientOfferAttachment: null,
   resolvedAt: null,
   resolvedByUserId: "",
   resolvedByUserName: "",
@@ -92,6 +95,28 @@ describe("partOrdersDomain", () => {
   it("keeps supplier and client prices separate", () => {
     expect(calculateSupplierOfferTotal([line()])).toBe(24);
     expect(calculateClientOfferTotal([line()])).toBe(40);
+  });
+
+  it("shows supplier offer total after quote is received", () => {
+    expect(getPartOrderDisplayAmount(order({ status: "quote_received", supplierOfferAmount: 123 }))).toEqual({
+      amount: 123,
+      label: "oferta furnizor",
+    });
+  });
+
+  it("shows client offer total after client offer was sent", () => {
+    expect(getPartOrderDisplayAmount(order({ clientOfferEmailSentAt: 300, clientOfferAmount: 250 }))).toEqual({
+      amount: 250,
+      label: "oferta client",
+    });
+  });
+
+  it("maps order visual states for stronger highlighting", () => {
+    expect(getPartOrderVisualState(order({ status: "requested", priority: "normal" }))).toBe("waiting");
+    expect(getPartOrderVisualState(order({ status: "requested", priority: "urgent" }))).toBe("urgent");
+    expect(getPartOrderVisualState(order({ status: "quote_received", priority: "normal" }))).toBe("quoted");
+    expect(getPartOrderVisualState(order({ status: "ordered", priority: "normal" }))).toBe("ordered");
+    expect(getPartOrderVisualState(order({ status: "installed", priority: "urgent" }))).toBe("resolved");
   });
 
   it("applies personal defaults without overwriting entered values", () => {

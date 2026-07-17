@@ -22,6 +22,7 @@ function normalizePreferences(
     supplierEmail: cleanText(value?.supplierEmail).toLowerCase(),
     lineSupplier: cleanText(value?.lineSupplier),
     lastPartName: cleanText(value?.lastPartName),
+    clientOfferNotes: cleanText(value?.clientOfferNotes),
     updatedAt: Number.isFinite(Number(value?.updatedAt)) ? Number(value?.updatedAt) : 0,
   };
 }

@@ -82,6 +82,31 @@ export function calculateClientOfferTotal(lines: MaintenancePartOrderLine[]): nu
   );
 }
 
+export type PartOrderVisualState = "waiting" | "urgent" | "quoted" | "ordered" | "resolved" | "cancelled";
+
+export function getPartOrderDisplayAmount(order: MaintenancePartOrder): { amount: number; label: string } {
+  const clientTotal = Number(order.clientOfferAmount || calculateClientOfferTotal(order.lines) || 0);
+  if (clientTotal > 0 && order.clientOfferEmailSentAt) {
+    return { amount: clientTotal, label: "oferta client" };
+  }
+
+  const supplierTotal = Number(order.supplierOfferAmount || calculateSupplierOfferTotal(order.lines) || 0);
+  if (supplierTotal > 0 && ["quote_received", "ordered", "partial", "received", "installed"].includes(order.status)) {
+    return { amount: supplierTotal, label: "oferta furnizor" };
+  }
+
+  return { amount: Number(order.totalEstimated || 0), label: "estimat" };
+}
+
+export function getPartOrderVisualState(order: MaintenancePartOrder): PartOrderVisualState {
+  if (order.status === "cancelled") return "cancelled";
+  if (order.status === "installed") return "resolved";
+  if (order.priority === "urgent") return "urgent";
+  if (order.status === "quote_received") return "quoted";
+  if (["ordered", "partial", "received"].includes(order.status)) return "ordered";
+  return "waiting";
+}
+
 export function applyPartOrderPreferences<T extends {
   supplierName: string;
   supplierContact: string;

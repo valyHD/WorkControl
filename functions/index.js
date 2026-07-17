@@ -1139,7 +1139,7 @@ function base64UrlEncodeBuffer(buffer) {
 function normalizeGmailAttachmentInput(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const path = cleanText(value.path, 600);
-  if (!path || !path.startsWith('maintenance-reports/')) return null;
+  if (!path || (!path.startsWith('maintenance-reports/') && !path.startsWith('maintenance-part-orders/'))) return null;
   return {
     path,
     fileName: sanitizeHeaderValue(value.fileName || path.split('/').pop() || 'atasament', 180),
@@ -1353,11 +1353,21 @@ async function sendMaintenancePartOrderEmail(request) {
   const content = kind === 'supplier_quote_request'
     ? buildSupplierQuoteRequestEmail(order)
     : buildClientPartOfferEmail(order);
+  const clientOfferAttachment = kind === 'client_offer'
+    ? normalizeGmailAttachmentInput({
+        path: order.clientOfferAttachment?.path,
+        fileName: order.clientOfferAttachment?.name,
+        contentType: order.clientOfferAttachment?.contentType,
+      })
+    : null;
+  const attachments = await Promise.all(
+    [clientOfferAttachment].filter(Boolean).map(readStorageAttachment)
+  );
   const raw = buildRawGmailMessage({
     to: recipientEmail,
     subject: content.subject,
     body: content.body,
-    attachments: [],
+    attachments,
   });
   const accessToken = await getSharedGmailAccessToken();
   const response = await sendRawGmailMessage({ accessToken, raw });

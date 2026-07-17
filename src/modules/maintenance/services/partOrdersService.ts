@@ -21,6 +21,7 @@ import { dispatchNotificationEvent } from "../../notifications/services/notifica
 import type { AppUser } from "../../../types/tool";
 import type {
   MaintenancePartOrder,
+  MaintenancePartOrderAttachment,
   MaintenancePartOrderLine,
   MaintenancePartOrderPriority,
   MaintenancePartOrderStatus,
@@ -64,6 +65,22 @@ function normalizeLine(line: Partial<MaintenancePartOrderLine>, index: number): 
     supplierOfferUnitPrice: Math.max(0, toNumber(line.supplierOfferUnitPrice, toNumber(line.estimatedPrice, 0))),
     clientOfferUnitPrice: Math.max(0, toNumber(line.clientOfferUnitPrice, 0)),
     notes: toText(line.notes),
+  };
+}
+
+function normalizeAttachment(value: unknown): MaintenancePartOrderAttachment | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const data = value as Partial<MaintenancePartOrderAttachment>;
+  const path = toText(data.path);
+  const url = toText(data.url);
+  if (!path && !url) return null;
+  return {
+    name: toText(data.name, path.split("/").pop() || "atasament"),
+    url,
+    path,
+    contentType: toText(data.contentType, "application/octet-stream"),
+    sizeBytes: Math.max(0, toNumber(data.sizeBytes, 0)),
+    uploadedAt: toNumber(data.uploadedAt, 0),
   };
 }
 
@@ -130,6 +147,7 @@ function mapOrder(id: string, data: Record<string, unknown>): MaintenancePartOrd
     clientOfferEmailSentByUserName: toText(data.clientOfferEmailSentByUserName),
     clientOfferAmount: toNumber(data.clientOfferAmount, 0),
     clientOfferNotes: toText(data.clientOfferNotes),
+    clientOfferAttachment: normalizeAttachment(data.clientOfferAttachment),
     resolvedAt: toNullableNumber(data.resolvedAt),
     resolvedByUserId: toText(data.resolvedByUserId),
     resolvedByUserName: toText(data.resolvedByUserName),
@@ -378,21 +396,31 @@ export async function markSupplierQuoteReceived(
 export async function saveClientPartOffer(
   order: MaintenancePartOrder,
   _actor: AppUser | null,
-  values: { clientEmail: string; clientOfferAmount: number; clientOfferNotes: string; lineClientPrices: Record<string, number> }
+  values: {
+    clientEmail: string;
+    clientOfferAmount: number;
+    clientOfferNotes: string;
+    lineClientPrices: Record<string, number>;
+    clientOfferAttachment?: MaintenancePartOrderAttachment | null;
+  }
 ): Promise<void> {
   const now = Date.now();
   const lines = order.lines.map((line) => ({
     ...line,
     clientOfferUnitPrice: Math.max(0, Number(values.lineClientPrices[line.id] ?? line.clientOfferUnitPrice ?? 0)),
   }));
-  await updateDoc(doc(partOrdersCollection, order.id), {
+  const payload: Record<string, unknown> = {
     clientEmail: toText(values.clientEmail),
     clientOfferAmount: Math.max(0, Number(values.clientOfferAmount || 0)),
     clientOfferNotes: toText(values.clientOfferNotes),
     lines,
     updatedAt: now,
     updatedAtServer: serverTimestamp(),
-  });
+  };
+  if (values.clientOfferAttachment !== undefined) {
+    payload.clientOfferAttachment = values.clientOfferAttachment;
+  }
+  await updateDoc(doc(partOrdersCollection, order.id), payload);
 }
 
 export async function markClientOfferEmailSent(order: MaintenancePartOrder, actor: AppUser | null): Promise<void> {

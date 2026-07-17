@@ -16,6 +16,7 @@ type ClientOfferValues = {
   clientOfferAmount: number;
   clientOfferNotes: string;
   lineClientPrices: Record<string, number>;
+  attachmentFile: File | null;
 };
 
 type DialogShellProps = {
@@ -145,25 +146,29 @@ export function SupplierQuoteDialog({
 export function ClientOfferDialog({
   order,
   saving,
+  defaultNotes = "",
   onClose,
   onSave,
 }: {
   order: MaintenancePartOrder;
   saving: boolean;
+  defaultNotes?: string;
   onClose: () => void;
   onSave: (values: ClientOfferValues, sendEmail: boolean) => Promise<void>;
 }) {
   const [clientEmail, setClientEmail] = useState(order.clientEmail);
-  const [notes, setNotes] = useState(order.clientOfferNotes);
+  const [notes, setNotes] = useState(order.clientOfferNotes || defaultNotes);
   const [linePrices, setLinePrices] = useState<Record<string, number>>({});
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
 
   useEffect(() => {
     setClientEmail(order.clientEmail);
-    setNotes(order.clientOfferNotes);
+    setNotes(order.clientOfferNotes || defaultNotes);
+    setAttachmentFile(null);
     setLinePrices(
       Object.fromEntries(order.lines.map((line) => [line.id, line.clientOfferUnitPrice || 0]))
     );
-  }, [order]);
+  }, [defaultNotes, order]);
 
   const total = useMemo(() => {
     const lines = order.lines.map((line) => ({ ...line, clientOfferUnitPrice: linePrices[line.id] || 0 }));
@@ -175,6 +180,7 @@ export function ClientOfferDialog({
     clientOfferAmount: total,
     clientOfferNotes: notes,
     lineClientPrices: linePrices,
+    attachmentFile,
   };
 
   return (
@@ -223,6 +229,22 @@ export function ClientOfferDialog({
         <label className="tool-form-block">
           <span className="tool-form-label">Observatii pentru client</span>
           <textarea className="tool-textarea" value={notes} onChange={(event) => setNotes(event.target.value)} />
+        </label>
+        <label className="tool-form-block">
+          <span className="tool-form-label">Ataseaza proforma / factura</span>
+          <input
+            className="tool-input"
+            type="file"
+            accept="application/pdf,image/jpeg,image/png,image/webp"
+            onChange={(event) => setAttachmentFile(event.target.files?.[0] || null)}
+          />
+          <small>
+            {attachmentFile
+              ? `${attachmentFile.name} - ${(attachmentFile.size / 1024 / 1024).toFixed(2)} MB`
+              : order.clientOfferAttachment
+                ? `Atasat anterior: ${order.clientOfferAttachment.name}`
+                : "Optional: PDF, JPG, PNG sau WEBP."}
+          </small>
         </label>
         <div className="maintenance-offer-dialog__total">Total oferta client: {total.toFixed(2)} RON</div>
       </div>

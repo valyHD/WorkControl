@@ -37,24 +37,29 @@ function buildSupplierQuoteRequestEmail(order) {
   const parts = lines.map((line, index) =>
     `${index + 1}. ${line.name}${line.code ? `, cod ${line.code}` : ''}, ${line.quantity} ${line.unit}${line.notes ? `, observatii: ${line.notes}` : ''}`
   );
+  const body = [
+    'Buna ziua,',
+    '',
+    'Va rugam sa ne transmiteti oferta pentru urmatoarele piese:',
+    '',
+    ...parts,
+    '',
+    `Client: ${cleanText(order?.clientName, 160) || '-'}`,
+    `Adresa: ${cleanText(order?.addressLabel, 240) || '-'}`,
+    `Numar lift: ${cleanText(order?.liftSerialNumber, 120) || '-'}`,
+  ];
+  if (cleanText(order?.neededByDate, 40)) {
+    body.push(`Necesar pana la: ${cleanText(order.neededByDate, 40)}`);
+  }
+  if (cleanText(order?.notes, 1000)) {
+    body.push(`Observatii: ${cleanText(order.notes, 1000)}`, '');
+  } else {
+    body.push('');
+  }
+  body.push('Va multumim,', 'Service si Mentenanta Lift');
   return {
     subject: `Cerere oferta piese - ${orderLabel(order)}`,
-    body: [
-      'Buna ziua,',
-      '',
-      'Va rugam sa ne transmiteti oferta pentru urmatoarele piese:',
-      '',
-      ...parts,
-      '',
-      `Client: ${cleanText(order?.clientName, 160) || '-'}`,
-      `Adresa: ${cleanText(order?.addressLabel, 240) || '-'}`,
-      `Numar lift: ${cleanText(order?.liftSerialNumber, 120) || '-'}`,
-      cleanText(order?.neededByDate, 40) ? `Necesar pana la: ${cleanText(order.neededByDate, 40)}` : '',
-      cleanText(order?.notes, 1000) ? `Observatii: ${cleanText(order.notes, 1000)}` : '',
-      '',
-      'Va multumim,',
-      'Service si Mentenanta Lift',
-    ].filter((line) => line !== '').join('\n'),
+    body: body.join('\n'),
   };
 }
 
@@ -66,24 +71,27 @@ function buildClientPartOfferEmail(order) {
   });
   const calculatedTotal = lines.reduce((sum, line) => sum + line.quantity * line.clientOfferUnitPrice, 0);
   const total = calculatedTotal || toPositiveNumber(order?.clientOfferAmount);
+  const body = [
+    'Buna ziua,',
+    '',
+    `Va transmitem oferta pentru piesele necesare liftului ${cleanText(order?.liftSerialNumber, 120) || '-'}.`,
+    '',
+    ...parts,
+    '',
+    `Valoare totala oferta: ${money(total)}`,
+  ];
+  if (cleanText(order?.clientOfferNotes, 1000)) {
+    body.push(`Observatii: ${cleanText(order.clientOfferNotes, 1000)}`, '');
+  } else {
+    body.push('');
+  }
+  if (cleanText(order?.addressLabel, 240)) {
+    body.push(`Locatie: ${cleanText(order.addressLabel, 240)}`);
+  }
+  body.push('', 'Va rugam sa ne confirmati acceptarea ofertei.', '', 'Cu stima,', 'Service si Mentenanta Lift');
   return {
     subject: `Oferta piese - ${orderLabel(order)}`,
-    body: [
-      'Buna ziua,',
-      '',
-      `Va transmitem oferta pentru piesele necesare liftului ${cleanText(order?.liftSerialNumber, 120) || '-'}.`,
-      '',
-      ...parts,
-      '',
-      `Valoare totala oferta: ${money(total)}`,
-      cleanText(order?.clientOfferNotes, 1000) ? `Observatii: ${cleanText(order.clientOfferNotes, 1000)}` : '',
-      cleanText(order?.addressLabel, 240) ? `Locatie: ${cleanText(order.addressLabel, 240)}` : '',
-      '',
-      'Va rugam sa ne confirmati acceptarea ofertei.',
-      '',
-      'Cu stima,',
-      'Service si Mentenanta Lift',
-    ].filter((line) => line !== '').join('\n'),
+    body: body.join('\n'),
   };
 }
 

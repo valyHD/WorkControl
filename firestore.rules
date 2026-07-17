@@ -608,7 +608,7 @@ service cloud.firestore {
         request.resource.data.get('userId', '') == request.auth.uid &&
         request.resource.data.keys().hasOnly([
           'userId', 'companyId', 'supplierName', 'supplierContact', 'supplierEmail',
-          'lineSupplier', 'lastPartName', 'updatedAt', 'updatedAtServer'
+          'lineSupplier', 'lastPartName', 'clientOfferNotes', 'updatedAt', 'updatedAtServer'
         ]);
     }
 

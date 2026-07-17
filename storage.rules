@@ -107,6 +107,14 @@ service firebase.storage {
       return firestore.exists(/databases/(default)/documents/maintenanceClients/$(clientId));
     }
 
+    function maintenancePartOrder(orderId) {
+      return firestore.get(/databases/(default)/documents/maintenancePartOrders/$(orderId));
+    }
+
+    function maintenancePartOrderExists(orderId) {
+      return firestore.exists(/databases/(default)/documents/maintenancePartOrders/$(orderId));
+    }
+
     function safeImageWrite(maxBytes) {
       return request.resource != null && request.resource.size <= maxBytes &&
         request.resource.contentType.matches('image/(jpeg|png|webp)');
@@ -164,6 +172,16 @@ service firebase.storage {
         safeDocumentWrite(25 * 1024 * 1024);
       allow delete: if maintenanceClientExists(clientId) &&
         managerFor(maintenanceClient(clientId).data.get('companyId', ''));
+    }
+
+    match /maintenance-part-orders/{orderId}/{fileName} {
+      allow read: if maintenancePartOrderExists(orderId) &&
+        sameCompany(maintenancePartOrder(orderId).data.get('companyId', ''));
+      allow create, update: if maintenancePartOrderExists(orderId) &&
+        managerFor(maintenancePartOrder(orderId).data.get('companyId', '')) &&
+        safeDocumentWrite(15 * 1024 * 1024);
+      allow delete: if maintenancePartOrderExists(orderId) &&
+        managerFor(maintenancePartOrder(orderId).data.get('companyId', ''));
     }
 
     match /vehicle-position-archives/{vehicleId}/{fileName} {
