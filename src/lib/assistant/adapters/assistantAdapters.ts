@@ -46,7 +46,7 @@ export function createAssistantModuleAdapters(): AssistantModuleAdapter[] {
     },
     {
       module: "vehicles",
-      toolIds: ["vehicles.update", "vehicles.draft", "vehicles.openTracker"],
+      toolIds: ["vehicles.update", "vehicles.draft", "vehicles.open"],
       register: (registry) => {
         registry.register(createVehicleUpdateTool());
         registry.register(createVehicleDraftTool());

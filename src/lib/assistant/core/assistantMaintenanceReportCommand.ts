@@ -30,7 +30,7 @@ function cleanExtractedValue(value: string) {
 
 function sliceUntilCommandMarker(original: string, normalized: string) {
   const stopPatterns = [
-    /(?:^|\s)(?:si\s+)?cu\s+(?:observatia|observatie|mentiunea|comentariul|comentariu)\b/,
+    /(?:^|\s)(?:(?:si|iar)\s+)?(?:cu|la|in)\s+(?:(?:rubrica|campul)\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)\b/,
     /(?:^|\s)(?:si\s+)?(?:trimite(?:-l)?|trimita|expediaza|transmite|send)\b/,
     /(?:^|\s)(?:si\s+)?(?:asteapta|apoi)\b/,
   ];
@@ -71,7 +71,7 @@ function extractClientQuery(command: string, normalized: string) {
 
 function extractObservations(command: string, normalized: string) {
   const marker =
-    /\b(?:cu\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)(?:\s+tehnicianului)?\s*[:;-]?\s*/.exec(
+    /\b(?:(?:iar|si)\s+)?(?:cu|la|in)?\s*(?:(?:rubrica|campul)\s+)?(?:observatia|observatie|observatii|mentiunea|mentiune|comentariul|comentariu)(?:\s+tehnicianului)?\s*[:;-]?\s*/.exec(
       normalized
     );
   if (marker?.index === undefined) return "";
@@ -86,7 +86,12 @@ function extractObservations(command: string, normalized: string) {
     .map((pattern) => normalizedTail.search(pattern))
     .filter((index) => index >= 0);
   const end = indexes.length > 0 ? Math.min(...indexes) : originalTail.length;
-  return cleanExtractedValue(originalTail.slice(0, end)).replace(/^(?:este|ca|sa fie)\s+/i, "");
+  return cleanExtractedValue(originalTail.slice(0, end))
+    .replace(
+      /^(?:(?:trece|scrie|pune|noteaza|notează|completeaza|completează)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|așa|ca|cu))?\s+)+/i,
+      ""
+    )
+    .replace(/^(?:este|ca|sa fie)\s+/i, "");
 }
 
 type MaintenanceReportContext = Omit<Partial<AssistantV3PageContext>, "memory"> & {

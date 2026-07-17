@@ -8,7 +8,7 @@ import {
 } from "../tools/assistantToolRegistry";
 import { createServiceUpdateTool, toLegacyRuntimeContext } from "./adapterHelpers";
 
-type VehicleTrackerInput = { entityQuery: string };
+type VehicleTrackerInput = { entityQuery: string; destination: "details" | "tracker" };
 
 type ResolvedVehicleTrackerInput = VehicleTrackerInput & {
   resolution: Awaited<ReturnType<typeof resolveAssistantEntity>>;
@@ -19,21 +19,27 @@ function readVehicleTrackerInput(value: unknown): VehicleTrackerInput {
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
-  return { entityQuery: String(input.entityQuery || "").trim() };
+  return {
+    entityQuery: String(input.entityQuery || "").trim(),
+    destination: input.destination === "details" ? "details" : "tracker",
+  };
 }
 
-export function createVehicleTrackerTool(): AssistantToolDefinition<
+export function createVehicleOpenTool(): AssistantToolDefinition<
   unknown,
   ResolvedVehicleTrackerInput
 > {
   const definition: AssistantToolDefinition<unknown, ResolvedVehicleTrackerInput> = {
-    id: "vehicles.openTracker",
-    description: "Gaseste masina ceruta si deschide direct sectiunea ei GPS.",
-    aliases: ["open_vehicle_tracker", "open_vehicle_live"],
+    id: "vehicles.open",
+    description: "Gaseste masina ceruta si deschide pagina ei sau sectiunea GPS.",
+    aliases: ["vehicles.openTracker", "open_vehicle", "open_vehicle_tracker", "open_vehicle_live"],
     module: "vehicles",
     inputSchema: {
       type: "object",
-      properties: { entityQuery: { type: "string" } },
+      properties: {
+        entityQuery: { type: "string" },
+        destination: { type: "string", enum: ["details", "tracker"] },
+      },
       required: ["entityQuery"],
       additionalProperties: false,
     },
@@ -65,24 +71,41 @@ export function createVehicleTrackerTool(): AssistantToolDefinition<
       };
     },
     preview: (input) =>
-      `Deschid GPS-ul pentru ${input.resolution.entity?.label || input.entityQuery}.`,
+      input.destination === "tracker"
+        ? `Deschid GPS-ul pentru ${input.resolution.entity?.label || input.entityQuery}.`
+        : `Deschid pagina pentru ${input.resolution.entity?.label || input.entityQuery}.`,
     execute: async (input, context) => {
       const vehicle = input.resolution.entity;
       if (!vehicle) throw new Error("Masina nu a fost rezolvata.");
-      const path = `/vehicles/${encodeURIComponent(vehicle.entityId)}?tab=gps#vehicle-tracker-live-section`;
+      const path =
+        input.destination === "tracker"
+          ? `/vehicles/${encodeURIComponent(vehicle.entityId)}?tab=gps#vehicle-tracker-live-section`
+          : `/vehicles/${encodeURIComponent(vehicle.entityId)}`;
       await context.runtime.navigate(path);
-      return { message: `Am deschis GPS-ul pentru ${vehicle.label}.`, entityId: vehicle.entityId };
+      return {
+        message:
+          input.destination === "tracker"
+            ? `Am deschis GPS-ul pentru ${vehicle.label}.`
+            : `Am deschis pagina masinii ${vehicle.label}.`,
+        entityId: vehicle.entityId,
+      };
     },
     audit: (input, outcome, context) =>
       auditAssistantTool(
         definition,
-        { entityQuery: input.entityQuery, entityId: input.resolution.entity?.entityId || "" },
+        {
+          entityQuery: input.entityQuery,
+          destination: input.destination,
+          entityId: input.resolution.entity?.entityId || "",
+        },
         outcome,
         context
       ),
   };
   return definition;
 }
+
+export const createVehicleTrackerTool = createVehicleOpenTool;
 
 export function createVehicleUpdateTool() {
   return createServiceUpdateTool({

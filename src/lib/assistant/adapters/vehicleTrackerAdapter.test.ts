@@ -25,7 +25,7 @@ const contract: AssistantV3Contract = {
   version: "3",
   commandType: "navigation",
   intent: "open_vehicle_tracker",
-  toolCalls: [{ id: "vehicles.openTracker", input: { entityQuery: "toyota" } }],
+  toolCalls: [{ id: "vehicles.open", input: { entityQuery: "toyota", destination: "tracker" } }],
   targetPage: "",
   entityReferences: [{ type: "vehicle", query: "toyota", id: "" }],
   missingInformation: [],
@@ -97,5 +97,42 @@ describe("vehicle tracker assistant adapter", () => {
       { id: "v2", label: "Toyota Yaris B05ABC" },
     ]);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("opens the vehicle details page for a simple page command", async () => {
+    mocks.resolveEntity.mockResolvedValue({
+      status: "resolved",
+      entity: {
+        entityType: "vehicle",
+        entityId: "toyota-1",
+        label: "Toyota Corolla IF 82 GDY",
+        query: "toyota",
+        score: 1,
+        data: {},
+      },
+      options: [],
+    });
+    const navigate = vi.fn();
+    const orchestrator = new AssistantV3Orchestrator(
+      async () => ({
+        ...contract,
+        intent: "open_vehicle",
+        toolCalls: [
+          { id: "vehicles.open", input: { entityQuery: "toyota", destination: "details" } },
+        ],
+        response: "Deschid pagina masinii Toyota.",
+      }),
+      new AssistantToolRegistry().register(createVehicleTrackerTool())
+    );
+
+    const result = await orchestrator.run({
+      command: "du-ma pe pagina masinii Toyota",
+      pageContext,
+      actor: { uid: "admin-1", role: "admin" },
+      runtime: { navigate, dispatchFormDraft: () => true },
+    });
+
+    expect(result.status).toBe("executed");
+    expect(navigate).toHaveBeenCalledWith("/vehicles/toyota-1");
   });
 });

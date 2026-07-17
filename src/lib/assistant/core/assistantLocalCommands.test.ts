@@ -44,7 +44,22 @@ describe("local vehicle tracker commands", () => {
     expect(buildLocalVehicleTrackerContract(command)).toMatchObject({
       commandType: "navigation",
       intent: "open_vehicle_tracker",
-      toolCalls: [{ id: "vehicles.openTracker", input: { entityQuery: query } }],
+      toolCalls: [{ id: "vehicles.open", input: { entityQuery: query, destination: "tracker" } }],
+      entityReferences: [{ type: "vehicle", query }],
+      confirmationRequired: false,
+    });
+  });
+
+  it.each([
+    ["Du-ma pe pagina masinii Toyota", "toyota"],
+    ["deschide masina Toyota Corolla", "toyota corolla"],
+    ["intra la detaliile vehiculului IF 82 GDY", "if 82 gdy"],
+    ["arata-mi pagina Toyotei", "toyota"],
+  ])("builds a controlled vehicle details command: %s", (command, query) => {
+    expect(buildLocalVehicleTrackerContract(command)).toMatchObject({
+      commandType: "navigation",
+      intent: "open_vehicle",
+      toolCalls: [{ id: "vehicles.open", input: { entityQuery: query, destination: "details" } }],
       entityReferences: [{ type: "vehicle", query }],
       confirmationRequired: false,
     });

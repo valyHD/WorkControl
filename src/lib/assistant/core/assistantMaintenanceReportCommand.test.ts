@@ -119,6 +119,33 @@ describe("local maintenance report command contract", () => {
     expect(fields).toMatchObject({ observations: "usa functioneaza normal" });
   });
 
+  it("separates the client from a natural observation instruction", () => {
+    const { fields } = reportFields(
+      "Generează un raport de intervenție pentru Vali iar la observații trece așa liftul funcționează normal"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "liftul funcționează normal",
+    });
+  });
+
+  it.each([
+    "pune liftul functioneaza normal",
+    "scrie ca liftul functioneaza normal",
+    "noteaza asa liftul functioneaza normal",
+  ])("removes the observation instruction from the saved value: %s", (instruction) => {
+    const { fields } = reportFields(
+      `Genereaza raport interventie pentru Vali la rubrica observatii ${instruction}`
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      observations: "liftul functioneaza normal",
+    });
+  });
+
   it("does not intercept unrelated navigation commands", () => {
     expect(buildLocalMaintenanceReportContract("Deschide pagina mentenanta")).toBeNull();
   });

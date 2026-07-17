@@ -9,6 +9,7 @@ describe("Assistant V3 tool registry", () => {
     expect(second).toBe(first);
     expect(first.list().length).toBeGreaterThan(0);
     expect(new Set(first.list().map((tool) => tool.id)).size).toBe(first.list().length);
+    expect(first.get("vehicles.open")).not.toBeNull();
     expect(first.get("vehicles.openTracker")).not.toBeNull();
   });
 });

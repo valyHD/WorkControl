@@ -37,7 +37,22 @@ describe("assistant command service local routing", () => {
     expect(result).toMatchObject({
       intent: "open_vehicle_tracker",
       entityQuery: "toyota",
-      toolCalls: [{ id: "vehicles.openTracker", input: { entityQuery: "toyota" } }],
+      toolCalls: [
+        { id: "vehicles.open", input: { entityQuery: "toyota", destination: "tracker" } },
+      ],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("routes a Toyota vehicle page command without the cloud interpreter", async () => {
+    const result = await interpretAssistantCommand("Du mă pe pagina mașinii Toyota");
+
+    expect(result).toMatchObject({
+      intent: "open_vehicle",
+      entityQuery: "toyota",
+      toolCalls: [
+        { id: "vehicles.open", input: { entityQuery: "toyota", destination: "details" } },
+      ],
     });
     expect(mocks.callable).not.toHaveBeenCalled();
   });

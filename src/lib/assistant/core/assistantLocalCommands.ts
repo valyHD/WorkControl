@@ -65,20 +65,37 @@ function normalizeVehicleQueryToken(value: string) {
   return normalized;
 }
 
-function extractVehicleQuery(command: string) {
+function extractVehicleQuery(command: string, destination: "details" | "tracker") {
   const tokens = normalizeForMatching(command).split(" ").filter(Boolean);
   let markerIndex = -1;
 
   tokens.forEach((token, index) => {
-    if (
+    const isTrackerMarker =
       token === "gps" ||
       token.startsWith("gpsul") ||
       token.startsWith("tracker") ||
-      token === "harta"
+      token === "harta";
+    const isVehicleMarker = [
+      "masina",
+      "masinii",
+      "vehicul",
+      "vehiculul",
+      "vehiculului",
+      "autoturism",
+      "autoturismul",
+      "autoturismului",
+    ].includes(token);
+    if (
+      (destination === "tracker" && isTrackerMarker) ||
+      (destination === "details" && isVehicleMarker)
     ) {
       markerIndex = index;
     }
   });
+
+  if (markerIndex < 0 && destination === "details") {
+    markerIndex = tokens.findIndex((token) => token === "pagina" || token === "detaliile");
+  }
 
   if (markerIndex < 0) return "";
   const filler = new Set([
@@ -98,6 +115,10 @@ function extractVehicleQuery(command: string) {
     "vehicul",
     "vehiculul",
     "vehiculului",
+    "pagina",
+    "paginii",
+    "detalii",
+    "detaliile",
   ]);
   const queryTokens = tokens.slice(markerIndex + 1);
   while (queryTokens.length > 0 && filler.has(queryTokens[0])) queryTokens.shift();
@@ -120,13 +141,51 @@ function extractVehicleQuery(command: string) {
 
 export function buildLocalVehicleTrackerContract(command: string): AssistantV3Contract | null {
   const normalized = normalizeForMatching(command);
-  const mentionsTracker = normalized
-    .split(" ")
-    .some((token) => token.startsWith("gps") || token.startsWith("tracker") || token === "harta");
+  const tokens = normalized.split(" ");
+  const mentionsTracker = tokens.some(
+    (token) => token.startsWith("gps") || token.startsWith("tracker") || token === "harta"
+  );
+  const knownVehicleMakes = new Set([
+    "audi",
+    "bmw",
+    "citroen",
+    "dacia",
+    "fiat",
+    "ford",
+    "hyundai",
+    "iveco",
+    "kia",
+    "mercedes",
+    "opel",
+    "peugeot",
+    "renault",
+    "seat",
+    "skoda",
+    "toyota",
+    "volkswagen",
+    "volvo",
+    "vw",
+  ]);
+  const mentionsVehicle =
+    tokens.some((token) =>
+      [
+        "masina",
+        "masinii",
+        "vehicul",
+        "vehiculul",
+        "vehiculului",
+        "autoturism",
+        "autoturismul",
+        "autoturismului",
+      ].includes(token)
+    ) ||
+    (tokens.some((token) => token === "pagina" || token === "detaliile") &&
+      tokens.some((token) => knownVehicleMakes.has(normalizeVehicleQueryToken(token))));
   const requestsNavigation =
-    /\b(?:du\s+ma|deschide|arata(?:\s+mi)?|mergi|intra|vreau\s+sa\s+vad)\b/.test(normalized) ||
-    /^(?:gps|gpsul|tracker|trackerul)\b/.test(normalized);
-  if (!mentionsTracker || !requestsNavigation) return null;
+    /\b(?:du\s+ma|deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|vreau\s+sa\s+vad)\b/.test(
+      normalized
+    ) || /^(?:gps|gpsul|tracker|trackerul)\b/.test(normalized);
+  if ((!mentionsTracker && !mentionsVehicle) || !requestsNavigation) return null;
 
   if (/\b(?:toate|flota|flotei)\b/.test(normalized)) {
     return {
@@ -143,7 +202,8 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
     };
   }
 
-  const entityQuery = extractVehicleQuery(command);
+  const destination = mentionsTracker ? "tracker" : "details";
+  const entityQuery = extractVehicleQuery(command, destination);
   if (entityQuery === "meu" || entityQuery === "mea") {
     return {
       version: "3",
@@ -163,13 +223,16 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
   return {
     version: "3",
     commandType: "navigation",
-    intent: "open_vehicle_tracker",
-    toolCalls: [{ id: "vehicles.openTracker", input: { entityQuery } }],
+    intent: destination === "tracker" ? "open_vehicle_tracker" : "open_vehicle",
+    toolCalls: [{ id: "vehicles.open", input: { entityQuery, destination } }],
     targetPage: "",
     entityReferences: [{ type: "vehicle", query: entityQuery, id: "" }],
     missingInformation: [],
     confidence: 0.98,
     confirmationRequired: false,
-    response: `Deschid GPS-ul masinii ${entityQuery}.`,
+    response:
+      destination === "tracker"
+        ? `Deschid GPS-ul masinii ${entityQuery}.`
+        : `Deschid pagina masinii ${entityQuery}.`,
   };
 }
