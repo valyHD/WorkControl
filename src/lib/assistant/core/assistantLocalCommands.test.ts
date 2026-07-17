@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocalAssistantHelpContract,
+  buildLocalNamedEntityUpdateContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./assistantLocalCommands";
@@ -17,6 +18,10 @@ describe("local assistant help commands", () => {
     "spune-mi ce comenzi pot folosi",
     "ce fel de comenzi executi",
     "care sunt capabilitatile tale",
+    "la ce te pot folosi",
+    "cum trebuie sa iti vorbesc",
+    "da-mi niste exemple",
+    "ajuta-ma cu comenzile",
   ])("answers capability request: %s", (command) => {
     const contract = buildLocalAssistantHelpContract(command);
 
@@ -29,6 +34,76 @@ describe("local assistant help commands", () => {
     });
     expect(contract?.response).toContain("genereaza raport revizie pentru Vali");
     expect(contract?.response).toContain("GPS-ul Toyota");
+  });
+});
+
+describe("local named entity updates", () => {
+  it.each([
+    [
+      "schimba functia lui Ionut in tehnician lifturi",
+      "user",
+      "ionut",
+      "users.update",
+      { roleTitle: "tehnician lifturi" },
+    ],
+    [
+      "pune departamentul lui Mihai la interventii",
+      "user",
+      "mihai",
+      "users.update",
+      { department: "interventii" },
+    ],
+    [
+      "schimba starea sculei Bosch in defecta",
+      "tool",
+      "bosch",
+      "tools.update",
+      { status: "defecta" },
+    ],
+    [
+      "pune statusul proiectului Service Lifturi in finalizat",
+      "project",
+      "service lifturi",
+      "timesheets.projects.update",
+      { status: "finalizat" },
+    ],
+    [
+      "schimba ITP-ul masinii Toyota pe 20 august 2026",
+      "vehicle",
+      "toyota",
+      "vehicles.update",
+      { nextItpDate: "20 august 2026" },
+    ],
+    [
+      "schimba ITP la Toyota pe 20 august 2026",
+      "vehicle",
+      "toyota",
+      "vehicles.update",
+      { nextItpDate: "20 august 2026" },
+    ],
+    [
+      "pune garantia la Bosch pe 1 decembrie 2026",
+      "tool",
+      "bosch",
+      "tools.update",
+      { warrantyUntil: "1 decembrie 2026" },
+    ],
+  ])("builds a controlled named update: %s", (command, type, query, toolId, fields) => {
+    expect(buildLocalNamedEntityUpdateContract(command)).toMatchObject({
+      commandType: "entity_update",
+      entityReferences: [{ type, query }],
+      toolCalls: [{ id: toolId, input: { entityQuery: query, fields } }],
+      confirmationRequired: true,
+      confidence: 0.97,
+    });
+  });
+
+  it("does not guess a named entity when the value is missing", () => {
+    expect(buildLocalNamedEntityUpdateContract("schimba functia lui Ionut")).toBeNull();
+  });
+
+  it("does not guess the entity type for an ambiguous field", () => {
+    expect(buildLocalNamedEntityUpdateContract("schimba statusul la Bosch in defect")).toBeNull();
   });
 });
 
@@ -63,6 +138,8 @@ describe("local vehicle tracker commands", () => {
     ["du-ma la GPS-ul Toyotei", "toyota"],
     ["GPS Fordului", "ford"],
     ["du-ma pe harta masinii Toyota", "toyota"],
+    ["deschide masina Toyota la tracker live", "toyota"],
+    ["arata Toyota pe GPS", "toyota"],
     ["du-ma la gps-ul dubei cu 04 in numarul de inmatriculare", "04"],
   ])("builds a controlled tracker command: %s", (command, query) => {
     expect(buildLocalVehicleTrackerContract(command)).toMatchObject({

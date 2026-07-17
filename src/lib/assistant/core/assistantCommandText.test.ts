@@ -54,6 +54,13 @@ describe("normalizeAssistantCommandText", () => {
     ["am terminat pe azi", "opreste pontajul"],
     ["inchide ziua", "opreste pontajul"],
     ["raportu de interventie pentru clientu Vali", "raportul de interventie pentru clientul Vali"],
+    ["te rog frumos sa duma la masni", "deschide masini"],
+    ["poti sa ma duci pe notificrile", "deschide notificarile"],
+    ["as vrea sa vad cheltuelile", "deschide cheltuieli"],
+    ["vreau sa ma uit la masni", "deschide masini"],
+    ["poti sa imi deschizi pontaju meu", "deschide pontajul meu"],
+    ["modifica-mi revisie la Toyota", "modifica revizie la Toyota"],
+    ["fa-mi un raport de revizie pentru Vali", "genereaza raport de revizie pentru Vali"],
   ])("normalizes colloquial Romanian without changing the payload: %s", (input, expected) => {
     expect(normalizeAssistantCommandText(input)).toBe(expected);
   });

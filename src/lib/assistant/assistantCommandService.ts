@@ -9,6 +9,7 @@ import {
 import {
   buildLocalAssistantHelpContract,
   buildLocalCurrentEntityUpdateContract,
+  buildLocalNamedEntityUpdateContract,
   buildLocalPageNavigationContract,
   buildLocalTimesheetContract,
   buildLocalVehicleMileageContract,
@@ -218,6 +219,19 @@ export async function interpretAssistantCommand(
     return buildLocalInterpretation(localVehicleMileage, {
       entityType: "vehicle",
       entityQuery,
+      fields: fields || {},
+    });
+  }
+
+  const localNamedEntityUpdate = buildLocalNamedEntityUpdateContract(cleanCommand);
+  if (localNamedEntityUpdate) {
+    const entity = localNamedEntityUpdate.entityReferences[0];
+    const fields = localNamedEntityUpdate.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localNamedEntityUpdate, {
+      entityType: entity?.type || "none",
+      entityQuery: entity?.query || "",
       fields: fields || {},
     });
   }

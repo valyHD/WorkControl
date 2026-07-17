@@ -298,35 +298,21 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
-  it("does not apply a named-user update to the user currently open", async () => {
-    mocks.callable.mockResolvedValue({
-      data: {
-        version: "3",
-        commandType: "entity_update",
-        intent: "update_user",
-        toolCalls: [
-          {
-            id: "users.update",
-            input: { entityQuery: "Razvan", fields: { role: "manager" } },
-          },
-        ],
-        targetPage: "",
-        entityReferences: [{ type: "user", query: "Razvan", id: "" }],
-        missingInformation: [],
-        confidence: 0.95,
-        confirmationRequired: true,
-        response: "Schimb rolul lui Razvan?",
-      },
-    });
-
+  it("resolves a named-user update instead of applying it to the user currently open", async () => {
     const result = await interpretAssistantCommand("schimba rolul lui Razvan in manager", {
       selectedEntity: { type: "user", id: "user-1", label: "Mihai Popescu" },
     });
 
-    expect(mocks.callable).toHaveBeenCalledOnce();
+    expect(mocks.callable).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      entityReferences: [{ type: "user", query: "Razvan" }],
-      toolCalls: [{ id: "users.update", input: { entityQuery: "Razvan" } }],
+      entityReferences: [{ type: "user", query: "razvan" }],
+      toolCalls: [
+        {
+          id: "users.update",
+          input: { entityQuery: "razvan", fields: { role: "manager" } },
+        },
+      ],
+      confirmationRequired: true,
     });
   });
 

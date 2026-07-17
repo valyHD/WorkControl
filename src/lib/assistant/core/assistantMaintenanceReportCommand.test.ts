@@ -131,6 +131,41 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("understands a short intervention request with a conversational note", () => {
+    const { fields } = reportFields(
+      "Raport interventie la Vali si scrie usa se blocheaza intre etaje"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "Usa se blocheaza intre etaje.",
+      submitMode: "send",
+    });
+  });
+
+  it("understands an intervention request without the word report", () => {
+    const { fields } = reportFields(
+      "Genereaza interventia la Vali iar pune liftul functioneaza normal"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "Liftul functioneaza normal.",
+    });
+  });
+
+  it("keeps a short revision target clean", () => {
+    const { fields } = reportFields("Raport revizie Vali");
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "revizie",
+      observations: "",
+    });
+  });
+
   it.each([
     "pune liftul functioneaza normal",
     "scrie ca liftul functioneaza normal",

@@ -41,6 +41,11 @@ export function buildLocalAssistantHelpContract(command: string): AssistantV3Con
     /\bcum\s+(?:te|pot\s+sa\s+te)\s+folosesc\b/,
     /\bcu\s+ce\s+ma\s+poti\s+ajuta\b/,
     /\bcum\s+ma\s+poti\s+ajuta\b/,
+    /\bla\s+ce\s+te\s+pot\s+folosi\b/,
+    /\bcum\s+(?:trebuie\s+sa\s+)?(?:iti|ti)\s+vorbesc\b/,
+    /\bcum\s+(?:trebuie\s+sa\s+)?(?:iti|ti)\s+cer\b/,
+    /\b(?:da|spune|arata)\s+mi\s+(?:niste\s+)?exemple\b/,
+    /\bajuta\s+ma\s+cu\s+comenzile\b/,
     /\bcomenzi(?:le)?\s+(?:disponibile|acceptate|cunoscute)\b/,
     /\bcapabilitat(?:i|ile)\b/,
     /\bexemple\s+(?:de\s+)?comenzi\b/,
@@ -196,6 +201,7 @@ export function buildLocalVehicleMileageContract(command: string): AssistantV3Co
 function extractVehicleQuery(command: string, destination: "details" | "tracker") {
   const tokens = normalizeForMatching(command).split(" ").filter(Boolean);
   let markerIndex = -1;
+  let vehicleMarkerIndex = -1;
 
   tokens.forEach((token, index) => {
     const isTrackerMarker =
@@ -213,6 +219,7 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
       "autoturismul",
       "autoturismului",
     ].includes(token);
+    if (isVehicleMarker) vehicleMarkerIndex = index;
     if (
       (destination === "tracker" && isTrackerMarker) ||
       (destination === "details" && isVehicleMarker)
@@ -259,12 +266,46 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
     "numar",
     "numarul",
     "inmatriculare",
+    "live",
+    "tracker",
+    "trackerul",
+    "gps",
+    "gpsul",
   ]);
-  return queryTokens
+  const queryAfterMarker = queryTokens
     .filter((token) => !descriptorWords.has(token) && !filler.has(token))
     .map(normalizeVehicleQueryToken)
     .join(" ")
     .trim();
+  if (queryAfterMarker) return queryAfterMarker;
+
+  if (destination === "tracker" && markerIndex > 0) {
+    const navigationWords = new Set([
+      "acceseaza",
+      "arata",
+      "deschide",
+      "du",
+      "ma",
+      "mergi",
+      "intra",
+      "pagina",
+      "vreau",
+      "sa",
+      "vad",
+    ]);
+    const start = vehicleMarkerIndex >= 0 ? vehicleMarkerIndex + 1 : 0;
+    return tokens
+      .slice(start, markerIndex)
+      .filter(
+        (token) =>
+          !navigationWords.has(token) && !descriptorWords.has(token) && !filler.has(token)
+      )
+      .map(normalizeVehicleQueryToken)
+      .join(" ")
+      .trim();
+  }
+
+  return "";
 }
 
 export function buildLocalVehicleTrackerContract(command: string): AssistantV3Contract | null {
@@ -539,6 +580,149 @@ export function buildLocalCurrentEntityUpdateContract(
     confidence: 0.96,
     confirmationRequired: true,
     response: `Schimb ${change.fieldLabel} pentru ${entity.query}?`,
+  };
+}
+
+type NamedEntityMarker = {
+  type: AssistantRuntimeEntityType;
+  pattern: RegExp;
+  implicitField?: string;
+};
+
+const NAMED_ENTITY_MARKERS: NamedEntityMarker[] = [
+  {
+    type: "vehicle",
+    pattern: /\b(?:masina|masinii|vehiculul|vehiculului|autoturismul|autoturismului)\s+/,
+    implicitField: "status",
+  },
+  {
+    type: "tool",
+    pattern: /\b(?:scula|sculei|unealta|uneltei|flexul|flexului|bormasina|bormasinii)\s+/,
+    implicitField: "status",
+  },
+  {
+    type: "project",
+    pattern: /\b(?:proiectul|proiectului)\s+/,
+    implicitField: "status",
+  },
+  {
+    type: "user",
+    pattern: /\b(?:utilizatorul|utilizatorului|userul|userului|angajatul|angajatului)\s+/,
+  },
+];
+
+function inferEntityTypeFromUniqueField(value: string): AssistantRuntimeEntityType | null {
+  const normalized = normalizeForMatching(value);
+  if (
+    /\b(?:itp|rca|casco|rovinieta|sofer|soferul|driver|vin|serie\s+sasiu|ulei|schimb\s+ulei|service)\b/.test(
+      normalized
+    )
+  ) {
+    return "vehicle";
+  }
+  if (/\b(?:garantie|garantia|cod\s+intern|qr|cod\s+qr|detinator|detinatorul)\b/.test(normalized)) {
+    return "tool";
+  }
+  if (/\b(?:functie|functia|meserie|post|departament|departamentul|rol|drepturi)\b/.test(normalized)) {
+    return "user";
+  }
+  return null;
+}
+
+function splitNamedEntityAndValue(value: string) {
+  const connectors = [...value.matchAll(/\b(?:la|in|cu|pe|sa\s+fie|devina)\b/g)].reverse();
+  for (const connector of connectors) {
+    const index = connector.index ?? -1;
+    if (index <= 0) continue;
+    const entityQuery = value
+      .slice(0, index)
+      .replace(/^(?:lui|pentru)\s+/, "")
+      .trim();
+    const fieldValue = value.slice(index + connector[0].length).trim();
+    if (entityQuery && fieldValue) return { entityQuery, fieldValue };
+  }
+  return null;
+}
+
+function namedEntityUpdateParts(command: string) {
+  const normalized = normalizeForMatching(command);
+  const action = normalized.match(
+    /\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece|marcheaza)\b/
+  );
+  if (action?.index === undefined) return null;
+  const payload = normalized.slice(action.index + action[0].length).trim();
+  if (!payload) return null;
+
+  for (const marker of NAMED_ENTITY_MARKERS) {
+    const entityMarker = marker.pattern.exec(payload);
+    if (entityMarker?.index === undefined) continue;
+    const naturalField = payload.slice(0, entityMarker.index).trim() || marker.implicitField || "";
+    const field = resolveAssistantField(marker.type, naturalField);
+    const split = splitNamedEntityAndValue(
+      payload.slice(entityMarker.index + entityMarker[0].length).trim()
+    );
+    if (field && split) return { type: marker.type, field, ...split };
+  }
+
+  const userMarker = /\blui\s+/.exec(payload);
+  if (userMarker?.index !== undefined) {
+    const naturalField = payload.slice(0, userMarker.index).trim();
+    const field = resolveAssistantField("user", naturalField);
+    const split = splitNamedEntityAndValue(
+      payload.slice(userMarker.index + userMarker[0].length).trim()
+    );
+    if (field && split) return { type: "user" as const, field, ...split };
+  }
+
+  const firstConnector = /\b(?:la|pentru)\b/.exec(payload);
+  if (firstConnector?.index !== undefined && firstConnector.index > 0) {
+    const naturalField = payload.slice(0, firstConnector.index).trim();
+    const inferredType = inferEntityTypeFromUniqueField(naturalField);
+    const field = inferredType ? resolveAssistantField(inferredType, naturalField) : null;
+    const split = splitNamedEntityAndValue(
+      payload.slice(firstConnector.index + firstConnector[0].length).trim()
+    );
+    if (inferredType && field && split) {
+      return { type: inferredType, field, ...split };
+    }
+  }
+
+  return null;
+}
+
+/** Handles high-frequency named updates locally so casual wording does not depend on OpenAI. */
+export function buildLocalNamedEntityUpdateContract(command: string): AssistantV3Contract | null {
+  const parsed = namedEntityUpdateParts(command);
+  if (!parsed) return null;
+  const toolId = LOCAL_UPDATE_TOOL[parsed.type];
+  const intent = LOCAL_UPDATE_INTENT[parsed.type];
+  if (!toolId || !intent) return null;
+
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent,
+    toolCalls: [
+      {
+        id: toolId,
+        input: {
+          entityQuery: parsed.entityQuery,
+          fields: { [parsed.field.key]: parsed.fieldValue },
+        },
+      },
+    ],
+    targetPage: "",
+    entityReferences: [
+      {
+        type: parsed.type as "vehicle" | "tool" | "project" | "user",
+        query: parsed.entityQuery,
+        id: "",
+      },
+    ],
+    missingInformation: [],
+    confidence: 0.97,
+    confirmationRequired: true,
+    response: `Schimb ${parsed.field.label} pentru ${parsed.entityQuery}?`,
   };
 }
 
