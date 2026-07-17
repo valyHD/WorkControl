@@ -54,7 +54,7 @@ describe("local maintenance report command contract", () => {
     expect(fields).toEqual({
       clientQuery: "Vali",
       reportType: "interventie",
-      observations: "usa nu se inchide",
+      observations: "Usa nu se inchide.",
       submitMode: "prepare",
       waitForPhotos: true,
     });
@@ -106,7 +106,7 @@ describe("local maintenance report command contract", () => {
     expect(fields).toMatchObject({
       clientQuery: "Vali",
       reportType: "interventie",
-      observations: "liftul functioneaza normal",
+      observations: "Liftul functioneaza normal.",
       submitMode: "send",
     });
   });
@@ -116,7 +116,7 @@ describe("local maintenance report command contract", () => {
       "Genereaza raport interventie pentru Vali cu observatii: usa functioneaza normal"
     );
 
-    expect(fields).toMatchObject({ observations: "usa functioneaza normal" });
+    expect(fields).toMatchObject({ observations: "Usa functioneaza normal." });
   });
 
   it("separates the client from a natural observation instruction", () => {
@@ -127,7 +127,7 @@ describe("local maintenance report command contract", () => {
     expect(fields).toMatchObject({
       clientQuery: "Vali",
       reportType: "interventie",
-      observations: "liftul funcționează normal",
+      observations: "Liftul functioneaza normal.",
     });
   });
 
@@ -142,7 +142,7 @@ describe("local maintenance report command contract", () => {
 
     expect(fields).toMatchObject({
       clientQuery: "Vali",
-      observations: "liftul functioneaza normal",
+      observations: "Liftul functioneaza normal.",
     });
   });
 

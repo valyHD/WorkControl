@@ -3,6 +3,7 @@ import type {
   AssistantV3PageContext,
   AssistantV3SelectedEntity,
 } from "./assistantV3Types";
+import { formatAssistantReportObservation } from "./assistantReportText";
 
 export type AssistantMaintenanceReportFields = {
   clientQuery: string;
@@ -86,12 +87,14 @@ function extractObservations(command: string, normalized: string) {
     .map((pattern) => normalizedTail.search(pattern))
     .filter((index) => index >= 0);
   const end = indexes.length > 0 ? Math.min(...indexes) : originalTail.length;
-  return cleanExtractedValue(originalTail.slice(0, end))
-    .replace(
-      /^(?:(?:trece|scrie|pune|noteaza|notează|completeaza|completează)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|așa|ca|cu))?\s+)+/i,
-      ""
-    )
-    .replace(/^(?:este|ca|sa fie)\s+/i, "");
+  return formatAssistantReportObservation(
+    cleanExtractedValue(originalTail.slice(0, end))
+      .replace(
+        /^(?:(?:trece|scrie|pune|noteaza|notează|completeaza|completează)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|așa|ca|cu))?\s+)+/i,
+        ""
+      )
+      .replace(/^(?:este|ca|sa fie)\s+/i, "")
+  );
 }
 
 type MaintenanceReportContext = Omit<Partial<AssistantV3PageContext>, "memory"> & {

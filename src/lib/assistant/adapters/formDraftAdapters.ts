@@ -8,6 +8,7 @@ import {
   ASSISTANT_FILL_VEHICLE_FORM_EVENT,
   ASSISTANT_FILL_EXPENSE_FORM_EVENT,
 } from "../runtime/assistantFormFill";
+import { formatAssistantReportObservation } from "../core/assistantReportText";
 import {
   ASSISTANT_TOOL_OUTPUT_SCHEMA,
   auditAssistantTool,
@@ -135,9 +136,7 @@ function readMaintenanceReportDraftInput(value: unknown): MaintenanceReportDraft
         .replace(/\s+/g, " ")
         .trim(),
       reportType: draft.reportType === "interventie" ? "interventie" : "revizie",
-      observations: String(draft.observations || "")
-        .replace(/\s+/g, " ")
-        .trim(),
+      observations: formatAssistantReportObservation(String(draft.observations || "")),
       submitMode: draft.submitMode === "send" ? "send" : "prepare",
       waitForPhotos: draft.waitForPhotos === true,
     },

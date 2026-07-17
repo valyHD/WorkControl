@@ -298,6 +298,7 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     await sendCommand("Du-te pe pagina concedii.");
 
     await waitFor(() => expect(screen.getByTestId("current-path")).toHaveTextContent("/my-leave"));
+    expect(screen.getByRole("button", { name: "Deschide asistentul vocal" })).toBeInTheDocument();
     expect(plateInput).toHaveValue("B33LGR");
     expect(inputSpy).not.toHaveBeenCalled();
     expect(fillSpy).not.toHaveBeenCalled();
@@ -360,7 +361,7 @@ describe("VoiceCommandAssistant V3 controlled behavior", () => {
     expect(reportDraft).toHaveBeenCalledWith({
       clientQuery: "Isomat",
       reportType: "interventie",
-      observations: "usa nu se inchide",
+      observations: "Usa nu se inchide.",
       submitMode: "prepare",
       waitForPhotos: true,
     });
