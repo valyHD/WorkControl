@@ -200,50 +200,13 @@ function normalizeMaintenanceAssistantText(value: string) {
     .trim();
 }
 
-function findMaintenanceClientsForAssistant(clients: MaintenanceClient[], clientQuery: string) {
-  const needle = normalizeMaintenanceAssistantText(clientQuery);
-  if (!needle) return [];
-
-  const searchable = clients.map((client) => {
-    const names = [client.name].filter(Boolean).map(normalizeMaintenanceAssistantText);
-    const lifts = [
-      client.liftNumber,
-      ...(client.liftNumbers || []),
-      ...(client.addresses || []).flatMap((address) =>
-        (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
-      ),
-    ]
-      .filter(Boolean)
-      .map(normalizeMaintenanceAssistantText);
-    const fullText = normalizeMaintenanceAssistantText(
-      [
-        client.name,
-        client.address,
-        ...lifts,
-        ...(client.addresses || []).map((address) => address.label || address.street || ""),
-      ]
-        .filter(Boolean)
-        .join(" ")
-    );
-    return { client, names, lifts, fullText };
-  });
-  const exact = searchable.filter(
-    (item) => item.names.includes(needle) || item.lifts.includes(needle)
-  );
-  const matches = exact.length > 0
-    ? exact
-    : searchable.filter((item) => item.fullText.includes(needle));
-  return matches.map((item) => item.client);
+function tokenizeMaintenanceAssistantText(value: string) {
+  return normalizeMaintenanceAssistantText(value).split(" ").filter(Boolean);
 }
 
-function isExactMaintenanceClientAssistantMatch(
-  client: MaintenanceClient,
-  clientQuery: string
-) {
-  const needle = normalizeMaintenanceAssistantText(clientQuery);
-  if (!needle) return false;
-  const exactValues = [
-    client.name,
+function createMaintenanceAssistantSearchProfile(client: MaintenanceClient) {
+  const names = [client.name].filter(Boolean).map(normalizeMaintenanceAssistantText);
+  const lifts = [
     client.liftNumber,
     ...(client.liftNumbers || []),
     ...(client.addresses || []).flatMap((address) =>
@@ -252,7 +215,109 @@ function isExactMaintenanceClientAssistantMatch(
   ]
     .filter(Boolean)
     .map(normalizeMaintenanceAssistantText);
-  return exactValues.includes(needle);
+  const addresses = [
+    client.address,
+    ...(client.addresses || []).map((address) => address.label || address.street || ""),
+  ]
+    .filter(Boolean)
+    .map(normalizeMaintenanceAssistantText);
+  const fullText = normalizeMaintenanceAssistantText(
+    [client.name, client.address, ...lifts, ...addresses].filter(Boolean).join(" ")
+  );
+  const tokens = new Set(tokenizeMaintenanceAssistantText(fullText));
+
+  return { client, names, lifts, addresses, fullText, tokens };
+}
+
+function maintenanceAssistantQueryMatches(fullText: string, tokens: Set<string>, needle: string, queryTokens: string[]) {
+  return fullText.includes(needle) || queryTokens.every((token) => tokens.has(token) || fullText.includes(token));
+}
+
+function findMaintenanceClientMatchesForAssistant(clients: MaintenanceClient[], clientQuery: string) {
+  const needle = normalizeMaintenanceAssistantText(clientQuery);
+  const queryTokens = tokenizeMaintenanceAssistantText(clientQuery);
+  if (!needle || queryTokens.length === 0) return [];
+
+  const searchable = clients.map(createMaintenanceAssistantSearchProfile);
+  const matches = searchable.filter((item) => {
+    const exact = item.names.includes(needle) || item.lifts.includes(needle) || item.addresses.includes(needle);
+    return exact || maintenanceAssistantQueryMatches(item.fullText, item.tokens, needle, queryTokens);
+  });
+
+  return matches.sort((left, right) => {
+    const score = (item: (typeof matches)[number]) => {
+      let total = 0;
+      if (item.names.includes(needle) || item.lifts.includes(needle) || item.addresses.includes(needle)) total += 100;
+      if (item.fullText.includes(needle)) total += 20;
+      total += queryTokens.filter((token) => item.tokens.has(token) || item.fullText.includes(token)).length * 5;
+      if (item.names.some((name) => queryTokens.some((token) => name.includes(token)))) total += 3;
+      if ([...item.addresses, ...item.lifts].some((text) => queryTokens.some((token) => text.includes(token)))) total += 3;
+      return total;
+    };
+    return score(right) - score(left);
+  });
+}
+
+function findMaintenanceClientsForAssistant(clients: MaintenanceClient[], clientQuery: string) {
+  const matches = findMaintenanceClientMatchesForAssistant(clients, clientQuery);
+  return matches.map((item) => item.client);
+}
+
+function isExactMaintenanceClientAssistantMatch(
+  client: MaintenanceClient,
+  clientQuery: string
+) {
+  const needle = normalizeMaintenanceAssistantText(clientQuery);
+  const queryTokens = tokenizeMaintenanceAssistantText(clientQuery);
+  if (!needle || queryTokens.length === 0) return false;
+
+  const profile = createMaintenanceAssistantSearchProfile(client);
+  const directExact = [...profile.names, ...profile.lifts, ...profile.addresses].includes(needle);
+  if (directExact) return true;
+  if (queryTokens.length < 2) return false;
+
+  const nameHasToken = profile.names.some((name) => queryTokens.some((token) => name.includes(token)));
+  const allTokensInName = profile.names.some((name) => queryTokens.every((token) => name.includes(token)));
+  const locationHasToken = [...profile.addresses, ...profile.lifts].some((text) =>
+    queryTokens.some((token) => text.includes(token))
+  );
+  const allTokensFound = queryTokens.every(
+    (token) => profile.tokens.has(token) || profile.fullText.includes(token)
+  );
+
+  return allTokensFound && (allTokensInName || (nameHasToken && locationHasToken));
+}
+
+function resolveAssistantAddressLiftForClient(client: MaintenanceClient, clientQuery: string) {
+  const needle = normalizeMaintenanceAssistantText(clientQuery);
+  const queryTokens = tokenizeMaintenanceAssistantText(clientQuery);
+  if (!needle || queryTokens.length === 0) return { address: "", lift: "" };
+
+  const scoredGroups = buildAddressLiftGroups(client)
+    .map((group) => {
+      const addressText = normalizeMaintenanceAssistantText(group.address);
+      const lifts = group.lifts.map((lift) => ({ value: lift, text: normalizeMaintenanceAssistantText(lift) }));
+      const fullText = normalizeMaintenanceAssistantText([group.address, ...group.lifts].join(" "));
+      let score = 0;
+      if (fullText.includes(needle)) score += 30;
+      score += queryTokens.filter((token) => fullText.includes(token)).length * 10;
+      if (queryTokens.some((token) => addressText.includes(token))) score += 8;
+      if (lifts.some((lift) => queryTokens.some((token) => lift.text.includes(token)))) score += 12;
+      const exactLift = lifts.find((lift) => lift.text === needle || queryTokens.some((token) => lift.text === token));
+      return {
+        group,
+        score,
+        lift: exactLift?.value || (lifts.length === 1 ? lifts[0]?.value || "" : ""),
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  const best = scoredGroups[0];
+  if (!best || (scoredGroups[1] && scoredGroups[1].score === best.score)) {
+    return { address: "", lift: "" };
+  }
+  return { address: best.group.address === "-" ? "" : best.group.address, lift: best.lift };
 }
 
 function getMissingMonthlyReviews(
@@ -1232,10 +1297,11 @@ export default function MaintenanceWorkspace() {
       });
 
       if (match) {
+        const resolvedLocation = resolveAssistantAddressLiftForClient(match, clientQuery);
         setSelectedClientId(match.id);
         setReportSearch(match.name || match.address || match.liftNumber || clientQuery);
-        setReportAddress("");
-        setReportLift("");
+        setReportAddress(resolvedLocation.address);
+        setReportLift(resolvedLocation.lift);
         setReportComments("");
         setReportImageFiles([]);
         setReportMessage("Asistentul a selectat clientul. Verifica adresa/liftul, apoi genereaza raportul.");
@@ -1369,11 +1435,15 @@ export default function MaintenanceWorkspace() {
     }
 
     const client = safeMatches[0];
+    const resolvedLocation = resolveAssistantAddressLiftForClient(
+      client,
+      assistantReportRequest.clientQuery
+    );
     setSelectedClientId(client.id);
     setReportSearch(client.name || client.address || client.liftNumber || "");
     setReportSuggestionsOpen(false);
-    setReportAddress("");
-    setReportLift("");
+    setReportAddress(resolvedLocation.address);
+    setReportLift(resolvedLocation.lift);
     setReportTypeDraft(assistantReportRequest.reportType);
     setReportComments(assistantReportRequest.observations);
     setAssistantReportRequest((current) =>

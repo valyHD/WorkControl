@@ -36,6 +36,12 @@ describe("local maintenance report command contract", () => {
     expect(fields).toMatchObject({ clientQuery: "Vali", reportType: "revizie" });
   });
 
+  it("understands common speech mistakes in a revision command", () => {
+    const { fields } = reportFields("Genereaza revize petru oltenita c1");
+
+    expect(fields).toMatchObject({ clientQuery: "oltenita c1", reportType: "revizie" });
+  });
+
   it("accepts the client directly after the report type", () => {
     const { fields } = reportFields("Genereaza raport revizie Vali");
 

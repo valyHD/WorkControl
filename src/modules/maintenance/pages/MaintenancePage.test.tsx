@@ -86,6 +86,61 @@ function createMaintenanceClientTest(id: string, name: string): MaintenanceClien
   };
 }
 
+function createOltenitaBlockClient(): MaintenanceClient {
+  return {
+    ...createMaintenanceClientTest("client-oltenita-blocks", "Asociatia de proprietari Oltenita"),
+    address: "Oltenita bloc C2",
+    liftNumber: "C2-LIFT",
+    liftNumbers: ["C1-LIFT", "C2-LIFT", "C3-LIFT"],
+    addresses: [
+      {
+        id: "address-c1",
+        label: "Oltenita bloc C1",
+        city: "",
+        street: "Oltenita bloc C1",
+        postalCode: "",
+        contactPerson: "",
+        contactPhone: "",
+        lifts: [
+          {
+            id: "lift-c1",
+            label: "Lift C1",
+            serialNumber: "C1-LIFT",
+            manufacturer: "",
+            installYear: "",
+            maintenanceCompany: "",
+            maintenanceEmail: "",
+            inspectionExpiryDate: "",
+            notes: "",
+          },
+        ],
+      },
+      {
+        id: "address-c2",
+        label: "Oltenita bloc C2",
+        city: "",
+        street: "Oltenita bloc C2",
+        postalCode: "",
+        contactPerson: "",
+        contactPhone: "",
+        lifts: [
+          {
+            id: "lift-c2",
+            label: "Lift C2",
+            serialNumber: "C2-LIFT",
+            manufacturer: "",
+            installYear: "",
+            maintenanceCompany: "",
+            maintenanceEmail: "",
+            inspectionExpiryDate: "",
+            notes: "",
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("MaintenancePage client form", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -370,6 +425,43 @@ describe("MaintenancePage client form", () => {
       expect.objectContaining({
         clientId: "client-report-send",
         recipientEmail: "client@example.test",
+      })
+    );
+  });
+
+  it("auto-sends when the assistant query matches client name plus block address", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createOltenitaBlockClient()]);
+      return vi.fn();
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "oltenita c1",
+        reportType: "revizie",
+        observations: "",
+        submitMode: "send",
+        waitForPhotos: false,
+      });
+    });
+
+    await waitFor(() =>
+      expect(maintenanceMocks.saveMaintenanceReportHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client: expect.objectContaining({ id: "client-oltenita-blocks" }),
+          address: "Oltenita bloc C1",
+          lift: "C1-LIFT",
+        })
+      )
+    );
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-oltenita-blocks",
       })
     );
   });
