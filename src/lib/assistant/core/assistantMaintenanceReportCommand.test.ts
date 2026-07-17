@@ -42,6 +42,26 @@ describe("local maintenance report command contract", () => {
     expect(fields).toMatchObject({ clientQuery: "oltenita c1", reportType: "revizie" });
   });
 
+  it("defaults to a revision report in the maintenance report context when only the client is spoken", () => {
+    const contract = buildLocalMaintenanceReportContract("Genereala pentru oltenita bloc c1", {
+      route: "/maintenance?tab=report",
+      page: "maintenance",
+      selectedEntity: null,
+      openForm: null,
+      availableActions: [],
+      allowedFields: [],
+      role: "admin",
+      memory: {},
+    });
+    const fields = contract?.toolCalls[0]?.input.fields;
+
+    expect(fields).toMatchObject({
+      clientQuery: "oltenita bloc c1",
+      reportType: "revizie",
+      submitMode: "send",
+    });
+  });
+
   it("accepts the client directly after the report type", () => {
     const { fields } = reportFields("Genereaza raport revizie Vali");
 

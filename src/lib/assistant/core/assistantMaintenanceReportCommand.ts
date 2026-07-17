@@ -139,22 +139,34 @@ function contextualClient(context?: MaintenanceReportContext) {
   return "";
 }
 
+function isMaintenanceReportContext(context?: MaintenanceReportContext) {
+  return (
+    context?.page === "maintenance" ||
+    Boolean(context?.route?.startsWith("/maintenance")) ||
+    Boolean(context?.route?.includes("/maintenance?"))
+  );
+}
+
 export function buildLocalMaintenanceReportContract(
   command: string,
   context?: MaintenanceReportContext
 ): AssistantV3Contract | null {
   const cleanCommand = normalizeAssistantCommandText(command);
   const normalized = normalizeForMatching(cleanCommand);
+  const hasMaintenanceContext = isMaintenanceReportContext(context);
   const isReportCommand =
     (/\braport(?:ul)?\b/.test(normalized) ||
-      /\b(?:revizie|revizia|interventie|interventia)\b/.test(normalized)) &&
+      /\b(?:revizie|revizia|interventie|interventia)\b/.test(normalized) ||
+      (hasMaintenanceContext && /\b(?:genereaza|creeaza|fa|trimite|expediaza)\b/.test(normalized))) &&
     (/\b(?:genereaza|creeaza|pregateste|fa|trimite|expediaza)\b/.test(normalized) ||
       /^(?:raport(?:ul)?\s+)?(?:de\s+)?(?:revizie|interventie)\b/.test(normalized));
   const reportType = /\binterventi(?:e|a)\b/.test(normalized)
     ? "interventie"
     : /\brevizi(?:e|a)\b/.test(normalized)
       ? "revizie"
-      : null;
+      : hasMaintenanceContext
+        ? "revizie"
+        : null;
 
   if (!isReportCommand || !reportType) return null;
 

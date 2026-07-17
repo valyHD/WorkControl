@@ -86,18 +86,20 @@ function createMaintenanceClientTest(id: string, name: string): MaintenanceClien
   };
 }
 
-function createOltenitaBlockClient(): MaintenanceClient {
+function createOltenitaBlockClient(options: { storedBlockWord?: boolean } = {}): MaintenanceClient {
+  const c1Address = options.storedBlockWord === false ? "Oltenita C1" : "Oltenita bloc C1";
+  const c2Address = options.storedBlockWord === false ? "Oltenita C2" : "Oltenita bloc C2";
   return {
     ...createMaintenanceClientTest("client-oltenita-blocks", "Asociatia de proprietari Oltenita"),
-    address: "Oltenita bloc C2",
+    address: c2Address,
     liftNumber: "C2-LIFT",
     liftNumbers: ["C1-LIFT", "C2-LIFT", "C3-LIFT"],
     addresses: [
       {
         id: "address-c1",
-        label: "Oltenita bloc C1",
+        label: c1Address,
         city: "",
-        street: "Oltenita bloc C1",
+        street: c1Address,
         postalCode: "",
         contactPerson: "",
         contactPhone: "",
@@ -117,9 +119,9 @@ function createOltenitaBlockClient(): MaintenanceClient {
       },
       {
         id: "address-c2",
-        label: "Oltenita bloc C2",
+        label: c2Address,
         city: "",
-        street: "Oltenita bloc C2",
+        street: c2Address,
         postalCode: "",
         contactPerson: "",
         contactPhone: "",
@@ -455,6 +457,43 @@ describe("MaintenancePage client form", () => {
         expect.objectContaining({
           client: expect.objectContaining({ id: "client-oltenita-blocks" }),
           address: "Oltenita bloc C1",
+          lift: "C1-LIFT",
+        })
+      )
+    );
+    expect(gmailMocks.sendSharedMaintenanceGmailReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-oltenita-blocks",
+      })
+    );
+  });
+
+  it("auto-sends when spoken block wording is not stored literally in the address", async () => {
+    maintenanceMocks.subscribeMaintenanceClients.mockImplementation((onData) => {
+      onData([createOltenitaBlockClient({ storedBlockWord: false })]);
+      return vi.fn();
+    });
+    render(
+      <MemoryRouter initialEntries={["/maintenance?tab=report"]}>
+        <MaintenancePage />
+      </MemoryRouter>
+    );
+
+    await act(async () => {
+      await dispatchAssistantFormDraft(ASSISTANT_FILL_MAINTENANCE_REPORT_EVENT, {
+        clientQuery: "oltenita bloc c1",
+        reportType: "revizie",
+        observations: "",
+        submitMode: "send",
+        waitForPhotos: false,
+      });
+    });
+
+    await waitFor(() =>
+      expect(maintenanceMocks.saveMaintenanceReportHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          client: expect.objectContaining({ id: "client-oltenita-blocks" }),
+          address: "Oltenita C1",
           lift: "C1-LIFT",
         })
       )

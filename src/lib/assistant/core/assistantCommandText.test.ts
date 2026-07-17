@@ -55,6 +55,7 @@ describe("normalizeAssistantCommandText", () => {
     ["inchide ziua", "opreste pontajul"],
     ["raportu de interventie pentru clientu Vali", "raportul de interventie pentru clientul Vali"],
     ["genereaza revize petru oltenita c1", "genereaza revizie pentru oltenita c1"],
+    ["genereala pentru oltenita bloc c1", "genereaza pentru oltenita bloc c1"],
     ["te rog frumos sa duma la masni", "deschide masini"],
     ["poti sa ma duci pe notificrile", "deschide notificarile"],
     ["as vrea sa vad cheltuelile", "deschide cheltuieli"],

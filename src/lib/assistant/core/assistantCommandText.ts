@@ -127,6 +127,7 @@ function normalizeColloquialRomanian(value: string) {
     [/\b(?:remiderul|reminderu|reaminderul)\b/giu, "reminderul"],
     [/\b(?:mentenata|mentenenta)\b/giu, "mentenanta"],
     [/\b(?:cheltueli|cheltuelile)\b/giu, "cheltuieli"],
+    [/\b(?:genereala|generala|generaza)\b/giu, "genereaza"],
     [/\b(?:revisie|revizzie|revize|revizi)\b/giu, "revizie"],
     [/\b(?:interventi|interventzie)\b/giu, "interventie"],
     [/\b(?:petru|pentry|pentu|pentr|pentruu)\b/giu, "pentru"],

@@ -200,8 +200,23 @@ function normalizeMaintenanceAssistantText(value: string) {
     .trim();
 }
 
+const MAINTENANCE_ASSISTANT_WEAK_QUERY_TOKENS = new Set([
+  "adresa",
+  "bloc",
+  "blocul",
+  "bl",
+  "client",
+  "clientul",
+  "lift",
+  "liftul",
+  "sc",
+  "scara",
+]);
+
 function tokenizeMaintenanceAssistantText(value: string) {
-  return normalizeMaintenanceAssistantText(value).split(" ").filter(Boolean);
+  return normalizeMaintenanceAssistantText(value)
+    .split(" ")
+    .filter((token) => token && !MAINTENANCE_ASSISTANT_WEAK_QUERY_TOKENS.has(token));
 }
 
 function createMaintenanceAssistantSearchProfile(client: MaintenanceClient) {
