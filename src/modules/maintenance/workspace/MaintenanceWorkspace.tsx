@@ -43,6 +43,11 @@ import type {
   MaintenanceReportHistoryItem,
 } from "../../../types/maintenance";
 import type { AppUserItem, UserRole } from "../../../types/user";
+import {
+  findMaintenanceClientsForAssistant as findMaintenanceClientsForAssistantV2,
+  isExactMaintenanceClientAssistantMatch as isExactMaintenanceClientAssistantMatchV2,
+  resolveAssistantAddressLiftForClient as resolveAssistantAddressLiftForClientV2,
+} from "../assistant/maintenanceClientAssistantMatcher";
 import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
@@ -217,90 +222,6 @@ function tokenizeMaintenanceAssistantText(value: string) {
   return normalizeMaintenanceAssistantText(value)
     .split(" ")
     .filter((token) => token && !MAINTENANCE_ASSISTANT_WEAK_QUERY_TOKENS.has(token));
-}
-
-function createMaintenanceAssistantSearchProfile(client: MaintenanceClient) {
-  const names = [client.name].filter(Boolean).map(normalizeMaintenanceAssistantText);
-  const lifts = [
-    client.liftNumber,
-    ...(client.liftNumbers || []),
-    ...(client.addresses || []).flatMap((address) =>
-      (address.lifts || []).map((lift) => lift.serialNumber || lift.label || "")
-    ),
-  ]
-    .filter(Boolean)
-    .map(normalizeMaintenanceAssistantText);
-  const addresses = [
-    client.address,
-    ...(client.addresses || []).map((address) => address.label || address.street || ""),
-  ]
-    .filter(Boolean)
-    .map(normalizeMaintenanceAssistantText);
-  const fullText = normalizeMaintenanceAssistantText(
-    [client.name, client.address, ...lifts, ...addresses].filter(Boolean).join(" ")
-  );
-  const tokens = new Set(tokenizeMaintenanceAssistantText(fullText));
-
-  return { client, names, lifts, addresses, fullText, tokens };
-}
-
-function maintenanceAssistantQueryMatches(fullText: string, tokens: Set<string>, needle: string, queryTokens: string[]) {
-  return fullText.includes(needle) || queryTokens.every((token) => tokens.has(token) || fullText.includes(token));
-}
-
-function findMaintenanceClientMatchesForAssistant(clients: MaintenanceClient[], clientQuery: string) {
-  const needle = normalizeMaintenanceAssistantText(clientQuery);
-  const queryTokens = tokenizeMaintenanceAssistantText(clientQuery);
-  if (!needle || queryTokens.length === 0) return [];
-
-  const searchable = clients.map(createMaintenanceAssistantSearchProfile);
-  const matches = searchable.filter((item) => {
-    const exact = item.names.includes(needle) || item.lifts.includes(needle) || item.addresses.includes(needle);
-    return exact || maintenanceAssistantQueryMatches(item.fullText, item.tokens, needle, queryTokens);
-  });
-
-  return matches.sort((left, right) => {
-    const score = (item: (typeof matches)[number]) => {
-      let total = 0;
-      if (item.names.includes(needle) || item.lifts.includes(needle) || item.addresses.includes(needle)) total += 100;
-      if (item.fullText.includes(needle)) total += 20;
-      total += queryTokens.filter((token) => item.tokens.has(token) || item.fullText.includes(token)).length * 5;
-      if (item.names.some((name) => queryTokens.some((token) => name.includes(token)))) total += 3;
-      if ([...item.addresses, ...item.lifts].some((text) => queryTokens.some((token) => text.includes(token)))) total += 3;
-      return total;
-    };
-    return score(right) - score(left);
-  });
-}
-
-function findMaintenanceClientsForAssistant(clients: MaintenanceClient[], clientQuery: string) {
-  const matches = findMaintenanceClientMatchesForAssistant(clients, clientQuery);
-  return matches.map((item) => item.client);
-}
-
-function isExactMaintenanceClientAssistantMatch(
-  client: MaintenanceClient,
-  clientQuery: string
-) {
-  const needle = normalizeMaintenanceAssistantText(clientQuery);
-  const queryTokens = tokenizeMaintenanceAssistantText(clientQuery);
-  if (!needle || queryTokens.length === 0) return false;
-
-  const profile = createMaintenanceAssistantSearchProfile(client);
-  const directExact = [...profile.names, ...profile.lifts, ...profile.addresses].includes(needle);
-  if (directExact) return true;
-  if (queryTokens.length < 2) return false;
-
-  const nameHasToken = profile.names.some((name) => queryTokens.some((token) => name.includes(token)));
-  const allTokensInName = profile.names.some((name) => queryTokens.every((token) => name.includes(token)));
-  const locationHasToken = [...profile.addresses, ...profile.lifts].some((text) =>
-    queryTokens.some((token) => text.includes(token))
-  );
-  const allTokensFound = queryTokens.every(
-    (token) => profile.tokens.has(token) || profile.fullText.includes(token)
-  );
-
-  return allTokensFound && (allTokensInName || (nameHasToken && locationHasToken));
 }
 
 function resolveAssistantAddressLiftForClient(client: MaintenanceClient, clientQuery: string) {
@@ -1427,11 +1348,17 @@ export default function MaintenanceWorkspace() {
   useEffect(() => {
     if (!assistantReportRequest || assistantReportRequest.resolvedClientId || loading) return;
 
-    const matches = findMaintenanceClientsForAssistant(clients, assistantReportRequest.clientQuery);
+    const matches = findMaintenanceClientsForAssistantV2(
+      clients,
+      assistantReportRequest.clientQuery
+    );
     const safeMatches =
       assistantReportRequest.submitMode === "send"
         ? matches.filter((client) =>
-            isExactMaintenanceClientAssistantMatch(client, assistantReportRequest.clientQuery)
+            isExactMaintenanceClientAssistantMatchV2(
+              client,
+              assistantReportRequest.clientQuery
+            )
           )
         : matches;
     if (safeMatches.length !== 1) {
@@ -1450,7 +1377,7 @@ export default function MaintenanceWorkspace() {
     }
 
     const client = safeMatches[0];
-    const resolvedLocation = resolveAssistantAddressLiftForClient(
+    const resolvedLocation = resolveAssistantAddressLiftForClientV2(
       client,
       assistantReportRequest.clientQuery
     );

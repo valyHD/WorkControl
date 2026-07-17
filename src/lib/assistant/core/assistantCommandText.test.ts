@@ -75,6 +75,9 @@ describe("normalizeAssistantCommandText", () => {
     ],
     ["deschide setariile mele", "deschide setarile mele"],
     ["fa masina asta indisponibila", "seteaza status indisponibila"],
+    ["pai uite modifca kilometri la 7200", "modifica kilometri la 7200"],
+    ["deci schima departametu in Service", "schimba departamentul in Service"],
+    ["baga un raport interventi pt Vali", "genereaza raport interventie pentru Vali"],
   ])("normalizes colloquial Romanian without changing the payload: %s", (input, expected) => {
     expect(normalizeAssistantCommandText(input)).toBe(expected);
   });

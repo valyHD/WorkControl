@@ -31,12 +31,7 @@ function vehicleLabel(vehicle: VehicleItem) {
 }
 
 function vehicleSearchText(vehicle: VehicleItem) {
-  return [
-    vehicleLabel(vehicle),
-    vehicle.vin,
-    vehicle.currentDriverUserName,
-    vehicle.ownerUserName,
-  ]
+  return [vehicleLabel(vehicle), vehicle.vin, vehicle.currentDriverUserName, vehicle.ownerUserName]
     .filter(Boolean)
     .join(" ");
 }
@@ -68,6 +63,78 @@ function userLabel(user: AppUserItem) {
 
 function userSearchText(user: AppUserItem) {
   return [userLabel(user), user.email, user.roleTitle, user.department].filter(Boolean).join(" ");
+}
+
+const ENTITY_QUERY_FILLER = new Set([
+  "a",
+  "al",
+  "ale",
+  "arata",
+  "cauta",
+  "cu",
+  "de",
+  "deschide",
+  "din",
+  "du",
+  "in",
+  "la",
+  "lui",
+  "ma",
+  "mi",
+  "ne",
+  "pagina",
+  "pe",
+  "pentru",
+  "spre",
+  "te",
+  "ul",
+]);
+
+const ENTITY_QUERY_DESCRIPTORS: Partial<Record<AssistantRuntimeEntityType, Set<string>>> = {
+  vehicle: new Set([
+    "autoturism",
+    "autoturismul",
+    "duba",
+    "dubei",
+    "gps",
+    "gpsul",
+    "harta",
+    "inmatriculare",
+    "masina",
+    "masinii",
+    "numar",
+    "numarul",
+    "tracker",
+    "trackerul",
+    "vehicul",
+    "vehiculul",
+  ]),
+  tool: new Set(["scula", "sculei", "unealta", "uneltei"]),
+  project: new Set(["lucrare", "lucrarii", "proiect", "proiectul"]),
+  user: new Set([
+    "angajat",
+    "angajatul",
+    "coleg",
+    "colegul",
+    "user",
+    "userul",
+    "utilizator",
+    "utilizatorul",
+  ]),
+};
+
+export function normalizeAssistantEntityQuery(
+  entityType: AssistantRuntimeEntityType,
+  query: string
+) {
+  const normalized = normalizeAssistantText(query);
+  const descriptors = ENTITY_QUERY_DESCRIPTORS[entityType] || new Set<string>();
+  const meaningful = normalized
+    .split(" ")
+    .filter((token) => token && !ENTITY_QUERY_FILLER.has(token) && !descriptors.has(token))
+    .join(" ")
+    .trim();
+  return meaningful || normalized;
 }
 
 function buildResolution<T>(
@@ -223,6 +290,7 @@ export async function resolveAssistantEntity(
   context: AssistantRuntimeContext
 ): Promise<AssistantEntityResolution> {
   const cleanQuery = query.trim();
+  const searchQuery = normalizeAssistantEntityQuery(entityType, cleanQuery);
   const contextEntity = await resolveContextEntity(entityType, context);
   // Context is only a pronoun/omitted-target fallback. An explicit query must
   // always be resolved against the requested entity collection.
@@ -233,12 +301,15 @@ export async function resolveAssistantEntity(
     const ranked = vehicles
       .map((vehicle) => {
         const compactPlate = compactVehiclePlate(vehicle.plateNumber);
-        const compactQuery = compactVehiclePlate(cleanQuery);
+        const compactQuery = compactVehiclePlate(searchQuery);
         const plateBoost =
           compactPlate && compactQuery && compactPlate.includes(compactQuery) ? 0.35 : 0;
         return {
           item: vehicle,
-          score: Math.min(1, scoreAssistantText(vehicleSearchText(vehicle), cleanQuery) + plateBoost),
+          score: Math.min(
+            1,
+            scoreAssistantText(vehicleSearchText(vehicle), searchQuery) + plateBoost
+          ),
         };
       })
       .filter((entry) => entry.score >= 0.25)
@@ -247,12 +318,12 @@ export async function resolveAssistantEntity(
   }
 
   if (entityType === "tool") {
-    const ranked = rankAssistantMatches(await getToolsList(), cleanQuery, toolSearchText, 0.25);
+    const ranked = rankAssistantMatches(await getToolsList(), searchQuery, toolSearchText, 0.25);
     return buildResolution("tool", cleanQuery, ranked, (tool) => tool.id, toolLabel);
   }
 
   if (entityType === "project") {
-    const ranked = rankAssistantMatches(await getProjectsList(), cleanQuery, projectLabel, 0.25);
+    const ranked = rankAssistantMatches(await getProjectsList(), searchQuery, projectLabel, 0.25);
     return buildResolution("project", cleanQuery, ranked, (project) => project.id, projectLabel);
   }
 
@@ -261,9 +332,7 @@ export async function resolveAssistantEntity(
     const normalizedQuery = normalizeAssistantText(cleanQuery);
     const requestsCurrentUser =
       cleanQuery === "__current_user__" ||
-      ["eu", "mine", "profilul meu", "contul meu", "utilizatorul curent"].includes(
-        normalizedQuery
-      );
+      ["eu", "mine", "profilul meu", "contul meu", "utilizatorul curent"].includes(normalizedQuery);
     if (requestsCurrentUser && context.user?.uid) {
       const currentUser = users.find((item) => item.id === context.user?.uid);
       if (currentUser) {
@@ -281,7 +350,7 @@ export async function resolveAssistantEntity(
         };
       }
     }
-    const ranked = rankAssistantMatches(users, cleanQuery, userSearchText, 0.25);
+    const ranked = rankAssistantMatches(users, searchQuery, userSearchText, 0.25);
     return buildResolution("user", cleanQuery, ranked, (user) => user.id, userLabel);
   }
 

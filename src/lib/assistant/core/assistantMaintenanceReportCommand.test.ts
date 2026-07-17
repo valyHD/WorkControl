@@ -227,6 +227,41 @@ describe("local maintenance report command contract", () => {
     });
   });
 
+  it("keeps a spoken block reference as the client query", () => {
+    const contract = buildLocalMaintenanceReportContract(
+      "Genereaza pentru blocul C unu de la Oltenita",
+      {
+        route: "/maintenance?tab=report",
+        page: "maintenance",
+        selectedEntity: null,
+        openForm: null,
+        availableActions: [],
+        allowedFields: [],
+        role: "admin",
+        memory: {},
+      }
+    );
+    const fields = contract?.toolCalls[0]?.input.fields;
+
+    expect(fields).toMatchObject({
+      clientQuery: "blocul C unu de la Oltenita",
+      reportType: "revizie",
+      submitMode: "send",
+    });
+  });
+
+  it("separates a natural details instruction from the client", () => {
+    const { fields } = reportFields(
+      "Genereaza interventie pentru Vali iar la detalii scrie usa se inchide greu"
+    );
+
+    expect(fields).toMatchObject({
+      clientQuery: "Vali",
+      reportType: "interventie",
+      observations: "Usa se inchide greu.",
+    });
+  });
+
   it.each([
     "pune liftul functioneaza normal",
     "scrie ca liftul functioneaza normal",

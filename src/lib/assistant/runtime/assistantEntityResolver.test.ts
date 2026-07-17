@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveAssistantEntity } from "./assistantEntityResolver";
+import { normalizeAssistantEntityQuery, resolveAssistantEntity } from "./assistantEntityResolver";
 
 const mocks = vi.hoisted(() => ({
   vehicles: vi.fn(),
@@ -84,5 +84,24 @@ describe("resolveAssistantEntity context safety", () => {
     expect(result.status).toBe("resolved");
     expect(result.entity?.entityId).toBe("user-current");
     expect(result.entity?.label).toBe("Ionut Matura");
+  });
+
+  it.each([
+    ["vehicle", "du-ma la gps-ul dubei cu numarul B 092194", "b 092194"],
+    ["tool", "deschide scula Hilti H2", "hilti h2"],
+    ["project", "arata proiectul Service Lifturi", "service lifturi"],
+    ["user", "cauta utilizatorul lui Razvan", "razvan"],
+  ] as const)("removes command descriptors from a %s query", (entityType, query, expected) => {
+    expect(normalizeAssistantEntityQuery(entityType, query)).toBe(expected);
+  });
+
+  it("resolves a vehicle even when the query still contains spoken descriptors", async () => {
+    const result = await resolveAssistantEntity("vehicle", "duba cu numarul B 092194", {
+      user: null,
+      currentPathname: "/vehicles",
+    });
+
+    expect(result.status).toBe("resolved");
+    expect(result.entity?.entityId).toBe("vehicle-requested");
   });
 });

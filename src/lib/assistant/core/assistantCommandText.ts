@@ -47,6 +47,7 @@ function normalizeColloquialRomanian(value: string) {
   let output = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   const replacements: Array<[RegExp, string]> = [
+    [/^(?:(?:pai|deci|uite|bun|ok|bine)(?:\s+(?:atunci|acum))?[,.:;-]*\s+)+/giu, ""],
     [
       /^\s*(?:as\s+vrea|vreau)(?:\s+si\s+eu)?\s+sa\s+(?:ma\s+uit|vad)\s+(?:la|pe)\s+/giu,
       "deschide ",
@@ -83,6 +84,10 @@ function normalizeColloquialRomanian(value: string) {
     [/\b(?:schimbami|schimba\s*-?\s*mi)\b/giu, "schimba"],
     [/\b(?:seteazami|seteaza\s*-?\s*mi)\b/giu, "seteaza"],
     [/\b(?:actualizeazami|actualizeaza\s*-?\s*mi)\b/giu, "actualizeaza"],
+    [/\b(?:modifca|modifia|modifcia|modifc)\b/giu, "modifica"],
+    [/\b(?:schima|scimba|simba|schmiba)\b/giu, "schimba"],
+    [/\b(?:setaza|seteaz|seteazaa)\b/giu, "seteaza"],
+    [/\b(?:actualizaza|actualizeaz|actulizeaza)\b/giu, "actualizeaza"],
     [/\b(?:schimba|modifica|pune|seteaza)\s+(?:la\s+)?mine\b/giu, "$1"],
     [/\b(?:schimba|modifica|pune|seteaza)\s+mie\b/giu, "$1"],
     [/\bschimba\s*-?\s*i\b/giu, "schimba"],
@@ -106,6 +111,7 @@ function normalizeColloquialRomanian(value: string) {
     ],
     [/\bfa(?:-mi)?\s+(?:un\s+)?proiect\b/giu, "creeaza proiect"],
     [/\bfa(?:-mi)?\s+(?:un\s+)?raport\b/giu, "genereaza raport"],
+    [/\b(?:baga|scoate|fa)\s+(?:mi\s+)?(?:un\s+)?raport\b/giu, "genereaza raport"],
     [
       /\b(?:gata\s+(?:cu|pe)\s+pontaju(?:l)?|gata\s+pe\s+azi|am\s+(?:terminat|plecat)(?:\s+pe\s+azi)?|inchide\s+(?:ziua|programul))\b/giu,
       "opreste pontajul",
@@ -131,6 +137,7 @@ function normalizeColloquialRomanian(value: string) {
     [/\b(?:revisie|revizzie|revize|revizi)\b/giu, "revizie"],
     [/\b(?:interventi|interventzie)\b/giu, "interventie"],
     [/\b(?:petru|pentry|pentu|pentr|pentruu)\b/giu, "pentru"],
+    [/\bpt\.?\s+(?=[\p{L}\p{N}])/giu, "pentru "],
     [/\braportu\b/giu, "raportul"],
     [/\bpontaju\b/giu, "pontajul"],
     [/\bclientu\b/giu, "clientul"],
