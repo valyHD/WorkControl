@@ -24,4 +24,20 @@ describe("assistant action catalog", () => {
     expect(employeeActions.some((action) => action.id === "control-panel")).toBe(false);
     expect(resolveAssistantNavigationAction("deschide control panel", "angajat")).toBeNull();
   });
+
+  it.each([
+    ["duma la scanare bon", "/expenses/scan"],
+    ["aratami notficarile", "/notifications"],
+    ["hai pe masni", "/vehicles"],
+    ["unde gasesc sculele", "/tools"],
+    ["vreau pontaju meu", "/my-timesheets"],
+  ])("ranks rough Romanian navigation by intent: %s", (command, path) => {
+    expect(resolveAssistantNavigationAction(command, "angajat")?.path).toBe(path);
+  });
+
+  it("prefers an exact registered alias over a related workflow keyword", () => {
+    expect(resolveAssistantNavigationAction("deschide piese", "manager")?.path).toBe(
+      "/maintenance/orders"
+    );
+  });
 });

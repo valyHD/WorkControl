@@ -22,10 +22,12 @@ import type {
 } from "./assistantTypes";
 
 function vehicleLabel(vehicle: VehicleItem) {
+  return [vehicle.plateNumber, vehicle.brand, vehicle.model].filter(Boolean).join(" ");
+}
+
+function vehicleSearchText(vehicle: VehicleItem) {
   return [
-    vehicle.plateNumber,
-    vehicle.brand,
-    vehicle.model,
+    vehicleLabel(vehicle),
     vehicle.vin,
     vehicle.currentDriverUserName,
     vehicle.ownerUserName,
@@ -35,9 +37,12 @@ function vehicleLabel(vehicle: VehicleItem) {
 }
 
 function toolLabel(tool: ToolItem) {
+  return [tool.name, tool.internalCode].filter(Boolean).join(" ");
+}
+
+function toolSearchText(tool: ToolItem) {
   return [
-    tool.name,
-    tool.internalCode,
+    toolLabel(tool),
     tool.qrCodeValue,
     tool.status,
     tool.currentHolderUserName,
@@ -53,7 +58,11 @@ function projectLabel(project: ProjectItem) {
 }
 
 function userLabel(user: AppUserItem) {
-  return [user.fullName, user.email, user.roleTitle, user.department].filter(Boolean).join(" ");
+  return user.fullName || user.email || user.id;
+}
+
+function userSearchText(user: AppUserItem) {
+  return [userLabel(user), user.email, user.roleTitle, user.department].filter(Boolean).join(" ");
 }
 
 function buildResolution<T>(
@@ -224,7 +233,7 @@ export async function resolveAssistantEntity(
           compactPlate && compactQuery && compactPlate.includes(compactQuery) ? 0.35 : 0;
         return {
           item: vehicle,
-          score: Math.min(1, scoreAssistantText(vehicleLabel(vehicle), cleanQuery) + plateBoost),
+          score: Math.min(1, scoreAssistantText(vehicleSearchText(vehicle), cleanQuery) + plateBoost),
         };
       })
       .filter((entry) => entry.score >= 0.25)
@@ -233,7 +242,7 @@ export async function resolveAssistantEntity(
   }
 
   if (entityType === "tool") {
-    const ranked = rankAssistantMatches(await getToolsList(), cleanQuery, toolLabel, 0.25);
+    const ranked = rankAssistantMatches(await getToolsList(), cleanQuery, toolSearchText, 0.25);
     return buildResolution("tool", cleanQuery, ranked, (tool) => tool.id, toolLabel);
   }
 
@@ -243,7 +252,7 @@ export async function resolveAssistantEntity(
   }
 
   if (entityType === "user") {
-    const ranked = rankAssistantMatches(await getAllUsers(), cleanQuery, userLabel, 0.25);
+    const ranked = rankAssistantMatches(await getAllUsers(), cleanQuery, userSearchText, 0.25);
     return buildResolution("user", cleanQuery, ranked, (user) => user.id, userLabel);
   }
 

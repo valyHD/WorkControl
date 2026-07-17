@@ -11,7 +11,10 @@ import {
   canAccessNavigationItem,
   type NavigationRole,
 } from "../../config/navigation";
-import { normalizeAssistantText } from "./runtime/assistantFuzzy";
+import {
+  normalizeAssistantText,
+  scoreAssistantText,
+} from "./runtime/assistantFuzzy";
 
 export const ASSISTANT_ACTION_IDS = {
   openGlobalSearch: "open-global-search",
@@ -162,9 +165,85 @@ export function getAssistantNavigationActions(role: NavigationRole) {
 export function resolveAssistantNavigationAction(text: string, role: NavigationRole = "angajat") {
   const normalized = normalizeAssistantText(text);
   if (!normalized) return null;
-  return getAssistantNavigationActions(role).find((action) =>
-    [action.label, ...action.aliases, ...action.keywords]
-      .map(normalizeAssistantText)
-      .some((term) => term && normalized.includes(term))
-  ) || null;
+
+  const ignoredWords = new Set([
+    "acceseaza",
+    "arata",
+    "aratami",
+    "deschide",
+    "du",
+    "duma",
+    "gasesc",
+    "hai",
+    "intra",
+    "la",
+    "ma",
+    "mergi",
+    "mi",
+    "pagina",
+    "pe",
+    "te",
+    "rog",
+    "vreau",
+    "sa",
+    "unde",
+    "vad",
+  ]);
+  const normalizeTargetToken = (token: string) => {
+    const endings = ["ului", "lor", "ul", "le", "u"];
+    const ending = endings.find(
+      (candidate) => token.endsWith(candidate) && token.length - candidate.length >= 4
+    );
+    return ending ? token.slice(0, -ending.length) : token;
+  };
+  const target = normalized
+    .split(" ")
+    .filter((token) => token && !ignoredWords.has(token))
+    .map(normalizeTargetToken)
+    .join(" ")
+    .trim() || normalized;
+  const normalizeCandidate = (value: string) =>
+    normalizeAssistantText(value)
+      .split(" ")
+      .map(normalizeTargetToken)
+      .join(" ");
+
+  const ranked = getAssistantNavigationActions(role)
+    .map((action) => {
+      const terms = [
+        { value: action.label, weight: 1, primary: true },
+        ...action.aliases.map((value) => ({ value, weight: 0.98, primary: true })),
+        ...action.keywords.map((value) => ({ value, weight: 0.72, primary: false })),
+      ];
+      const exactPrimary = terms.some(
+        (term) => term.primary && normalizeCandidate(term.value) === target
+      );
+      const score = Math.max(
+        ...terms.map((term) => {
+          const candidate = normalizeCandidate(term.value);
+          if (!candidate) return 0;
+          if (candidate === target) return term.weight;
+          if (target.includes(candidate) && candidate.length >= 4) return 0.94 * term.weight;
+          return Math.min(0.92, scoreAssistantText(candidate, target)) * term.weight;
+        })
+      );
+      return { action, score, exactPrimary };
+    })
+    .filter(({ score }) => score >= 0.42)
+    .sort((left, right) => right.score - left.score);
+
+  const first = ranked[0];
+  const second = ranked[1];
+  if (!first) return null;
+  const shortTarget = target.split(" ").length === 1;
+  if (
+    second &&
+    first.action.path !== second.action.path &&
+    first.score - second.score < 0.08 &&
+    !first.exactPrimary &&
+    (first.score < 0.9 || shortTarget)
+  ) {
+    return null;
+  }
+  return first.action;
 }

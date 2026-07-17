@@ -1,5 +1,5 @@
 import type { SpeechRecognitionEventLike } from "./types";
-import { normalizeAssistantCommandText } from "../core/assistantCommandText";
+import { cleanAssistantCommandTranscript } from "../core/assistantCommandText";
 
 type TranscriptSegment = {
   text: string;
@@ -108,7 +108,7 @@ export function mergeTranscriptParts(parts: readonly string[]) {
     merged = [...mergedTokens, ...partTokens.slice(overlap)].join(" ");
   }
 
-  return normalizeAssistantCommandText(merged);
+  return cleanAssistantCommandTranscript(merged);
 }
 
 export class TranscriptAccumulator {

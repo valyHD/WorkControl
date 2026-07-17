@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { interpretAssistantCommand } from "./assistantCommandService";
+import {
+  interpretAssistantCommand,
+  type AssistantCommandContext,
+} from "./assistantCommandService";
 
 const mocks = vi.hoisted(() => ({ callable: vi.fn() }));
 
@@ -80,8 +83,12 @@ describe("assistant command service local routing", () => {
 
   it.each([
     ["duma la concedii", "open_leave", "/my-leave"],
+    ["du-te la dashboard", "open_dashboard", "/dashboard"],
     ["vreau la bonuri", "open_expense_scan", "/expenses/scan"],
     ["hai sa merg la scule", "open_page", "/tools"],
+    ["ia vezi pe proiecte", "open_page", "/projects"],
+    ["uita-te la notificari", "open_page", "/notifications"],
+    ["vreau sa vad masinile", "open_page", "/vehicles"],
     ["aratami notificarile", "open_page", "/notifications"],
   ])("routes colloquial page navigation locally: %s", async (command, intent, path) => {
     const result = await interpretAssistantCommand(command);
@@ -91,6 +98,13 @@ describe("assistant command service local routing", () => {
       intent,
       toolCalls: [{ id: "navigation.open", input: { path, query: "" } }],
     });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it("answers an informal help request without requiring exact wording", async () => {
+    const result = await interpretAssistantCommand("zi-mi ce poti face");
+
+    expect(result).toMatchObject({ intent: "assistant_help", commandType: "question" });
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
@@ -169,6 +183,34 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["ponteaza-ma pe Hotel Balada", "hotel balada"],
+    ["incep munca pe Service Lifturi", "service lifturi"],
+  ])("understands a rough timesheet start: %s", async (command, projectQuery) => {
+    const result = await interpretAssistantCommand(command);
+
+    expect(result).toMatchObject({
+      intent: "start_timesheet",
+      entityQuery: projectQuery,
+      confirmationRequired: true,
+      toolCalls: [{ id: "timesheets.start", input: { projectQuery } }],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it.each(["am plecat", "am terminat pe azi", "inchide ziua"])(
+    "understands a rough timesheet stop: %s",
+    async (command) => {
+      const result = await interpretAssistantCommand(command);
+      expect(result).toMatchObject({
+        intent: "stop_timesheet",
+        confirmationRequired: true,
+        toolCalls: [{ id: "timesheets.stop" }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
+
   it("updates a field on the vehicle already selected in page context", async () => {
     const result = await interpretAssistantCommand("schimba data ITP in 20 august 2026", {
       selectedEntity: { type: "vehicle", id: "vehicle-1", label: "B092194 Dacia Logan" },
@@ -204,6 +246,54 @@ describe("assistant command service local routing", () => {
       fieldsToUpdate: { department: "interventii" },
       confirmationRequired: true,
       toolCalls: [{ id: "users.update" }],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "itp 20 august 2026",
+      { type: "vehicle", id: "vehicle-1", label: "B092194 Dacia Logan" },
+      "vehicles.update",
+      { nextItpDate: "20 august 2026" },
+    ],
+    [
+      "departament interventii",
+      { type: "user", id: "user-1", label: "Mihai Popescu" },
+      "users.update",
+      { department: "interventii" },
+    ],
+    [
+      "stare defecta",
+      { type: "tool", id: "tool-1", label: "Flex Bosch F12" },
+      "tools.update",
+      { status: "defecta" },
+    ],
+  ])(
+    "uses the selected page entity when the user only says field and value: %s",
+    async (command, selectedEntity, toolId, fields) => {
+      const result = await interpretAssistantCommand(command, {
+        selectedEntity: selectedEntity as AssistantCommandContext["selectedEntity"],
+      });
+
+      expect(result).toMatchObject({
+        confirmationRequired: true,
+        fieldsToUpdate: fields,
+        toolCalls: [{ id: toolId, input: { fields } }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
+
+  it("removes a repeated speech prefix before routing a report", async () => {
+    const result = await interpretAssistantCommand(
+      "genereaza raport genereaza raport interventie pentru Vali"
+    );
+
+    expect(result).toMatchObject({
+      intent: "open_maintenance_report",
+      entityQuery: "Vali",
+      reportType: "interventie",
     });
     expect(mocks.callable).not.toHaveBeenCalled();
   });

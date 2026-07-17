@@ -30,7 +30,7 @@ export function buildLocalAssistantHelpContract(command: string): AssistantV3Con
     .replace(/\bsti\b/g, "stii");
 
   const asksCapabilities = [
-    /\bce\s+(?:comenzi\s+)?(?:mai\s+)?(?:stii|poti)\s+(?:sa\s+)?faci\b/,
+    /\bce\s+(?:comenzi\s+)?(?:mai\s+)?(?:stii|poti)\s+(?:sa\s+)?(?:faci|face)\b/,
     /\bce\s+comenzi\s+(?:pot\s+)?(?:sa\s+)?(?:iti|ti)\s+dau\b/,
     /\bce\s+comenzi\s+(?:stii|cunosti)\b/,
     /\bce\s+(?:fel\s+de\s+)?comenzi\s+(?:accepti|intelegi|executi)\b/,
@@ -383,9 +383,9 @@ export function buildLocalPageNavigationContract(
 ): AssistantV3Contract | null {
   const normalized = normalizeForMatching(command);
   const requestsNavigation =
-    /\b(?:deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|du\s+ma|vreau\s+sa\s+vad)\b/.test(
+    /\b(?:deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|du\s+ma|vreau\s+sa\s+vad|unde\s+(?:este|e|gasesc))\b/.test(
       normalized
-    );
+    ) || /^(?:hai|la|pe|vreau)\s+/.test(normalized);
   const requestsMutation =
     /\b(?:adauga|completeaza|creeaza|modifica|porneste|salveaza|schimba|seteaza|sterge|trimite)\b/.test(
       normalized
@@ -462,9 +462,13 @@ function contextualEntity(context?: LocalEntityContext) {
 function extractCurrentEntityFieldChange(command: string, entityType: AssistantRuntimeEntityType) {
   const normalized = normalizeForMatching(command);
   const action = normalized.match(/\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/);
-  if (!action?.index && action?.index !== 0) return null;
-  let payload = normalized.slice(action.index + action[0].length).trim();
-  payload = payload.replace(/^(?:si\s+)?(?:aici|la\s+asta|pe\s+asta|pentru\s+asta)\s+/, "");
+  let payload = action?.index === undefined
+    ? normalized
+    : normalized.slice(action.index + action[0].length).trim();
+  payload = payload.replace(
+    /^(?:si\s+)?(?:aici|la\s+(?:asta|ala)|pe\s+(?:asta|ala)|pentru\s+(?:asta|ala)|(?:asta|ala))\s+/,
+    ""
+  );
   if (!payload || /\b(?:lui|pentru\s+(?:masina|scula|proiectul|utilizatorul))\b/.test(payload)) {
     return null;
   }
@@ -480,12 +484,25 @@ function extractCurrentEntityFieldChange(command: string, entityType: AssistantR
   }
 
   const tokens = payload.split(" ").filter(Boolean);
+  const exactCandidates: Array<{
+    fieldKey: string;
+    fieldLabel: string;
+    value: string;
+    size: number;
+  }> = [];
   for (let size = Math.min(3, tokens.length - 1); size >= 1; size -= 1) {
     const naturalField = tokens.slice(0, size).join(" ");
     const value = tokens.slice(size).join(" ").trim();
     const field = resolveAssistantField(entityType, naturalField);
-    if (field && value) return { fieldKey: field.key, fieldLabel: field.label, value };
+    if (!field || !value) continue;
+    const normalizedField = normalizeForMatching(naturalField);
+    const exactNames = [field.key, field.label, ...field.aliases].map(normalizeForMatching);
+    if (exactNames.includes(normalizedField)) {
+      exactCandidates.push({ fieldKey: field.key, fieldLabel: field.label, value, size });
+    }
   }
+  const exact = exactCandidates.sort((left, right) => right.size - left.size)[0];
+  if (exact) return { fieldKey: exact.fieldKey, fieldLabel: exact.fieldLabel, value: exact.value };
   return null;
 }
 

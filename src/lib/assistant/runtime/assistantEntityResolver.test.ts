@@ -32,7 +32,14 @@ describe("resolveAssistantEntity context safety", () => {
   beforeEach(() => {
     mocks.vehicles.mockResolvedValue([
       { id: "vehicle-context", plateNumber: "B33LGR", brand: "Dacia", model: "Logan" },
-      { id: "vehicle-requested", plateNumber: "B092194", brand: "Dacia", model: "Logan" },
+      {
+        id: "vehicle-requested",
+        plateNumber: "B092194",
+        brand: "Dacia",
+        model: "Logan",
+        vin: "VIN123",
+        currentDriverUserName: "Matura Ionut",
+      },
     ]);
     mocks.tools.mockResolvedValue([
       { id: "tool-context", name: "Bosch vechi", internalCode: "A1" },
@@ -49,6 +56,7 @@ describe("resolveAssistantEntity context safety", () => {
 
     expect(result.status).toBe("resolved");
     expect(result.entity?.entityId).toBe("vehicle-requested");
+    expect(result.entity?.label).toBe("B092194 Dacia Logan");
   });
 
   it("does not replace an explicitly requested tool with the remembered tool", async () => {
