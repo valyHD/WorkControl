@@ -250,6 +250,23 @@ export function samplePositions(
   return unique.sort((a, b) => a.gpsTimestamp - b.gpsTimestamp);
 }
 
+export function getMaximumPositionSpeedKmh(
+  ...positionSources: VehiclePositionItem[][]
+): number {
+  let maximumSpeedKmh = 0;
+
+  for (const source of positionSources) {
+    for (const position of source) {
+      const speedKmh = Number(position.speedKmh);
+      if (Number.isFinite(speedKmh) && speedKmh > maximumSpeedKmh) {
+        maximumSpeedKmh = speedKmh;
+      }
+    }
+  }
+
+  return maximumSpeedKmh;
+}
+
 export function filterStationaryGpsJitter(
   positions: VehiclePositionItem[]
 ): VehiclePositionItem[] {

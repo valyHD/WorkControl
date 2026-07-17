@@ -179,6 +179,16 @@
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  list-style: none;
+}
+
+.maintenance-order-lines__head::-webkit-details-marker {
+  display: none;
+}
+
+.maintenance-order-lines__content {
+  display: grid;
+  gap: 10px;
 }
 
 .maintenance-order-lines__head strong {
@@ -662,6 +672,15 @@ html.is-samsung-internet .maintenance-orders-list > .maintenance-order-card[open
 
   .maintenance-order-line {
     grid-template-columns: 1fr;
+  }
+
+  .maintenance-order-lines__head {
+    cursor: pointer;
+    min-height: 44px;
+  }
+
+  .maintenance-order-lines:not([open]) {
+    padding-bottom: 12px;
   }
 
   .maintenance-order-form-panel__summary {

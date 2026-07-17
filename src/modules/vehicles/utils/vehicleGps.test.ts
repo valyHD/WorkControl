@@ -9,6 +9,7 @@ import {
   filterRouteRenderJitter,
   filterStationaryGpsJitter,
   formatDuration,
+  getMaximumPositionSpeedKmh,
   sanitizePositions,
 } from "./vehicleGps";
 
@@ -130,5 +131,18 @@ describe("vehicleGps helpers", () => {
     ];
 
     expect(buildRouteMetricSegments(points)).toEqual([]);
+  });
+
+  it("keeps the higher real maximum speed when a slower simulated route is present", () => {
+    const realRoute = [
+      position({ id: "real-1", speedKmh: 72 }),
+      position({ id: "real-peak", speedKmh: 140 }),
+    ];
+    const simulatedRoute = [
+      position({ id: "sim-1", speedKmh: 42 }),
+      position({ id: "sim-peak", speedKmh: 62 }),
+    ];
+
+    expect(getMaximumPositionSpeedKmh(realRoute, simulatedRoute)).toBe(140);
   });
 });

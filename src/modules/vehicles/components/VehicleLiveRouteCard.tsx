@@ -44,6 +44,7 @@ import {
   filterStationaryGpsJitter,
   filterTrackableRoutePositions,
   formatDuration,
+  getMaximumPositionSpeedKmh,
   samplePositions,
   sanitizePositions,
   type DateRangePreset,
@@ -2153,10 +2154,13 @@ export default function VehicleLiveRouteCard({
               (activeSimulationPositionsInRange[0]?.gpsTimestamp || 0)
           )
         : 0;
-    const calculatedMaxSpeed = Math.max(
-      getMaxRouteSpeedKmh(realAnalysisPoints.length ? realAnalysisPoints : statsPositions),
-      getMaxRouteSpeedKmh(historySimulationAnalysisPoints),
-      getMaxRouteSpeedKmh(activeSimulationPositionsInRange)
+    const unsampledRealAnalysisPoints = realAnalysisSourceSegments.flatMap((segment) =>
+      filterTrackableRoutePositions(segment)
+    );
+    const calculatedMaxSpeed = getMaximumPositionSpeedKmh(
+      unsampledRealAnalysisPoints.length ? unsampledRealAnalysisPoints : realAnalysisPoints,
+      gpsSimHistorySegments.flat(),
+      activeSimulationPositionsInRange
     );
     const calculatedDistanceKm = Number(
       (
@@ -2213,9 +2217,10 @@ export default function VehicleLiveRouteCard({
     fromTs,
     gpsSimVisible,
     hasLiveSimulation,
-    historySimulationAnalysisPoints,
     historySimulationAnalysisSegments,
+    gpsSimHistorySegments,
     realAnalysisPoints,
+    realAnalysisSourceSegments,
     realStatsSegments,
     simulationActive,
     toTs,

@@ -183,6 +183,12 @@ function getClientLiftOptions(client: MaintenanceClient | null) {
   return [...fromAddresses, ...fallback].filter((item) => item.liftSerialNumber);
 }
 
+function isCompactMaintenanceViewport() {
+  return typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 640px)").matches;
+}
+
 function orderToForm(order: MaintenancePartOrder): FormState {
   return {
     title: order.title,
@@ -225,7 +231,22 @@ export default function MaintenancePartOrdersPage() {
   const [preferences, setPreferences] = useState<MaintenancePartOrderPreferences | null>(null);
   const [supplierQuoteOrder, setSupplierQuoteOrder] = useState<MaintenancePartOrder | null>(null);
   const [clientOfferOrder, setClientOfferOrder] = useState<MaintenancePartOrder | null>(null);
+  const [formPanelOpen, setFormPanelOpen] = useState(() => !isCompactMaintenanceViewport());
+  const [orderedPartsOpen, setOrderedPartsOpen] = useState(() => !isCompactMaintenanceViewport());
   const preferenceSaveTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(max-width: 640px)");
+    const handleChange = () => {
+      setFormPanelOpen(!query.matches);
+      setOrderedPartsOpen(!query.matches);
+    };
+
+    handleChange();
+    query.addEventListener("change", handleChange);
+    return () => query.removeEventListener("change", handleChange);
+  }, []);
 
   useEffect(() => {
     const unsubClients = subscribeMaintenanceClients(
@@ -356,6 +377,8 @@ export default function MaintenancePartOrdersPage() {
   function startEdit(order: MaintenancePartOrder) {
     setEditingOrder(order);
     setForm(orderToForm(order));
+    setFormPanelOpen(true);
+    setOrderedPartsOpen(true);
     setError("");
     setStatus("Editezi comanda selectata.");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -555,10 +578,14 @@ export default function MaintenancePartOrdersPage() {
 
   return (
     <section className="page-section maintenance-orders-page" data-assistant-action="maintenance-parts">
-      <details className="panel maintenance-order-form-panel" open>
+      <details
+        className="panel maintenance-order-form-panel"
+        open={formPanelOpen}
+        onToggle={(event) => setFormPanelOpen(event.currentTarget.open)}
+      >
         <summary className="maintenance-order-form-panel__summary">
-          <span>{editingOrder ? "Editeaza comanda" : "Comanda noua"}</span>
-          <small>Deschide sau inchide formularul pentru acces rapid la istoric pe mobil.</small>
+          <span>Comenzi piese lift</span>
+          <small>{editingOrder ? "Editeaza comanda selectata" : "Deschide formularul pentru o comanda noua"}</small>
         </summary>
         <div className="panel-head">
           <div>
@@ -791,35 +818,49 @@ export default function MaintenancePartOrdersPage() {
             </div>
           </div>
 
-          <div className="maintenance-order-lines">
+          <details
+            className="maintenance-order-lines"
+            open={orderedPartsOpen}
+            onToggle={(event) => setOrderedPartsOpen(event.currentTarget.open)}
+          >
             <datalist id="maintenance-part-suggestions">
               {orderedPartSuggestions.map((name) => <option key={name} value={name} />)}
             </datalist>
             <datalist id="maintenance-supplier-suggestions">
               {supplierSuggestions.map((name) => <option key={name} value={name} />)}
             </datalist>
-            <div className="maintenance-order-lines__head">
+            <summary className="maintenance-order-lines__head">
               <strong>Piese comandate</strong>
-              <button className="secondary-btn" type="button" onClick={addLine}>
+              <button
+                className="secondary-btn"
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  addLine();
+                  setOrderedPartsOpen(true);
+                }}
+              >
                 <PackagePlus size={15} />
                 Adauga piesa
               </button>
+            </summary>
+            <div className="maintenance-order-lines__content">
+              {form.lines.map((line) => (
+                <div key={line.id} className="maintenance-order-line">
+                  <input className="tool-input" list="maintenance-part-suggestions" value={line.name} onChange={(event) => updateLine(line.id, { name: event.target.value })} placeholder="Denumire piesa" />
+                  <input className="tool-input" value={line.code} onChange={(event) => updateLine(line.id, { code: event.target.value })} placeholder="Cod piesa" />
+                  <input className="tool-input" type="number" min="1" value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: Number(event.target.value || 1) })} placeholder="Cant." />
+                  <input className="tool-input" value={line.unit} onChange={(event) => updateLine(line.id, { unit: event.target.value })} placeholder="UM" />
+                  <input className="tool-input" type="number" min="0" step="0.01" value={line.estimatedPrice} onChange={(event) => updateLine(line.id, { estimatedPrice: Number(event.target.value || 0) })} placeholder="Pret estimat" />
+                  <input className="tool-input" list="maintenance-supplier-suggestions" value={line.supplier} onChange={(event) => updateLine(line.id, { supplier: event.target.value })} placeholder="Furnizor piesa" />
+                  <button className="danger-btn" type="button" onClick={() => removeLine(line.id)} disabled={form.lines.length <= 1}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+              <div className="maintenance-order-total">Total estimat: {formatMoney(orderTotal(form.lines))}</div>
             </div>
-            {form.lines.map((line) => (
-              <div key={line.id} className="maintenance-order-line">
-                <input className="tool-input" list="maintenance-part-suggestions" value={line.name} onChange={(event) => updateLine(line.id, { name: event.target.value })} placeholder="Denumire piesa" />
-                <input className="tool-input" value={line.code} onChange={(event) => updateLine(line.id, { code: event.target.value })} placeholder="Cod piesa" />
-                <input className="tool-input" type="number" min="1" value={line.quantity} onChange={(event) => updateLine(line.id, { quantity: Number(event.target.value || 1) })} placeholder="Cant." />
-                <input className="tool-input" value={line.unit} onChange={(event) => updateLine(line.id, { unit: event.target.value })} placeholder="UM" />
-                <input className="tool-input" type="number" min="0" step="0.01" value={line.estimatedPrice} onChange={(event) => updateLine(line.id, { estimatedPrice: Number(event.target.value || 0) })} placeholder="Pret estimat" />
-                <input className="tool-input" list="maintenance-supplier-suggestions" value={line.supplier} onChange={(event) => updateLine(line.id, { supplier: event.target.value })} placeholder="Furnizor piesa" />
-                <button className="danger-btn" type="button" onClick={() => removeLine(line.id)} disabled={form.lines.length <= 1}>
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            ))}
-            <div className="maintenance-order-total">Total estimat: {formatMoney(orderTotal(form.lines))}</div>
-          </div>
+          </details>
 
           <div className="tool-form-actions">
             <button className="primary-btn" type="submit" disabled={saving}>
