@@ -2706,6 +2706,7 @@ function buildWorkControlAssistantExamples() {
     '178. "da-mi exemple cu ce poti face" => question/assistant_help, fara navigare sau modificari.',
     '179. "schimba aia la 7200" fara entitate si camp unic => clarification, nu folosi primul input vizibil.',
     '180. "pune si asta la Mihai" cu referinta ambigua => clarification, fara executie.',
+    '181. "du-ma pe pagina masina mea si arata-mi cati kilometri curenti am" => navigation/open_my_vehicle /my-vehicle; "masina mea" inseamna vehiculul asignat utilizatorului, fara cautare in flota.',
   ];
 }
 

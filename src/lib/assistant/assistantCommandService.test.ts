@@ -235,6 +235,23 @@ describe("assistant command service local routing", () => {
     expect(mocks.callable).not.toHaveBeenCalled();
   });
 
+  it("opens my assigned vehicle for a compound mileage question without fleet resolution", async () => {
+    const result = await interpretAssistantCommand(
+      "Du-ma pe pagina masina mea si arata-mi cati kilometri curenti am"
+    );
+
+    expect(result).toMatchObject({
+      commandType: "navigation",
+      intent: "open_my_vehicle",
+      entityType: "none",
+      entityQuery: "",
+      targetPage: "/my-vehicle",
+      toolCalls: [{ id: "navigation.open", input: { path: "/my-vehicle", query: "" } }],
+      confirmationRequired: false,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
   it("updates a short field phrase on the user already selected", async () => {
     const result = await interpretAssistantCommand("pune departamentul interventii", {
       selectedEntity: { type: "user", id: "user-1", label: "Mihai Popescu" },

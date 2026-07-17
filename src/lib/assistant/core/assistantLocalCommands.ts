@@ -257,6 +257,12 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
   ]);
   const queryTokens = tokens.slice(markerIndex + 1);
   while (queryTokens.length > 0 && filler.has(queryTokens[0])) queryTokens.shift();
+  const followUpIndex = queryTokens.findIndex(
+    (token, index) =>
+      token === "si" &&
+      ["arata", "deschide", "spune", "vezi", "zi"].includes(queryTokens[index + 1] || "")
+  );
+  const boundedQueryTokens = followUpIndex >= 0 ? queryTokens.slice(0, followUpIndex) : queryTokens;
   const descriptorWords = new Set([
     "duba",
     "dubei",
@@ -272,7 +278,7 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
     "gps",
     "gpsul",
   ]);
-  const queryAfterMarker = queryTokens
+  const queryAfterMarker = boundedQueryTokens
     .filter((token) => !descriptorWords.has(token) && !filler.has(token))
     .map(normalizeVehicleQueryToken)
     .join(" ")
@@ -308,9 +314,29 @@ function extractVehicleQuery(command: string, destination: "details" | "tracker"
   return "";
 }
 
+function referencesPersonalVehicle(normalizedCommand: string) {
+  return [
+    /\b(?:masina|masinii|vehicul|vehiculul|vehiculului|autoturism|autoturismul|autoturismului|duba|dubei)\s+(?:mea|meu|personala|personal)\b/,
+    /\b(?:gps|gps\s+ul|gpsul|tracker|trackerul|harta)\s+(?:mea|meu)\b/,
+    /\b(?:masina|vehiculul|autoturismul)\s+(?:pe\s+care\s+(?:o\s+)?conduc|asignat(?:a)?\s+mie|alocat(?:a)?\s+mie|de\s+serviciu)\b/,
+  ].some((pattern) => pattern.test(normalizedCommand));
+}
+
+function asksForCurrentVehicleMileage(normalizedCommand: string) {
+  return (
+    /\b(?:cati|cat|ce)\s+(?:km|kilometri|kilometraj)\b/.test(normalizedCommand) ||
+    /\b(?:km|kilometri|kilometrii|kilometraj|kilometrajul)\s+(?:actuali|curenti|are|am)\b/.test(
+      normalizedCommand
+    ) ||
+    /\b(?:spune|arata|vezi)\s+(?:mi\s+)?(?:km|kilometrii?|kilometrajul)\b/.test(normalizedCommand)
+  );
+}
+
 export function buildLocalVehicleTrackerContract(command: string): AssistantV3Contract | null {
   const normalized = normalizeForMatching(command);
   const tokens = normalized.split(" ");
+  const referencesMyVehicle = referencesPersonalVehicle(normalized);
+  const asksMileage = asksForCurrentVehicleMileage(normalized);
   const mentionsTracker = tokens.some(
     (token) => token.startsWith("gps") || token.startsWith("tracker") || token === "harta"
   );
@@ -353,7 +379,9 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
   const requestsNavigation =
     /\b(?:du\s+ma|deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|vreau\s+sa\s+vad)\b/.test(
       normalized
-    ) || /^(?:gps|gpsul|tracker|trackerul)\b/.test(normalized);
+    ) ||
+    /^(?:gps|gpsul|tracker|trackerul)\b/.test(normalized) ||
+    (referencesMyVehicle && asksMileage);
   if ((!mentionsTracker && !mentionsVehicle) || !requestsNavigation) return null;
 
   if (/\b(?:toate|flota|flotei)\b/.test(normalized)) {
@@ -368,6 +396,25 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
       confidence: 0.99,
       confirmationRequired: false,
       response: "Deschid harta cu toate GPS-urile.",
+    };
+  }
+
+  if (referencesMyVehicle) {
+    return {
+      version: "3",
+      commandType: "navigation",
+      intent: "open_my_vehicle",
+      toolCalls: [{ id: "navigation.open", input: { path: "/my-vehicle", query: "" } }],
+      targetPage: "/my-vehicle",
+      entityReferences: [],
+      missingInformation: [],
+      confidence: 0.99,
+      confirmationRequired: false,
+      response: asksMileage
+        ? "Deschid masina ta. Kilometrajul curent este afisat in pagina masinii."
+        : mentionsTracker
+          ? "Deschid GPS-ul masinii tale."
+          : "Deschid pagina masinii tale.",
     };
   }
 

@@ -179,4 +179,32 @@ describe("local vehicle tracker commands", () => {
       targetPage: "/my-vehicle",
     });
   });
+
+  it.each([
+    "Du-ma pe pagina masina mea si arata-mi cati kilometri curenti am",
+    "arata-mi cati kilometri are masina mea",
+    "intra la vehiculul meu si spune-mi kilometrajul",
+    "du-ma la masina pe care o conduc si arata km curenti",
+    "deschide masina asignata mie",
+  ])("uses the authenticated user's vehicle without searching the fleet: %s", (command) => {
+    expect(buildLocalVehicleTrackerContract(command)).toMatchObject({
+      commandType: "navigation",
+      intent: "open_my_vehicle",
+      toolCalls: [{ id: "navigation.open", input: { path: "/my-vehicle", query: "" } }],
+      targetPage: "/my-vehicle",
+      entityReferences: [],
+      confirmationRequired: false,
+    });
+  });
+
+  it("keeps an explicitly named vehicle instead of treating it as the personal vehicle", () => {
+    expect(
+      buildLocalVehicleTrackerContract("du-ma la masina Toyota si arata-mi kilometrii curenti")
+    ).toMatchObject({
+      intent: "open_vehicle",
+      toolCalls: [
+        { id: "vehicles.open", input: { entityQuery: "toyota", destination: "details" } },
+      ],
+    });
+  });
 });
