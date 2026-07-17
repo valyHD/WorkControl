@@ -135,6 +135,7 @@ describe("local maintenance report command contract", () => {
     "pune liftul functioneaza normal",
     "scrie ca liftul functioneaza normal",
     "noteaza asa liftul functioneaza normal",
+    "baga liftul functioneaza normal",
   ])("removes the observation instruction from the saved value: %s", (instruction) => {
     const { fields } = reportFields(
       `Genereaza raport interventie pentru Vali la rubrica observatii ${instruction}`

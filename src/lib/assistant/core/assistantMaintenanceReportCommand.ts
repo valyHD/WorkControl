@@ -90,6 +90,10 @@ function extractObservations(command: string, normalized: string) {
   return formatAssistantReportObservation(
     cleanExtractedValue(originalTail.slice(0, end))
       .replace(
+        /^(?:(?:bag(?:a|\u0103)|zi)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|ca|cu))?\s+)+/i,
+        ""
+      )
+      .replace(
         /^(?:(?:trece|scrie|pune|noteaza|notează|completeaza|completează)(?:\s+(?:aici|acolo))?(?:\s+(?:asa|așa|ca|cu))?\s+)+/i,
         ""
       )

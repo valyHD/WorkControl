@@ -2739,6 +2739,11 @@ function buildAssistantPrompt(today, context) {
     'formSchemaId valori: maintenance-client, leave-request, expense, vehicle, tool, user, project, timesheet sau string gol.',
     'Nu transforma navigarea in completare. "du-ma la pontajul meu" nu porneste pontajul.',
     'Nu transforma textul comenzii in valoare de input. Nu exista regula "daca gasesc input scriu acolo".',
+    'Intelege romana colocviala, regionala, agramaticala si dictarea fonetica: articole lipsa, cuvinte lipite, acorduri gresite si expresii precum "baga", "da-i drumul", "gata pe azi" sau "du-ma". Nu cere o formulare rigida.',
+    'Pastreaza numele proprii, numerele, datele si identificatorii. Corecteaza numai forma instructiunii, nu inventa valori.',
+    'Separa strict instructiunea de valoare: in "la observatii baga liftul merge normal", valoarea observatiei este doar "Liftul merge normal", nu restul comenzii.',
+    'Foloseste pagina curenta, selectedEntity si lastEntity pentru pronume precum "asta", "aici", "al meu" sau "schimba si...". Daca exista doua entitati posibile, cere alegerea.',
+    'Comenzile cu mai multi pasi se pastreaza in ordinea rostita. Nu executa pasul urmator daca primul necesita clarificare.',
     'DOM fallback este interzis. Daca nu exista schema sau executor, cere clarificare.',
     'entity_update inseamna update prin servicii Firestore dupa resolve entity, nu prin formular si nu prin DOM.',
     'form_fill inseamna trimitere de obiect catre schema formularului, fara salvare automata.',
@@ -2793,6 +2798,7 @@ exports.interpretAssistantCommand = onCall(
 
     const startedAtMs = Date.now();
     const command = toSafeString(request.data?.command).slice(0, 600);
+    const originalCommand = toSafeString(request.data?.originalCommand || command).slice(0, 600);
     const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;
     const model = toSafeString(process.env.OPENAI_ASSISTANT_MODEL) || 'gpt-4.1-mini';
 
@@ -2803,7 +2809,7 @@ exports.interpretAssistantCommand = onCall(
     if (!apiKey) {
       await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: null,
         model,
         openAiResponse: null,
@@ -2834,7 +2840,10 @@ exports.interpretAssistantCommand = onCall(
             },
             {
               role: 'user',
-              content: [{ type: 'input_text', text: command }],
+              content: [{
+                type: 'input_text',
+                text: `Transcript original: ${originalCommand}\nForma normalizata: ${command}`,
+              }],
             },
           ],
           text: {
@@ -2851,7 +2860,7 @@ exports.interpretAssistantCommand = onCall(
       logger.error('[interpretAssistantCommand][openai]', { category: 'network_error' });
       await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: null,
         model,
         openAiResponse: null,
@@ -2870,7 +2879,7 @@ exports.interpretAssistantCommand = onCall(
       });
       await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: null,
         model,
         openAiResponse: null,
@@ -2891,7 +2900,7 @@ exports.interpretAssistantCommand = onCall(
       });
       await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: null,
         model,
         openAiResponse: null,
@@ -3028,7 +3037,7 @@ exports.interpretAssistantCommand = onCall(
       };
       const traceId = await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: normalizedInterpretation,
         model,
         openAiResponse: parsedResponse,
@@ -3044,7 +3053,7 @@ exports.interpretAssistantCommand = onCall(
       });
       await persistAssistantInterpretationTrace({
         ownerUserId: request.auth.uid,
-        transcript: command,
+        transcript: originalCommand,
         interpreted: null,
         model,
         openAiResponse: parsedResponse,

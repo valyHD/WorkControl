@@ -2,9 +2,15 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase/firebase";
 import type { AssistantCommandType } from "./runtime/assistantClassifier";
 import { buildLocalMaintenanceReportContract } from "./core/assistantMaintenanceReportCommand";
-import { normalizeAssistantCommandText } from "./core/assistantCommandText";
+import {
+  cleanAssistantCommandTranscript,
+  normalizeAssistantCommandText,
+} from "./core/assistantCommandText";
 import {
   buildLocalAssistantHelpContract,
+  buildLocalCurrentEntityUpdateContract,
+  buildLocalPageNavigationContract,
+  buildLocalTimesheetContract,
   buildLocalVehicleMileageContract,
   buildLocalVehicleTrackerContract,
 } from "./core/assistantLocalCommands";
@@ -197,6 +203,7 @@ export async function interpretAssistantCommand(
   command: string,
   context?: AssistantCommandContext
 ): Promise<AssistantCommandInterpretationV3 | null> {
+  const originalCommand = cleanAssistantCommandTranscript(command);
   const cleanCommand = normalizeAssistantCommandText(command);
   if (!cleanCommand) return null;
 
@@ -270,12 +277,44 @@ export async function interpretAssistantCommand(
     };
   }
 
+  const localTimesheet = buildLocalTimesheetContract(cleanCommand, context);
+  if (localTimesheet) {
+    const projectQuery = localTimesheet.entityReferences[0]?.query || "";
+    return buildLocalInterpretation(localTimesheet, {
+      entityType: projectQuery ? "project" : "none",
+      entityQuery: projectQuery,
+    });
+  }
+
+  const localCurrentEntityUpdate = buildLocalCurrentEntityUpdateContract(cleanCommand, context);
+  if (localCurrentEntityUpdate) {
+    const entity = localCurrentEntityUpdate.entityReferences[0];
+    const fields = localCurrentEntityUpdate.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localCurrentEntityUpdate, {
+      entityType: entity?.type || "none",
+      entityQuery: entity?.query || "",
+      fields: fields || {},
+    });
+  }
+
+  const localNavigation = buildLocalPageNavigationContract(
+    cleanCommand,
+    context?.role || context?.userRole || "angajat"
+  );
+  if (localNavigation) return buildLocalInterpretation(localNavigation);
+
   const safeContext = sanitizeAssistantV3PageContext(context);
   const interpretCommand = httpsCallable<
-    { command: string; context: AssistantV3PageContext },
+    { command: string; originalCommand: string; context: AssistantV3PageContext },
     unknown
   >(functions, "interpretAssistantCommand");
-  const result = await interpretCommand({ command: cleanCommand, context: safeContext });
+  const result = await interpretCommand({
+    command: cleanCommand,
+    originalCommand,
+    context: safeContext,
+  });
   if (!result.data) return null;
 
   const validated = normalizeAndValidateAssistantV3Contract(cleanCommand, result.data);

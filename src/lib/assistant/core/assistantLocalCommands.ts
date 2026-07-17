@@ -1,5 +1,9 @@
 import type { AssistantV3Contract } from "./assistantV3Types";
 import { correctRomanianKilometers } from "../speech/romanianSpeechCorrections";
+import { resolveAssistantNavigationAction } from "../assistantActionCatalog";
+import type { NavigationRole } from "../../../config/navigation";
+import { resolveAssistantField } from "../runtime/assistantFieldResolver";
+import type { AssistantRuntimeEntityType } from "../runtime/assistantTypes";
 
 const HELP_RESPONSE = [
   "Pot sa te ajut direct cu:",
@@ -358,5 +362,275 @@ export function buildLocalVehicleTrackerContract(command: string): AssistantV3Co
       destination === "tracker"
         ? `Deschid GPS-ul masinii ${entityQuery}.`
         : `Deschid pagina masinii ${entityQuery}.`,
+  };
+}
+
+function navigationIntent(actionId: string): AssistantV3Contract["intent"] {
+  if (actionId === "dashboard") return "open_dashboard";
+  if (actionId === "my-vehicle") return "open_my_vehicle";
+  if (actionId === "my-timesheets") return "open_my_timesheets";
+  if (actionId === "fleet-gps") return "open_gps_maps";
+  if (actionId === "my-leave") return "open_leave";
+  if (actionId === "expense-scan") return "open_expense_scan";
+  if (actionId === "expense-invoices") return "open_expense_invoices";
+  if (actionId === "maintenance-report") return "open_maintenance_report";
+  return "open_page";
+}
+
+export function buildLocalPageNavigationContract(
+  command: string,
+  role: NavigationRole = "angajat"
+): AssistantV3Contract | null {
+  const normalized = normalizeForMatching(command);
+  const requestsNavigation =
+    /\b(?:deschide|arata(?:\s+mi)?|mergi|intra|acceseaza|du\s+ma|vreau\s+sa\s+vad)\b/.test(
+      normalized
+    );
+  const requestsMutation =
+    /\b(?:adauga|completeaza|creeaza|modifica|porneste|salveaza|schimba|seteaza|sterge|trimite)\b/.test(
+      normalized
+    );
+  if (!requestsNavigation || requestsMutation) return null;
+
+  const action = resolveAssistantNavigationAction(command, role);
+  if (!action) return null;
+
+  return {
+    version: "3",
+    commandType: "navigation",
+    intent: navigationIntent(action.id),
+    toolCalls: [{ id: "navigation.open", input: { path: action.path, query: "" } }],
+    targetPage: action.path,
+    entityReferences: [],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: false,
+    response: action.spokenOpenLabel,
+  };
+}
+
+type LocalEntityContext = {
+  selectedEntity?: { type?: string; id?: string; label?: string } | null;
+  memory?: {
+    lastEntity?: {
+      type?: string;
+      entityType?: string;
+      id?: string;
+      entityId?: string;
+      label?: string;
+      query?: string;
+    };
+  };
+};
+
+const LOCAL_UPDATE_TOOL: Partial<Record<AssistantRuntimeEntityType, string>> = {
+  vehicle: "vehicles.update",
+  tool: "tools.update",
+  project: "timesheets.projects.update",
+  user: "users.update",
+};
+
+const LOCAL_UPDATE_INTENT: Partial<
+  Record<AssistantRuntimeEntityType, AssistantV3Contract["intent"]>
+> = {
+  vehicle: "update_vehicle",
+  tool: "update_tool",
+  project: "update_project",
+  user: "update_user",
+};
+
+function contextualEntity(context?: LocalEntityContext) {
+  const selected = context?.selectedEntity;
+  const selectedType = selected?.type as AssistantRuntimeEntityType | undefined;
+  if (selectedType && LOCAL_UPDATE_TOOL[selectedType]) {
+    return { type: selectedType, query: selected?.label || selected?.id || "" };
+  }
+  const remembered = context?.memory?.lastEntity;
+  const rememberedType = (remembered?.type || remembered?.entityType) as
+    | AssistantRuntimeEntityType
+    | undefined;
+  if (rememberedType && LOCAL_UPDATE_TOOL[rememberedType]) {
+    return {
+      type: rememberedType,
+      query:
+        remembered?.label || remembered?.query || remembered?.id || remembered?.entityId || "",
+    };
+  }
+  return null;
+}
+
+function extractCurrentEntityFieldChange(command: string, entityType: AssistantRuntimeEntityType) {
+  const normalized = normalizeForMatching(command);
+  const action = normalized.match(/\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/);
+  if (!action?.index && action?.index !== 0) return null;
+  let payload = normalized.slice(action.index + action[0].length).trim();
+  payload = payload.replace(/^(?:si\s+)?(?:aici|la\s+asta|pe\s+asta|pentru\s+asta)\s+/, "");
+  if (!payload || /\b(?:lui|pentru\s+(?:masina|scula|proiectul|utilizatorul))\b/.test(payload)) {
+    return null;
+  }
+
+  const connectors = [...payload.matchAll(/\b(?:la|in|cu|pe|sa\s+fie|devina)\b/g)].reverse();
+  for (const connector of connectors) {
+    const index = connector.index ?? -1;
+    if (index <= 0) continue;
+    const naturalField = payload.slice(0, index).replace(/^(?:si\s+)?/, "").trim();
+    const value = payload.slice(index + connector[0].length).trim();
+    const field = resolveAssistantField(entityType, naturalField);
+    if (field && value) return { fieldKey: field.key, fieldLabel: field.label, value };
+  }
+
+  const tokens = payload.split(" ").filter(Boolean);
+  for (let size = Math.min(3, tokens.length - 1); size >= 1; size -= 1) {
+    const naturalField = tokens.slice(0, size).join(" ");
+    const value = tokens.slice(size).join(" ").trim();
+    const field = resolveAssistantField(entityType, naturalField);
+    if (field && value) return { fieldKey: field.key, fieldLabel: field.label, value };
+  }
+  return null;
+}
+
+export function buildLocalCurrentEntityUpdateContract(
+  command: string,
+  context?: LocalEntityContext
+): AssistantV3Contract | null {
+  const entity = contextualEntity(context);
+  if (!entity?.query) return null;
+  const change = extractCurrentEntityFieldChange(command, entity.type);
+  const toolId = LOCAL_UPDATE_TOOL[entity.type];
+  const intent = LOCAL_UPDATE_INTENT[entity.type];
+  if (!change || !toolId || !intent) return null;
+
+  return {
+    version: "3",
+    commandType: "entity_update",
+    intent,
+    toolCalls: [
+      {
+        id: toolId,
+        input: { entityQuery: entity.query, fields: { [change.fieldKey]: change.value } },
+      },
+    ],
+    targetPage: "",
+    entityReferences: [
+      {
+        type: entity.type as "vehicle" | "tool" | "project" | "user",
+        query: entity.query,
+        id: "",
+      },
+    ],
+    missingInformation: [],
+    confidence: 0.96,
+    confirmationRequired: true,
+    response: `Schimb ${change.fieldLabel} pentru ${entity.query}?`,
+  };
+}
+
+type LocalTimesheetContext = LocalEntityContext;
+
+function contextualProject(context?: LocalTimesheetContext) {
+  const selected = context?.selectedEntity;
+  if (selected?.type === "project") return selected.label || selected.id || "";
+  const remembered = context?.memory?.lastEntity;
+  if (!remembered) return "";
+  const type = remembered.type || remembered.entityType;
+  return type === "project"
+    ? remembered.label || remembered.query || remembered.id || remembered.entityId || ""
+    : "";
+}
+
+function cleanExtractedProject(value: string) {
+  return value
+    .replace(/\b(?:acum|te\s+rog)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTimesheetProject(command: string) {
+  const normalized = normalizeForMatching(command);
+  const createAndStart = normalized.match(
+    /\bcreeaza\s+proiect(?:ul)?\s+(.+?)\s+(?:si\s+)?porneste\s+pontaj(?:ul)?\b/
+  );
+  if (createAndStart) {
+    return { projectQuery: cleanExtractedProject(createAndStart[1]), createProjectIfMissing: true };
+  }
+
+  const selectAndStart = normalized.match(
+    /\b(?:alege|selecteaza)\s+proiect(?:ul)?\s+(.+?)\s+(?:si\s+)?porneste\s+pontaj(?:ul)?\b/
+  );
+  if (selectAndStart) {
+    return { projectQuery: cleanExtractedProject(selectAndStart[1]), createProjectIfMissing: false };
+  }
+
+  const projectAfterStart = normalized.match(
+    /\bporneste\s+pontaj(?:ul)?(?:\s+pe)?\s+(?:proiect(?:ul)?\s+)?(.+)$/
+  );
+  return {
+    projectQuery: cleanExtractedProject(projectAfterStart?.[1] || ""),
+    createProjectIfMissing: false,
+  };
+}
+
+export function buildLocalTimesheetContract(
+  command: string,
+  context?: LocalTimesheetContext
+): AssistantV3Contract | null {
+  const normalized = normalizeForMatching(command);
+  const requestsStop =
+    /\b(?:opreste|inchide|termina)\s+(?:mi\s+)?(?:pontaj(?:ul)?|ceas(?:ul)?)\b/.test(normalized);
+  if (requestsStop) {
+    return {
+      version: "3",
+      commandType: "timesheet_action",
+      intent: "stop_timesheet",
+      toolCalls: [{ id: "timesheets.stop", input: { explanation: "" } }],
+      targetPage: "",
+      entityReferences: [],
+      missingInformation: [],
+      confidence: 0.99,
+      confirmationRequired: true,
+      response: "Opresc pontajul activ?",
+    };
+  }
+
+  const requestsStart = /\bporneste\s+(?:mi\s+)?pontaj(?:ul)?\b/.test(normalized);
+  if (!requestsStart) return null;
+  const parsed = extractTimesheetProject(command);
+  const projectQuery = parsed.projectQuery || contextualProject(context);
+  if (!projectQuery) {
+    return {
+      version: "3",
+      commandType: "timesheet_action",
+      intent: "start_timesheet",
+      toolCalls: [],
+      targetPage: "",
+      entityReferences: [],
+      missingInformation: ["proiectul pentru pontaj"],
+      confidence: 0.6,
+      confirmationRequired: false,
+      response: "Pe ce proiect pornesc pontajul?",
+    };
+  }
+
+  return {
+    version: "3",
+    commandType: "timesheet_action",
+    intent: "start_timesheet",
+    toolCalls: [
+      {
+        id: "timesheets.start",
+        input: {
+          projectId: "",
+          projectQuery,
+          createProjectIfMissing: parsed.createProjectIfMissing,
+          explanation: "",
+        },
+      },
+    ],
+    targetPage: "",
+    entityReferences: [{ type: "project", query: projectQuery, id: "" }],
+    missingInformation: [],
+    confidence: 0.98,
+    confirmationRequired: true,
+    response: `Pornesc pontajul pe proiectul ${projectQuery}?`,
   };
 }
