@@ -32,7 +32,7 @@ const TOOL_FIELDS: FieldMapItem[] = [
   { key: "status", label: "Status", aliases: ["status", "stare"], kind: "status" },
   { key: "owner", label: "Responsabil", aliases: ["responsabil", "proprietar", "owner"], kind: "user" },
   { key: "holder", label: "Detinator", aliases: ["detinator", "utilizator", "la cine este"], kind: "user" },
-  { key: "locationLabel", label: "Locatie", aliases: ["locatie", "unde este"], kind: "text" },
+  { key: "locationLabel", label: "Locatie", aliases: ["locatie", "locatia", "unde este"], kind: "text" },
   { key: "description", label: "Observatii", aliases: ["observatii", "descriere", "note"], kind: "text" },
   { key: "warrantyUntil", label: "Garantie", aliases: ["garantie"], kind: "date" },
 ];
@@ -82,6 +82,10 @@ function getFieldMap(entityType: AssistantRuntimeEntityType) {
   if (entityType === "project") return PROJECT_FIELDS;
   if (entityType === "user") return USER_FIELDS;
   return [];
+}
+
+export function getAssistantFieldDefinitions(entityType: AssistantRuntimeEntityType) {
+  return getFieldMap(entityType).map((field) => ({ ...field, aliases: [...field.aliases] }));
 }
 
 export function resolveAssistantField(entityType: AssistantRuntimeEntityType, naturalName: string) {

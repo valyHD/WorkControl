@@ -37,6 +37,7 @@ export const ASSISTANT_FORM_SCHEMAS: AssistantFormSchema[] = [
       { key: "liftNumbers", label: "Numar lift", kind: "text", aliases: ["lift", "liftNumber", "liftNumbers", "numar lift"], required: true },
       { key: "expiryDate", label: "Data expirare", kind: "date", aliases: ["expira", "expiryDate", "data expirare"] },
       { key: "revisionType", label: "Tip revizie", kind: "select", aliases: ["revizie", "revisionType", "tip revizie"], allowedValues: ["R1", "R2"] },
+      { key: "active", label: "Client activ", kind: "boolean", aliases: ["activ", "inactiv", "status client"] },
     ],
   },
   {
@@ -95,6 +96,26 @@ export const ASSISTANT_FORM_SCHEMAS: AssistantFormSchema[] = [
       { key: "roleTitle", label: "Functie", kind: "select", aliases: ["functie", "meserie", "post", "roleTitle"] },
       { key: "department", label: "Departament", kind: "select", aliases: ["departament", "echipa", "department"] },
       { key: "active", label: "Activ", kind: "boolean", aliases: ["activ", "status activ"] },
+    ],
+  },
+  {
+    id: "project",
+    module: "timesheets",
+    pagePatterns: ["/projects"],
+    title: "Proiect",
+    fields: [
+      { key: "name", label: "Nume proiect", kind: "text", aliases: ["nume", "proiect", "nume proiect"], required: true },
+      { key: "status", label: "Status", kind: "select", aliases: ["status", "stare"], allowedValues: ["activ", "inactiv", "finalizat"] },
+    ],
+  },
+  {
+    id: "expense",
+    module: "expenses",
+    pagePatterns: ["/expenses/scan"],
+    title: "Bon / cheltuiala",
+    fields: [
+      { key: "projectId", label: "Proiect", kind: "text", aliases: ["proiect", "lucrare", "projectId"] },
+      { key: "companyName", label: "Firma", kind: "text", aliases: ["firma", "companie", "companyName"] },
     ],
   },
   {

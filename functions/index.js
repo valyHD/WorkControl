@@ -2854,6 +2854,23 @@ exports.interpretAssistantCommand = onCall(
     const startedAtMs = Date.now();
     const command = toSafeString(request.data?.command).slice(0, 600);
     const originalCommand = toSafeString(request.data?.originalCommand || command).slice(0, 600);
+    const rawLanguageHints =
+      request.data?.languageHints && typeof request.data.languageHints === 'object' &&
+      !Array.isArray(request.data.languageHints)
+        ? request.data.languageHints
+        : {};
+    const languageHints = {
+      action: toSafeString(rawLanguageHints.action).slice(0, 30),
+      modules: Array.isArray(rawLanguageHints.modules)
+        ? rawLanguageHints.modules.slice(0, 10).map((item) => toSafeString(item).slice(0, 40)).filter(Boolean)
+        : [],
+      usesCurrentContext: rawLanguageHints.usesCurrentContext === true,
+      hasMultipleSteps: rawLanguageHints.hasMultipleSteps === true,
+      isMutation: rawLanguageHints.isMutation === true,
+      fieldWords: Array.isArray(rawLanguageHints.fieldWords)
+        ? rawLanguageHints.fieldWords.slice(0, 20).map((item) => toSafeString(item).slice(0, 50)).filter(Boolean)
+        : [],
+    };
     const apiKey = openaiApiKey.value() || process.env.OPENAI_API_KEY;
     const model = toSafeString(process.env.OPENAI_ASSISTANT_MODEL) || 'gpt-4.1-mini';
 
@@ -2897,7 +2914,11 @@ exports.interpretAssistantCommand = onCall(
               role: 'user',
               content: [{
                 type: 'input_text',
-                text: `Transcript original: ${originalCommand}\nForma normalizata: ${command}`,
+                text: [
+                  `Transcript original: ${originalCommand}`,
+                  `Forma normalizata: ${command}`,
+                  `Indicii semantice locale (orientative, nu inlocuiesc validarea): ${JSON.stringify(languageHints)}`,
+                ].join('\n'),
               }],
             },
           ],

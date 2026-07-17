@@ -7,6 +7,11 @@ import {
   normalizeAssistantCommandText,
 } from "./core/assistantCommandText";
 import {
+  buildAssistantLanguageHints,
+  buildLocalContextualFormContract,
+  buildSafeAssistantClarificationContract,
+} from "./core/assistantHumanLanguage";
+import {
   buildLocalAssistantHelpContract,
   buildLocalCurrentEntityUpdateContract,
   buildLocalNamedEntityUpdateContract,
@@ -354,6 +359,18 @@ export async function interpretAssistantCommand(
     });
   }
 
+  const localContextualForm = buildLocalContextualFormContract(cleanCommand, context);
+  if (localContextualForm) {
+    const fields = localContextualForm.toolCalls[0]?.input.fields as
+      | Record<string, AssistantCommandFieldValue>
+      | undefined;
+    return buildLocalInterpretation(localContextualForm, {
+      entityType: localContextualForm.entityReferences[0]?.type || "currentPage",
+      entityQuery: localContextualForm.entityReferences[0]?.query || "",
+      fields: fields || {},
+    });
+  }
+
   const localNavigation = buildLocalPageNavigationContract(
     cleanCommand,
     context?.role || context?.userRole || "angajat"
@@ -362,19 +379,38 @@ export async function interpretAssistantCommand(
 
   const safeContext = sanitizeAssistantV3PageContext(context);
   const interpretCommand = httpsCallable<
-    { command: string; originalCommand: string; context: AssistantV3PageContext },
+    {
+      command: string;
+      originalCommand: string;
+      context: AssistantV3PageContext;
+      languageHints: ReturnType<typeof buildAssistantLanguageHints>;
+    },
     unknown
   >(functions, "interpretAssistantCommand");
-  const result = await interpretCommand({
-    command: cleanCommand,
-    originalCommand,
-    context: safeContext,
-  });
-  if (!result.data) return null;
+  let result;
+  try {
+    result = await interpretCommand({
+      command: cleanCommand,
+      originalCommand,
+      context: safeContext,
+      languageHints: buildAssistantLanguageHints(cleanCommand),
+    });
+  } catch {
+    return buildLocalInterpretation(
+      buildSafeAssistantClarificationContract(cleanCommand, safeContext)
+    );
+  }
+  if (!result.data) {
+    return buildLocalInterpretation(
+      buildSafeAssistantClarificationContract(cleanCommand, safeContext)
+    );
+  }
 
   const validated = normalizeAndValidateAssistantV3Contract(cleanCommand, result.data);
   if (!validated.ok) {
-    throw new Error(`Contract Assistant V3 invalid: ${validated.errors.join(" ")}`);
+    return buildLocalInterpretation(
+      buildSafeAssistantClarificationContract(cleanCommand, safeContext)
+    );
   }
 
   return {

@@ -2,7 +2,10 @@ import type { AssistantV3Contract } from "./assistantV3Types";
 import { correctRomanianKilometers } from "../speech/romanianSpeechCorrections";
 import { resolveAssistantNavigationAction } from "../assistantActionCatalog";
 import type { NavigationRole } from "../../../config/navigation";
-import { resolveAssistantField } from "../runtime/assistantFieldResolver";
+import {
+  getAssistantFieldDefinitions,
+  resolveAssistantField,
+} from "../runtime/assistantFieldResolver";
 import type { AssistantRuntimeEntityType } from "../runtime/assistantTypes";
 import { normalizeAssistantCommandText } from "./assistantCommandText";
 
@@ -864,7 +867,7 @@ function contextualEntity(context?: LocalEntityContext) {
 function extractCurrentEntityFieldChange(command: string, entityType: AssistantRuntimeEntityType) {
   const normalized = normalizeForMatching(command);
   const action = normalized.match(
-    /\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece)\b/
+    /\b(?:actualizeaza|baga|corecteaza|fa|lasa|modifica|pune|schimba|seteaza|trece)\b/
   );
   let payload =
     action?.index === undefined
@@ -874,6 +877,7 @@ function extractCurrentEntityFieldChange(command: string, entityType: AssistantR
     /^(?:si\s+)?(?:aici|la\s+(?:asta|ala)|pe\s+(?:asta|ala)|pentru\s+(?:asta|ala)|(?:asta|ala))\s+/,
     ""
   );
+  payload = payload.replace(/^(?:la|pe|in)\s+(?=\S)/, "");
   if (!payload || /\b(?:lui|pentru\s+(?:masina|scula|proiectul|utilizatorul))\b/.test(payload)) {
     return null;
   }
@@ -1015,8 +1019,47 @@ function splitNamedEntityAndValue(value: string) {
 
 function namedEntityUpdateParts(command: string) {
   const normalized = normalizeForMatching(command);
+
+  for (const marker of NAMED_ENTITY_MARKERS) {
+    const entityMarker = marker.pattern.exec(normalized);
+    if (entityMarker?.index === undefined) continue;
+    const afterMarker = normalized
+      .slice(entityMarker.index + entityMarker[0].length)
+      .trim();
+    const nestedAction = /\b(?:actualizeaza|baga|corecteaza|fa|lasa|modifica|pune|schimba|seteaza|trece|marcheaza)\b/.exec(
+      afterMarker
+    );
+    if (nestedAction?.index === undefined || nestedAction.index <= 0) continue;
+    const entityQuery = afterMarker.slice(0, nestedAction.index).replace(/\b(?:te\s+rog|acum)\b/g, " ").trim();
+    const fieldPayload = afterMarker.slice(nestedAction.index + nestedAction[0].length).trim();
+    if (!entityQuery || !fieldPayload) continue;
+
+    const fields = getAssistantFieldDefinitions(marker.type);
+    const candidates = fields.flatMap((field) =>
+      [field.label, field.key, ...field.aliases]
+        .map(normalizeForMatching)
+        .filter(Boolean)
+        .map((alias) => ({ field, alias }))
+        .filter(({ alias }) => fieldPayload === alias || fieldPayload.startsWith(`${alias} `))
+    );
+    const matched = candidates.sort((left, right) => right.alias.length - left.alias.length)[0];
+    if (matched) {
+      const fieldValue = fieldPayload
+        .slice(matched.alias.length)
+        .trim()
+        .replace(/^(?:la|in|cu|pe|sa\s+fie|devina)\s+/, "")
+        .trim();
+      if (fieldValue) return { type: marker.type, field: matched.field, entityQuery, fieldValue };
+    }
+
+    if (marker.implicitField) {
+      const field = resolveAssistantField(marker.type, marker.implicitField);
+      if (field) return { type: marker.type, field, entityQuery, fieldValue: fieldPayload };
+    }
+  }
+
   const action = normalized.match(
-    /\b(?:actualizeaza|corecteaza|modifica|pune|schimba|seteaza|trece|marcheaza)\b/
+    /\b(?:actualizeaza|baga|corecteaza|fa|lasa|modifica|pune|schimba|seteaza|trece|marcheaza)\b/
   );
   if (action?.index === undefined) return null;
   const payload = normalized.slice(action.index + action[0].length).trim();

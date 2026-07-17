@@ -90,6 +90,14 @@ function normalizeColloquialRomanian(value: string) {
     [/\b(?:actualizaza|actualizeaz|actulizeaza)\b/giu, "actualizeaza"],
     [/\b(?:schimba|modifica|pune|seteaza)\s+(?:la\s+)?mine\b/giu, "$1"],
     [/\b(?:schimba|modifica|pune|seteaza)\s+mie\b/giu, "$1"],
+    [
+      /\b(?:lasa|fa)\s+(kilometri|km|kilometraj|itp|rca|casco|rovinieta|status|stare|functie|departament|rol|nume|locatie|observatii)\s+sa\s+fie\b/giu,
+      "seteaza $1",
+    ],
+    [
+      /\bbaga\s+(?:la\s+)?(kilometri|km|kilometraj|itp|rca|casco|rovinieta|status|stare|functie|departament|rol|nume|locatie|observatii)\b/giu,
+      "pune $1",
+    ],
     [/\bschimba\s*-?\s*i\b/giu, "schimba"],
     [/\bpune\s*-?\s*mi\b/giu, "pune"],
     [/\bpune\s*-?\s*i\b/giu, "pune"],
@@ -122,7 +130,7 @@ function normalizeColloquialRomanian(value: string) {
     [/\bspunemi\b/giu, "spune-mi"],
     [/\bmasinamea\b/giu, "masina mea"],
     [/\bmasinameu\b/giu, "masina mea"],
-    [/\b(?:kilometriii|kilometr|kilometru|chilometri|chilometraj)\b/giu, "kilometri"],
+    [/\b(?:kilometriii|kilometrii|kilometr|kilometru|chilometri|chilometraj)\b/giu, "kilometri"],
     [/\b(?:km-ul|kmul)\b/giu, "km"],
     [/\b(?:masni|masinilele)\b/giu, "masini"],
     [/\b(?:notificrile|notificarie)\b/giu, "notificarile"],

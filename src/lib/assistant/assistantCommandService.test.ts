@@ -434,7 +434,99 @@ describe("assistant command service local routing", () => {
       expect.objectContaining({
         command: "fa-mi ceva cu asta",
         originalCommand: "fami ceva cu asta",
+        languageHints: expect.objectContaining({
+          usesCurrentContext: true,
+        }),
       })
     );
+  });
+
+  it("returns a human clarification instead of a technical OpenAI error", async () => {
+    mocks.callable.mockRejectedValue(new Error("network"));
+
+    const result = await interpretAssistantCommand("schimba si aici", {
+      selectedEntity: { type: "tool", id: "tool-1", label: "Flex Bosch" },
+    });
+
+    expect(result).toMatchObject({
+      commandType: "unknown",
+      intent: "unknown",
+      toolCalls: [],
+      missingInformation: ["campul si valoarea noua"],
+      confidence: 0.35,
+    });
+    expect(result?.response).toContain("Flex Bosch");
+  });
+
+  it("fills several current-page fields locally without using OpenAI", async () => {
+    const result = await interpretAssistantCommand(
+      "completeaza data inceput 20 august 2026 data sfarsit 25 august 2026 motiv odihna",
+      { route: "/my-leave" }
+    );
+
+    expect(result).toMatchObject({
+      commandType: "form_fill",
+      intent: "fill_leave_form",
+      fieldsToUpdate: {
+        startDate: "20 august 2026",
+        endDate: "25 august 2026",
+        reason: "odihna",
+      },
+      toolCalls: [{ id: "leave.draft" }],
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "la masina Toyota pune kilometrii la 7200",
+      "vehicle",
+      "toyota",
+      "vehicles.update",
+      { currentKm: 7200 },
+    ],
+    [
+      "la scula Bosch pune locatia in depozit",
+      "tool",
+      "bosch",
+      "tools.update",
+      { locationLabel: "depozit" },
+    ],
+    [
+      "la utilizatorul Razvan schimba departamentul pe service",
+      "user",
+      "razvan",
+      "users.update",
+      { department: "service" },
+    ],
+  ])(
+    "understands entity-first colloquial updates: %s",
+    async (command, entityType, entityQuery, toolId, fields) => {
+      const result = await interpretAssistantCommand(command);
+
+      expect(result).toMatchObject({
+        commandType: "entity_update",
+        entityType,
+        entityQuery,
+        fieldsToUpdate: fields,
+        confirmationRequired: true,
+        toolCalls: [{ id: toolId, input: { entityQuery, fields } }],
+      });
+      expect(mocks.callable).not.toHaveBeenCalled();
+    }
+  );
+
+  it("understands a natural current-entity value sentence", async () => {
+    const result = await interpretAssistantCommand("lasa kilometrii sa fie 7200", {
+      selectedEntity: { type: "vehicle", id: "vehicle-1", label: "B092194 Dacia Logan" },
+    });
+
+    expect(result).toMatchObject({
+      intent: "update_vehicle",
+      entityQuery: "B092194 Dacia Logan",
+      fieldsToUpdate: { currentKm: "7200" },
+      confirmationRequired: true,
+    });
+    expect(mocks.callable).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,286 @@
+import type { AssistantCommandContext, AssistantCommandIntent } from "../assistantCommandService";
+import {
+  getAssistantFormSchemaForPage,
+  type AssistantFormFieldSchema,
+  type AssistantFormSchema,
+} from "../runtime/assistantFormSchemas";
+import { normalizeAssistantText } from "../runtime/assistantFuzzy";
+import type { AssistantV3Contract, AssistantV3PageContext } from "./assistantV3Types";
+import { normalizeAssistantCommandText } from "./assistantCommandText";
+
+export type AssistantHumanAction =
+  | "navigate"
+  | "read"
+  | "update"
+  | "create"
+  | "start"
+  | "stop"
+  | "send"
+  | "prepare"
+  | "question"
+  | "unknown";
+
+export type AssistantHumanLanguageHints = {
+  action: AssistantHumanAction;
+  modules: string[];
+  usesCurrentContext: boolean;
+  hasMultipleSteps: boolean;
+  isMutation: boolean;
+  fieldWords: string[];
+};
+
+const MODULE_TERMS: Record<string, string[]> = {
+  vehicles: ["masina", "masini", "vehicul", "gps", "tracker", "itp", "rca", "kilometri", "km"],
+  tools: ["scula", "scule", "unealta", "unelte", "flex", "bormasina", "qr"],
+  timesheets: ["pontaj", "pontaje", "proiect", "proiecte", "ore lucrate"],
+  leave: ["concediu", "cerere concediu", "zile libere"],
+  maintenance: ["mentenanta", "revizie", "interventie", "lift", "client"],
+  expenses: ["bon", "bonuri", "factura", "facturi", "cheltuiala", "ocr"],
+  users: ["utilizator", "user", "angajat", "profil", "functie", "departament"],
+  notifications: ["notificare", "notificari", "regula", "reminder"],
+  settings: ["setare", "setari", "tema", "interfata", "font", "animatii"],
+};
+
+const FIELD_WORDS = [
+  "nume",
+  "email",
+  "telefon",
+  "adresa",
+  "status",
+  "stare",
+  "functie",
+  "departament",
+  "rol",
+  "kilometri",
+  "km",
+  "itp",
+  "rca",
+  "casco",
+  "rovinieta",
+  "sofer",
+  "responsabil",
+  "locatie",
+  "observatii",
+  "motiv",
+  "proiect",
+];
+
+function includesTerm(text: string, term: string) {
+  const normalizedTerm = normalizeAssistantText(term);
+  if (` ${text} `.includes(` ${normalizedTerm} `)) return true;
+  if (normalizedTerm.length < 4) return false;
+  return text
+    .split(" ")
+    .some((token) => token.startsWith(normalizedTerm) || normalizedTerm.startsWith(token));
+}
+
+export function analyzeAssistantHumanLanguage(command: string): AssistantHumanLanguageHints {
+  const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
+  const action: AssistantHumanAction = /\b(?:opreste|stop|inchide|termina)\b/.test(normalized)
+    ? "stop"
+    : /\b(?:porneste|start|incepe|da drumul)\b/.test(normalized)
+      ? "start"
+      : /\b(?:trimite|expediaza)\b/.test(normalized)
+        ? "send"
+        : /\b(?:pregateste|completeaza|draft|asteapta)\b/.test(normalized)
+          ? "prepare"
+          : /\b(?:creeaza|adauga|genereaza|fa un|fa o)\b/.test(normalized)
+            ? "create"
+            : /\b(?:modifica|schimba|seteaza|actualizeaza|corecteaza|pune|trece|marcheaza|fa sa fie|lasa)\b/.test(
+                  normalized
+                )
+              ? "update"
+              : /\b(?:deschide|arata|mergi|intra|du ma|vreau sa vad)\b/.test(normalized)
+                ? "navigate"
+                : /\b(?:cat|cate|care|ce|unde|cand|cum|spune mi|zi mi)\b/.test(normalized)
+                  ? "question"
+                  : /\b(?:vad|vezi|afiseaza|citeste)\b/.test(normalized)
+                    ? "read"
+                    : "unknown";
+
+  const modules = Object.entries(MODULE_TERMS)
+    .filter(([, terms]) => terms.some((term) => includesTerm(normalized, term)))
+    .map(([module]) => module);
+  const fieldWords = FIELD_WORDS.filter((field) => includesTerm(normalized, field));
+  const usesCurrentContext =
+    /\b(?:asta|acesta|aceasta|aici|al meu|a mea|curent|curenta|lui|ei|si pe el|si pe ea)\b/.test(
+      normalized
+    );
+  const hasMultipleSteps = /\b(?:apoi|dupa aia|dupa aceea|iar dupa|si apoi)\b/.test(normalized);
+
+  return {
+    action,
+    modules,
+    usesCurrentContext,
+    hasMultipleSteps,
+    isMutation: ["update", "create", "start", "stop", "send", "prepare"].includes(action),
+    fieldWords,
+  };
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function fieldAliases(field: AssistantFormFieldSchema) {
+  return Array.from(new Set([field.key, field.label, ...field.aliases].map(normalizeAssistantText)))
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+}
+
+function locateFormFields(schema: AssistantFormSchema, command: string) {
+  const candidates: Array<{ field: AssistantFormFieldSchema; start: number; end: number }> = [];
+  schema.fields.forEach((field) => {
+    for (const alias of fieldAliases(field)) {
+      const match = new RegExp(`(?:^|\\s)${escapeRegExp(alias)}(?=\\s|$)`, "i").exec(command);
+      if (!match) continue;
+      const leadingSpace = match[0].startsWith(" ") ? 1 : 0;
+      candidates.push({
+        field,
+        start: match.index + leadingSpace,
+        end: match.index + match[0].length,
+      });
+      break;
+    }
+  });
+
+  return candidates
+    .sort((left, right) => left.start - right.start || right.end - left.end)
+    .filter((candidate, index, all) => index === 0 || candidate.start >= all[index - 1].end);
+}
+
+function cleanFormValue(value: string) {
+  return value
+    .replace(/^\s*(?::|-|=)?\s*(?:sa\s+fie|este|cu|la|in|pe|drept|ca)?\s*/i, "")
+    .replace(/\s+(?:si\s+apoi|apoi|dupa\s+aia|dupa\s+aceea)\s*$/i, "")
+    .replace(/[,.]+$/g, "")
+    .trim();
+}
+
+function normalizeFormValue(field: AssistantFormFieldSchema, value: string) {
+  if (field.kind === "number") {
+    const parsed = Number(value.replace(/[^\d.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : value;
+  }
+  if (field.kind === "boolean") {
+    const normalized = normalizeAssistantText(value);
+    if (/\b(?:nu|inactiv|oprit|dezactivat)\b/.test(normalized)) return false;
+    if (/\b(?:da|activ|pornit|activat)\b/.test(normalized)) return true;
+  }
+  return value;
+}
+
+const FORM_TOOL_BY_SCHEMA: Record<
+  string,
+  {
+    toolId: string;
+    intent: AssistantCommandIntent;
+    entityType: AssistantV3Contract["entityReferences"][number]["type"];
+  }
+> = {
+  "maintenance-client": {
+    toolId: "maintenance.draft",
+    intent: "fill_maintenance_client_form",
+    entityType: "maintenanceClient",
+  },
+  "leave-request": { toolId: "leave.draft", intent: "fill_leave_form", entityType: "none" },
+  vehicle: { toolId: "vehicles.draft", intent: "create_vehicle", entityType: "vehicle" },
+  tool: { toolId: "tools.draft", intent: "create_tool", entityType: "tool" },
+  user: { toolId: "users.draft", intent: "fill_current_page", entityType: "user" },
+  project: {
+    toolId: "timesheets.projects.draft",
+    intent: "create_project",
+    entityType: "project",
+  },
+  expense: { toolId: "expenses.draft", intent: "fill_current_page", entityType: "none" },
+};
+
+function contextPath(context?: AssistantCommandContext) {
+  const route = context?.route || context?.currentPathname || "";
+  return route.split(/[?#]/)[0] || "";
+}
+
+/** Completes only the React form exposed by the current page schema; it never saves it. */
+export function buildLocalContextualFormContract(
+  command: string,
+  context?: AssistantCommandContext
+): AssistantV3Contract | null {
+  const pathname = contextPath(context);
+  if (!pathname) return null;
+  const schema = getAssistantFormSchemaForPage(pathname);
+  const tool = schema ? FORM_TOOL_BY_SCHEMA[schema.id] : null;
+  if (!schema || !tool) return null;
+
+  const normalized = normalizeAssistantCommandText(command).toLocaleLowerCase("ro-RO");
+  const requestsFormChange =
+    /\b(?:completeaza|scrie|pune|seteaza|trece|adauga|baga|modifica|schimba|fa sa fie|lasa)\b/.test(
+      normalized
+    );
+  if (!requestsFormChange) return null;
+
+  const matches = locateFormFields(schema, normalized);
+  if (matches.length === 0) return null;
+  const fields: Record<string, string | number | boolean> = {};
+  matches.forEach((match, index) => {
+    const next = matches[index + 1];
+    const value = cleanFormValue(normalized.slice(match.end, next?.start ?? normalized.length));
+    if (value) fields[match.field.key] = normalizeFormValue(match.field, value);
+  });
+  if (Object.keys(fields).length === 0) return null;
+
+  return {
+    version: "3",
+    commandType: "form_fill",
+    intent: tool.intent,
+    toolCalls: [{ id: tool.toolId, input: { fields } }],
+    targetPage: pathname,
+    entityReferences: [],
+    missingInformation: [],
+    confidence: 0.94,
+    confirmationRequired: false,
+    response: `Completez ${Object.keys(fields).length === 1 ? "campul cerut" : "campurile cerute"} in ${schema.title}. Verifica apoi datele.`,
+  };
+}
+
+export function buildAssistantLanguageHints(command: string) {
+  return analyzeAssistantHumanLanguage(command);
+}
+
+export function buildSafeAssistantClarificationContract(
+  command: string,
+  context?: AssistantV3PageContext
+): AssistantV3Contract {
+  const hints = analyzeAssistantHumanLanguage(command);
+  const selectedLabel = context?.selectedEntity?.label || context?.memory?.lastEntity?.label || "";
+  let missingInformation = ["actiunea dorita"];
+  let response =
+    "Nu vreau sa ghicesc si sa modific gresit. Spune-mi ce vrei sa fac si cu ce element.";
+
+  if (hints.action === "update") {
+    missingInformation = selectedLabel
+      ? ["campul si valoarea noua"]
+      : ["elementul, campul si valoarea noua"];
+    response = selectedLabel
+      ? `Am inteles ca vrei sa modifici ${selectedLabel}. Spune-mi campul si valoarea noua.`
+      : "Am inteles ca vrei o modificare. Spune-mi elementul, campul si valoarea noua.";
+  } else if (hints.action === "navigate" || hints.action === "read") {
+    missingInformation = ["pagina sau elementul cautat"];
+    response = "Spune-mi pagina sau elementul pe care vrei sa il deschid.";
+  } else if (hints.action === "create" || hints.action === "prepare" || hints.action === "send") {
+    missingInformation = ["tipul si datele necesare"];
+    response = "Am inteles actiunea, dar am nevoie de tipul si datele elementului.";
+  }
+
+  return {
+    version: "3",
+    commandType: "unknown",
+    intent: "unknown",
+    toolCalls: [],
+    targetPage: "",
+    entityReferences: [],
+    missingInformation,
+    confidence: 0.35,
+    confirmationRequired: false,
+    response,
+  };
+}
