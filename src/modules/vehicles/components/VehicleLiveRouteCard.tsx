@@ -50,6 +50,10 @@ import {
   type VehicleDistanceBucket,
 } from "../utils/vehicleGps";
 import {
+  calculateSimulationMileageTotals,
+  getSimulationMileageCheckpointElapsedMs,
+} from "../utils/vehicleSimulationMileage";
+import {
   appendLiveTrailPoint,
   getRenderableLiveTrail,
 } from "../utils/vehicleLiveTrail";
@@ -2014,6 +2018,38 @@ export default function VehicleLiveRouteCard({
         : [],
     [displayToTs, effectiveSimPositions, fromTs, hasLiveSimulation]
   );
+  const activeSimulationMileagePositions = useMemo(() => {
+    if (!hasLiveSimulation || activeSimulationPositionsInRange.length <= 1) return [];
+
+    const firstTimestamp = activeSimulationPositionsInRange[0]?.gpsTimestamp || 0;
+    const lastTimestamp =
+      activeSimulationPositionsInRange[activeSimulationPositionsInRange.length - 1]?.gpsTimestamp ||
+      firstTimestamp;
+    const elapsedMs = gpsSimVisible
+      ? gpsSimElapsedMs
+      : Math.max(0, lastTimestamp - firstTimestamp);
+    const checkpointElapsedMs = getSimulationMileageCheckpointElapsedMs(
+      elapsedMs,
+      gpsSimVisible ? gpsSimTotalDurationMs : Math.max(0, lastTimestamp - firstTimestamp),
+      gpsSimDone
+    );
+    const cutoffTimestamp = firstTimestamp + checkpointElapsedMs;
+
+    return activeSimulationPositionsInRange.filter(
+      (point) => point.gpsTimestamp <= cutoffTimestamp
+    );
+  }, [
+    activeSimulationPositionsInRange,
+    gpsSimDone,
+    gpsSimElapsedMs,
+    gpsSimTotalDurationMs,
+    gpsSimVisible,
+    hasLiveSimulation,
+  ]);
+  const activeSimulationMileageDistanceKm = useMemo(
+    () => calculateRouteProgressDistanceKm(activeSimulationMileagePositions),
+    [activeSimulationMileagePositions]
+  );
   const currentSimulationPosition = useMemo<VehiclePositionItem | null>(() => {
     if (!hasLiveSimulation) return null;
     const point = shouldUseLocalSimulation
@@ -2349,20 +2385,16 @@ export default function VehicleLiveRouteCard({
       0,
       absoluteCurrentKm - initialRecordedKm
     );
-    const totalTrackedKm = Number(
-      Math.max(
-        baseHistoryStats.totalTrackedKm,
-        monitoredFromOdometerKm
-      ).toFixed(2)
-    );
-    const calculatedEstimatedCurrentKm = Number(
-      Math.max(
-        absoluteCurrentKm,
-        initialRecordedKm +
-          baseHistoryStats.totalTrackedKm +
-          (vehicle.mileageAdjustmentKm || 0)
-      ).toFixed(2)
-    );
+    const liveMileageTotals = calculateSimulationMileageTotals({
+      historyTrackedKm: baseHistoryStats.totalTrackedKm,
+      monitoredFromOdometerKm,
+      absoluteCurrentKm,
+      initialRecordedKm,
+      mileageAdjustmentKm: vehicle.mileageAdjustmentKm || 0,
+      activeSimulationDistanceKm: activeSimulationMileageDistanceKm,
+    });
+    const totalTrackedKm = liveMileageTotals.totalTrackedKm;
+    const calculatedEstimatedCurrentKm = liveMileageTotals.estimatedCurrentKm;
     const activeRouteStartedAt =
       vehicle.gpsSim?.startedAt ||
       activeSimulationPositionsInRange[0]?.gpsTimestamp ||
@@ -2391,6 +2423,7 @@ export default function VehicleLiveRouteCard({
     };
   }, [
     baseHistoryStats,
+    activeSimulationMileageDistanceKm,
     latestRealLivePosition?.odometerKm,
     initialRecordedKm,
     activeSimulationPositionsInRange,
