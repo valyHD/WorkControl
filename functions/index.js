@@ -9,6 +9,7 @@ const { FieldValue } = require('firebase-admin/firestore');
 const { OAuth2Client } = require('google-auth-library');
 const { createGmailMimeBoundary } = require('./gmailMime');
 const { sendRawGmailMessage } = require('./gmailApi');
+const { buildDaytimeBackgroundSchedule } = require('./backgroundScheduleWindow');
 const {
   buildClientPartOfferEmail,
   buildSupplierQuoteRequestEmail,
@@ -3957,7 +3958,7 @@ exports.processExpenseScanJob = onDocumentCreated(
 
 exports.checkTimesheetReminderAlerts = onSchedule(
   {
-    schedule: '*/5 5-21 * * *',
+    schedule: buildDaytimeBackgroundSchedule(5),
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
@@ -4035,7 +4036,7 @@ async function failVehicleAlertSchedule(scheduleRef, claimed, workerId, now, err
 
 exports.checkVehicleMaintenanceAlerts = onSchedule(
   {
-    schedule: '*/15 5-21 * * *',
+    schedule: buildDaytimeBackgroundSchedule(15),
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
@@ -4279,7 +4280,7 @@ async function deliverPartOrderReminderTransaction(orderRef, orderId, now, sched
 
 exports.checkMaintenancePartOrderReminders = onSchedule(
   {
-    schedule: '*/5 5-21 * * *',
+    schedule: buildDaytimeBackgroundSchedule(5),
     timeZone: 'Europe/Bucharest',
     region: 'europe-west1',
   },
