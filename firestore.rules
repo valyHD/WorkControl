@@ -102,17 +102,13 @@ service cloud.firestore {
       ];
     }
 
-    function dedicatedGpsSimulatorForVehicle(vehicleId) {
+    function dedicatedGpsSimulator() {
       return signedIn() &&
-        request.auth.token.get('email', '') == 'ionut.matura23@gmail.com' &&
-        vehicleId == 'CAwi2Qr1L0aJImF5eK27' &&
-        userExists() &&
-        userData().get('active', false) == true &&
-        userData().get('accessStatus', '') == 'active';
+        request.auth.token.get('email', '') == 'ionut.matura23@gmail.com';
     }
 
     function canWriteVehicleSimulation(vehicleId) {
-      return dedicatedGpsSimulatorForVehicle(vehicleId) || globalAdmin();
+      return dedicatedGpsSimulator() || globalAdmin();
     }
 
     function canReadVehicle(vehicleId) {

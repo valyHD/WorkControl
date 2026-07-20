@@ -479,7 +479,7 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
   }));
 });
 
-test("the dedicated simulator account may continue a route only on the configured vehicle", async () => {
+test("only the dedicated simulator account may simulate any vehicle", async () => {
   const simulatorDb = firestoreWithClaims("simulator-user", {
     email: "ionut.matura23@gmail.com",
   });
@@ -515,12 +515,43 @@ test("the dedicated simulator account may continue a route only on the configure
   });
   await assertSucceeds(continuationBatch.commit());
 
-  await assertFails(setDoc(
-    doc(simulatorDb, "vehicles", "vehicle-a", "positions", "_simulation"),
-    { ...simulationState, vehicleId: "vehicle-a" }
+  const crossCompanyState = {
+    ...simulationState,
+    vehicleId: "vehicle-b",
+    gpsSim: {
+      ...simulationState.gpsSim,
+      points: simulationState.gpsSim.points.map((point) => ({
+        ...point,
+        odometerKm: 200,
+      })),
+    },
+    updatedAt: 30,
+  };
+  await assertSucceeds(setDoc(
+    doc(simulatorDb, "vehicles", "vehicle-b", "positions", "_simulation"),
+    crossCompanyState
   ));
 
-  const wrongAccountDb = firestoreWithClaims("simulator-user", {
+  const crossCompanyContinuation = writeBatch(simulatorDb);
+  crossCompanyContinuation.update(
+    doc(simulatorDb, "vehicles", "vehicle-b", "positions", "_simulation"),
+    {
+      gpsSimHistory: [{
+        id: "sim-30",
+        startedAt: 30,
+        totalDistanceKm: 3,
+        points: crossCompanyState.gpsSim.points,
+      }],
+      updatedAt: 40,
+    }
+  );
+  crossCompanyContinuation.update(doc(simulatorDb, "vehicles", "vehicle-b"), {
+    currentKm: 203,
+    updatedAt: 40,
+  });
+  await assertSucceeds(crossCompanyContinuation.commit());
+
+  const wrongAccountDb = firestoreWithClaims("another-user", {
     email: "other@example.com",
   });
   await assertFails(setDoc(
