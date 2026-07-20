@@ -551,6 +551,25 @@ test("only the dedicated simulator account may simulate any vehicle", async () =
   });
   await assertSucceeds(crossCompanyContinuation.commit());
 
+  await assertFails(updateDoc(doc(simulatorDb, "vehicles", "vehicle-b"), {
+    ownerUserId: "vip1Arv2zBNYQY1CGqCDcLhuCSc2",
+  }));
+
+  const productionSizedHistory = Array.from({ length: 49 }, (_, index) => ({
+    id: `existing-sim-${index}`,
+    startedAt: index + 1,
+    totalDistanceKm: 1,
+    points: crossCompanyState.gpsSim.points,
+  }));
+  await assertSucceeds(setDoc(
+    doc(simulatorDb, "vehicles", "vehicle-b", "positions", "_simulation"),
+    {
+      ...crossCompanyState,
+      gpsSimHistory: productionSizedHistory,
+      updatedAt: 50,
+    }
+  ));
+
   const wrongAccountDb = firestoreWithClaims("another-user", {
     email: "ionut.matura23@gmail.com",
   });

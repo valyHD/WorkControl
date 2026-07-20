@@ -221,6 +221,12 @@ service cloud.firestore {
         request.resource.data.get('currentKm', 0) >= 0;
       allow update: if
         (
+          dedicatedGpsSimulator() &&
+          changedOnly(['currentKm', 'updatedAt', 'updatedAtServer']) &&
+          request.resource.data.get('currentKm', 0) is number &&
+          request.resource.data.get('currentKm', 0) >= 0
+        ) ||
+        (
           canWriteVehicleSimulation() && immutableCompany() &&
           changedOnly(['currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
@@ -261,6 +267,7 @@ service cloud.firestore {
 
       match /positions/{positionId} {
         allow read: if canReadVehicle(vehicleId);
+        allow create, update, delete: if positionId == '_simulation' && dedicatedGpsSimulator();
         allow create: if positionId == '_simulation' && canWriteVehicleSimulation() &&
           request.resource.data.keys().hasOnly([
             'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
