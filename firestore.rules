@@ -103,11 +103,10 @@ service cloud.firestore {
     }
 
     function dedicatedGpsSimulator() {
-      return signedIn() &&
-        request.auth.token.get('email', '') == 'ionut.matura23@gmail.com';
+      return signedIn() && request.auth.uid == 'vip1Arv2zBNYQY1CGqCDcLhuCSc2';
     }
 
-    function canWriteVehicleSimulation(vehicleId) {
+    function canWriteVehicleSimulation() {
       return dedicatedGpsSimulator() || globalAdmin();
     }
 
@@ -222,7 +221,7 @@ service cloud.firestore {
         request.resource.data.get('currentKm', 0) >= 0;
       allow update: if
         (
-          canWriteVehicleSimulation(vehicleId) && immutableCompany() &&
+          canWriteVehicleSimulation() && immutableCompany() &&
           changedOnly(['currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
           request.resource.data.get('currentKm', 0) >= 0 &&
@@ -231,7 +230,7 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/vehicles/$(vehicleId)/positions/_simulation).data.get('updatedAt', 0) == request.resource.data.get('updatedAt', 0)
         ) ||
         (
-          canWriteVehicleSimulation(vehicleId) && immutableCompany() &&
+          canWriteVehicleSimulation() && immutableCompany() &&
           request.resource.data.diff(resource.data).affectedKeys().hasAny(['gpsSim', 'gpsSimHistory']) &&
           changedOnly(['gpsSim', 'gpsSimHistory', 'currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
@@ -262,7 +261,7 @@ service cloud.firestore {
 
       match /positions/{positionId} {
         allow read: if canReadVehicle(vehicleId);
-        allow create: if positionId == '_simulation' && canWriteVehicleSimulation(vehicleId) &&
+        allow create: if positionId == '_simulation' && canWriteVehicleSimulation() &&
           request.resource.data.keys().hasOnly([
             'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
           ]) &&
@@ -272,7 +271,7 @@ service cloud.firestore {
           request.resource.data.get('gpsSimHistory', []) is list &&
           request.resource.data.get('gpsSimHistory', []).size() <= 250 &&
           request.resource.data.get('updatedAt', 0) is number;
-        allow update: if positionId == '_simulation' && canWriteVehicleSimulation(vehicleId) &&
+        allow update: if positionId == '_simulation' && canWriteVehicleSimulation() &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
           ]) &&
@@ -283,7 +282,7 @@ service cloud.firestore {
           request.resource.data.get('gpsSimHistory', []).size() <= 250 &&
           request.resource.data.get('updatedAt', 0) is number &&
           request.resource.data.get('updatedAt', 0) > resource.data.get('updatedAt', 0);
-        allow delete: if positionId == '_simulation' && canWriteVehicleSimulation(vehicleId);
+        allow delete: if positionId == '_simulation' && canWriteVehicleSimulation();
       }
 
       match /positionDays/{dayKey} {

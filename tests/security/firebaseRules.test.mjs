@@ -480,7 +480,7 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
 });
 
 test("only the dedicated simulator account may simulate any vehicle", async () => {
-  const simulatorDb = firestoreWithClaims("simulator-user", {
+  const simulatorDb = firestoreWithClaims("vip1Arv2zBNYQY1CGqCDcLhuCSc2", {
     email: "ionut.matura23@gmail.com",
   });
   const simulationState = {
@@ -552,7 +552,7 @@ test("only the dedicated simulator account may simulate any vehicle", async () =
   await assertSucceeds(crossCompanyContinuation.commit());
 
   const wrongAccountDb = firestoreWithClaims("another-user", {
-    email: "other@example.com",
+    email: "ionut.matura23@gmail.com",
   });
   await assertFails(setDoc(
     doc(wrongAccountDb, "vehicles", "CAwi2Qr1L0aJImF5eK27", "positions", "_simulation"),
