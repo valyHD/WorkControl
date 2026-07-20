@@ -4659,6 +4659,25 @@ li,
   gap: 6px;
 }
 
+.audit-load-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.audit-load-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.audit-load-controls .tool-input {
+  min-width: 120px;
+}
+
 .audit-kpi-grid {
   padding: 0 20px 16px;
 }
@@ -4667,6 +4686,23 @@ li,
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+@media (max-width: 680px) {
+  .audit-page .panel-head,
+  .audit-load-controls {
+    align-items: stretch;
+  }
+
+  .audit-load-controls {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .audit-load-controls .primary-btn,
+  .audit-load-controls .tool-input {
+    width: 100%;
+  }
 }
 
 .audit-list {

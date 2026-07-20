@@ -15,6 +15,10 @@ import {
   getCurrentCompanyAccessContext,
 } from "../../../lib/firebase/companyAccess";
 import type { AuditLogCategory, AuditLogInput, AuditLogItem } from "../../../types/audit";
+import {
+  DEFAULT_AUDIT_LOG_QUERY_LIMIT,
+  normalizeAuditLogQueryLimit,
+} from "../utils/auditLogQueryLimit";
 
 const auditLogsCollection = collection(db, "auditLogs");
 const PAGE_VIEW_THROTTLE_MS = 30 * 60_000;
@@ -173,23 +177,24 @@ export function logPageView(params: {
   }).catch((error) => console.warn("[audit][page_view]", error));
 }
 
-export async function getAuditLogs(maxItems = 800): Promise<AuditLogItem[]> {
+export async function getAuditLogs(maxItems = DEFAULT_AUDIT_LOG_QUERY_LIMIT): Promise<AuditLogItem[]> {
+  const safeLimit = normalizeAuditLogQueryLimit(maxItems);
   const context = await getCurrentCompanyAccessContext();
   const scoped = context.globalAdmin
-    ? query(auditLogsCollection, orderBy("createdAt", "desc"), limit(maxItems))
+    ? query(auditLogsCollection, orderBy("createdAt", "desc"), limit(safeLimit))
     : context.role === "angajat"
       ? query(
           auditLogsCollection,
           ...buildCompanyScopeConstraints(context),
           where("actorUserId", "==", context.uid),
           orderBy("createdAt", "desc"),
-          limit(maxItems)
+          limit(safeLimit)
         )
       : query(
           auditLogsCollection,
           ...buildCompanyScopeConstraints(context),
           orderBy("createdAt", "desc"),
-          limit(maxItems)
+          limit(safeLimit)
         );
   const snap = await getDocs(scoped);
   return snap.docs.map((docItem) => mapAuditLogDoc(docItem.id, docItem.data()));

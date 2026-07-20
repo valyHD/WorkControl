@@ -16,23 +16,25 @@ vi.mock("../../../components/UserProfileLink", () => ({
 
 describe("AuditLogPage lazy activity", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(getAuditLogs).mockResolvedValue([]);
     vi.mocked(getAllUsers).mockResolvedValue([]);
   });
 
-  it("does not read activity until the user explicitly requests it", async () => {
+  it("loads only ten recent activities by default and expands only on request", async () => {
     render(
       <MemoryRouter>
         <AuditLogPage />
       </MemoryRouter>
     );
 
-    expect(getAuditLogs).not.toHaveBeenCalled();
+    await waitFor(() => expect(getAuditLogs).toHaveBeenCalledWith(10));
     expect(getAllUsers).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /afiseaza activitatea/i }));
+    fireEvent.change(screen.getByLabelText(/numar activitati/i), { target: { value: "1000" } });
+    fireEvent.click(screen.getByRole("button", { name: /afiseaza 1000/i }));
 
-    await waitFor(() => expect(getAuditLogs).toHaveBeenCalledWith(200));
+    await waitFor(() => expect(getAuditLogs).toHaveBeenLastCalledWith(1000));
     expect(getAllUsers).toHaveBeenCalledTimes(1);
   });
 });
