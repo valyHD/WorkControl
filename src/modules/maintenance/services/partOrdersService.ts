@@ -14,8 +14,8 @@ import {
 import { db } from "../../../lib/firebase/firebase";
 import {
   buildCompanyScopeConstraints,
+  canAccessCompany,
   getCurrentCompanyAccessContext,
-  requirePrimaryCompanyId,
 } from "../../../lib/firebase/companyAccess";
 import { dispatchNotificationEvent } from "../../notifications/services/notificationsService";
 import type { AppUser } from "../../../types/tool";
@@ -26,6 +26,7 @@ import type {
   MaintenancePartOrderPriority,
   MaintenancePartOrderStatus,
 } from "../../../types/maintenance";
+import { resolvePartOrderCompanyId } from "../utils/partOrdersDomain";
 
 const partOrdersCollection = collection(db, "maintenancePartOrders");
 const ORDERS_PATH = "/maintenance/orders";
@@ -215,7 +216,14 @@ export async function createMaintenancePartOrder(
   actor: AppUser | null
 ): Promise<string> {
   const context = await getCurrentCompanyAccessContext();
-  const companyId = input.companyId || requirePrimaryCompanyId(context);
+  const companyId = resolvePartOrderCompanyId(
+    input.companyId,
+    context.primaryCompanyId,
+    context.companyIds
+  );
+  if (!canAccessCompany(context, companyId)) {
+    throw new Error("Clientul selectat nu apartine unei firme la care ai acces.");
+  }
   const now = Date.now();
   const lines = input.lines.map((line, index) => normalizeLine(line, index)).filter((line) => line.name);
   const payload = {
@@ -238,21 +246,25 @@ export async function createMaintenancePartOrder(
 
   const docRef = await addDoc(partOrdersCollection, payload);
   const savedOrder = mapOrder(docRef.id, payload);
-  await dispatchNotificationEvent({
-    module: "maintenance",
-    eventType: "maintenance_part_order_created",
-    entityId: docRef.id,
-    title: "Comanda piese noua",
-    message: `${actorName(actor)} a creat comanda ${orderLabel(savedOrder)}.`,
-    notificationPath: ORDERS_PATH,
-    ownerUserId: savedOrder.requestedByUserId,
-    actorUserId: actor?.id || actor?.uid || "",
-    actorUserName: actorName(actor),
-    actorUserThemeKey: actor?.themeKey ?? null,
-    metadata: {
-      fieldsText: buildFieldsText(savedOrder),
-    },
-  });
+  try {
+    await dispatchNotificationEvent({
+      module: "maintenance",
+      eventType: "maintenance_part_order_created",
+      entityId: docRef.id,
+      title: "Comanda piese noua",
+      message: `${actorName(actor)} a creat comanda ${orderLabel(savedOrder)}.`,
+      notificationPath: ORDERS_PATH,
+      ownerUserId: savedOrder.requestedByUserId,
+      actorUserId: actor?.id || actor?.uid || "",
+      actorUserName: actorName(actor),
+      actorUserThemeKey: actor?.themeKey ?? null,
+      metadata: {
+        fieldsText: buildFieldsText(savedOrder),
+      },
+    });
+  } catch (error) {
+    console.error("[partOrdersService][create][notification]", error);
+  }
 
   return docRef.id;
 }

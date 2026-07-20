@@ -7,6 +7,7 @@ import {
   calculateSupplierOfferTotal,
   getPartOrderDisplayAmount,
   getPartOrderVisualState,
+  resolvePartOrderCompanyId,
   uniqueOrderedPartNames,
 } from "./partOrdersDomain";
 
@@ -142,5 +143,21 @@ describe("partOrdersDomain", () => {
       supplierEmail: "salvat@example.com",
     });
     expect(result.lines[0]).toMatchObject({ name: "Role usa", supplier: "Furnizor piesa" });
+  });
+
+  it("uses the selected client's company for a part order", () => {
+    expect(resolvePartOrderCompanyId(" client-company ", "profile-company", ["profile-company"])).toBe(
+      "client-company"
+    );
+  });
+
+  it("falls back only to an unambiguous profile company", () => {
+    expect(resolvePartOrderCompanyId("", "profile-company", ["profile-company", "other-company"])).toBe(
+      "profile-company"
+    );
+    expect(resolvePartOrderCompanyId("", "", ["single-company"])).toBe("single-company");
+    expect(() => resolvePartOrderCompanyId("", "", ["company-a", "company-b"])).toThrow(
+      "Selecteaza un client asociat unei firme"
+    );
   });
 });

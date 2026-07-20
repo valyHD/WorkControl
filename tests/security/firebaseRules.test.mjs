@@ -327,6 +327,26 @@ test("part order preferences belong only to the authenticated user", async () =>
   }));
 });
 
+test("maintenance part orders require manager access to the selected company", async () => {
+  const order = {
+    companyId: "company-a",
+    title: "Comanda piese test",
+    clientId: "client-a",
+    clientName: "Client A",
+    lines: [{ id: "line-1", name: "Rola usa", quantity: 1 }],
+    createdAt: 1000,
+    updatedAt: 1000,
+  };
+
+  await assertSucceeds(setDoc(doc(firestore("manager-a"), "maintenancePartOrders", "order-a"), order));
+  await assertSucceeds(setDoc(doc(firestore("admin-a"), "maintenancePartOrders", "order-admin"), {
+    ...order,
+    companyId: "company-b",
+  }));
+  await assertFails(setDoc(doc(firestore("employee-a"), "maintenancePartOrders", "order-employee"), order));
+  await assertFails(setDoc(doc(firestore("manager-b"), "maintenancePartOrders", "order-cross-company"), order));
+});
+
 test("only a manager from the client company can change maintenance client status", async () => {
   await assertSucceeds(updateDoc(doc(firestore("manager-a"), "maintenanceClients", "client-a"), {
     status: "inactive",

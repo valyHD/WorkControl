@@ -374,6 +374,15 @@ export default function MaintenancePartOrdersPage() {
     setStatus("");
   }
 
+  function getSaveErrorMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("Selecteaza ") || message.startsWith("Clientul selectat ")) return message;
+    if (/permission-denied|insufficient permissions/i.test(message)) {
+      return "Nu ai permisiunea sa salvezi comanda pentru firma clientului selectat.";
+    }
+    return "Nu am putut salva comanda de piese. Incearca din nou.";
+  }
+
   function startEdit(order: MaintenancePartOrder) {
     setEditingOrder(order);
     setForm(orderToForm(order));
@@ -407,6 +416,7 @@ export default function MaintenancePartOrdersPage() {
     try {
       const payload = {
         ...form,
+        companyId: editingOrder?.companyId || client?.companyId || "",
         clientName: client?.name || "",
         requestedByUserId: editingOrder?.requestedByUserId || currentUser.id,
         requestedByUserName: editingOrder?.requestedByUserName || currentUser.fullName || currentUser.email || "Utilizator",
@@ -437,26 +447,32 @@ export default function MaintenancePartOrdersPage() {
         lines,
       };
 
-      await savePartOrderPreferences(currentUser.id, {
-        ...(preferences || {}),
-        supplierName: form.supplierName,
-        supplierContact: form.supplierContact,
-        supplierEmail: form.supplierEmail,
-        lineSupplier: lines.find((line) => line.supplier.trim())?.supplier || preferences?.lineSupplier || "",
-        lastPartName: lines.at(-1)?.name || preferences?.lastPartName || "",
-      });
+      try {
+        await savePartOrderPreferences(currentUser.id, {
+          ...(preferences || {}),
+          companyId: editingOrder?.companyId || client?.companyId || preferences?.companyId || "",
+          supplierName: form.supplierName,
+          supplierContact: form.supplierContact,
+          supplierEmail: form.supplierEmail,
+          lineSupplier: lines.find((line) => line.supplier.trim())?.supplier || preferences?.lineSupplier || "",
+          lastPartName: lines.at(-1)?.name || preferences?.lastPartName || "",
+        });
+      } catch (preferenceError) {
+        console.error("[MaintenancePartOrdersPage][preferences]", preferenceError);
+      }
 
       if (editingOrder) {
         await updateMaintenancePartOrder(editingOrder.id, payload, currentUser, editingOrder.status);
+        resetForm();
         setStatus("Comanda actualizata.");
       } else {
         await createMaintenancePartOrder(payload, currentUser);
-        setStatus("Comanda creata si notificarea a fost generata dupa reguli.");
+        resetForm();
+        setStatus("Comanda de piese a fost creata.");
       }
-      resetForm();
     } catch (err) {
       console.error("[MaintenancePartOrdersPage][save]", err);
-      setError("Nu am putut salva comanda de piese.");
+      setError(getSaveErrorMessage(err));
     } finally {
       setSaving(false);
     }

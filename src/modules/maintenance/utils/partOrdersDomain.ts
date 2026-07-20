@@ -125,3 +125,20 @@ export function applyPartOrderPreferences<T extends {
     })),
   };
 }
+
+export function resolvePartOrderCompanyId(
+  requestedCompanyId: string | null | undefined,
+  primaryCompanyId: string,
+  companyIds: string[]
+): string {
+  const requested = requestedCompanyId?.trim() || "";
+  if (requested) return requested;
+
+  const primary = primaryCompanyId.trim();
+  if (primary) return primary;
+
+  const assigned = [...new Set(companyIds.map((value) => value.trim()).filter(Boolean))];
+  if (assigned.length === 1) return assigned[0];
+
+  throw new Error("Selecteaza un client asociat unei firme inainte de a crea comanda.");
+}
