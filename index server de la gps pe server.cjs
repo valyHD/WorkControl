@@ -12,6 +12,11 @@ const {
   shouldUseRuntimeLive,
   shouldWriteDayMetadata,
 } = require("./gps-write-amplification-core.cjs");
+const {
+  advanceRealPositionRetentionState,
+  evaluateRealPositionRetention,
+  shouldWriteLiveSnapshot24h,
+} = require("./gps-stationary-write-policy.cjs");
 
 const execAsync = util.promisify(exec);
 
@@ -38,6 +43,8 @@ const LAST_CLEANUP_FILE = "/tmp/workcontrol-last-cleanup.txt";
 const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
 const UNBOUND_LOG_THROTTLE_MS = 15 * 60 * 1000;
 const SNAPSHOT_WRITE_MIN_INTERVAL_MS = Number(process.env.LIVE_SNAPSHOT_WRITE_INTERVAL_MS || 1_000);
+const GPS_STATIONARY_WRITE_REDUCTION_ENABLED =
+  String(process.env.GPS_STATIONARY_WRITE_REDUCTION_ENABLED || "true").toLowerCase() !== "false";
 const LIVE_DIAGNOSTICS_TTL_MS = Number(process.env.LIVE_DIAGNOSTICS_TTL_MS || 30_000);
 const MIN_POINT_INTERVAL_MS_MOVING = Number(process.env.ROUTE_POINT_INTERVAL_MS_MOVING || 3_000);
 const MIN_POINT_INTERVAL_MS_IDLE = 180_000;
@@ -49,6 +56,7 @@ const MAX_DISTANCE_STEP_METERS = 2000;
 const MAX_ODOMETER_INCREMENT_KM = 500;
 const trackerBindingCache = new Map();
 const lastSavedPointByImei = new Map();
+const positionRetentionStateByImei = new Map();
 const lastOdometerKmByImei = new Map();
 const lastSnapshotWriteByVehicle = new Map();
 const lastDayMetadataWriteByVehicle = new Map();
@@ -83,6 +91,8 @@ const writeAmplificationCounters = {
   runtimeRootFlushes: 0,
   dayMetadataWrites: 0,
   dayMetadataWritesSkipped: 0,
+  stationaryRoutePointsSkipped: 0,
+  stationarySnapshotWritesSkipped: 0,
   lastLoggedAt: Date.now(),
 };
 let gpsCostConfigCache = {
@@ -183,12 +193,16 @@ function maybeLogWriteAmplificationCounters(now = Date.now()) {
     runtimeRootFlushes: writeAmplificationCounters.runtimeRootFlushes,
     dayMetadataWrites: writeAmplificationCounters.dayMetadataWrites,
     dayMetadataWritesSkipped: writeAmplificationCounters.dayMetadataWritesSkipped,
+    stationaryRoutePointsSkipped: writeAmplificationCounters.stationaryRoutePointsSkipped,
+    stationarySnapshotWritesSkipped: writeAmplificationCounters.stationarySnapshotWritesSkipped,
   })}`);
   writeAmplificationCounters.runtimeSnapshotWrites = 0;
   writeAmplificationCounters.legacyRootSnapshotWrites = 0;
   writeAmplificationCounters.runtimeRootFlushes = 0;
   writeAmplificationCounters.dayMetadataWrites = 0;
   writeAmplificationCounters.dayMetadataWritesSkipped = 0;
+  writeAmplificationCounters.stationaryRoutePointsSkipped = 0;
+  writeAmplificationCounters.stationarySnapshotWritesSkipped = 0;
   writeAmplificationCounters.lastLoggedAt = now;
 }
 
@@ -2097,11 +2111,37 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
   const previousSavedPointFromMemory = lastSavedPointByImei.get(imei) || null;
   let previousSavedPoint = previousSavedPointFromMemory;
   const recordsForStorage = [];
+  let retentionState = positionRetentionStateByImei.get(imei) || {
+    lastSaved: previousSavedPointFromMemory,
+    lastObserved: previousSavedPointFromMemory,
+    lastMoving: null,
+  };
+  let latestRetentionDecision = null;
+  let hasImmediateSnapshotReason = false;
   for (const record of validRecords) {
+    if (GPS_STATIONARY_WRITE_REDUCTION_ENABLED) {
+      const decision = evaluateRealPositionRetention(retentionState, record);
+      latestRetentionDecision = decision;
+      hasImmediateSnapshotReason = hasImmediateSnapshotReason ||
+        decision.ignitionChanged || decision.importantEvent || decision.motionChanged;
+      retentionState = advanceRealPositionRetentionState(retentionState, record, decision);
+      if (decision.keep) {
+        recordsForStorage.push(record);
+        previousSavedPoint = record;
+      } else if (!decision.moving) {
+        writeAmplificationCounters.stationaryRoutePointsSkipped += 1;
+      }
+      continue;
+    }
+
     if (shouldKeepRecord(previousSavedPoint, record)) {
       recordsForStorage.push(record);
       previousSavedPoint = record;
     }
+  }
+
+  if (GPS_STATIONARY_WRITE_REDUCTION_ENABLED) {
+    positionRetentionStateByImei.set(imei, retentionState);
   }
 
   if (previousSavedPoint) {
@@ -2251,10 +2291,18 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
 
   if (latestSnapshot) {
     const lastSnapshotWriteAt = lastSnapshotWriteByVehicle.get(vehicleId) || 0;
-    const shouldWriteSnapshot =
-      now - lastSnapshotWriteAt >= SNAPSHOT_WRITE_MIN_INTERVAL_MS ||
-      (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH ||
-      currentKmIncrement > 0;
+    const shouldWriteSnapshot = GPS_STATIONARY_WRITE_REDUCTION_ENABLED
+      ? shouldWriteLiveSnapshot24h({
+          lastWriteAt: lastSnapshotWriteAt,
+          now,
+          moving: latestRetentionDecision?.moving === true,
+          ignitionOn: latestSnapshot.ignitionOn,
+          immediate: hasImmediateSnapshotReason,
+          currentKmIncrement,
+        })
+      : now - lastSnapshotWriteAt >= SNAPSHOT_WRITE_MIN_INTERVAL_MS ||
+        (latestSnapshot.speedKmh || 0) >= MOVING_SPEED_THRESHOLD_KMH ||
+        currentKmIncrement > 0;
     if (shouldWriteSnapshot) {
       if (useRuntimeLive) {
         await writeVehicleRuntimeLiveSnapshot(
@@ -2304,6 +2352,9 @@ async function saveRecordsToFirestore(imei, records, dataUsageDelta = null) {
       }
       lastSnapshotWriteByVehicle.set(vehicleId, now);
     } else {
+      if (GPS_STATIONARY_WRITE_REDUCTION_ENABLED && latestRetentionDecision?.moving !== true) {
+        writeAmplificationCounters.stationarySnapshotWritesSkipped += 1;
+      }
       if (!useGpsCostCanary) {
         if (useRuntimeLive) {
           await writeVehicleRuntimeDataUsageOnly(
@@ -2788,6 +2839,9 @@ gpsCostFlushTimer.unref?.();
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`[SERVER STARTED] GPS gateway listening on 0.0.0.0:${PORT}`);
+  console.log(
+    `[GPS STATIONARY WRITE REDUCTION] ${GPS_STATIONARY_WRITE_REDUCTION_ENABLED ? "enabled" : "disabled"}`
+  );
 });
 
 let shutdownStarted = false;
