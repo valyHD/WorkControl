@@ -1960,6 +1960,14 @@ async function assertAdminRequest(request) {
   return context;
 }
 
+async function assertBillingAdminRequest(request) {
+  const context = await assertActiveInternalRequest(request);
+  if (context.role !== 'admin') {
+    throw new HttpsError('permission-denied', 'Doar administratorii pot vedea datele de consum.');
+  }
+  return context;
+}
+
 async function assertActiveInternalRequest(request) {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Trebuie sa fii autentificat.');
@@ -4541,7 +4549,7 @@ exports.refreshBillingMetricsNow = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    await assertAdminRequest(request);
+    await assertBillingAdminRequest(request);
     return refreshBillingMetricsCache({
       db,
       admin,
@@ -4557,7 +4565,7 @@ exports.getBillingControlPanelData = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    await assertAdminRequest(request);
+    await assertBillingAdminRequest(request);
     const [metricsSnap, settingsSnap, canarySnap, firestoreCostControl] = await Promise.all([
       db.collection('systemMetrics').doc('billing').get(),
       db.collection('systemCostSettings').doc('billing').get(),
@@ -4611,7 +4619,7 @@ exports.getLiveFirebaseCostEstimate = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    await assertAdminRequest(request);
+    await assertBillingAdminRequest(request);
     const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || 'workcontrol-53b1d';
     if (projectId.startsWith('demo-')) {
       return {
@@ -4651,7 +4659,7 @@ exports.saveBillingCostSettings = onCall(
     memory: '256MiB',
   },
   async (request) => {
-    await assertAdminRequest(request);
+    await assertBillingAdminRequest(request);
     const budgetMonthlyEur = toSafeNumber(request.data?.budgetMonthlyEur, -1);
     const warningPercent = toSafeNumber(request.data?.warningPercent, -1);
     const criticalPercent = toSafeNumber(request.data?.criticalPercent, -1);

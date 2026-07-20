@@ -13,20 +13,30 @@ function callableBody(exportName, nextExportName) {
   return source.slice(start, end);
 }
 
-test("billing read, refresh and settings callables validate admin before accessing data", () => {
+test("billing read, refresh and settings callables validate every active admin before accessing data", () => {
   const refreshBody = callableBody("refreshBillingMetricsNow", "getBillingControlPanelData");
   const readBody = callableBody("getBillingControlPanelData", "getLiveFirebaseCostEstimate");
   const liveBody = callableBody("getLiveFirebaseCostEstimate", "saveBillingCostSettings");
   const saveBody = callableBody("saveBillingCostSettings", "sendPushOnNotificationCreated");
 
   for (const body of [refreshBody, readBody, liveBody, saveBody]) {
-    const authCheck = body.indexOf("await assertAdminRequest(request)");
+    const authCheck = body.indexOf("await assertBillingAdminRequest(request)");
     assert.ok(authCheck >= 0);
     const firstDatabaseAccess = body.search(
       /db\.collection|refreshBillingMetricsCache|await getEcbRates|return await getLiveFirebaseCostEstimate/
     );
     assert.ok(firstDatabaseAccess > authCheck);
   }
+});
+
+test("billing admin validation checks the role without requiring the legacy globalAdmin flag", () => {
+  const start = source.indexOf("async function assertBillingAdminRequest");
+  const end = source.indexOf("async function assertActiveInternalRequest", start);
+  assert.ok(start >= 0);
+  assert.ok(end > start);
+  const body = source.slice(start, end);
+  assert.match(body, /context\.role !== 'admin'/);
+  assert.doesNotMatch(body, /context\.globalAdmin/);
 });
 
 test("private cost documents are never exposed through a direct client rule", () => {
