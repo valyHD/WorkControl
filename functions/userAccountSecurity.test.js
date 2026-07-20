@@ -220,6 +220,23 @@ describe('internal account creation security', () => {
     assert.equal(authAdmin.updatedUsers[0].input.password, 'password123');
   });
 
+  test('an admin assigned to a company may create another admin', async () => {
+    const { db, handlers } = createFixture();
+
+    const result = await handlers.adminCreateUser({
+      auth: { uid: 'admin-1' },
+      data: {
+        fullName: 'Admin Nou',
+        email: 'admin-nou@example.test',
+        password: 'password123',
+        role: 'admin',
+        companyId: 'company-1',
+      },
+    });
+
+    assert.equal(db.store.get(`users/${result.userId}`).role, 'admin');
+  });
+
   test('admin creation never overwrites an existing internal profile', async () => {
     const existing = { uid: 'existing-user', email: 'existing@example.test', disabled: false };
     const { authAdmin, handlers } = createFixture({

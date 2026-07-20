@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildCompanyScopeConstraints,
   canAccessCompany,
+  isGlobalAdminProfile,
   requireCompanyScope,
   requirePrimaryCompanyId,
   type CompanyAccessContext,
@@ -38,6 +39,20 @@ describe("companyAccess", () => {
     expect(canAccessCompany(scopedContext, "company-a")).toBe(true);
     expect(canAccessCompany(scopedContext, "company-c")).toBe(false);
     expect(canAccessCompany({ ...scopedContext, globalAdmin: true }, "company-c")).toBe(true);
+  });
+
+  it("trateaza orice profil admin activ ca administrator global chiar daca are firma", () => {
+    expect(isGlobalAdminProfile({
+      role: "admin",
+      globalAdmin: false,
+      primaryCompanyId: "company-a",
+      companyIds: ["company-a"],
+    })).toBe(true);
+    expect(isGlobalAdminProfile({
+      role: "manager",
+      globalAdmin: true,
+      companyIds: [],
+    })).toBe(false);
   });
 
   it("refuza interogarile fara firma si nu limiteaza adminul global", () => {

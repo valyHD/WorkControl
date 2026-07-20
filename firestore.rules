@@ -38,11 +38,7 @@ service cloud.firestore {
     }
 
     function globalAdmin() {
-      return activeUser() && userData().get('role', '') == 'admin' &&
-        (
-          userData().get('globalAdmin', false) == true ||
-          !hasCompanyScope(userData())
-        );
+      return activeUser() && userData().get('role', '') == 'admin';
     }
 
     function sameCompany(companyId) {
@@ -107,7 +103,7 @@ service cloud.firestore {
     }
 
     function canWriteVehicleSimulation() {
-      return dedicatedGpsSimulator() || globalAdmin();
+      return dedicatedGpsSimulator();
     }
 
     function canReadVehicle(vehicleId) {

@@ -165,7 +165,7 @@ describe('secured requestVehicleCommand callable', () => {
     fixture = createFixture();
   });
 
-  test('allows only an administrator with access to the vehicle company', async () => {
+  test('allows every administrator and rejects non-admin roles', async () => {
     await assert.rejects(
       fixture.handler(commandRequest('employee-1')),
       (error) => error.code === 'permission-denied'
@@ -174,11 +174,11 @@ describe('secured requestVehicleCommand callable', () => {
       fixture.handler(commandRequest('manager-1')),
       (error) => error.code === 'permission-denied'
     );
-    await assert.rejects(
-      fixture.handler(commandRequest('company-admin')),
-      (error) => error.code === 'permission-denied'
-    );
+    const crossCompanyAdminResult = await fixture.handler(commandRequest('company-admin'));
+    assert.equal(crossCompanyAdminResult.status, 'requested');
+    assert.equal(crossCompanyAdminResult.duplicate, false);
 
+    fixture = createFixture();
     const result = await fixture.handler(commandRequest('company-admin-1'));
     assert.equal(result.status, 'requested');
     assert.equal(result.duplicate, false);

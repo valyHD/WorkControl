@@ -305,7 +305,12 @@ export default function MyProfilePage() {
       setUsers(usersData);
       setCompanies(companiesData);
       const currentUserData = usersData.find((item) => item.id === user.uid);
-      setSelectedCompanyKey(currentUserData?.primaryCompanyId || "");
+      setSelectedCompanyKey(
+        currentUserData?.primaryCompanyId ||
+        user.primaryCompanyId ||
+        user.companyIds?.[0] ||
+        ""
+      );
       setRoleTitle(currentUserData?.roleTitle || user.roleTitle || "");
       setDepartment(currentUserData?.department || user.department || "");
     } finally {

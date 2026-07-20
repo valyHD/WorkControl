@@ -200,7 +200,7 @@ function userCompanyIds(data) {
 }
 
 function isGlobalAdmin(actor) {
-  return actor.role === 'admin' && actor.globalAdmin === true;
+  return actor.role === 'admin';
 }
 
 function canAccessCompany(actor, companyId) {
@@ -250,7 +250,7 @@ async function loadActor(db, uid, HttpsError) {
   return {
     uid,
     role,
-    globalAdmin: data.globalAdmin === true || (role === 'admin' && userCompanyIds(data).length === 0),
+    globalAdmin: role === 'admin',
     companyIds: userCompanyIds(data),
     primaryCompanyId: cleanText(data.primaryCompanyId, 120),
     fullName: cleanText(data.fullName || data.email || uid, 160),
@@ -543,7 +543,7 @@ function createSecurityHandlers({ db, authAdmin, fieldValue, HttpsError, logger 
           role,
           active: true,
           accessStatus: 'active',
-          globalAdmin: role === 'admin' && input.globalAdmin === true,
+          globalAdmin: role === 'admin',
           companyId,
           primaryCompanyId: companyId,
           companyIds: [companyId],

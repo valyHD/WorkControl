@@ -5,6 +5,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -87,7 +88,7 @@ export function normalizeCompanyKey(value: string): string {
 }
 
 function mapCompanyDoc(id: string, data: Record<string, unknown>): CompanyItem {
-  const companyName = toText(data.companyName);
+  const companyName = toText(data.companyName) || toText(data.name) || id;
   return {
     id,
     companyKey: toText(data.companyKey) || normalizeCompanyKey(companyName) || id,
@@ -115,12 +116,34 @@ function mapCompanyDoc(id: string, data: Record<string, unknown>): CompanyItem {
 
 export async function getCompaniesList(maxItems?: number): Promise<CompanyItem[]> {
   const context = await getCurrentCompanyAccessContext();
+  const requestedLimit = Number.isFinite(maxItems)
+    ? clampQueryLimit(maxItems, COMPANY_DIRECTORY_QUERY_LIMITS.companies, 250)
+    : COMPANY_DIRECTORY_QUERY_LIMITS.companies;
+
+  if (!context.globalAdmin) {
+    const companyIds = Array.from(new Set([
+      context.primaryCompanyId,
+      ...context.companyIds,
+    ].filter(Boolean))).slice(0, Math.min(requestedLimit, 30));
+    const companyDocs = await Promise.all(
+      companyIds.map((companyId) => getDoc(doc(companiesCollection, companyId)))
+    );
+    return companyDocs
+      .filter((companyDoc) => companyDoc.exists())
+      .map((companyDoc) => mapCompanyDoc(
+        companyDoc.id,
+        companyDoc.data() as Record<string, unknown>
+      ))
+      .filter((item) => item.companyName)
+      .sort((left, right) => left.companyName.localeCompare(right.companyName, "ro-RO"));
+  }
+
   const constraints = [
     ...buildCompanyScopeConstraints(context),
     orderBy("companyName", "asc"),
   ];
   if (Number.isFinite(maxItems)) {
-    constraints.push(limit(clampQueryLimit(maxItems, COMPANY_DIRECTORY_QUERY_LIMITS.companies, 250)));
+    constraints.push(limit(requestedLimit));
   }
   const snap = await getDocs(query(companiesCollection, ...constraints));
   return snap.docs

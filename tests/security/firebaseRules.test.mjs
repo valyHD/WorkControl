@@ -395,7 +395,7 @@ test("manager cannot bypass server functions for assignments or mileage", async 
   }));
 });
 
-test("global admin may persist GPS simulation mileage without opening normal GPS writes", async () => {
+test("regular admins cannot persist GPS simulation mileage or open normal GPS writes", async () => {
   await assertFails(updateDoc(doc(firestore("manager-a"), "vehicles", "vehicle-a"), {
     gpsSimHistory: [{
       id: "sim-1",
@@ -408,7 +408,7 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
     updatedAt: 2,
   }));
 
-  await assertSucceeds(updateDoc(doc(firestore("global"), "vehicles", "vehicle-a"), {
+  await assertFails(updateDoc(doc(firestore("global"), "vehicles", "vehicle-a"), {
     gpsSim: {
       active: true,
       status: "running",
@@ -443,7 +443,7 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
     doc(firestore("manager-a"), "vehicles", "vehicle-a", "positions", "_simulation"),
     simulationState
   ));
-  await assertSucceeds(setDoc(
+  await assertFails(setDoc(
     doc(firestore("global"), "vehicles", "vehicle-a", "positions", "_simulation"),
     simulationState
   ));
@@ -467,7 +467,7 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
     currentKm: 6211,
     updatedAt: 5,
   });
-  await assertSucceeds(batch.commit());
+  await assertFails(batch.commit());
   await assertFails(updateDoc(
     doc(globalDb, "vehicles", "vehicle-a", "positions", "_simulation"),
     { updatedAt: 4 }
@@ -579,7 +579,7 @@ test("only the dedicated simulator account may simulate any vehicle", async () =
   ));
 });
 
-test("employee can update safe profile fields and manager cannot change roles", async () => {
+test("employee can update safe profile fields, managers cannot change roles, and admins manage companies", async () => {
   await assertSucceeds(updateDoc(doc(firestore("employee-a"), "users", "employee-a"), {
     fullName: "Employee A Updated",
   }));
@@ -592,7 +592,7 @@ test("employee can update safe profile fields and manager cannot change roles", 
   await assertSucceeds(updateDoc(doc(firestore("admin-a"), "users", "employee-a"), {
     role: "manager",
   }));
-  await assertFails(updateDoc(doc(firestore("admin-a"), "users", "employee-a"), {
+  await assertSucceeds(updateDoc(doc(firestore("admin-a"), "users", "employee-a"), {
     companyIds: ["company-a", "company-b"],
   }));
 });
@@ -647,6 +647,8 @@ test("GPS points are readable only for assigned users and company managers", asy
 test("global admin has explicit cross-company access while company managers do not", async () => {
   await assertSucceeds(getDoc(doc(firestore("global"), "vehicles", "vehicle-b")));
   await assertSucceeds(getDocs(collection(firestore("global"), "projects")));
+  await assertSucceeds(getDoc(doc(firestore("admin-a"), "vehicles", "vehicle-b")));
+  await assertSucceeds(getDocs(collection(firestore("admin-a"), "projects")));
   await assertFails(getDoc(doc(firestore("manager-a"), "vehicles", "vehicle-b")));
   await assertFails(getDocs(collection(firestore("manager-a"), "projects")));
 });

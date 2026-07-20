@@ -22,13 +22,7 @@ function cleanCompanyIds(values: unknown, primaryCompanyId: string): string[] {
 }
 
 export function isGlobalAdminProfile(data: Record<string, unknown>): boolean {
-  if (data.role !== "admin") return false;
-  if (data.globalAdmin === true) return true;
-
-  const primaryCompanyId =
-    typeof data.primaryCompanyId === "string" ? data.primaryCompanyId.trim() : "";
-  const companyIds = cleanCompanyIds(data.companyIds, primaryCompanyId);
-  return companyIds.length === 0;
+  return data.role === "admin";
 }
 
 export async function getCurrentCompanyAccessContext(): Promise<CompanyAccessContext> {
