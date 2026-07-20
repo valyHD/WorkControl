@@ -174,7 +174,7 @@ async function seed() {
       currentKm: 100,
       initialRecordedKm: 50,
     });
-    await setDoc(doc(db, "vehicles", "vehicle-simulator"), {
+    await setDoc(doc(db, "vehicles", "CAwi2Qr1L0aJImF5eK27"), {
       companyId: "company-a",
       plateNumber: "B092194",
       ownerUserId: "simulator-user",
@@ -479,13 +479,13 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
   }));
 });
 
-test("the dedicated simulator account may continue a route only on its assigned vehicle", async () => {
+test("the dedicated simulator account may continue a route only on the configured vehicle", async () => {
   const simulatorDb = firestoreWithClaims("simulator-user", {
     email: "ionut.matura23@gmail.com",
   });
   const simulationState = {
     schemaVersion: 1,
-    vehicleId: "vehicle-simulator",
+    vehicleId: "CAwi2Qr1L0aJImF5eK27",
     gpsSim: {
       active: true,
       status: "running",
@@ -497,19 +497,19 @@ test("the dedicated simulator account may continue a route only on its assigned 
   };
 
   await assertSucceeds(setDoc(
-    doc(simulatorDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    doc(simulatorDb, "vehicles", "CAwi2Qr1L0aJImF5eK27", "positions", "_simulation"),
     simulationState
   ));
 
   const continuationBatch = writeBatch(simulatorDb);
   continuationBatch.update(
-    doc(simulatorDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    doc(simulatorDb, "vehicles", "CAwi2Qr1L0aJImF5eK27", "positions", "_simulation"),
     {
       gpsSimHistory: [{ id: "sim-10", startedAt: 10, totalDistanceKm: 3, points: simulationState.gpsSim.points }],
       updatedAt: 20,
     }
   );
-  continuationBatch.update(doc(simulatorDb, "vehicles", "vehicle-simulator"), {
+  continuationBatch.update(doc(simulatorDb, "vehicles", "CAwi2Qr1L0aJImF5eK27"), {
     currentKm: 7203,
     updatedAt: 20,
   });
@@ -524,7 +524,7 @@ test("the dedicated simulator account may continue a route only on its assigned 
     email: "other@example.com",
   });
   await assertFails(setDoc(
-    doc(wrongAccountDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    doc(wrongAccountDb, "vehicles", "CAwi2Qr1L0aJImF5eK27", "positions", "_simulation"),
     simulationState
   ));
 });

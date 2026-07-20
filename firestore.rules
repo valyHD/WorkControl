@@ -102,31 +102,17 @@ service cloud.firestore {
       ];
     }
 
-    function dedicatedGpsSimulatorForData(data) {
+    function dedicatedGpsSimulatorForVehicle(vehicleId) {
       return signedIn() &&
         request.auth.token.get('email', '') == 'ionut.matura23@gmail.com' &&
+        vehicleId == 'CAwi2Qr1L0aJImF5eK27' &&
         userExists() &&
         userData().get('active', false) == true &&
-        userData().get('accessStatus', '') == 'active' &&
-        request.auth.uid in [
-          data.get('ownerUserId', ''),
-          data.get('currentDriverUserId', ''),
-          data.get('pendingDriverUserId', '')
-        ] &&
-        data.get('companyId', '') is string &&
-        data.get('companyId', '').size() > 0 &&
-        (
-          data.get('companyId', '') == userData().get('primaryCompanyId', '') ||
-          data.get('companyId', '') in userData().get('companyIds', [])
-        );
-    }
-
-    function canWriteVehicleSimulationData(data) {
-      return dedicatedGpsSimulatorForData(data) || globalAdmin();
+        userData().get('accessStatus', '') == 'active';
     }
 
     function canWriteVehicleSimulation(vehicleId) {
-      return canWriteVehicleSimulationData(vehicle(vehicleId));
+      return dedicatedGpsSimulatorForVehicle(vehicleId) || globalAdmin();
     }
 
     function canReadVehicle(vehicleId) {
@@ -240,7 +226,7 @@ service cloud.firestore {
         request.resource.data.get('currentKm', 0) >= 0;
       allow update: if
         (
-          canWriteVehicleSimulationData(resource.data) && immutableCompany() &&
+          canWriteVehicleSimulation(vehicleId) && immutableCompany() &&
           changedOnly(['currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
           request.resource.data.get('currentKm', 0) >= 0 &&
@@ -249,7 +235,7 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/vehicles/$(vehicleId)/positions/_simulation).data.get('updatedAt', 0) == request.resource.data.get('updatedAt', 0)
         ) ||
         (
-          canWriteVehicleSimulationData(resource.data) && immutableCompany() &&
+          canWriteVehicleSimulation(vehicleId) && immutableCompany() &&
           request.resource.data.diff(resource.data).affectedKeys().hasAny(['gpsSim', 'gpsSimHistory']) &&
           changedOnly(['gpsSim', 'gpsSimHistory', 'currentKm', 'updatedAt', 'updatedAtServer']) &&
           request.resource.data.get('currentKm', 0) is number &&
