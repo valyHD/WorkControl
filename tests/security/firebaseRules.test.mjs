@@ -51,6 +51,15 @@ const profiles = {
     primaryCompanyId: "company-a",
     companyIds: ["company-a"],
   },
+  simulator: {
+    uid: "simulator-user",
+    fullName: "GPS Simulator User",
+    role: "admin",
+    active: true,
+    accessStatus: "active",
+    primaryCompanyId: "company-a",
+    companyIds: ["company-a"],
+  },
   managerA: {
     uid: "manager-a",
     fullName: "Manager A",
@@ -120,6 +129,10 @@ function firestore(uid) {
   return env.authenticatedContext(uid).firestore();
 }
 
+function firestoreWithClaims(uid, claims) {
+  return env.authenticatedContext(uid, claims).firestore();
+}
+
 function storage(uid) {
   return env.authenticatedContext(uid).storage();
 }
@@ -160,6 +173,15 @@ async function seed() {
       pendingDriverUserId: "",
       currentKm: 100,
       initialRecordedKm: 50,
+    });
+    await setDoc(doc(db, "vehicles", "vehicle-simulator"), {
+      companyId: "company-a",
+      plateNumber: "B092194",
+      ownerUserId: "simulator-user",
+      currentDriverUserId: "simulator-user",
+      pendingDriverUserId: "",
+      currentKm: 7200,
+      initialRecordedKm: 6000,
     });
     await setDoc(doc(db, "vehicles", "vehicle-b"), {
       companyId: "company-b",
@@ -455,6 +477,56 @@ test("global admin may persist GPS simulation mileage without opening normal GPS
     lat: 44.4,
     lng: 26.1,
   }));
+});
+
+test("the dedicated simulator account may continue a route only on its assigned vehicle", async () => {
+  const simulatorDb = firestoreWithClaims("simulator-user", {
+    email: "ionut.matura23@gmail.com",
+  });
+  const simulationState = {
+    schemaVersion: 1,
+    vehicleId: "vehicle-simulator",
+    gpsSim: {
+      active: true,
+      status: "running",
+      startedAt: 10,
+      points: [{ lat: 44.4, lng: 26.1, odometerKm: 7200, ts: 10, speedKmh: 20, angle: 0, ignitionOn: true }],
+    },
+    gpsSimHistory: [],
+    updatedAt: 10,
+  };
+
+  await assertSucceeds(setDoc(
+    doc(simulatorDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    simulationState
+  ));
+
+  const continuationBatch = writeBatch(simulatorDb);
+  continuationBatch.update(
+    doc(simulatorDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    {
+      gpsSimHistory: [{ id: "sim-10", startedAt: 10, totalDistanceKm: 3, points: simulationState.gpsSim.points }],
+      updatedAt: 20,
+    }
+  );
+  continuationBatch.update(doc(simulatorDb, "vehicles", "vehicle-simulator"), {
+    currentKm: 7203,
+    updatedAt: 20,
+  });
+  await assertSucceeds(continuationBatch.commit());
+
+  await assertFails(setDoc(
+    doc(simulatorDb, "vehicles", "vehicle-a", "positions", "_simulation"),
+    { ...simulationState, vehicleId: "vehicle-a" }
+  ));
+
+  const wrongAccountDb = firestoreWithClaims("simulator-user", {
+    email: "other@example.com",
+  });
+  await assertFails(setDoc(
+    doc(wrongAccountDb, "vehicles", "vehicle-simulator", "positions", "_simulation"),
+    simulationState
+  ));
 });
 
 test("employee can update safe profile fields and manager cannot change roles", async () => {
