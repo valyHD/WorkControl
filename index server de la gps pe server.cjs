@@ -485,7 +485,7 @@ const FMC130_IO_DEFINITIONS = {
   9: { key: "analogInput1V", label: "Intrare analogica 1", group: "input_output", unit: "V", multiplier: 0.001, decimals: 3, description: "Analog Input 1" },
   12: { key: "fuelUsedGpsL", label: "Combustibil folosit GPS", group: "gps", unit: "L", multiplier: 0.001, decimals: 3, description: "Fuel Used GPS" },
   15: { key: "ecoScore", label: "Eco score", group: "gps", description: "Eco Score" },
-  16: { key: "totalOdometerKm", label: "Odometru total AVL 16", group: "obd", unit: "km", multiplier: 0.001, decimals: 1, description: "Total Odometer; seteaza sursa pe OBD in FMC130" },
+  16: { key: "totalOdometerKm", label: "Odometru virtual tracker AVL 16", group: "gps", unit: "km", multiplier: 0.001, decimals: 1, description: "Total Odometer virtual FMC130; nu este kilometrajul din bord/ECU" },
   13: { key: "fuelRateGpsL100Km", label: "Consum GPS", group: "gps", unit: "l/100km", multiplier: 0.01, decimals: 2, description: "Fuel Rate GPS" },
   21: { key: "gsmSignal", label: "Semnal GSM", group: "connectivity", unit: "/5", description: "GSM Signal" },
   24: { key: "gnssSpeedKmh", label: "Viteza GNSS", group: "gps", unit: "km/h", description: "GNSS Speed" },
@@ -693,7 +693,6 @@ function buildUnusualDiagnosticEvents(diagnostics, record) {
   const oil = getMetric(metrics, "engineOilTemperatureC");
   const externalVoltage = getMetric(metrics, "externalVoltageV");
   const fuelLevel = getMetric(metrics, "fuelLevelPct");
-  const engineLoad = getMetric(metrics, "engineLoadPct");
   const throttle = getMetric(metrics, "throttlePositionPct");
   const dtcCount = getMetric(metrics, "dtcCount");
   const faultCodes = getMetricValue(metrics, "faultCodes");
@@ -812,20 +811,6 @@ function buildUnusualDiagnosticEvents(diagnostics, record) {
         String(faultCodes).trim(),
         "",
         "Valoare raw Fault Codes"
-      )
-    );
-  }
-
-  if (engineLoad !== null && engineLoad >= 95) {
-    events.push(
-      makeDiagnosticEvent(
-        "high_engine_load",
-        timestamp,
-        "Sarcina motor foarte mare",
-        "info",
-        engineLoad,
-        "%",
-        "Engine Load peste 95%"
       )
     );
   }

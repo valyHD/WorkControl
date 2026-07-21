@@ -33,6 +33,11 @@ import {
   subscribeVehicleDailyDiagnostics,
   subscribeVehicleDiagnosticHistory,
 } from "../services/vehiclesService";
+import {
+  getActionableDiagnosticEvents,
+  hasStoredObdValues,
+  readLatestDiagnosticNumber,
+} from "../utils/vehicleLiveDiagnostics";
 
 const GROUP_LABELS: Record<VehicleLiveIoGroup, string> = {
   gps: "GPS si miscare",
@@ -138,12 +143,6 @@ function formatDurationFromSeconds(value: unknown): string {
   return `${hours} h ${minutes} min`;
 }
 
-function readObdNumber(diagnostics: VehicleLiveDiagnostics | null | undefined, key: string): number | null {
-  const value = diagnostics?.obd?.[key];
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
 function isDiagnosticsFresh(
   diagnostics: VehicleLiveDiagnostics | null | undefined,
   nowTs: number
@@ -204,7 +203,10 @@ function filterGroup(items: VehicleLiveIoItem[], group: VehicleLiveIoGroup): Veh
 function StatCard({ label, value, hint, icon, tone = "normal" }: MetricCard) {
   return (
     <div className={`vehicle-live-metric vehicle-live-metric--${tone}`}>
-      <span>{icon}{label}</span>
+      <span>
+        {icon}
+        {label}
+      </span>
       <strong>{value}</strong>
       <small>{hint}</small>
     </div>
@@ -239,7 +241,7 @@ function DailySummaryPanel({
   dayKey: string;
 }) {
   const stats = summary?.stats ?? {};
-  const events = summary?.events ?? [];
+  const events = getActionableDiagnosticEvents(summary?.events ?? []);
   const criticalCount = events.filter((event) => event.severity === "critical").length;
   const warningCount = events.filter((event) => event.severity === "warning").length;
 
@@ -257,7 +259,9 @@ function DailySummaryPanel({
         <div className="vehicle-live-daily__summary">
           <strong>{summary?.summaryText || "Nu exista inca rezumat pentru ziua curenta."}</strong>
           <span>
-            {summary?.firstRecordAt ? `${formatTime(summary.firstRecordAt)} - ${formatTime(summary.lastRecordAt)}` : "Astept primul pachet FMC130."}
+            {summary?.firstRecordAt
+              ? `${formatTime(summary.firstRecordAt)} - ${formatTime(summary.lastRecordAt)}`
+              : "Astept primul pachet FMC130."}
           </span>
         </div>
 
@@ -282,9 +286,9 @@ function DailySummaryPanel({
             icon={<Gauge size={13} />}
           />
           <StatCard
-            label="Odometru"
+            label="Odometru virtual tracker"
             value={formatMetric(stats.maxTotalOdometerKm, "km", 1)}
-            hint="AVL 16"
+            hint="FMC130 AVL 16, nu bord/ECU"
             icon={<Gauge size={13} />}
           />
           <StatCard
@@ -336,7 +340,7 @@ function buildDiagnosticHistoryRows(
 ): DiagnosticHistoryRow[] {
   return summaries
     .flatMap((summary) =>
-      summary.events.map((event) => ({
+      getActionableDiagnosticEvents(summary.events).map((event) => ({
         dayKey: summary.dayKey,
         event,
       }))
@@ -363,7 +367,9 @@ function DiagnosticEventsHistoryTable({
       </div>
 
       {rows.length === 0 ? (
-        <div className="vehicle-live-empty">Nu exista evenimente neobisnuite salvate in istoric.</div>
+        <div className="vehicle-live-empty">
+          Nu exista evenimente neobisnuite salvate in istoric.
+        </div>
       ) : (
         <div className="vehicle-live-table-wrap">
           <table className="vehicle-live-table vehicle-live-events-table">
@@ -383,7 +389,9 @@ function DiagnosticEventsHistoryTable({
                   <td>{formatDate(event.timestamp, dayKey)}</td>
                   <td>{formatTime(event.timestamp)}</td>
                   <td>
-                    <span className={`vehicle-live-severity vehicle-live-severity--${event.severity}`}>
+                    <span
+                      className={`vehicle-live-severity vehicle-live-severity--${event.severity}`}
+                    >
                       {event.severity}
                     </span>
                   </td>
@@ -620,9 +628,11 @@ export default function VehicleLiveDiagnosticsPage() {
 
   const diagnostics = vehicle?.liveDiagnostics ?? null;
   const liveFresh = isDiagnosticsFresh(diagnostics, nowTick);
-  const liveDiagnostics = liveFresh ? diagnostics : null;
-  const liveGpsSnapshot = liveFresh ? vehicle?.gpsSnapshot : null;
-  const liveVehicle = liveFresh ? vehicle : null;
+  const liveDiagnostics = diagnostics;
+  const liveGpsSnapshot = vehicle?.gpsSnapshot ?? null;
+  const liveVehicle = vehicle;
+  const dailyObdFallback = dailySummary?.latestObd ?? null;
+  const hasObdValues = hasStoredObdValues(liveDiagnostics, dailyObdFallback);
   const decodedIo = useMemo(() => getDecodedIo(liveVehicle), [liveVehicle]);
   const rawIo = useMemo(() => getRawIo(liveVehicle), [liveVehicle]);
   const groupedItems = useMemo(() => {
@@ -633,40 +643,48 @@ export default function VehicleLiveDiagnosticsPage() {
   }, [decodedIo]);
 
   const metrics = useMemo<MetricCard[]>(() => {
-    const totalOdometer = readObdNumber(liveDiagnostics, "totalOdometerKm") ?? liveGpsSnapshot?.odometerKm ?? null;
-    const tripOdometer = readObdNumber(liveDiagnostics, "tripOdometerKm") ?? liveGpsSnapshot?.tripOdometerKm ?? null;
-    const rpm = readObdNumber(liveDiagnostics, "engineRpm");
-    const obdSpeed = readObdNumber(liveDiagnostics, "vehicleSpeedKmh");
-    const coolant = readObdNumber(liveDiagnostics, "coolantTemperatureC");
-    const oil = readObdNumber(liveDiagnostics, "engineOilTemperatureC");
-    const intakeTemp = readObdNumber(liveDiagnostics, "intakeAirTemperatureC");
-    const fuelLevel = readObdNumber(liveDiagnostics, "fuelLevelPct");
-    const externalVoltage = readObdNumber(liveDiagnostics, "externalVoltageV");
-    const batteryVoltage = readObdNumber(liveDiagnostics, "batteryVoltageV");
-    const batteryCurrent = readObdNumber(liveDiagnostics, "batteryCurrentA");
-    const moduleVoltage = readObdNumber(liveDiagnostics, "controlModuleVoltageV");
-    const fuelRate = readObdNumber(liveDiagnostics, "fuelRateLh");
-    const fuelRateGps = readObdNumber(liveDiagnostics, "fuelRateGpsL100Km");
-    const fuelUsedGps = readObdNumber(liveDiagnostics, "fuelUsedGpsL");
-    const engineLoad = readObdNumber(liveDiagnostics, "engineLoadPct");
-    const throttle = readObdNumber(liveDiagnostics, "throttlePositionPct");
-    const fuelPressure = readObdNumber(liveDiagnostics, "fuelPressureKpa");
-    const intakeMap = readObdNumber(liveDiagnostics, "intakeMapKpa");
-    const maf = readObdNumber(liveDiagnostics, "mafGps");
-    const runtime = readObdNumber(liveDiagnostics, "engineRuntimeSec");
-    const dtcCount = readObdNumber(liveDiagnostics, "dtcCount");
-    const ambient = readObdNumber(liveDiagnostics, "ambientAirTemperatureC");
-    const barometric = readObdNumber(liveDiagnostics, "barometricPressureKpa");
-    const distanceMil = readObdNumber(liveDiagnostics, "distanceMilOnKm");
-    const gsmSignal = readObdNumber(liveDiagnostics, "gsmSignal");
-    const gnssHdop = readObdNumber(liveDiagnostics, "gnssHdop");
-    const gnssPdop = readObdNumber(liveDiagnostics, "gnssPdop");
+    const read = (key: string) =>
+      readLatestDiagnosticNumber(liveDiagnostics, dailyObdFallback, key);
+    const totalOdometer = read("totalOdometerKm") ?? liveGpsSnapshot?.odometerKm ?? null;
+    const tripOdometer = read("tripOdometerKm") ?? liveGpsSnapshot?.tripOdometerKm ?? null;
+    const rpm = read("engineRpm");
+    const obdSpeed = read("vehicleSpeedKmh");
+    const coolant = read("coolantTemperatureC");
+    const oil = read("engineOilTemperatureC");
+    const intakeTemp = read("intakeAirTemperatureC");
+    const fuelLevel = read("fuelLevelPct");
+    const externalVoltage = read("externalVoltageV");
+    const batteryVoltage = read("batteryVoltageV");
+    const batteryCurrent = read("batteryCurrentA");
+    const moduleVoltage = read("controlModuleVoltageV");
+    const fuelRate = read("fuelRateLh");
+    const fuelRateGps = read("fuelRateGpsL100Km");
+    const fuelUsedGps = read("fuelUsedGpsL");
+    const engineLoad = read("engineLoadPct");
+    const throttle = read("throttlePositionPct");
+    const fuelPressure = read("fuelPressureKpa");
+    const intakeMap = read("intakeMapKpa");
+    const maf = read("mafGps");
+    const runtime = read("engineRuntimeSec");
+    const dtcCount = read("dtcCount");
+    const ambient = read("ambientAirTemperatureC");
+    const barometric = read("barometricPressureKpa");
+    const distanceMil = read("distanceMilOnKm");
+    const gsmSignal = read("gsmSignal");
+    const gnssHdop = read("gnssHdop");
+    const gnssPdop = read("gnssPdop");
 
     return [
       {
-        label: "Odometru total",
+        label: "Kilometraj WorkControl",
+        value: formatMetric(vehicle?.currentKm, "km", 1),
+        hint: "Kilometrajul administrat al masinii",
+        icon: <Gauge size={13} />,
+      },
+      {
+        label: "Odometru virtual tracker",
         value: formatMetric(totalOdometer, "km", 1),
-        hint: "AVL 16 - sursa OBD in FMC",
+        hint: "FMC130 AVL 16, nu bord/ECU",
         icon: <Gauge size={13} />,
       },
       {
@@ -677,7 +695,10 @@ export default function VehicleLiveDiagnosticsPage() {
       },
       {
         label: "Viteza",
-        value: formatMetric(obdSpeed ?? liveDiagnostics?.gps?.speedKmh ?? liveGpsSnapshot?.speedKmh, "km/h"),
+        value: formatMetric(
+          obdSpeed ?? liveDiagnostics?.gps?.speedKmh ?? liveGpsSnapshot?.speedKmh,
+          "km/h"
+        ),
         hint: obdSpeed !== null ? "OBD2" : "GPS",
         icon: <Gauge size={13} />,
       },
@@ -837,7 +858,14 @@ export default function VehicleLiveDiagnosticsPage() {
         icon: <Satellite size={13} />,
       },
     ];
-  }, [liveDiagnostics, liveGpsSnapshot?.odometerKm, liveGpsSnapshot?.speedKmh, liveGpsSnapshot?.tripOdometerKm]);
+  }, [
+    dailyObdFallback,
+    liveDiagnostics,
+    liveGpsSnapshot?.odometerKm,
+    liveGpsSnapshot?.speedKmh,
+    liveGpsSnapshot?.tripOdometerKm,
+    vehicle?.currentKm,
+  ]);
 
   if (loading) {
     return (
@@ -853,14 +881,21 @@ export default function VehicleLiveDiagnosticsPage() {
     return (
       <div className="placeholder-page">
         <h2>Masina nu a fost gasita</h2>
-        <Link to="/vehicles" className="secondary-btn" style={{ marginTop: 16, display: "inline-flex" }}>
+        <Link
+          to="/vehicles"
+          className="secondary-btn"
+          style={{ marginTop: 16, display: "inline-flex" }}
+        >
           <ArrowLeft size={15} /> Inapoi la masini
         </Link>
       </div>
     );
   }
 
-  const lastSeenAt = diagnostics?.serverTimestamp || vehicle.tracker?.lastSeenAt || vehicle.gpsSnapshot?.serverTimestamp;
+  const lastSeenAt =
+    diagnostics?.serverTimestamp ||
+    vehicle.tracker?.lastSeenAt ||
+    vehicle.gpsSnapshot?.serverTimestamp;
   const liveStatusText = !diagnostics
     ? "Fara pachet live"
     : liveFresh
@@ -891,11 +926,14 @@ export default function VehicleLiveDiagnosticsPage() {
             </span>
             <span className="vehicle-live-chip">
               <Bluetooth size={13} />
-              OBD2: {liveFresh ? getBooleanLabel(liveDiagnostics?.obdConnected) : "expirat"}
+              OBD2:{" "}
+              {liveFresh
+                ? getBooleanLabel(liveDiagnostics?.obdConnected)
+                : hasObdValues
+                  ? "ultima citire"
+                  : "fara date"}
             </span>
-            <span className="vehicle-live-chip">
-              Ultimul pachet: {formatAge(lastSeenAt)}
-            </span>
+            <span className="vehicle-live-chip">Ultimul pachet: {formatAge(lastSeenAt)}</span>
           </div>
         </div>
 
@@ -909,9 +947,16 @@ export default function VehicleLiveDiagnosticsPage() {
       {!liveFresh ? (
         <div className="vehicle-live-stale-note">
           <AlertTriangle size={15} />
-          Datele live raman afisate intre pachete si expira dupa 30 secunde fara pachet nou. Verifica FMC130 si conexiunea OBD2 Bluetooth daca nu se actualizeaza.
+          Afisam ultima valoare cunoscuta, dar nu mai este live. Verifica FMC130 si conexiunea OBD2
+          Bluetooth daca nu soseste un pachet nou.
         </div>
       ) : null}
+
+      <div className="vehicle-live-stale-note">
+        <Gauge size={15} />
+        AVL 16 este odometrul virtual calculat de tracker, nu kilometrajul din bord. Kilometrajul
+        real administrat in WorkControl este afisat separat.
+      </div>
 
       <div className="vehicle-live-metrics-grid">
         {metrics.map((metric) => (
@@ -927,17 +972,23 @@ export default function VehicleLiveDiagnosticsPage() {
             <Satellite size={16} />
             Snapshot FMC130
           </h3>
-          <span className="tools-subtitle">{diagnostics?.imei || vehicle.tracker?.imei || "IMEI lipsa"}</span>
+          <span className="tools-subtitle">
+            {diagnostics?.imei || vehicle.tracker?.imei || "IMEI lipsa"}
+          </span>
         </div>
 
         <div className="vehicle-info-grid">
           <div className="vehicle-info-item">
             <span>GPS timestamp</span>
-            <strong>{formatDateTime(liveDiagnostics?.recordTimestamp ?? liveGpsSnapshot?.gpsTimestamp)}</strong>
+            <strong>
+              {formatDateTime(liveDiagnostics?.recordTimestamp ?? liveGpsSnapshot?.gpsTimestamp)}
+            </strong>
           </div>
           <div className="vehicle-info-item">
             <span>Server timestamp</span>
-            <strong>{formatDateTime(liveDiagnostics?.serverTimestamp ?? liveGpsSnapshot?.serverTimestamp)}</strong>
+            <strong>
+              {formatDateTime(liveDiagnostics?.serverTimestamp ?? liveGpsSnapshot?.serverTimestamp)}
+            </strong>
           </div>
           <div className="vehicle-info-item">
             <span>Coordonate</span>
@@ -955,7 +1006,9 @@ export default function VehicleLiveDiagnosticsPage() {
           </div>
           <div className="vehicle-info-item">
             <span>Event IO / Total IO</span>
-            <strong>{formatNumber(liveDiagnostics?.eventIoId)} / {formatNumber(liveDiagnostics?.totalIo)}</strong>
+            <strong>
+              {formatNumber(liveDiagnostics?.eventIoId)} / {formatNumber(liveDiagnostics?.totalIo)}
+            </strong>
           </div>
           <div className="vehicle-info-item">
             <span>Protocol</span>
@@ -998,7 +1051,9 @@ export default function VehicleLiveDiagnosticsPage() {
         icon={<Table2 size={16} />}
         title="Toate valorile AVL raw"
         items={allItems}
-        emptyText={hasRawIo ? "Date raw indisponibile pentru afisare." : "Nu a venit inca niciun pachet IO."}
+        emptyText={
+          hasRawIo ? "Date raw indisponibile pentru afisare." : "Nu a venit inca niciun pachet IO."
+        }
       />
 
       <DiagnosticEventsHistoryTable summaries={diagnosticHistory} />
