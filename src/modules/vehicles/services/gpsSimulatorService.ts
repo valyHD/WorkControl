@@ -2,12 +2,23 @@
  * GPS Simulator Service
  *
  * Strategie:
- *  - Scriem traseul complet in vehicles/{id}/positions/_simulation, separat de GPS-ul fizic.
+ *  - Starea activa ramane in positions/_simulation, separat de GPS-ul fizic.
+ *  - Traseele finalizate sunt documente individuale in simulationRoutes.
  *  - Pozitia afisata este calculata din timp: continua si daca pagina este inchisa.
  *  - Nu atingem positionDays si nu rescriem gpsSnapshot-ul trackerului fizic.
  */
 
-import { doc, runTransaction, writeBatch } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  runTransaction,
+  writeBatch,
+} from 'firebase/firestore';
 import { db } from '../../../lib/firebase/firebase';
 import { applyVehicleMileageAdjustment } from '../utils/vehicleMileage';
 
@@ -74,10 +85,65 @@ export interface GpsRouteStateSnapshot {
   currentKm?: number;
 }
 
-const SIMULATION_STATE_SCHEMA_VERSION = 1;
+const SIMULATION_STATE_SCHEMA_VERSION = 2;
+const SIMULATION_HISTORY_LIMIT = 250;
+// A route document can be large. Small batches stay safely below Firestore's
+// 10 MiB request limit even when several dense routes are restored or edited.
+const SIMULATION_BATCH_CHUNK_SIZE = 8;
 
 function simulationStateRef(vehicleId: string) {
   return doc(db, 'vehicles', vehicleId, 'positions', '_simulation');
+}
+
+function simulationRoutesCollection(vehicleId: string) {
+  return collection(db, 'vehicles', vehicleId, 'simulationRoutes');
+}
+
+function simulationRouteRef(vehicleId: string, simulationId: string) {
+  return doc(db, 'vehicles', vehicleId, 'simulationRoutes', simulationId);
+}
+
+function getSimulationId(simulation: PersistedGpsSimulation, index: number) {
+  return simulation.id || `sim-${simulation.startedAt || index}`;
+}
+
+function withoutSimulationPoints(
+  simulation: PersistedGpsSimulation,
+  index: number
+): PersistedGpsSimulation {
+  const { points: _points, ...metadata } = simulation;
+  return {
+    ...metadata,
+    id: getSimulationId(simulation, index),
+    active: false,
+    status: 'done',
+  };
+}
+
+function normalizeHistoryMetadata(history: PersistedGpsSimulation[]) {
+  return [...(history ?? [])]
+    .sort((left, right) => (left.startedAt || 0) - (right.startedAt || 0))
+    .slice(-SIMULATION_HISTORY_LIMIT)
+    .map((simulation, index) => withoutSimulationPoints(simulation, index));
+}
+
+function buildSimulationRoutePayload(
+  vehicleId: string,
+  simulation: PersistedGpsSimulation,
+  index: number,
+  updatedAt: number
+) {
+  const id = getSimulationId(simulation, index);
+  return {
+    schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
+    vehicleId,
+    routeId: id,
+    ...simulation,
+    id,
+    active: false,
+    status: 'done' as const,
+    updatedAt,
+  };
 }
 
 function buildSimulationStatePayload(
@@ -90,15 +156,78 @@ function buildSimulationStatePayload(
     schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
     vehicleId,
     gpsSim,
-    gpsSimHistory,
+    gpsSimHistory: normalizeHistoryMetadata(gpsSimHistory),
+    historyCount: Math.min(gpsSimHistory.length, SIMULATION_HISTORY_LIMIT),
     updatedAt,
   };
+}
+
+async function commitSimulationOperationsInChunks(
+  operations: Array<(batch: ReturnType<typeof writeBatch>) => void>
+) {
+  for (let offset = 0; offset < operations.length; offset += SIMULATION_BATCH_CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    operations
+      .slice(offset, offset + SIMULATION_BATCH_CHUNK_SIZE)
+      .forEach((operation) => operation(batch));
+    await batch.commit();
+  }
+}
+
+async function ensureSimulationHistoryV2(vehicleId: string): Promise<void> {
+  const stateRef = simulationStateRef(vehicleId);
+  const stateSnap = await getDoc(stateRef);
+  if (!stateSnap.exists()) return;
+
+  const state = stateSnap.data() as Record<string, unknown>;
+  const history = Array.isArray(state.gpsSimHistory)
+    ? state.gpsSimHistory as PersistedGpsSimulation[]
+    : [];
+  const hasEmbeddedRoutes = history.some((route) => Array.isArray(route.points) && route.points.length > 0);
+  if (Number(state.schemaVersion || 1) >= SIMULATION_STATE_SCHEMA_VERSION && !hasEmbeddedRoutes) {
+    return;
+  }
+
+  const migratedAt = Date.now();
+  await commitSimulationOperationsInChunks(
+    history.map((simulation, index) => {
+      return (batch: ReturnType<typeof writeBatch>) => {
+        batch.set(
+          simulationRouteRef(vehicleId, getSimulationId(simulation, index)),
+          buildSimulationRoutePayload(vehicleId, simulation, index, migratedAt),
+          { merge: true }
+        );
+      };
+    })
+  );
+
+  await runTransaction(db, async (transaction) => {
+    const currentSnap = await transaction.get(stateRef);
+    if (!currentSnap.exists()) return;
+    const current = currentSnap.data() as Record<string, unknown>;
+    const currentHistory = Array.isArray(current.gpsSimHistory)
+      ? current.gpsSimHistory as PersistedGpsSimulation[]
+      : [];
+    transaction.set(
+      stateRef,
+      buildSimulationStatePayload(
+        vehicleId,
+        current.gpsSim && typeof current.gpsSim === 'object'
+          ? current.gpsSim as PersistedGpsSimulation
+          : null,
+        currentHistory,
+        migratedAt
+      ),
+      { merge: true }
+    );
+  });
 }
 
 async function updateSimulationStatus(
   vehicleId: string,
   update: (current: PersistedGpsSimulation) => PersistedGpsSimulation
 ) {
+  await ensureSimulationHistoryV2(vehicleId);
   const simulationRef = simulationStateRef(vehicleId);
   const vehicleRef = doc(db, 'vehicles', vehicleId);
   await runTransaction(db, async (transaction) => {
@@ -114,12 +243,13 @@ async function updateSimulationStatus(
       : null;
     if (!current) throw new Error('Traseul activ nu mai este disponibil. Reincarca pagina.');
     const now = Date.now();
+    const history = Array.isArray(storedState.gpsSimHistory)
+      ? storedState.gpsSimHistory as PersistedGpsSimulation[]
+      : [];
     transaction.set(simulationRef, buildSimulationStatePayload(
       vehicleId,
       update(current),
-      Array.isArray(storedState.gpsSimHistory)
-        ? storedState.gpsSimHistory as PersistedGpsSimulation[]
-        : [],
+      history,
       now
     ));
   });
@@ -250,10 +380,6 @@ function buildHistoryEntry(currentSimulation?: PersistedGpsSimulation | null) {
   };
 }
 
-function getSimulationId(simulation: PersistedGpsSimulation, index: number) {
-  return simulation.id || `sim-${simulation.startedAt || index}`;
-}
-
 function mergeSimulationHistory(
   history: PersistedGpsSimulation[],
   entry: PersistedGpsSimulation | null
@@ -272,7 +398,7 @@ function mergeSimulationHistory(
 
   return [...merged.values()]
     .sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0))
-    .slice(-250);
+    .slice(-SIMULATION_HISTORY_LIMIT);
 }
 
 function normalizeHistoryOdometers(realBaseKm: number, history: PersistedGpsSimulation[]) {
@@ -494,6 +620,7 @@ export function buildSimulationConfig(
 export async function startGpsSimOnFirestore(
   config: SimulationConfig,
 ): Promise<PersistedGpsSimulation> {
+  await ensureSimulationHistoryV2(config.vehicleId);
   const startedAt = Date.now();
   const points = config.route.map((p, index) => {
     const progress = config.route.length <= 1 ? 0 : index / (config.route.length - 1);
@@ -549,6 +676,21 @@ export async function startGpsSimOnFirestore(
         : null;
     const previousHistoryEntry = buildHistoryEntry(activeSimulation);
     const traveledKm = previousHistoryEntry?.totalDistanceKm || 0;
+    if (previousHistoryEntry) {
+      transaction.set(
+        simulationRouteRef(
+          config.vehicleId,
+          getSimulationId(previousHistoryEntry, existingHistory.length)
+        ),
+        buildSimulationRoutePayload(
+          config.vehicleId,
+          previousHistoryEntry,
+          existingHistory.length,
+          startedAt
+        ),
+        { merge: true }
+      );
+    }
     transaction.set(simulationRef, buildSimulationStatePayload(
       config.vehicleId,
       nextGpsSim,
@@ -595,6 +737,7 @@ export async function resumeGpsSimOnFirestore(vehicleId: string): Promise<void> 
 export async function stopGpsSimOnFirestore(
   vehicleId: string,
 ): Promise<void> {
+  await ensureSimulationHistoryV2(vehicleId);
   const now = Date.now();
   const vehicleRef = doc(db, 'vehicles', vehicleId);
   const simulationRef = simulationStateRef(vehicleId);
@@ -615,6 +758,13 @@ export async function stopGpsSimOnFirestore(
         : null;
     const historyEntry = buildHistoryEntry(activeSimulation);
     const traveledKm = historyEntry?.totalDistanceKm || 0;
+    if (historyEntry) {
+      transaction.set(
+        simulationRouteRef(vehicleId, getSimulationId(historyEntry, existingHistory.length)),
+        buildSimulationRoutePayload(vehicleId, historyEntry, existingHistory.length, now),
+        { merge: true }
+      );
+    }
     transaction.set(simulationRef, buildSimulationStatePayload(
       vehicleId,
       null,
@@ -635,7 +785,13 @@ export async function clearGpsSimHistoryOnFirestore(
   realBaseKm = 0
 ): Promise<void> {
   const now = Date.now();
+  const routesSnap = await getDocs(query(
+    simulationRoutesCollection(vehicleId),
+    orderBy('startedAt', 'asc'),
+    limit(SIMULATION_HISTORY_LIMIT)
+  ));
   const batch = writeBatch(db);
+  routesSnap.docs.forEach((routeDoc) => batch.delete(routeDoc.ref));
   batch.set(
     simulationStateRef(vehicleId),
     buildSimulationStatePayload(vehicleId, null, [], now)
@@ -658,18 +814,33 @@ export async function deleteGpsSimHistoryEntryOnFirestore(
   );
   const normalized = normalizeHistoryOdometers(realBaseKm, nextHistory);
   const now = Date.now();
-  const batch = writeBatch(db);
-  batch.set(simulationStateRef(vehicleId), {
+  await commitSimulationOperationsInChunks([
+    (batch) => batch.delete(simulationRouteRef(vehicleId, simulationId)),
+    ...normalized.history.map((simulation, index) => (batch: ReturnType<typeof writeBatch>) => {
+      batch.set(
+        simulationRouteRef(vehicleId, getSimulationId(simulation, index)),
+        buildSimulationRoutePayload(vehicleId, simulation, index, now),
+        { merge: true }
+      );
+    }),
+  ]);
+  const stateBatch = writeBatch(db);
+  stateBatch.set(
+    simulationStateRef(vehicleId),
+    {
       schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
       vehicleId,
-      gpsSimHistory: normalized.history,
+      gpsSimHistory: normalizeHistoryMetadata(normalized.history),
+      historyCount: normalized.history.length,
       updatedAt: now,
-    }, { merge: true });
-  batch.update(doc(db, 'vehicles', vehicleId), {
+    },
+    { merge: true }
+  );
+  stateBatch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: normalized.currentKm,
     updatedAt: now,
   });
-  await batch.commit();
+  await stateBatch.commit();
 }
 
 export async function updateGpsSimHistoryDistanceOnFirestore(
@@ -686,18 +857,32 @@ export async function updateGpsSimHistoryDistanceOnFirestore(
   );
   const normalized = normalizeHistoryOdometers(realBaseKm, nextHistory);
   const now = Date.now();
-  const batch = writeBatch(db);
-  batch.set(simulationStateRef(vehicleId), {
+  await commitSimulationOperationsInChunks(
+    normalized.history.map((simulation, index) => (batch) => {
+      batch.set(
+        simulationRouteRef(vehicleId, getSimulationId(simulation, index)),
+        buildSimulationRoutePayload(vehicleId, simulation, index, now),
+        { merge: true }
+      );
+    })
+  );
+  const stateBatch = writeBatch(db);
+  stateBatch.set(
+    simulationStateRef(vehicleId),
+    {
       schemaVersion: SIMULATION_STATE_SCHEMA_VERSION,
       vehicleId,
-      gpsSimHistory: normalized.history,
+      gpsSimHistory: normalizeHistoryMetadata(normalized.history),
+      historyCount: normalized.history.length,
       updatedAt: now,
-    }, { merge: true });
-  batch.update(doc(db, 'vehicles', vehicleId), {
+    },
+    { merge: true }
+  );
+  stateBatch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: normalized.currentKm,
     updatedAt: now,
   });
-  await batch.commit();
+  await stateBatch.commit();
 }
 
 export async function restoreGpsRouteStateOnFirestore(
@@ -705,8 +890,26 @@ export async function restoreGpsRouteStateOnFirestore(
   snapshot: GpsRouteStateSnapshot
 ): Promise<void> {
   const now = Date.now();
-  const batch = writeBatch(db);
-  batch.set(
+  const routesSnap = await getDocs(query(
+    simulationRoutesCollection(vehicleId),
+    orderBy('startedAt', 'asc'),
+    limit(SIMULATION_HISTORY_LIMIT)
+  ));
+  await commitSimulationOperationsInChunks(
+    routesSnap.docs.map((routeDoc) => (batch) => batch.delete(routeDoc.ref))
+  );
+  await commitSimulationOperationsInChunks(
+    (snapshot.gpsSimHistory ?? []).map((simulation, index) => (batch) => {
+      batch.set(
+        simulationRouteRef(vehicleId, getSimulationId(simulation, index)),
+        buildSimulationRoutePayload(vehicleId, simulation, index, now),
+        { merge: true }
+      );
+    })
+  );
+
+  const stateBatch = writeBatch(db);
+  stateBatch.set(
     simulationStateRef(vehicleId),
     buildSimulationStatePayload(
       vehicleId,
@@ -715,9 +918,9 @@ export async function restoreGpsRouteStateOnFirestore(
       now
     )
   );
-  batch.update(doc(db, 'vehicles', vehicleId), {
+  stateBatch.update(doc(db, 'vehicles', vehicleId), {
     currentKm: Number((snapshot.currentKm || 0).toFixed(2)),
     updatedAt: now,
   });
-  await batch.commit();
+  await stateBatch.commit();
 }

@@ -201,7 +201,7 @@ export default function GpsOptimizationPanel({ isAdmin }: { isAdmin: boolean }) 
           </div>
           <div>
             <span>Flush diagnostic gateway</span>
-            <strong>{canary?.diagnosticFlushSeconds ?? 45} sec</strong>
+            <strong>{canary?.diagnosticFlushSeconds ?? 300} sec</strong>
           </div>
           <div>
             <span>Listener-e active local</span>
@@ -214,6 +214,26 @@ export default function GpsOptimizationPanel({ isAdmin }: { isAdmin: boolean }) 
           <div>
             <span>Documente/query</span>
             <strong>{(telemetry?.averageDocumentsPerQuery ?? 0).toFixed(1)}</strong>
+          </div>
+          <div>
+            <span>Transfer local estimat</span>
+            <strong>{formatBytes(telemetry?.estimatedBytes ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Cache hits locale</span>
+            <strong>{formatCount(telemetry?.cacheHits ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Query-uri evitate local</span>
+            <strong>{formatCount(telemetry?.avoidedQueries ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Documente evitate local</span>
+            <strong>{formatCount(telemetry?.avoidedDocuments ?? 0)}</strong>
+          </div>
+          <div>
+            <span>Transfer evitat local</span>
+            <strong>{formatBytes(telemetry?.avoidedBytes ?? 0)}</strong>
           </div>
           <div>
             <span>Cereri traseu complet</span>
@@ -249,7 +269,8 @@ export default function GpsOptimizationPanel({ isAdmin }: { isAdmin: boolean }) 
             <strong>Consumatori locali observați</strong>
             {telemetry.topConsumers.map((item) => (
               <span key={`${item.module}:${item.operation}`}>
-                {item.module} · {item.operation}: {formatCount(item.documents)} documente
+                {item.module} · {item.operation}: {formatCount(item.documents)} documente,{" "}
+                {formatCount(item.queries)} query-uri, {formatBytes(item.estimatedBytes ?? 0)}
               </span>
             ))}
           </div>

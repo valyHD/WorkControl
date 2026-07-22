@@ -37,4 +37,16 @@ describe("fleetRoutePersistentCache", () => {
 
     expect(prepareFleetRouteForStorage(points)).toBeNull();
   });
+
+  it("drops raw IO only from the local copy while preserving every route point", () => {
+    const points = [
+      { ...point(1), rawIo: { 16: 1234 } },
+      { ...point(2), rawIo: { 239: 1 } },
+    ];
+
+    expect(prepareFleetRouteForStorage(points)).toEqual([
+      point(1),
+      point(2),
+    ]);
+  });
 });

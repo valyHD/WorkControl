@@ -30,8 +30,8 @@ test("canary buffers diagnostic and usage writes and flushes on disconnect and s
   assert.match(source, /queueGpsCostAggregation\(/);
   assert.match(source, /flushGpsCostBuffer\(session\.imei, "disconnect"\)/);
   assert.match(source, /flushAllGpsCostBuffers\("shutdown"\)/);
-  assert.match(source, /GPS_COST_MIN_FLUSH_SECONDS = 30/);
-  assert.match(source, /GPS_COST_MAX_FLUSH_SECONDS = 60/);
+  assert.match(source, /GPS_COST_MIN_FLUSH_SECONDS = 300/);
+  assert.match(source, /GPS_COST_MAX_FLUSH_SECONDS = 1800/);
 });
 
 test("gateway retries only flush operations that were not already committed", () => {

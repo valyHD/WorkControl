@@ -98,7 +98,7 @@ describe("BillingCostPanel", () => {
       canary: {
         enabled: true,
         canaryTrackerCount: 1,
-        diagnosticFlushSeconds: 45,
+        diagnosticFlushSeconds: 300,
         updatedAt: Date.now(),
       },
       metrics: {

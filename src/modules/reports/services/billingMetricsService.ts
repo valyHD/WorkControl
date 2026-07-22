@@ -254,7 +254,7 @@ function mapCanaryStatus(value: unknown): GpsCostOptimizationStatus {
   return {
     enabled: data.enabled === true,
     canaryTrackerCount: Math.max(0, finiteOr(data.canaryTrackerCount, 0)),
-    diagnosticFlushSeconds: Math.max(30, Math.min(60, finiteOr(data.diagnosticFlushSeconds, 45))),
+    diagnosticFlushSeconds: Math.max(300, Math.min(1800, finiteOr(data.diagnosticFlushSeconds, 300))),
     updatedAt: finiteOrNull(data.updatedAt),
   };
 }

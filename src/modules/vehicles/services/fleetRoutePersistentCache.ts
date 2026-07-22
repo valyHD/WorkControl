@@ -5,14 +5,16 @@ const DATABASE_NAME = "workcontrol-fleet-route-cache";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "routes";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const MAX_CACHE_ENTRIES = 20;
-export const MAX_PERSISTED_FLEET_ROUTE_POINTS = 12_000;
+const MAX_CACHE_ENTRIES = 10;
+export const MAX_PERSISTED_FLEET_ROUTE_POINTS = 35_000;
+
+type StoredFleetRoutePoint = Omit<VehiclePositionItem, "rawIo">;
 
 type StoredFleetRoute = {
   key: string;
   savedAt: number;
   expiresAt: number;
-  points: VehiclePositionItem[];
+  points: StoredFleetRoutePoint[];
 };
 
 let databasePromise: Promise<IDBDatabase> | null = null;
@@ -61,7 +63,7 @@ function openDatabase(): Promise<IDBDatabase> {
 
 export function prepareFleetRouteForStorage(points: VehiclePositionItem[]) {
   if (points.length > MAX_PERSISTED_FLEET_ROUTE_POINTS) return null;
-  return points;
+  return points.map(({ rawIo: _rawIo, ...point }) => point);
 }
 
 async function pruneOldEntries(database: IDBDatabase): Promise<void> {

@@ -4606,8 +4606,8 @@ exports.getBillingControlPanelData = onCall(
           ? canary.canaryTrackerImeis.filter(Boolean).length
           : 0,
         diagnosticFlushSeconds: Math.max(
-          30,
-          Math.min(60, toSafeNumber(canary.diagnosticFlushSeconds, 45))
+          300,
+          Math.min(1800, toSafeNumber(canary.diagnosticFlushSeconds, 300))
         ),
         updatedAt: toSafeNumber(canary.updatedAtMs, 0) || null,
       },

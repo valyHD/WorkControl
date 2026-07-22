@@ -18,9 +18,10 @@ import ProductTabs from "../../../components/product/ProductTabs";
 import { useAuth } from "../../../providers/AuthProvider";
 import type { VehicleItem, VehiclePositionItem } from "../../../types/vehicle";
 import {
+  getVehicleById,
   getVehiclePositionsIncremental,
   getVehiclePositionsForSelectedDay,
-  subscribeVehiclesList,
+  getVehiclesList,
 } from "../services/vehiclesService";
 import {
   createFleetRouteSync,
@@ -781,7 +782,7 @@ type FleetRefreshCommand = {
 };
 
 function VehicleFleetMapCard({
-  vehicle,
+  vehicle: baseVehicle,
   focused = false,
   scopeKey,
   refreshCommand,
@@ -791,6 +792,9 @@ function VehicleFleetMapCard({
   scopeKey: string;
   refreshCommand: FleetRefreshCommand;
 }) {
+  const [vehicle, setVehicle] = useState(baseVehicle);
+  const [isNearViewport, setIsNearViewport] = useState(focused);
+  const [hasEnteredViewport, setHasEnteredViewport] = useState(focused);
   const [routePositions, setRoutePositions] = useState<VehiclePositionItem[]>([]);
   const [liveRealTrail, setLiveRealTrail] = useState<VehiclePositionItem[]>([]);
   const [loadingRoute, setLoadingRoute] = useState(false);
@@ -799,6 +803,7 @@ function VehicleFleetMapCard({
     readFleetMapView(vehicle.id)
   );
   const routeSyncRef = useRef<FleetRouteSyncController | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
   const handledRefreshCommandRef = useRef(0);
   const hasPersistedRoute = Boolean(vehicle.gpsSim && vehicle.gpsSim.active !== false && vehicle.gpsSim.points?.length);
   const activeRoute = hasPersistedRoute;
@@ -814,6 +819,59 @@ function VehicleFleetMapCard({
   );
 
   useEffect(() => {
+    if (!hasEnteredViewport) setVehicle(baseVehicle);
+  }, [baseVehicle, hasEnteredViewport]);
+
+  useEffect(() => {
+    if (focused) {
+      setIsNearViewport(true);
+      setHasEnteredViewport(true);
+      return;
+    }
+    const card = cardRef.current;
+    if (!card || typeof IntersectionObserver === "undefined") {
+      setIsNearViewport(true);
+      setHasEnteredViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const isVisible = entry?.isIntersecting === true;
+        setIsNearViewport(isVisible);
+        if (isVisible) setHasEnteredViewport(true);
+      },
+      { rootMargin: "700px 0px" }
+    );
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [focused]);
+
+  useEffect(() => {
+    if (!isNearViewport) return;
+    let cancelled = false;
+    const hydrate = async () => {
+      const latest = await getVehicleById(baseVehicle.id, {
+        simulationFromTs: from,
+        simulationToTs: dayEnd,
+        simulationLimit: 50,
+      }).catch((error) => {
+        console.warn("[VehicleGpsMapsPage][vehicle-hydration]", error);
+        return null;
+      });
+      if (!cancelled && latest) setVehicle(latest);
+    };
+    void hydrate();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void hydrate();
+    }, FLEET_ROUTE_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [baseVehicle.id, dayEnd, from, isNearViewport]);
+
+  useEffect(() => {
+    if (!isNearViewport) return;
     const controller = createFleetRouteSync({
       scopeKey,
       vehicleId: vehicle.id,
@@ -839,13 +897,21 @@ function VehicleFleetMapCard({
       controller.stop();
       if (routeSyncRef.current === controller) routeSyncRef.current = null;
     };
-  }, [dayEnd, from, scopeKey, vehicle.id]);
+  }, [dayEnd, from, isNearViewport, scopeKey, vehicle.id]);
 
   useEffect(() => {
     if (!refreshCommand.id || handledRefreshCommandRef.current === refreshCommand.id) return;
     handledRefreshCommandRef.current = refreshCommand.id;
+    if (!isNearViewport) return;
+    void getVehicleById(baseVehicle.id, {
+      simulationFromTs: from,
+      simulationToTs: dayEnd,
+      simulationLimit: 50,
+    }).then((latest) => {
+      if (latest) setVehicle(latest);
+    }).catch(() => undefined);
     void routeSyncRef.current?.refresh(refreshCommand.forceFull);
-  }, [refreshCommand]);
+  }, [baseVehicle.id, dayEnd, from, isNearViewport, refreshCommand]);
 
   useEffect(() => {
     setLiveRealTrail((current) => (current.length ? [] : current));
@@ -1040,6 +1106,7 @@ function VehicleFleetMapCard({
 
   return (
     <article
+      ref={cardRef}
       id={`vehicle-fleet-map-card-${vehicle.id}`}
       className={`vehicle-fleet-map-card user-accent-card ${getUserThemeClass(vehicle.currentDriverThemeKey || vehicle.ownerThemeKey)} ${focused ? "is-assistant-focused" : ""}`}
     >
@@ -1065,7 +1132,12 @@ function VehicleFleetMapCard({
       </div>
 
       <div className="vehicle-fleet-map-card__mapWrap">
-        {mapPoints.length ? (
+        {!hasEnteredViewport ? (
+          <div className="vehicle-fleet-map-card__empty">
+            <MapPinned size={22} />
+            <span>Harta se incarca atunci cand ajunge in zona vizibila.</span>
+          </div>
+        ) : mapPoints.length ? (
           <MapContainer
             center={initialMapCenter}
             zoom={initialMapZoom}
@@ -1175,17 +1247,23 @@ export default function VehicleGpsMapsPage() {
   const filteredVehicles = vehicles;
 
   useEffect(() => {
-    const unsubscribe = subscribeVehiclesList((items) => {
-      setVehicles(keepFleetOrderStable(items ?? []));
+    let cancelled = false;
+    const loadFleet = async () => {
+      const items = await getVehiclesList(250).catch((error) => {
+        console.error("[VehicleGpsMapsPage][fleet-list]", error);
+        return [];
+      });
+      if (cancelled) return;
+      setVehicles(keepFleetOrderStable(items));
       setLoading(false);
-    }, { includeGpsSimulation: true });
-
+    };
+    void loadFleet();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadFleet();
+    }, FLEET_ROUTE_REFRESH_INTERVAL_MS);
     return () => {
-      try {
-        unsubscribe?.();
-      } catch (error) {
-        console.error("[VehicleGpsMapsPage][unsubscribe]", error);
-      }
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 

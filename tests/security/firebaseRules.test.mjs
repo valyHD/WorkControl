@@ -9,6 +9,7 @@ import {
 import {
   collection,
   collectionGroup,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -208,6 +209,26 @@ async function seed() {
     await setDoc(doc(db, "vehicles", "vehicle-a-unassigned", "positionDays", "2026-07-13", "points", "p1"), {
       lat: 44.5,
       lng: 26.2,
+    });
+    await setDoc(doc(db, "vehicles", "vehicle-a", "simulationRoutes", "sim-route-a"), {
+      schemaVersion: 2,
+      vehicleId: "vehicle-a",
+      id: "sim-route-a",
+      points: [{ lat: 44.4, lng: 26.1, ts: 10 }],
+    });
+    await setDoc(doc(db, "vehicles", "vehicle-b", "simulationRoutes", "sim-route-b"), {
+      schemaVersion: 2,
+      vehicleId: "vehicle-b",
+      id: "sim-route-b",
+      points: [{ lat: 44.5, lng: 26.2, ts: 10 }],
+    });
+    await setDoc(doc(db, "vehicles", "vehicle-a", "diagnosticDays", "2026-07-13", "diagnosticSamples", "sample-a"), {
+      timestamp: 10,
+      speedKmh: 20,
+    });
+    await setDoc(doc(db, "vehicles", "vehicle-a", "diagnosticDays", "2026-07-13", "diagnosticEvents", "event-a"), {
+      timestamp: 10,
+      type: "high_engine_load",
     });
     await setDoc(doc(db, "tools", "tool-a"), {
       companyId: "company-a",
@@ -597,6 +618,49 @@ test("only the dedicated simulator account may simulate any vehicle", async () =
     doc(wrongAccountDb, "vehicles", "CAwi2Qr1L0aJImF5eK27", "positions", "_simulation"),
     simulationState
   ));
+});
+
+test("simulation route documents preserve route reads and only the dedicated simulator may write", async () => {
+  const simulatorDb = firestoreWithClaims("vip1Arv2zBNYQY1CGqCDcLhuCSc2", {
+    email: "ionut.matura23@gmail.com",
+  });
+  const routeRef = doc(simulatorDb, "vehicles", "vehicle-b", "simulationRoutes", "sim-route-new");
+  const route = {
+    schemaVersion: 2,
+    vehicleId: "vehicle-b",
+    id: "sim-route-new",
+    startedAt: 100,
+    stoppedAt: 200,
+    totalDistanceKm: 2.5,
+    points: [
+      { lat: 44.4, lng: 26.1, ts: 100, speedKmh: 0, ignitionOn: false },
+      { lat: 44.5, lng: 26.2, ts: 200, speedKmh: 30, ignitionOn: true },
+    ],
+  };
+
+  await assertSucceeds(setDoc(routeRef, route));
+  await assertSucceeds(updateDoc(routeRef, { stoppedAt: 250 }));
+  await assertSucceeds(getDoc(doc(firestore("employee-a"), "vehicles", "vehicle-a", "simulationRoutes", "sim-route-a")));
+  await assertFails(getDoc(doc(firestore("employee-a"), "vehicles", "vehicle-b", "simulationRoutes", "sim-route-b")));
+  await assertFails(setDoc(
+    doc(firestore("global"), "vehicles", "vehicle-a", "simulationRoutes", "forbidden"),
+    { ...route, vehicleId: "vehicle-a" }
+  ));
+  await assertFails(setDoc(
+    doc(simulatorDb, "vehicles", "vehicle-a", "simulationRoutes", "wrong-vehicle"),
+    { ...route, vehicleId: "vehicle-b" }
+  ));
+  await assertFails(deleteDoc(doc(firestore("global"), "vehicles", "vehicle-a", "simulationRoutes", "sim-route-a")));
+  await assertSucceeds(deleteDoc(routeRef));
+});
+
+test("split diagnostics remain readable only through assigned vehicle access", async () => {
+  const samplePath = ["vehicles", "vehicle-a", "diagnosticDays", "2026-07-13", "diagnosticSamples", "sample-a"];
+  const eventPath = ["vehicles", "vehicle-a", "diagnosticDays", "2026-07-13", "diagnosticEvents", "event-a"];
+  await assertSucceeds(getDoc(doc(firestore("employee-a"), ...samplePath)));
+  await assertSucceeds(getDoc(doc(firestore("employee-a"), ...eventPath)));
+  await assertFails(getDoc(doc(firestore("employee-b"), ...samplePath)));
+  await assertFails(setDoc(doc(firestore("global"), ...samplePath), { timestamp: 20 }));
 });
 
 test("employee can update safe profile fields, managers cannot change roles, and admins manage companies", async () => {

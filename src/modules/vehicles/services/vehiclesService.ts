@@ -16,6 +16,7 @@ import {
   where,
   type CollectionReference,
   type DocumentData,
+  type Query,
   type QueryConstraint,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
@@ -28,6 +29,13 @@ import {
 } from "firebase/storage";
 import { auth, db, functions, storage } from "../../../lib/firebase/firebase";
 import { clampQueryLimit } from "../../../lib/firebase/queryLimits";
+import { createVisibilityAwareSubscription } from "../../../lib/firebase/visibilityAwareSubscription";
+import {
+  estimateFirestorePayloadBytes,
+  recordFirestoreAvoidedQuery,
+  recordFirestoreCacheHit,
+  recordFirestoreQuery,
+} from "../../../lib/firebase/firestoreQueryTelemetry";
 import {
   buildCompanyScopeConstraints,
   buildUserDirectoryConstraints,
@@ -100,6 +108,10 @@ function vehicleSimulationStateRef(vehicleId: string) {
   return doc(db, "vehicles", vehicleId, "positions", "_simulation");
 }
 
+function vehicleSimulationRoutesCollection(vehicleId: string) {
+  return collection(db, "vehicles", vehicleId, "simulationRoutes");
+}
+
 function mapRuntimeLive(data: DocumentData | undefined): VehicleRuntimeLiveData | null {
   return data && typeof data === "object" ? data as VehicleRuntimeLiveData : null;
 }
@@ -111,6 +123,12 @@ type RuntimeVehicleListCoordinator = {
 
 export type VehiclesListSubscriptionOptions = {
   includeGpsSimulation?: boolean;
+};
+
+export type VehicleByIdOptions = {
+  simulationFromTs?: number;
+  simulationToTs?: number;
+  simulationLimit?: number;
 };
 
 function createRuntimeVehicleListCoordinator(
@@ -270,6 +288,7 @@ const PROGRESSIVE_ROUTE_RANGE_MS = 30 * 60 * 1000;
 const PROGRESSIVE_ROUTE_CHUNK_MS = 30 * 60 * 1000;
 const MAX_POLL_BACKOFF_MS = 90_000;
 const ROUTE_CACHE_TTL_MS = 10_000;
+const LEGACY_ROUTE_AVAILABILITY_TTL_MS = 30 * 60 * 1000;
 const DAY_QUERY_CONCURRENCY = 1;
 const PERSISTED_ROUTE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const PERSISTED_ROUTE_CACHE_MAX_ITEMS = 12_000;
@@ -280,6 +299,13 @@ type RouteCacheItem = {
   expiresAt: number;
   items: VehiclePositionItem[];
 };
+
+type LegacyRouteAvailabilityCacheItem = {
+  available: boolean;
+  expiresAt: number;
+};
+
+const legacyRouteAvailabilityCache = new Map<string, LegacyRouteAvailabilityCacheItem>();
 
 const routeRangeCache = new Map<string, RouteCacheItem>();
 const vehiclePositionArchiveCache = new Map<string, VehiclePositionItem[]>();
@@ -391,6 +417,31 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs = REQUEST_TIMEOUT_MS): Pr
       });
   });
 }
+
+async function getTrackedVehicleDocs(
+  source: Query<DocumentData>,
+  operation: string,
+  reason: string,
+  timeoutMs?: number
+) {
+  const startedAt = performance.now();
+  const request = getDocs(source);
+  const snapshot = timeoutMs
+    ? await withTimeout(request, timeoutMs)
+    : await request;
+  recordFirestoreQuery({
+    module: "vehicles",
+    operation,
+    documents: snapshot.size,
+    durationMs: performance.now() - startedAt,
+    estimatedBytes: estimateFirestorePayloadBytes(
+      snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
+    ),
+    reason,
+  });
+  return snapshot;
+}
+
 export function subscribeVehicleCommands(
   vehicleId: string,
   callback: (items: VehicleCommandItem[]) => void,
@@ -581,8 +632,16 @@ function mapVehicleDailyDiagnosticsSummary(
   id: string,
   data: Record<string, unknown>
 ): VehicleDailyDiagnosticsSummary {
-  const eventsRaw = Array.isArray(data.events) ? data.events : [];
-  const samplesRaw = Array.isArray(data.samples) ? data.samples : [];
+  const eventsRaw = Array.isArray(data.events)
+    ? data.events
+    : Array.isArray(data.recentEvents)
+      ? data.recentEvents
+      : [];
+  const samplesRaw = Array.isArray(data.samples)
+    ? data.samples
+    : Array.isArray(data.recentSamples)
+      ? data.recentSamples
+      : [];
   const sensorKeysRaw = Array.isArray(data.availableSensorKeys) ? data.availableSensorKeys : [];
 
   return {
@@ -689,6 +748,12 @@ function getRouteCache(
     routeRangeCache.delete(key);
     return null;
   }
+  recordFirestoreCacheHit({
+    module: "vehicles",
+    operation: "route-range-cache",
+    avoidedDocuments: cached.items.length,
+    estimatedBytes: estimateFirestorePayloadBytes(cached.items),
+  });
   return cached.items;
 }
 
@@ -720,21 +785,26 @@ export function clearVehicleRouteCache(vehicleId: string): void {
       routeRangeCache.delete(key);
     }
   }
+  for (const [key] of legacyRouteAvailabilityCache.entries()) {
+    if (key.startsWith(`${vehicleId}:`)) {
+      legacyRouteAvailabilityCache.delete(key);
+    }
+  }
 }
 
 function buildPersistedRouteCacheKey(vehicleId: string, fromTs: number, toTs: number): string {
-  return `wc_route_cache:${vehicleId}:${fromTs}:${toTs}`;
+  return `wc_route_cache_v2:${vehicleId}:${fromTs}:${toTs}`;
 }
 
 function buildPersistedRouteCachePrefix(vehicleId: string): string {
-  return `wc_route_cache:${vehicleId}:`;
+  return `wc_route_cache_v2:${vehicleId}:`;
 }
 
 function parsePersistedRangeFromKey(key: string): { fromTs: number; toTs: number } | null {
   const parts = key.split(":");
-  if (parts.length !== 5) return null;
-  const fromTs = Number(parts[3]);
-  const toTs = Number(parts[4]);
+  if (parts.length !== 4) return null;
+  const fromTs = Number(parts[2]);
+  const toTs = Number(parts[3]);
   if (!Number.isFinite(fromTs) || !Number.isFinite(toTs)) return null;
   return { fromTs, toTs };
 }
@@ -819,6 +889,9 @@ function writePersistedRouteCache(
 ): void {
   if (typeof window === "undefined") return;
   if (!items.length) return;
+  // A partial persisted route would make old points disappear after refresh.
+  // Long routes are handled by the fleet IndexedDB cache; this small cache stays lossless.
+  if (items.length > PERSISTED_ROUTE_CACHE_MAX_ITEMS) return;
 
   try {
     const payload: PersistedRouteCacheItem = {
@@ -826,7 +899,7 @@ function writePersistedRouteCache(
       fromTs,
       toTs,
       savedAt: Date.now(),
-      items: items.slice(Math.max(0, items.length - PERSISTED_ROUTE_CACHE_MAX_ITEMS)),
+      items,
     };
 
     window.localStorage.setItem(
@@ -1371,21 +1444,21 @@ export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
     ? vehicleOperationalViewsCollection
     : vehiclesCollection;
   if (context.role !== "angajat") {
-    const snap = await getDocs(query(
+    const snap = await getTrackedVehicleDocs(query(
       source,
       ...buildCompanyScopeConstraints(context),
       orderBy("plateNumber", "asc"),
       limit(resultLimit)
-    ));
+    ), "fleet-list", "lista operationala limitata pentru harta flotei");
     return snap.docs.map((docItem) => mapVehicleDoc(docItem.id, docItem.data()));
   }
   const assignmentFields = ["ownerUserId", "currentDriverUserId", "pendingDriverUserId"] as const;
-  const snapshots = await Promise.all(assignmentFields.map((field) => getDocs(query(
+  const snapshots = await Promise.all(assignmentFields.map((field) => getTrackedVehicleDocs(query(
     source,
     ...buildCompanyScopeConstraints(context),
     where(field, "==", context.uid),
     limit(resultLimit)
-  ))));
+  ), `fleet-list-${field}`, "vehicule asignate utilizatorului curent")));
   const unique = new Map<string, VehicleItem>();
   snapshots.forEach((snap) => snap.docs.forEach((docItem) => {
     unique.set(docItem.id, mapVehicleDoc(docItem.id, docItem.data()));
@@ -1393,7 +1466,7 @@ export async function getVehiclesList(maxItems = 250): Promise<VehicleItem[]> {
   return [...unique.values()].sort((a, b) => a.plateNumber.localeCompare(b.plateNumber));
 }
 
-export function subscribeVehiclesList(
+function subscribeVehiclesListWhileVisible(
   onData: (items: VehicleItem[]) => void,
   options: VehiclesListSubscriptionOptions = {}
 ): () => void {
@@ -1460,15 +1533,28 @@ export function subscribeVehiclesList(
   };
 }
 
-export async function getVehicleById(vehicleId: string): Promise<VehicleItem | null> {
+export function subscribeVehiclesList(
+  onData: (items: VehicleItem[]) => void,
+  options: VehiclesListSubscriptionOptions = {}
+): () => void {
+  return createVisibilityAwareSubscription(
+    () => subscribeVehiclesListWhileVisible(onData, options),
+    { listenerCount: 1 }
+  );
+}
+
+export async function getVehicleById(
+  vehicleId: string,
+  options: VehicleByIdOptions = {}
+): Promise<VehicleItem | null> {
   if (!vehicleId) return null;
 
-  const [snap, runtimeSnap, simulationSnap] = await Promise.all([
+  const [snap, runtimeSnap, simulationState] = await Promise.all([
     getDoc(doc(db, "vehicles", vehicleId)),
     VEHICLE_RUNTIME_LIVE_READS_ENABLED
       ? getDoc(vehicleRuntimeLiveRef(vehicleId)).catch(() => null)
       : Promise.resolve(null),
-    getDoc(vehicleSimulationStateRef(vehicleId)).catch(() => null),
+    getVehicleSimulationStateOnce(vehicleId, options).catch(() => null),
   ]);
   if (!snap.exists()) return null;
 
@@ -1477,7 +1563,7 @@ export async function getVehicleById(vehicleId: string): Promise<VehicleItem | n
       mapVehicleDoc(snap.id, snap.data()),
       runtimeSnap?.exists() ? mapRuntimeLive(runtimeSnap.data()) : null
     ),
-    simulationSnap?.exists() ? mapVehicleSimulationState(simulationSnap.data()) : null
+    simulationState
   );
 }
 
@@ -1514,7 +1600,7 @@ export async function getMyVehicleForUser(userId: string): Promise<VehicleItem |
   return mapVehicleDoc(preferredDoc.id, preferredDoc.data());
 }
 
-export function subscribeVehicleById(
+function subscribeVehicleByIdWhileVisible(
   vehicleId: string,
   onData: (item: VehicleItem | null) => void
 ): () => void {
@@ -1526,16 +1612,68 @@ export function subscribeVehicleById(
   let baseVehicle: VehicleItem | null = null;
   let runtimeLive: VehicleRuntimeLiveData | null = null;
   let simulationState: VehicleSimulationStateData | null = null;
+  let simulationRoutes: NonNullable<VehicleItem["gpsSimHistory"]> = [];
   let baseLoaded = false;
   let simulationLoaded = false;
+  let simulationRoutesLoaded = true;
+  let simulationRoutesWatching = false;
+  let stopSimulationRoutes: () => void = () => undefined;
   const emit = () => {
-    if (!baseLoaded || !simulationLoaded) return;
+    if (!baseLoaded || !simulationLoaded || !simulationRoutesLoaded) return;
+    const hydratedSimulation = mergeSimulationRoutesIntoState(
+      simulationState,
+      simulationRoutes
+    );
     onData(baseVehicle
       ? mergeVehicleSimulationState(
           mergeVehicleRuntimeLive(baseVehicle, runtimeLive),
-          simulationState
+          hydratedSimulation
         )
       : null);
+  };
+
+  const watchSimulationRoutes = () => {
+    if (!simulationState || (simulationState.schemaVersion ?? 1) < 2) {
+      stopSimulationRoutes();
+      stopSimulationRoutes = () => undefined;
+      simulationRoutesWatching = false;
+      simulationRoutes = [];
+      simulationRoutesLoaded = true;
+      emit();
+      return;
+    }
+    if (simulationRoutesWatching) {
+      emit();
+      return;
+    }
+    simulationRoutesWatching = true;
+    simulationRoutesLoaded = false;
+    stopSimulationRoutes = onSnapshot(
+      query(
+        vehicleSimulationRoutesCollection(vehicleId),
+        orderBy("startedAt", "asc"),
+        limit(250)
+      ),
+      (snapshot) => {
+        simulationRoutes = snapshot.docs
+          .map((routeDoc) =>
+            mapVehicleSimulationRoute(vehicleId, routeDoc.id, routeDoc.data())
+          )
+          .filter(
+            (item): item is NonNullable<VehicleItem["gpsSimHistory"]>[number] =>
+              Boolean(item)
+          );
+        simulationRoutesLoaded = true;
+        emit();
+      },
+      (error) => {
+        console.warn(`[vehicle-simulation-routes][detail][${vehicleId}]`, error);
+        simulationRoutesWatching = false;
+        simulationRoutes = [];
+        simulationRoutesLoaded = true;
+        emit();
+      }
+    );
   };
 
   const stopVehicle = onSnapshot(
@@ -1574,13 +1712,14 @@ export function subscribeVehicleById(
     (snapshot) => {
       simulationState = snapshot.exists() ? mapVehicleSimulationState(snapshot.data()) : null;
       simulationLoaded = true;
-      emit();
+      watchSimulationRoutes();
     },
     (error) => {
       console.warn(`[vehicle-simulation][detail][${vehicleId}]`, error);
       simulationState = null;
       simulationLoaded = true;
-      emit();
+      simulationRoutesLoaded = true;
+      watchSimulationRoutes();
     }
   );
 
@@ -1588,6 +1727,109 @@ export function subscribeVehicleById(
     stopVehicle();
     stopRuntime();
     stopSimulation();
+    stopSimulationRoutes();
+  };
+}
+
+export function subscribeVehicleById(
+  vehicleId: string,
+  onData: (item: VehicleItem | null) => void
+): () => void {
+  if (!vehicleId) {
+    onData(null);
+    return () => undefined;
+  }
+  return createVisibilityAwareSubscription(
+    () => subscribeVehicleByIdWhileVisible(vehicleId, onData),
+    { listenerCount: 4 }
+  );
+}
+
+function subscribeVehicleDailyDiagnosticsWhileVisible(
+  vehicleId: string,
+  dayKey: string,
+  onData: (item: VehicleDailyDiagnosticsSummary | null) => void
+): () => void {
+  if (!vehicleId || !dayKey) {
+    onData(null);
+    return () => undefined;
+  }
+
+  let summary: VehicleDailyDiagnosticsSummary | null = null;
+  let events: VehicleDailyDiagnosticEvent[] | null = null;
+  let samples: VehicleDailyDiagnosticSample[] | null = null;
+  const emit = () => {
+    if (!summary) {
+      onData(null);
+      return;
+    }
+    onData({
+      ...summary,
+      events: events ?? summary.events,
+      samples: samples ?? summary.samples,
+    });
+  };
+
+  const stopSummary = onSnapshot(
+    doc(db, "vehicles", vehicleId, "diagnosticDays", dayKey),
+    (snap) => {
+      if (!snap.exists()) {
+        summary = null;
+        onData(null);
+        return;
+      }
+      summary = mapVehicleDailyDiagnosticsSummary(
+        snap.id,
+        snap.data() as Record<string, unknown>
+      );
+      emit();
+    },
+    (error) => {
+      console.error("[subscribeVehicleDailyDiagnostics]", error);
+      onData(null);
+    }
+  );
+  const stopEvents = onSnapshot(
+    query(
+      collection(db, "vehicles", vehicleId, "diagnosticDays", dayKey, "diagnosticEvents"),
+      orderBy("timestamp", "desc"),
+      limit(250)
+    ),
+    (snap) => {
+      events = snap.docs.map((item, index) =>
+        mapVehicleDailyDiagnosticEvent(index, item.data())
+      );
+      emit();
+    },
+    (error) => {
+      console.warn("[subscribeVehicleDailyDiagnostics][events]", error);
+      events = null;
+      emit();
+    }
+  );
+  const stopSamples = onSnapshot(
+    query(
+      collection(db, "vehicles", vehicleId, "diagnosticDays", dayKey, "diagnosticSamples"),
+      orderBy("timestamp", "desc"),
+      limit(144)
+    ),
+    (snap) => {
+      samples = snap.docs
+        .map((item) => mapVehicleDailyDiagnosticSample(item.data()))
+        .filter((item): item is VehicleDailyDiagnosticSample => Boolean(item));
+      emit();
+    },
+    (error) => {
+      console.warn("[subscribeVehicleDailyDiagnostics][samples]", error);
+      samples = null;
+      emit();
+    }
+  );
+
+  return () => {
+    stopSummary();
+    stopEvents();
+    stopSamples();
   };
 }
 
@@ -1600,22 +1842,68 @@ export function subscribeVehicleDailyDiagnostics(
     onData(null);
     return () => undefined;
   }
-
-  return onSnapshot(
-    doc(db, "vehicles", vehicleId, "diagnosticDays", dayKey),
-    (snap) => {
-      if (!snap.exists()) {
-        onData(null);
-        return;
-      }
-
-      onData(mapVehicleDailyDiagnosticsSummary(snap.id, snap.data() as Record<string, unknown>));
-    },
-    (error) => {
-      console.error("[subscribeVehicleDailyDiagnostics]", error);
-      onData(null);
-    }
+  return createVisibilityAwareSubscription(
+    () => subscribeVehicleDailyDiagnosticsWhileVisible(vehicleId, dayKey, onData),
+    { listenerCount: 3 }
   );
+}
+
+function mapVehicleSimulationRoute(
+  vehicleId: string,
+  id: string,
+  data: DocumentData
+): NonNullable<VehicleItem["gpsSimHistory"]>[number] | null {
+  const mapped = mapVehicleDoc(vehicleId, { gpsSimHistory: [{ ...data, id }] });
+  return mapped.gpsSimHistory?.[0] ?? null;
+}
+
+function mergeSimulationRoutesIntoState(
+  state: VehicleSimulationStateData | null,
+  routes: NonNullable<VehicleItem["gpsSimHistory"]>
+): VehicleSimulationStateData | null {
+  if (!state || (state.schemaVersion ?? 1) < 2 || routes.length === 0) return state;
+  return {
+    ...state,
+    gpsSimHistory: [...routes].sort(
+      (left, right) => (left.startedAt || 0) - (right.startedAt || 0)
+    ),
+  };
+}
+
+async function getVehicleSimulationStateOnce(
+  vehicleId: string,
+  options: VehicleByIdOptions = {}
+): Promise<VehicleSimulationStateData | null> {
+  const stateSnap = await getDoc(vehicleSimulationStateRef(vehicleId)).catch(() => null);
+  if (!stateSnap?.exists()) return null;
+  const state = mapVehicleSimulationState(stateSnap.data());
+  if (!state || (state.schemaVersion ?? 1) < 2) return state;
+
+  const routeLimit = clampQueryLimit(options.simulationLimit ?? 250, 250);
+  const routeConstraints: QueryConstraint[] = [];
+  if (Number.isFinite(options.simulationFromTs)) {
+    routeConstraints.push(where(
+      "startedAt",
+      ">=",
+      Math.max(0, Number(options.simulationFromTs) - 24 * 60 * 60 * 1000)
+    ));
+  }
+  if (Number.isFinite(options.simulationToTs)) {
+    routeConstraints.push(where("startedAt", "<=", Number(options.simulationToTs)));
+  }
+  routeConstraints.push(orderBy("startedAt", "asc"), limit(routeLimit));
+
+  const routesSnap = await getTrackedVehicleDocs(
+    query(vehicleSimulationRoutesCollection(vehicleId), ...routeConstraints),
+    "simulation-routes",
+    options.simulationFromTs || options.simulationToTs
+      ? "simulari limitate la intervalul selectat"
+      : "istoric simulare pentru detaliul vehiculului"
+  );
+  const routes = routesSnap.docs
+    .map((routeDoc) => mapVehicleSimulationRoute(vehicleId, routeDoc.id, routeDoc.data()))
+    .filter((item): item is NonNullable<VehicleItem["gpsSimHistory"]>[number] => Boolean(item));
+  return mergeSimulationRoutesIntoState(state, routes);
 }
 
 export function subscribeVehicleDiagnosticHistory(
@@ -1628,7 +1916,7 @@ export function subscribeVehicleDiagnosticHistory(
     return () => undefined;
   }
 
-  return onSnapshot(
+  return createVisibilityAwareSubscription(() => onSnapshot(
     query(
       collection(db, "vehicles", vehicleId, "diagnosticDays"),
       orderBy("dayKey", "desc"),
@@ -1645,7 +1933,7 @@ export function subscribeVehicleDiagnosticHistory(
       console.error("[subscribeVehicleDiagnosticHistory]", error);
       onData([]);
     }
-  );
+  ));
 }
 
 export async function isPlateNumberUsed(
@@ -2608,7 +2896,12 @@ async function getVehiclePositionsForDay(
       }
 
       const q = query(pointsRef, ...constraints);
-      const snap = await withTimeout(getDocs(q), ROUTE_QUERY_TIMEOUT_MS);
+      const snap = await getTrackedVehicleDocs(
+        q,
+        "route-canonical-page",
+        "puncte traseu din colectia zilnica",
+        ROUTE_QUERY_TIMEOUT_MS
+      );
 
       if (snap.empty) break;
 
@@ -2670,8 +2963,10 @@ async function getVehicleIncrementalPositionsForDay(
     ];
     if (lastDoc) constraints.push(startAfter(lastDoc));
 
-    const snap = await withTimeout(
-      getDocs(query(pointsRef, ...constraints)),
+    const snap = await getTrackedVehicleDocs(
+      query(pointsRef, ...constraints),
+      "route-canonical-incremental",
+      "numai punctele noi ale traseului",
       ROUTE_QUERY_TIMEOUT_MS
     );
     if (snap.empty) break;
@@ -2706,16 +3001,16 @@ async function getVehicleLatestPositionsForDay(
     "points"
   ) as CollectionReference<DocumentData>;
 
-  const snap = await withTimeout(
-    getDocs(
-      query(
-        pointsRef,
-        where("gpsTimestamp", ">=", fromTs),
-        where("gpsTimestamp", "<=", toTs),
-        orderBy("gpsTimestamp", "desc"),
-        limit(maxItems)
-      )
+  const snap = await getTrackedVehicleDocs(
+    query(
+      pointsRef,
+      where("gpsTimestamp", ">=", fromTs),
+      where("gpsTimestamp", "<=", toTs),
+      orderBy("gpsTimestamp", "desc"),
+      limit(maxItems)
     ),
+    "route-canonical-latest",
+    "ultimele puncte pentru pozitia curenta",
     ROUTE_QUERY_TIMEOUT_MS
   );
 
@@ -2753,7 +3048,12 @@ async function getVehiclePositionsFromFlatCollection(
     }
 
     const q = query(pointsRef, ...constraints);
-    const snap = await withTimeout(getDocs(q), ROUTE_QUERY_TIMEOUT_MS);
+    const snap = await getTrackedVehicleDocs(
+      q,
+      "route-legacy-page",
+      "fallback pentru trasee istorice legacy",
+      ROUTE_QUERY_TIMEOUT_MS
+    );
     if (snap.empty) break;
 
     allItems.push(
@@ -2777,6 +3077,46 @@ async function getVehiclePositionsFromFlatCollection(
   return allItems;
 }
 
+async function hasVehicleLegacyPositionsForDay(
+  vehicleId: string,
+  dayKey: string
+): Promise<boolean> {
+  const cacheKey = `${vehicleId}:${dayKey}`;
+  const cached = legacyRouteAvailabilityCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.available;
+
+  const dayStart = getDayStartTs(dayKey);
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
+  const pointsRef = collection(db, "vehicles", vehicleId, "positions") as CollectionReference<
+    DocumentData
+  >;
+
+  try {
+    const snapshot = await getTrackedVehicleDocs(
+      query(
+        pointsRef,
+        where("gpsTimestamp", ">=", dayStart),
+        where("gpsTimestamp", "<=", dayEnd),
+        orderBy("gpsTimestamp", "asc"),
+        limit(1)
+      ),
+      "route-legacy-probe",
+      "detectare unica pe zi pentru schema istorica",
+      ROUTE_QUERY_TIMEOUT_MS
+    );
+    const available = !snapshot.empty;
+    legacyRouteAvailabilityCache.set(cacheKey, {
+      available,
+      expiresAt: Date.now() + LEGACY_ROUTE_AVAILABILITY_TTL_MS,
+    });
+    return available;
+  } catch (error) {
+    console.warn("[hasVehicleLegacyPositionsForDay]", vehicleId, dayKey, error);
+    // Conservative fallback: preserve the old merge behavior if the probe itself fails.
+    return true;
+  }
+}
+
 async function getVehicleLatestPositionsFromFlatCollection(
   vehicleId: string,
   fromTs: number,
@@ -2787,16 +3127,16 @@ async function getVehicleLatestPositionsFromFlatCollection(
     DocumentData
   >;
 
-  const snap = await withTimeout(
-    getDocs(
-      query(
-        pointsRef,
-        where("gpsTimestamp", ">=", fromTs),
-        where("gpsTimestamp", "<=", toTs),
-        orderBy("gpsTimestamp", "desc"),
-        limit(maxItems)
-      )
+  const snap = await getTrackedVehicleDocs(
+    query(
+      pointsRef,
+      where("gpsTimestamp", ">=", fromTs),
+      where("gpsTimestamp", "<=", toTs),
+      orderBy("gpsTimestamp", "desc"),
+      limit(maxItems)
     ),
+    "route-legacy-latest",
+    "fallback ultima pozitie din schema veche",
     ROUTE_QUERY_TIMEOUT_MS
   );
 
@@ -2832,17 +3172,29 @@ async function getVehicleLatestPositionsRange(
       )
   );
 
-  const flatItems = await getVehicleLatestPositionsFromFlatCollection(
-    vehicleId,
-    fromTs,
-    toTs,
-    maxItems
-  ).catch((error) => {
-    console.warn("[getVehicleLatestPositionsRange][flatCollection]", error);
-    return [] as VehiclePositionItem[];
-  });
+  const canonicalItems = dayResults.flat();
+  if (canonicalItems.length) {
+    recordFirestoreAvoidedQuery({
+      module: "vehicles",
+      operation: "route-legacy-latest",
+      documents: canonicalItems.length,
+      estimatedBytes: estimateFirestorePayloadBytes(canonicalItems),
+      reason: "schema zilnica are deja puncte; fallback-ul legacy nu mai este cerut",
+    });
+  }
+  const flatItems = canonicalItems.length
+    ? []
+    : await getVehicleLatestPositionsFromFlatCollection(
+        vehicleId,
+        fromTs,
+        toTs,
+        maxItems
+      ).catch((error) => {
+        console.warn("[getVehicleLatestPositionsRange][flatCollection]", error);
+        return [] as VehiclePositionItem[];
+      });
 
-  const normalized = normalizePositionItems([...dayResults.flat(), ...flatItems]);
+  const normalized = normalizePositionItems([...canonicalItems, ...flatItems]);
   return normalized.slice(Math.max(0, normalized.length - maxItems));
 }
 
@@ -2881,55 +3233,40 @@ async function getVehiclePositionsForDayInChunks(
   if (safeFromTs > safeToTs) return [];
 
   const items: VehiclePositionItem[] = [];
+  const legacyAvailable = await hasVehicleLegacyPositionsForDay(vehicleId, dayKey);
+  if (!legacyAvailable) {
+    recordFirestoreAvoidedQuery({
+      module: "vehicles",
+      operation: "route-legacy-page",
+      documents: 0,
+      reason: "proba zilnica confirma ca nu exista puncte in schema istorica",
+    });
+  }
 
   for (const chunk of enumerateTimeChunks(safeFromTs, safeToTs, chunkMs)) {
     try {
-      items.push(
-        ...(await getVehiclePositionsForDay(
+      const canonicalItems = await getVehiclePositionsForDay(
+        vehicleId,
+        dayKey,
+        chunk.fromTs,
+        chunk.toTs,
+        pageSize,
+        maxPages
+      );
+      const legacyItems = legacyAvailable
+        ? await getVehiclePositionsFromFlatCollection(
           vehicleId,
-          dayKey,
           chunk.fromTs,
           chunk.toTs,
           pageSize,
           maxPages
-        ))
-      );
+        )
+        : [];
+      items.push(...canonicalItems, ...legacyItems);
     } catch (error) {
       console.warn(
         "[getVehiclePositionsForDayInChunks]",
         dayKey,
-        new Date(chunk.fromTs).toISOString(),
-        error
-      );
-    }
-  }
-
-  return normalizePositionItems(items);
-}
-
-async function getVehiclePositionsFromFlatCollectionInChunks(
-  vehicleId: string,
-  fromTs: number,
-  toTs: number,
-  pageSize = DEFAULT_ROUTE_PAGE_SIZE,
-  maxPages = DEFAULT_ROUTE_MAX_PAGES
-): Promise<VehiclePositionItem[]> {
-  const items: VehiclePositionItem[] = [];
-
-  for (const chunk of enumerateTimeChunks(fromTs, toTs)) {
-    try {
-      items.push(
-        ...(await getVehiclePositionsFromFlatCollection(
-          vehicleId,
-          chunk.fromTs,
-          chunk.toTs,
-          pageSize,
-          maxPages
-        ))
-      );
-    } catch (error) {
-      console.warn(
-        "[getVehiclePositionsFromFlatCollectionInChunks]",
         new Date(chunk.fromTs).toISOString(),
         error
       );
@@ -3033,19 +3370,6 @@ export async function getVehiclePositionsRange(
     rangeItems.push(...allItems);
   }
 
-  try {
-    const flatItems = await getVehiclePositionsFromFlatCollectionInChunks(
-      vehicleId,
-      fromTs,
-      toTs,
-      pageSize,
-      maxPages
-    );
-    rangeItems.push(...flatItems);
-  } catch (error) {
-    console.warn("[getVehiclePositionsRange][flatCollectionMerge]", error);
-  }
-
   const normalized = normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
 
   setRouteCache(vehicleId, fromTs, toTs, normalized);
@@ -3082,11 +3406,19 @@ async function getVehiclePositionsRangeProgressive(
     const dayFromTs = Math.max(fromTs, dayStart);
     const dayToTs = Math.min(toTs, dayEnd);
     if (dayFromTs > dayToTs) continue;
+    const legacyAvailable = await hasVehicleLegacyPositionsForDay(vehicleId, dayKey);
+    if (!legacyAvailable) {
+      recordFirestoreAvoidedQuery({
+        module: "vehicles",
+        operation: "route-legacy-page",
+        documents: 0,
+        reason: "proba zilnica confirma ca nu exista puncte in schema istorica",
+      });
+    }
 
     for (const chunk of enumerateTimeChunks(dayFromTs, dayToTs, PROGRESSIVE_ROUTE_CHUNK_MS, true)) {
       try {
-        const [dayItems, flatItems] = await Promise.all([
-          getVehiclePositionsForDay(
+        const dayItems = await getVehiclePositionsForDay(
             vehicleId,
             dayKey,
             chunk.fromTs,
@@ -3100,22 +3432,23 @@ async function getVehiclePositionsRangeProgressive(
               error
             );
             return [] as VehiclePositionItem[];
-          }),
-          getVehiclePositionsFromFlatCollection(
-            vehicleId,
-            chunk.fromTs,
-            chunk.toTs,
-            pageSize,
-            maxPages
-          ).catch((error) => {
-            console.warn(
-              "[getVehiclePositionsRangeProgressive][flatCollection]",
-              dayKey,
-              error
-            );
-            return [] as VehiclePositionItem[];
-          }),
-        ]);
+          });
+        const flatItems = legacyAvailable
+          ? await getVehiclePositionsFromFlatCollection(
+              vehicleId,
+              chunk.fromTs,
+              chunk.toTs,
+              pageSize,
+              maxPages
+            ).catch((error) => {
+              console.warn(
+                "[getVehiclePositionsRangeProgressive][flatCollection]",
+                dayKey,
+                error
+              );
+              return [] as VehiclePositionItem[];
+            })
+          : [];
 
         const incoming = normalizePositionItems([...dayItems, ...flatItems]);
         if (!incoming.length) continue;
@@ -3170,7 +3503,8 @@ export async function getLatestVehiclePosition(
     getDayKeyFromTs(now),
     snapshotTs ? getDayKeyFromTs(snapshotTs) : "",
     addDays(getDayKeyFromTs(now), -1),
-  ]);
+  ]).sort((left, right) => right.localeCompare(left));
+  let canonicalPositionFound = false;
 
   for (const dayKey of dayKeys) {
     try {
@@ -3183,31 +3517,48 @@ export async function getLatestVehiclePosition(
         "points"
       ) as CollectionReference<DocumentData>;
 
-      const snap = await withTimeout(
-        getDocs(query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)))
+      const snap = await getTrackedVehicleDocs(
+        query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)),
+        "route-canonical-latest-position",
+        "ultima pozitie canonica a vehiculului",
+        ROUTE_QUERY_TIMEOUT_MS
       );
       const docItem = snap.docs[0];
       if (docItem) {
         candidates.push(mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>));
+        canonicalPositionFound = true;
+        break;
       }
     } catch (error) {
       console.warn("[getLatestVehiclePosition][positionDays]", dayKey, error);
     }
   }
 
-  try {
-    const pointsRef = collection(db, "vehicles", vehicle.id, "positions") as CollectionReference<
-      DocumentData
-    >;
-    const snap = await withTimeout(
-      getDocs(query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)))
-    );
-    const docItem = snap.docs[0];
-    if (docItem) {
-      candidates.push(mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>));
+  if (canonicalPositionFound) {
+    recordFirestoreAvoidedQuery({
+      module: "vehicles",
+      operation: "route-legacy-latest-position",
+      documents: 1,
+      reason: "pozitia canonica exista; fallback-ul legacy nu mai este cerut",
+    });
+  } else {
+    try {
+      const pointsRef = collection(db, "vehicles", vehicle.id, "positions") as CollectionReference<
+        DocumentData
+      >;
+      const snap = await getTrackedVehicleDocs(
+        query(pointsRef, orderBy("gpsTimestamp", "desc"), limit(1)),
+        "route-legacy-latest-position",
+        "fallback pentru ultima pozitie din schema veche",
+        ROUTE_QUERY_TIMEOUT_MS
+      );
+      const docItem = snap.docs[0];
+      if (docItem) {
+        candidates.push(mapVehiclePositionDoc(docItem.id, docItem.data() as Record<string, any>));
+      }
+    } catch (error) {
+      console.warn("[getLatestVehiclePosition][flatCollection]", error);
     }
-  } catch (error) {
-    console.warn("[getLatestVehiclePosition][flatCollection]", error);
   }
 
   const clean = normalizePositionItems(candidates);
@@ -3235,39 +3586,13 @@ export async function getVehiclePositionsForSelectedDay(
     return [];
   }
 
-  const rangeItems: VehiclePositionItem[] = [];
-  const dayKeys = enumerateDayKeys(fromTs, toTs);
-
-  for (const dayKey of dayKeys) {
-    try {
-      const items = await getVehiclePositionsForDay(
-        vehicleId,
-        dayKey,
-        fromTs,
-        toTs,
-        pageSize,
-        maxPages
-      );
-      rangeItems.push(...items);
-    } catch (error) {
-      console.warn("[getVehiclePositionsForSelectedDay][positionDays]", dayKey, error);
-    }
-  }
-
-  try {
-    const flatItems = await getVehiclePositionsFromFlatCollection(
-      vehicleId,
-      fromTs,
-      toTs,
-      pageSize,
-      maxPages
-    );
-    rangeItems.push(...flatItems);
-  } catch (error) {
-    console.warn("[getVehiclePositionsForSelectedDay][flatCollection]", error);
-  }
-
-  return normalizePositionItems(rangeItems).slice(0, MAX_TOTAL_ROUTE_POINTS);
+  return getVehiclePositionsForSelectedDayChunked(
+    vehicleId,
+    fromTs,
+    toTs,
+    pageSize,
+    maxPages
+  );
 }
 
 export async function getVehiclePositionsForSelectedDayChunked(

@@ -53,7 +53,7 @@ describe("GpsOptimizationPanel", () => {
       canary: {
         enabled: true,
         canaryTrackerCount: 10,
-        diagnosticFlushSeconds: 45,
+        diagnosticFlushSeconds: 300,
         updatedAt: Date.now(),
       },
       firestoreCostControl: config,

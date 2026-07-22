@@ -266,9 +266,9 @@ service cloud.firestore {
         allow create, update, delete: if positionId == '_simulation' && dedicatedGpsSimulator();
         allow create: if positionId == '_simulation' && canWriteVehicleSimulation() &&
           request.resource.data.keys().hasOnly([
-            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
+            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'historyCount', 'updatedAt', 'migratedAtServer'
           ]) &&
-          request.resource.data.get('schemaVersion', 0) == 1 &&
+          request.resource.data.get('schemaVersion', 0) in [1, 2] &&
           request.resource.data.get('vehicleId', '') == vehicleId &&
           (request.resource.data.get('gpsSim', null) == null || request.resource.data.gpsSim is map) &&
           request.resource.data.get('gpsSimHistory', []) is list &&
@@ -276,9 +276,9 @@ service cloud.firestore {
           request.resource.data.get('updatedAt', 0) is number;
         allow update: if positionId == '_simulation' && canWriteVehicleSimulation() &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'updatedAt', 'migratedAtServer'
+            'schemaVersion', 'vehicleId', 'gpsSim', 'gpsSimHistory', 'historyCount', 'updatedAt', 'migratedAtServer'
           ]) &&
-          request.resource.data.get('schemaVersion', 0) == 1 &&
+          request.resource.data.get('schemaVersion', 0) in [1, 2] &&
           request.resource.data.get('vehicleId', '') == vehicleId &&
           (request.resource.data.get('gpsSim', null) == null || request.resource.data.gpsSim is map) &&
           request.resource.data.get('gpsSimHistory', []) is list &&
@@ -286,6 +286,13 @@ service cloud.firestore {
           request.resource.data.get('updatedAt', 0) is number &&
           request.resource.data.get('updatedAt', 0) > resource.data.get('updatedAt', 0);
         allow delete: if positionId == '_simulation' && canWriteVehicleSimulation();
+      }
+
+      match /simulationRoutes/{routeId} {
+        allow read: if canReadVehicle(vehicleId);
+        allow create, update: if dedicatedGpsSimulator() &&
+          request.resource.data.get('vehicleId', vehicleId) == vehicleId;
+        allow delete: if dedicatedGpsSimulator();
       }
 
       match /positionDays/{dayKey} {
@@ -301,6 +308,16 @@ service cloud.firestore {
       match /diagnosticDays/{dayKey} {
         allow read: if canReadVehicle(vehicleId);
         allow write: if false;
+
+        match /diagnosticSamples/{sampleId} {
+          allow read: if canReadVehicle(vehicleId);
+          allow write: if false;
+        }
+
+        match /diagnosticEvents/{eventId} {
+          allow read: if canReadVehicle(vehicleId);
+          allow write: if false;
+        }
       }
 
       match /events/{eventId} {

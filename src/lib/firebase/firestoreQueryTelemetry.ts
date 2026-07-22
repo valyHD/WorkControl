@@ -5,6 +5,11 @@ export type FirestoreQueryTelemetryItem = {
   documents: number;
   durationMs: number;
   reason: string;
+  estimatedBytes?: number;
+  avoidedBytes?: number;
+  cacheHits?: number;
+  avoidedQueries?: number;
+  avoidedDocuments?: number;
 };
 
 export type FirestoreQueryTelemetrySnapshot = {
@@ -13,6 +18,11 @@ export type FirestoreQueryTelemetrySnapshot = {
   queries: number;
   documents: number;
   averageDocumentsPerQuery: number;
+  estimatedBytes?: number;
+  avoidedBytes?: number;
+  cacheHits?: number;
+  avoidedQueries?: number;
+  avoidedDocuments?: number;
   topConsumers: FirestoreQueryTelemetryItem[];
 };
 
@@ -32,6 +42,7 @@ export function recordFirestoreQuery(params: {
   documents: number;
   durationMs?: number;
   reason: string;
+  estimatedBytes?: number;
 }) {
   const key = keyFor(params.module, params.operation);
   const current = items.get(key) ?? {
@@ -41,10 +52,17 @@ export function recordFirestoreQuery(params: {
     documents: 0,
     durationMs: 0,
     reason: params.reason,
+    estimatedBytes: 0,
+    avoidedBytes: 0,
+    cacheHits: 0,
+    avoidedQueries: 0,
+    avoidedDocuments: 0,
   };
   current.queries += 1;
   current.documents += Math.max(0, Math.round(params.documents));
   current.durationMs += Math.max(0, Math.round(params.durationMs ?? 0));
+  current.estimatedBytes = (current.estimatedBytes ?? 0) +
+    Math.max(0, Math.round(params.estimatedBytes ?? 0));
   current.reason = params.reason;
   items.set(key, current);
 
@@ -72,13 +90,72 @@ export async function trackedFirestoreQuery<T>(params: {
   return value;
 }
 
-export function registerFirestoreListener() {
-  activeListeners += 1;
+function getOrCreateItem(module: string, operation: string, reason: string) {
+  const key = keyFor(module, operation);
+  const current = items.get(key) ?? {
+    module,
+    operation,
+    queries: 0,
+    documents: 0,
+    durationMs: 0,
+    reason,
+    estimatedBytes: 0,
+    avoidedBytes: 0,
+    cacheHits: 0,
+    avoidedQueries: 0,
+    avoidedDocuments: 0,
+  };
+  current.reason = reason;
+  items.set(key, current);
+  return current;
+}
+
+export function recordFirestoreCacheHit(params: {
+  module: string;
+  operation: string;
+  avoidedDocuments?: number;
+  estimatedBytes?: number;
+}) {
+  const current = getOrCreateItem(params.module, params.operation, "cache local");
+  current.cacheHits = (current.cacheHits ?? 0) + 1;
+  current.avoidedQueries = (current.avoidedQueries ?? 0) + 1;
+  current.avoidedDocuments = (current.avoidedDocuments ?? 0) +
+    Math.max(0, Math.round(params.avoidedDocuments ?? 0));
+  current.avoidedBytes = (current.avoidedBytes ?? 0) +
+    Math.max(0, Math.round(params.estimatedBytes ?? 0));
+}
+
+export function recordFirestoreAvoidedQuery(params: {
+  module: string;
+  operation: string;
+  documents?: number;
+  estimatedBytes?: number;
+  reason: string;
+}) {
+  const current = getOrCreateItem(params.module, params.operation, params.reason);
+  current.avoidedQueries = (current.avoidedQueries ?? 0) + 1;
+  current.avoidedDocuments = (current.avoidedDocuments ?? 0) +
+    Math.max(0, Math.round(params.documents ?? 0));
+  current.avoidedBytes = (current.avoidedBytes ?? 0) +
+    Math.max(0, Math.round(params.estimatedBytes ?? 0));
+}
+
+export function estimateFirestorePayloadBytes(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return 0;
+  }
+}
+
+export function registerFirestoreListener(count = 1) {
+  const safeCount = Math.max(1, Math.round(count));
+  activeListeners += safeCount;
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    activeListeners = Math.max(0, activeListeners - 1);
+    activeListeners = Math.max(0, activeListeners - safeCount);
   };
 }
 
@@ -89,12 +166,22 @@ export function getFirestoreQueryTelemetry(): FirestoreQueryTelemetrySnapshot {
     .slice(0, 10);
   const queries = allItems.reduce((sum, item) => sum + item.queries, 0);
   const documents = allItems.reduce((sum, item) => sum + item.documents, 0);
+  const estimatedBytes = allItems.reduce((sum, item) => sum + Math.max(0, item.estimatedBytes ?? 0), 0);
+  const avoidedBytes = allItems.reduce((sum, item) => sum + Math.max(0, item.avoidedBytes ?? 0), 0);
+  const cacheHits = allItems.reduce((sum, item) => sum + (item.cacheHits ?? 0), 0);
+  const avoidedQueries = allItems.reduce((sum, item) => sum + (item.avoidedQueries ?? 0), 0);
+  const avoidedDocuments = allItems.reduce((sum, item) => sum + (item.avoidedDocuments ?? 0), 0);
   return {
     startedAt,
     activeListeners,
     queries,
     documents,
     averageDocumentsPerQuery: queries > 0 ? documents / queries : 0,
+    estimatedBytes,
+    avoidedBytes,
+    cacheHits,
+    avoidedQueries,
+    avoidedDocuments,
     topConsumers,
   };
 }

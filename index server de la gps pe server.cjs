@@ -17,6 +17,9 @@ const {
   evaluateRealPositionRetention,
   shouldWriteLiveSnapshot24h,
 } = require("./gps-stationary-write-policy.cjs");
+const {
+  buildDiagnosticPreview,
+} = require("./gps-diagnostics-compaction.cjs");
 
 const execAsync = util.promisify(exec);
 
@@ -40,7 +43,7 @@ const SOCKET_IDLE_TIMEOUT_MS = 120000;
 
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LAST_CLEANUP_FILE = "/tmp/workcontrol-last-cleanup.txt";
-const TRACKER_BINDING_CACHE_TTL_MS = 60_000;
+const TRACKER_BINDING_CACHE_TTL_MS = 15 * 60_000;
 const UNBOUND_LOG_THROTTLE_MS = 15 * 60 * 1000;
 const SNAPSHOT_WRITE_MIN_INTERVAL_MS = Number(process.env.LIVE_SNAPSHOT_WRITE_INTERVAL_MS || 1_000);
 const GPS_STATIONARY_WRITE_REDUCTION_ENABLED =
@@ -67,8 +70,6 @@ const lastUnboundLogByImei = new Map();
 const NOTIFICATION_LISTENER_START_TS = Date.now();
 const NOTIFICATION_STARTUP_GRACE_MS = 90_000;
 const NOTIFICATION_PUSH_BATCH_LIMIT = 120;
-const DIAGNOSTIC_DAY_EVENT_LIMIT = 250;
-const DIAGNOSTIC_DAY_SAMPLE_LIMIT = 1440;
 const OBD_OVERSPEED_KMH = Number(process.env.OBD_OVERSPEED_KMH || 130);
 const OBD_HIGH_RPM = Number(process.env.OBD_HIGH_RPM || 4000);
 const OBD_CRITICAL_RPM = Number(process.env.OBD_CRITICAL_RPM || 5000);
@@ -77,10 +78,10 @@ const OBD_COOLANT_CRITICAL_C = Number(process.env.OBD_COOLANT_CRITICAL_C || 115)
 const OBD_OIL_WARNING_C = Number(process.env.OBD_OIL_WARNING_C || 120);
 const OBD_LOW_VOLTAGE_V = Number(process.env.OBD_LOW_VOLTAGE_V || 11.5);
 const OBD_LOW_FUEL_PCT = Number(process.env.OBD_LOW_FUEL_PCT || 10);
-const GPS_COST_CONFIG_CACHE_MS = 60_000;
-const GPS_COST_DEFAULT_FLUSH_SECONDS = 45;
-const GPS_COST_MIN_FLUSH_SECONDS = 30;
-const GPS_COST_MAX_FLUSH_SECONDS = 60;
+const GPS_COST_CONFIG_CACHE_MS = 10 * 60_000;
+const GPS_COST_DEFAULT_FLUSH_SECONDS = 300;
+const GPS_COST_MIN_FLUSH_SECONDS = 300;
+const GPS_COST_MAX_FLUSH_SECONDS = 1800;
 const GPS_COST_MAX_BUFFERED_RECORDS = 500;
 const GPS_COST_FLUSH_CHECK_MS = 5_000;
 const gpsCostBuffers = new Map();
@@ -660,12 +661,8 @@ function getMetricValue(metrics, key) {
 }
 
 function makeDiagnosticEvent(type, timestamp, label, severity, value, unit, details) {
-  const minuteBucket = Math.floor(Number(timestamp || Date.now()) / 60000);
-  const eventValue =
-    value === null || value === undefined || value === ""
-      ? "na"
-      : String(value).replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 32);
-  const key = `${type}:${minuteBucket}:${eventValue}`;
+  const fifteenMinuteBucket = Math.floor(Number(timestamp || Date.now()) / (15 * 60_000));
+  const key = `${type}:${severity || "info"}:${fifteenMinuteBucket}`;
 
   return {
     id: key,
@@ -846,37 +843,6 @@ function buildUnusualDiagnosticEvents(diagnostics, record) {
   return events;
 }
 
-function mergeDiagnosticEvents(existingEvents, incomingEvents) {
-  const byKey = new Map();
-
-  for (const event of [...(existingEvents || []), ...(incomingEvents || [])]) {
-    if (!event || typeof event !== "object") continue;
-    const key = event.key || event.id;
-    if (!key) continue;
-    byKey.set(key, event);
-  }
-
-  return [...byKey.values()]
-    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
-    .slice(0, DIAGNOSTIC_DAY_EVENT_LIMIT);
-}
-
-function mergeDiagnosticSamples(existingSamples, incomingSamples) {
-  const byKey = new Map();
-
-  for (const sample of [...(existingSamples || []), ...(incomingSamples || [])]) {
-    if (!sample || typeof sample !== "object") continue;
-    const timestamp = Number(sample.timestamp || 0);
-    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
-    const key = String(Math.floor(timestamp / 60_000));
-    byKey.set(key, sample);
-  }
-
-  return [...byKey.values()]
-    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
-    .slice(0, DIAGNOSTIC_DAY_SAMPLE_LIMIT);
-}
-
 function updateMaxStat(stats, key, value) {
   const numeric = toFiniteMetric(value);
   if (numeric === null) return;
@@ -943,6 +909,7 @@ async function updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRe
   const lastRecordAt = Math.max(...dayRecords.map((record) => record.gpsTimestamp));
   const latestDiagnostics = diagnosticsItems[diagnosticsItems.length - 1];
   const dayRef = vehicleRef.collection("diagnosticDays").doc(dayKey);
+  const compacted = buildDiagnosticPreview(incomingEvents, incomingSamples);
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(dayRef);
@@ -966,10 +933,20 @@ async function updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRe
       updateMaxStat(stats, "maxDtcCount", metrics.dtcCount);
     }
 
-    const existingEvents = Array.isArray(existing.events) ? existing.events : [];
-    const mergedEvents = mergeDiagnosticEvents(existingEvents, incomingEvents);
-    const existingSamples = Array.isArray(existing.samples) ? existing.samples : [];
-    const mergedSamples = mergeDiagnosticSamples(existingSamples, incomingSamples);
+    const existingRecentEvents = Array.isArray(existing.recentEvents)
+      ? existing.recentEvents
+      : Array.isArray(existing.events)
+        ? existing.events.slice(0, 12)
+        : [];
+    const existingRecentSamples = Array.isArray(existing.recentSamples)
+      ? existing.recentSamples
+      : Array.isArray(existing.samples)
+        ? existing.samples.slice(0, 6)
+        : [];
+    const preview = buildDiagnosticPreview(
+      [...existingRecentEvents, ...compacted.recentEvents],
+      [...existingRecentSamples, ...compacted.recentSamples]
+    );
     const previousFirstRecordAt = Number(existing.firstRecordAt || 0);
     const previousLastRecordAt = Number(existing.lastRecordAt || 0);
     const availableSensorKeys = Array.from(
@@ -996,13 +973,25 @@ async function updateDailyDiagnostics(vehicleRef, vehicleId, imei, dayKey, dayRe
         stats,
         latestObd: latestDiagnostics?.obd || {},
         availableSensorKeys,
-        samples: mergedSamples,
-        events: mergedEvents,
-        eventKeys: mergedEvents.map((event) => event.key || event.id).filter(Boolean),
-        summaryText: buildDailyDiagnosticSummaryText(stats, mergedEvents),
+        schemaVersion: 2,
+        recentSamples: preview.recentSamples,
+        recentEvents: preview.recentEvents,
+        eventKeys: preview.recentEvents.map((event) => event.key || event.id).filter(Boolean),
+        summaryText: buildDailyDiagnosticSummaryText(stats, preview.recentEvents),
+        samplesCount: admin.firestore.FieldValue.delete(),
+        eventsCount: admin.firestore.FieldValue.delete(),
+        events: admin.firestore.FieldValue.delete(),
+        samples: admin.firestore.FieldValue.delete(),
       },
       { merge: true }
     );
+
+    for (const document of compacted.sampleDocuments) {
+      tx.set(dayRef.collection("diagnosticSamples").doc(document.id), document.payload, { merge: true });
+    }
+    for (const document of compacted.eventDocuments) {
+      tx.set(dayRef.collection("diagnosticEvents").doc(document.id), document.payload, { merge: true });
+    }
   });
 }
 
