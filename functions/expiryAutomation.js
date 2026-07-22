@@ -114,11 +114,21 @@ function zonedDateTimeToTimestamp(dateKey, hour = 8, minute = 0, timeZone = EXPI
   return candidate;
 }
 
-function selectCurrentMilestone(daysLeft) {
+function normalizeDocumentMilestones(milestones) {
+  const normalized = (Array.isArray(milestones) ? milestones : DOCUMENT_MILESTONES)
+    .map((value) => Math.round(cleanNumber(value, -1)))
+    .filter((value) => value >= 0 && value <= 365)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .sort((left, right) => right - left);
+  return normalized.length ? normalized : DOCUMENT_MILESTONES;
+}
+
+function selectCurrentMilestone(daysLeft, milestones = DOCUMENT_MILESTONES) {
   if (!Number.isFinite(daysLeft)) return null;
   if (daysLeft < 0) return 'expired';
-  if (daysLeft > DOCUMENT_MILESTONES[0]) return String(DOCUMENT_MILESTONES[0]);
-  const threshold = [...DOCUMENT_MILESTONES]
+  const safeMilestones = normalizeDocumentMilestones(milestones);
+  if (daysLeft > safeMilestones[0]) return String(safeMilestones[0]);
+  const threshold = [...safeMilestones]
     .sort((left, right) => left - right)
     .find((value) => value >= daysLeft);
   return String(threshold ?? 0);
@@ -131,12 +141,12 @@ function getMilestoneTriggerDate(expiryDate, milestone) {
   return addCalendarDays(expiryDate, -threshold);
 }
 
-function buildDocumentTiming(expiryDate, now = Date.now()) {
+function buildDocumentTiming(expiryDate, now = Date.now(), milestones = DOCUMENT_MILESTONES) {
   const nowDate = new Date(now);
   const todayKey = getDayKey(nowDate);
   const daysLeft = diffCalendarDays(todayKey, expiryDate);
   if (daysLeft === null) return null;
-  const milestone = selectCurrentMilestone(daysLeft);
+  const milestone = selectCurrentMilestone(daysLeft, milestones);
   if (!milestone) return null;
   const triggerDate = getMilestoneTriggerDate(expiryDate, milestone);
   const triggerAt = zonedDateTimeToTimestamp(triggerDate, 8, 0);
@@ -148,11 +158,16 @@ function buildDocumentTiming(expiryDate, now = Date.now()) {
   };
 }
 
-function getNextDocumentTiming(expiryDate, deliveredMilestone, now = Date.now()) {
+function getNextDocumentTiming(
+  expiryDate,
+  deliveredMilestone,
+  now = Date.now(),
+  milestones = DOCUMENT_MILESTONES
+) {
   if (!isValidDateKey(expiryDate) || deliveredMilestone === 'expired') {
     return { status: 'completed', nextMilestone: '', nextRunAt: null };
   }
-  const ordered = [...DOCUMENT_MILESTONES.map(String), 'expired'];
+  const ordered = [...normalizeDocumentMilestones(milestones).map(String), 'expired'];
   const currentIndex = ordered.indexOf(String(deliveredMilestone));
   if (currentIndex < 0 || currentIndex >= ordered.length - 1) {
     return { status: 'completed', nextMilestone: '', nextRunAt: null };
@@ -195,7 +210,11 @@ function buildVehicleAlertScheduleSources(vehicleId, vehicle, now = Date.now()) 
   DOCUMENT_DEFINITIONS.forEach((definition) => {
     const expiryDate = cleanText(vehicle?.[definition.field]);
     if (!isValidDateKey(expiryDate)) return;
-    const timing = buildDocumentTiming(expiryDate, now);
+    const configuredReminderDay = cleanNumber(vehicle?.vehicleDocumentReminderDays?.[definition.key], -1);
+    const milestones = configuredReminderDay >= 0 && configuredReminderDay <= 365
+      ? [Math.round(configuredReminderDay)]
+      : DOCUMENT_MILESTONES;
+    const timing = buildDocumentTiming(expiryDate, now, milestones);
     if (!timing) return;
     const sourceIdentity = {
       companyId: identity.companyId,
@@ -204,6 +223,7 @@ function buildVehicleAlertScheduleSources(vehicleId, vehicle, now = Date.now()) 
       plateNumber: identity.plateNumber,
       expiryDate,
       targetKey: definition.key,
+      milestones,
     };
     schedules.push({
       id: buildScheduleId(safeVehicleId, 'document', definition.key),
@@ -222,6 +242,7 @@ function buildVehicleAlertScheduleSources(vehicleId, vehicle, now = Date.now()) 
       targetLabel: definition.label,
       eventType: definition.eventType,
       expiryDate,
+      milestones,
       status: 'scheduled',
       nextMilestone: timing.milestone,
       nextRunAt: timing.nextRunAt,
@@ -306,7 +327,7 @@ function resolveDocumentDelivery(schedule, now = Date.now()) {
   const todayKey = getDayKey(new Date(now));
   const daysLeft = diffCalendarDays(todayKey, cleanText(schedule?.expiryDate));
   if (daysLeft === null) return null;
-  const milestone = selectCurrentMilestone(daysLeft);
+  const milestone = selectCurrentMilestone(daysLeft, schedule?.milestones);
   if (!milestone) return null;
   return { daysLeft, milestone };
 }
@@ -371,7 +392,12 @@ function buildNotificationForSchedule(schedule, now = Date.now()) {
 
 function getScheduleAdvancePatch(schedule, deliveredMilestone, now = Date.now()) {
   if (cleanText(schedule?.scheduleKind) === 'vehicle_document_expiry') {
-    const next = getNextDocumentTiming(cleanText(schedule.expiryDate), deliveredMilestone, now);
+    const next = getNextDocumentTiming(
+      cleanText(schedule.expiryDate),
+      deliveredMilestone,
+      now,
+      schedule?.milestones
+    );
     return {
       status: next.status,
       nextMilestone: next.nextMilestone,
@@ -424,6 +450,23 @@ function buildScheduleLeasePatch(workerId, now = Date.now(), leaseMs = 2 * 60 * 
   };
 }
 
+function resolveVehicleAlertRecipients(schedule, vehicle) {
+  if (
+    cleanText(schedule?.entityId) !== cleanText(vehicle?.id || schedule?.entityId) ||
+    cleanText(schedule?.companyId) !== cleanText(vehicle?.companyId)
+  ) {
+    return {
+      directUserId: cleanText(schedule?.directUserId),
+      ownerUserId: cleanText(schedule?.ownerUserId),
+    };
+  }
+  const ownerUserId = cleanText(vehicle?.ownerUserId) || cleanText(schedule?.ownerUserId);
+  return {
+    directUserId: cleanText(vehicle?.currentDriverUserId) || ownerUserId,
+    ownerUserId,
+  };
+}
+
 module.exports = {
   DOCUMENT_DEFINITIONS,
   DOCUMENT_MILESTONES,
@@ -444,6 +487,7 @@ module.exports = {
   isValidDateKey,
   canClaimSchedule,
   resolveDocumentDelivery,
+  resolveVehicleAlertRecipients,
   selectCurrentMilestone,
   stableHash,
   zonedDateTimeToTimestamp,

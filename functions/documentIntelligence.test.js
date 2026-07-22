@@ -4,10 +4,12 @@ const assert = require("node:assert/strict");
 const {
   buildDocumentJobId,
   buildDocumentOperationId,
+  buildVehicleRovinietaRuleId,
   buildVehicleDocumentSummary,
   createDocumentIntelligenceHandlers,
   isValidIsoDate,
   normalizeExtraction,
+  shouldAutoApplyRovinieta,
 } = require("./documentIntelligence");
 
 test("validates ISO dates without JavaScript rollover", () => {
@@ -67,6 +69,46 @@ test("normalizes field confidence and rejects invalid extracted dates", () => {
   assert.equal(result.policyNumber.confidence, 1);
   assert.equal(result.vehiclePlateNumber.value, "B33LGR");
   assert.equal(result.notes, "verificare necesara");
+});
+
+test("auto-applies only a high-confidence future rovinieta for the same vehicle", () => {
+  const extraction = normalizeExtraction({
+    documentType: { value: "rovinieta", confidence: 0.98 },
+    expiryDate: { value: "2026-08-31", confidence: 0.97 },
+    issueDate: { value: "2026-07-20", confidence: 0.9 },
+    policyNumber: { value: "R-123", confidence: 0.8 },
+    providerName: { value: "CNAIR", confidence: 0.9 },
+    vehiclePlateNumber: { value: "B 33 LGR", confidence: 0.96 },
+    notes: "",
+  });
+  const vehicle = { plateNumber: "B33LGR" };
+
+  assert.equal(shouldAutoApplyRovinieta(extraction, vehicle, new Date("2026-07-22T08:00:00Z")), true);
+  assert.equal(
+    shouldAutoApplyRovinieta(
+      { ...extraction, expiryDate: { ...extraction.expiryDate, confidence: 0.7 } },
+      vehicle,
+      new Date("2026-07-22T08:00:00Z")
+    ),
+    false
+  );
+  assert.equal(
+    shouldAutoApplyRovinieta(
+      { ...extraction, vehiclePlateNumber: { value: "B99XYZ", confidence: 0.99 } },
+      vehicle,
+      new Date("2026-07-22T08:00:00Z")
+    ),
+    false
+  );
+  assert.equal(
+    shouldAutoApplyRovinieta(extraction, vehicle, new Date("2026-09-01T08:00:00Z")),
+    false
+  );
+});
+
+test("builds one deterministic notification rule id per vehicle", () => {
+  assert.equal(buildVehicleRovinietaRuleId("vehicle-1"), buildVehicleRovinietaRuleId("vehicle-1"));
+  assert.notEqual(buildVehicleRovinietaRuleId("vehicle-1"), buildVehicleRovinietaRuleId("vehicle-2"));
 });
 
 test("assigned driver cannot queue a privileged document analysis", async () => {

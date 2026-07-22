@@ -60,6 +60,7 @@ const {
   buildScheduleSyncPlan,
   canClaimSchedule,
   getScheduleAdvancePatch,
+  resolveVehicleAlertRecipients,
   stableHash,
 } = require('./expiryAutomation');
 const {
@@ -4066,6 +4067,16 @@ exports.checkVehicleMaintenanceAlerts = onSchedule(
         claimed = await claimVehicleAlertSchedule(scheduleRef, workerId, now);
         if (!claimed) continue;
         claimedCount += 1;
+        if (toSafeString(claimed.entityId)) {
+          const vehicleSnap = await db.collection('vehicles').doc(toSafeString(claimed.entityId)).get();
+          if (vehicleSnap.exists) {
+            const recipients = resolveVehicleAlertRecipients(claimed, {
+              id: vehicleSnap.id,
+              ...(vehicleSnap.data() || {}),
+            });
+            claimed = { ...claimed, ...recipients };
+          }
+        }
         const delivery = buildNotificationForSchedule(claimed, now);
         if (!delivery) {
           await completeVehicleAlertSchedule(

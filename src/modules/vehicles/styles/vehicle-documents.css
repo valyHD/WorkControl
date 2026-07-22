@@ -1,3 +1,38 @@
+.vehicle-doc-upload-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--wc-blue-500, #2563eb) 28%, transparent);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--wc-blue-500, #2563eb) 4%, white);
+}
+
+.vehicle-doc-upload-card h4,
+.vehicle-doc-upload-card p {
+  margin: 0;
+}
+
+.vehicle-doc-upload-card p {
+  margin-top: 0.25rem;
+  color: var(--text-muted, #64748b);
+  font-size: 0.84rem;
+}
+
+.vehicle-doc-upload-card > .primary-btn {
+  justify-self: start;
+}
+
+.vehicle-doc-auto-success {
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--wc-green-500, #16a34a) 32%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--wc-green-500, #16a34a) 8%, white);
+  color: var(--wc-green-700, #15803d);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
 .vehicle-doc-card__header {
   position: relative;
   padding-right: 7.5rem;
@@ -113,6 +148,15 @@
 }
 
 @media (max-width: 640px) {
+  .vehicle-doc-upload-card {
+    padding: 0.8rem;
+  }
+
+  .vehicle-doc-upload-card > .primary-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
   .vehicle-doc-card__header {
     padding-right: 0;
     padding-top: 2.15rem;

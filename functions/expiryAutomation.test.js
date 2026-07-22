@@ -13,6 +13,7 @@ const {
   getNextDocumentTiming,
   getZonedParts,
   isValidDateKey,
+  resolveVehicleAlertRecipients,
   selectCurrentMilestone,
   zonedDateTimeToTimestamp,
 } = require('./expiryAutomation');
@@ -166,4 +167,39 @@ test('uses expired messaging but preserves the existing notification event contr
   assert.equal(result.milestone, 'expired');
   assert.equal(result.notification.eventType, 'vehicle_document_itp_due_soon');
   assert.match(result.notification.title, /expirat/i);
+});
+
+test('uses exactly the configured seven-day rovinieta milestone', () => {
+  const now = Date.UTC(2026, 6, 22, 9);
+  const schedule = buildVehicleAlertScheduleSources(
+    'vehicle-1',
+    vehicle({
+      nextItpDate: '',
+      nextRovinietaDate: '2026-08-31',
+      vehicleDocumentReminderDays: { rovinieta: 7 },
+    }),
+    now
+  ).find((item) => item.targetKey === 'rovinieta');
+
+  assert.deepEqual(schedule.milestones, [7]);
+  assert.equal(schedule.nextMilestone, '7');
+  assert.equal(getNextDocumentTiming('2026-08-31', '7', now, schedule.milestones).nextMilestone, 'expired');
+});
+
+test('resolves the driver again when the alert is delivered', () => {
+  const schedule = {
+    entityId: 'vehicle-1',
+    companyId: 'company-a',
+    directUserId: 'old-driver',
+    ownerUserId: 'owner-1',
+  };
+  assert.deepEqual(
+    resolveVehicleAlertRecipients(schedule, {
+      id: 'vehicle-1',
+      companyId: 'company-a',
+      currentDriverUserId: 'driver-at-expiry',
+      ownerUserId: 'owner-1',
+    }),
+    { directUserId: 'driver-at-expiry', ownerUserId: 'owner-1' }
+  );
 });

@@ -1115,7 +1115,7 @@ function mapVehicleDoc(id: string, data: Record<string, any>): VehicleItem {
        ? item.category === "rca_itp" ? "itp" : item.category
       : "other",
     expiryDate: toSafeString(item?.expiryDate),
-    expirySource: ["manual", "ai_confirmed", ""].includes(item?.expirySource)
+    expirySource: ["manual", "ai_confirmed", "ai_auto", ""].includes(item?.expirySource)
       ? item.expirySource
       : "",
     intelligenceJobId: toSafeString(item?.intelligenceJobId),

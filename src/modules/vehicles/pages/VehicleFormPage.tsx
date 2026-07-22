@@ -295,9 +295,9 @@ export default function VehicleFormPage() {
         if (selectedDocuments.length > 0) {
           setSubmitStatus("Se incarca documentele...");
           const uploadedDocs = await uploadVehicleDocuments(newVehicleId, selectedDocuments);
+          await saveVehicleDocuments(newVehicleId, [], uploadedDocs);
           setSubmitStatus("Se pregateste analiza documentelor...");
-          const queuedDocs = await queueVehicleDocumentsForAnalysis(newVehicleId, uploadedDocs);
-          await saveVehicleDocuments(newVehicleId, [], queuedDocs);
+          await queueVehicleDocumentsForAnalysis(newVehicleId, uploadedDocs);
         }
 
         navigate(`/vehicles/${newVehicleId}`);
@@ -315,9 +315,9 @@ export default function VehicleFormPage() {
       if (selectedDocuments.length > 0) {
         setSubmitStatus("Se incarca documentele...");
         const uploadedDocs = await uploadVehicleDocuments(vehicleId, selectedDocuments);
+        await saveVehicleDocuments(vehicleId, normalizedValues.documents, uploadedDocs);
         setSubmitStatus("Se pregateste analiza documentelor...");
-        const queuedDocs = await queueVehicleDocumentsForAnalysis(vehicleId, uploadedDocs);
-        await saveVehicleDocuments(vehicleId, normalizedValues.documents, queuedDocs);
+        await queueVehicleDocumentsForAnalysis(vehicleId, uploadedDocs);
       }
 
       navigate(`/vehicles/${vehicleId}`);

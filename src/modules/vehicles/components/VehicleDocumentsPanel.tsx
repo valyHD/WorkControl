@@ -20,10 +20,15 @@ import { downloadFileFromUrl } from "../../../lib/files/downloadFile";
 import {
   applyVehicleDocumentIngestionJob,
   getVehicleDocumentIngestionJob,
+  queueVehicleDocumentsForAnalysis,
   rejectVehicleDocumentIngestionJob,
   retryVehicleDocumentIngestionJob,
   rollbackVehicleDocumentIngestionJob,
+  saveVehicleDocuments,
+  uploadVehicleDocuments,
 } from "../services/vehiclesService";
+import VehicleDocumentUploader from "./VehicleDocumentUploader";
+import type { VehiclePendingDocument } from "./VehicleDocumentUploader";
 import "../styles/vehicle-documents.css";
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
@@ -96,6 +101,8 @@ export default function VehicleDocumentsPanel({
   );
   const [busyDocumentId, setBusyDocumentId] = useState("");
   const [actionMessage, setActionMessage] = useState("");
+  const [pendingDocuments, setPendingDocuments] = useState<VehiclePendingDocument[]>([]);
+  const [uploading, setUploading] = useState(false);
   const pollCountRef = useRef(0);
 
   const reviewableDocuments = useMemo(
@@ -172,6 +179,27 @@ export default function VehicleDocumentsPanel({
     await downloadFileFromUrl({ url: item.url, fileName: item.name });
   }
 
+  async function handleUploadDocuments() {
+    if (!pendingDocuments.length || uploading) return;
+    setUploading(true);
+    setActionMessage("");
+    try {
+      const uploaded = await uploadVehicleDocuments(vehicleId, pendingDocuments);
+      await saveVehicleDocuments(vehicleId, documents, uploaded);
+      await queueVehicleDocumentsForAnalysis(vehicleId, uploaded);
+      setPendingDocuments([]);
+      setActionMessage(
+        "Documentele au fost încărcate. WorkControl citește automat rovinieta, data expirării și configurează notificarea cu 7 zile înainte."
+      );
+    } catch (error) {
+      setActionMessage(
+        error instanceof Error ? error.message : "Documentele nu au putut fi încărcate."
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
   function jobReference(item: VehicleDocumentItem) {
     return {
       vehicleId,
@@ -233,17 +261,6 @@ export default function VehicleDocumentsPanel({
     }
   }
 
-  if (!documents.length) {
-    return (
-      <div className="empty-state">
-        <div className="empty-state-icon">
-          <FileText size={20} strokeWidth={1.6} />
-        </div>
-        <div className="empty-state-title">Nu există documente încărcate</div>
-      </div>
-    );
-  }
-
   const groupedDocuments = documents.reduce<Record<VehicleDocumentCategory, VehicleDocumentItem[]>>(
     (acc, item) => {
       acc[item.category].push(item);
@@ -263,9 +280,40 @@ export default function VehicleDocumentsPanel({
 
   return (
     <div className="vehicle-doc-sections">
+      {isOwner ? (
+        <section className="vehicle-doc-upload-card" aria-label="Încarcă document vehicul">
+          <div>
+            <h4>Încarcă document sau bon</h4>
+            <p>
+              O fotografie cu bonul de rovinietă este citită automat, fără să deschizi editarea
+              kilometrilor.
+            </p>
+          </div>
+          <VehicleDocumentUploader
+            selectedDocuments={pendingDocuments}
+            onDocumentsChange={setPendingDocuments}
+          />
+          <button
+            className="primary-btn"
+            type="button"
+            disabled={!pendingDocuments.length || uploading}
+            onClick={() => void handleUploadDocuments()}
+          >
+            {uploading ? "Se încarcă și se citește..." : "Încarcă și citește automat"}
+          </button>
+        </section>
+      ) : null}
       {actionMessage ? (
         <div className="vehicle-doc-action-message" aria-live="polite">
           {actionMessage}
+        </div>
+      ) : null}
+      {!documents.length ? (
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <FileText size={20} strokeWidth={1.6} />
+          </div>
+          <div className="empty-state-title">Nu există documente încărcate</div>
         </div>
       ) : null}
       {(Object.entries(groupedDocuments) as [VehicleDocumentCategory, VehicleDocumentItem[]][])
@@ -326,6 +374,13 @@ export default function VehicleDocumentsPanel({
                         <FileText size={16} /> Preview indisponibil pentru acest tip de fișier
                       </div>
                     )}
+
+                    {item.category === "rovinieta" && item.expirySource === "ai_auto" ? (
+                      <div className="vehicle-doc-auto-success">
+                        Rovinietă detectată automat. Expiră la {item.expiryDate}; șoferul curent
+                        va fi notificat cu 7 zile înainte.
+                      </div>
+                    ) : null}
 
                     {intelligenceStatus === "needs_review" && extraction && isOwner ? (
                       <div className="vehicle-doc-review" aria-label="Verificare date extrase">

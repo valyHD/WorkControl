@@ -35,7 +35,7 @@ export default function VehicleDocumentUploader({
   selectedDocuments,
   onDocumentsChange,
 }: Props) {
-  const [category, setCategory] = useState<VehicleDocumentCategory>("service");
+  const [category, setCategory] = useState<VehicleDocumentCategory>("other");
   const [expiryDate, setExpiryDate] = useState("");
   const [error, setError] = useState("");
 
@@ -87,7 +87,7 @@ export default function VehicleDocumentUploader({
   return (
     <div className="vehicle-doc-uploader">
       <div className="vehicle-doc-uploader__controls">
-        <label className="tool-form-label">Categorie document</label>
+        <label className="tool-form-label">Categorie inițială</label>
         <select
           className="tool-input"
           value={category}
@@ -120,6 +120,10 @@ export default function VehicleDocumentUploader({
         </label>
       </div>
       {error && <p className="form-error">{error}</p>}
+      <p className="tools-subtitle" style={{ marginTop: 8 }}>
+        Pentru bonuri de rovinietă poți lăsa „Alte documente”. WorkControl detectează automat
+        tipul și data expirării.
+      </p>
 
       {selectedDocuments.length > 0 ? (
         <div className="vehicle-doc-list">

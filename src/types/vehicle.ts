@@ -81,7 +81,7 @@ export interface VehicleDocumentItem {
   storageGeneration?: string;
   category: VehicleDocumentCategory;
   expiryDate?: string;
-  expirySource?: "manual" | "ai_confirmed" | "";
+  expirySource?: "manual" | "ai_confirmed" | "ai_auto" | "";
   intelligenceJobId?: string;
   intelligenceStatus?: VehicleDocumentIntelligenceStatus;
   intelligenceReviewedAt?: number;
