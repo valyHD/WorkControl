@@ -21,6 +21,7 @@ type Props = {
     selectedFiles: File[],
     selectedDocuments: VehiclePendingDocument[]
   ) => Promise<void>;
+  onDocumentUpload?: (documents: VehiclePendingDocument[]) => Promise<void>;
   submitting: boolean;
 };
 
@@ -42,6 +43,7 @@ export default function VehicleForm({
   initialValues,
   users,
   onSubmit,
+  onDocumentUpload,
   submitting,
 }: Props) {
   const [values, setValues] = useState<VehicleFormValues>(initialValues);
@@ -436,6 +438,7 @@ export default function VehicleForm({
           <VehicleDocumentUploader
             selectedDocuments={selectedDocuments}
             onDocumentsChange={setSelectedDocuments}
+            onUploadImmediately={onDocumentUpload}
           />
         </div>
 

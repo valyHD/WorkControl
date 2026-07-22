@@ -331,6 +331,27 @@ export default function VehicleFormPage() {
     }
   }
 
+  async function handleImmediateDocumentUpload(documents: VehiclePendingDocument[]) {
+    if (!vehicleId || documents.length === 0) return;
+
+    setError("");
+    setSubmitStatus("Se incarca documentul si porneste citirea automata...");
+    try {
+      const uploadedDocs = await uploadVehicleDocuments(vehicleId, documents);
+      await saveVehicleDocuments(vehicleId, initialValues.documents, uploadedDocs);
+      await queueVehicleDocumentsForAnalysis(vehicleId, uploadedDocs);
+      navigate(getVehicleDetailsPathAfterSave(vehicleId, uploadedDocs.length));
+    } catch (uploadError) {
+      const message = uploadError instanceof Error
+        ? uploadError.message
+        : "Documentul nu a putut fi incarcat si analizat automat.";
+      setError(message);
+      throw uploadError;
+    } finally {
+      setSubmitStatus("");
+    }
+  }
+
   const title = useMemo(
     () => (isEdit ? "Editeaza masina" : "Adauga masina"),
     [isEdit]
@@ -411,6 +432,7 @@ export default function VehicleFormPage() {
           initialValues={initialValues}
           users={users}
           onSubmit={handleSubmit}
+          onDocumentUpload={vehicleId ? handleImmediateDocumentUpload : undefined}
           submitting={submitting}
         />
       </div>

@@ -18,6 +18,7 @@ export type VehiclePendingDocument = {
 type Props = {
   selectedDocuments: VehiclePendingDocument[];
   onDocumentsChange: (documents: VehiclePendingDocument[]) => void;
+  onUploadImmediately?: (documents: VehiclePendingDocument[]) => Promise<void>;
 };
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
@@ -34,12 +35,14 @@ const categoryLabels: Record<VehicleDocumentCategory, string> = {
 export default function VehicleDocumentUploader({
   selectedDocuments,
   onDocumentsChange,
+  onUploadImmediately,
 }: Props) {
   const [category, setCategory] = useState<VehicleDocumentCategory>("other");
   const [expiryDate, setExpiryDate] = useState("");
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  function handleFilesSelect(event: ChangeEvent<HTMLInputElement>) {
+  async function handleFilesSelect(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (!files.length) return;
     const invalidFile = files.find((file) => !isSupportedVehicleDocumentFile(file));
@@ -56,9 +59,26 @@ export default function VehicleDocumentUploader({
       expiryDate,
     }));
 
-    onDocumentsChange([...selectedDocuments, ...pending]);
     setError("");
     event.target.value = "";
+
+    if (onUploadImmediately) {
+      setUploading(true);
+      try {
+        await onUploadImmediately(pending);
+      } catch (uploadError) {
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Documentul nu a putut fi incarcat si analizat automat."
+        );
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
+    onDocumentsChange([...selectedDocuments, ...pending]);
   }
 
   function removeSelected(id: string) {
@@ -108,13 +128,18 @@ export default function VehicleDocumentUploader({
           onChange={(event) => setExpiryDate(event.target.value)}
         />
 
-        <label className="secondary-btn" style={{ alignSelf: "flex-end" }}>
-          Alege documente
+        <label
+          className="secondary-btn"
+          style={{ alignSelf: "flex-end", opacity: uploading ? 0.65 : 1 }}
+          aria-disabled={uploading}
+        >
+          {uploading ? "Se incarca si se citeste..." : "Alege documente"}
           <input
             type="file"
             multiple
             accept={VEHICLE_DOCUMENT_ACCEPT}
             onChange={handleFilesSelect}
+            disabled={uploading}
             style={{ display: "none" }}
           />
         </label>
