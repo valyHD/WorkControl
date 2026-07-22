@@ -99,11 +99,13 @@ describe("VehicleDocumentsPanel document intelligence", () => {
     expect(screen.queryByRole("button", { name: /respinge/i })).not.toBeInTheDocument();
   });
 
-  it("offers direct document upload without opening the vehicle mileage form", () => {
+  it("offers one-step automatic document upload without manual metadata", () => {
     render(<VehicleDocumentsPanel vehicleId="vehicle-1" documents={[]} isOwner />);
 
-    expect(screen.getByRole("heading", { name: /încarcă document sau bon/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /încarcă și citește automat/i })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: /încarcă documente/i })).toBeInTheDocument();
+    expect(screen.getByText(/detectează automat tipul documentului/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/categorie inițială/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/data expirare/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/km curenți/i)).not.toBeInTheDocument();
   });
 
@@ -128,7 +130,6 @@ describe("VehicleDocumentsPanel document intelligence", () => {
     expect(input).not.toBeNull();
 
     await user.upload(input!, new File(["receipt"], "bon-rovinieta.jpg", { type: "image/jpeg" }));
-    await user.click(screen.getByRole("button", { name: /încarcă și citește automat/i }));
 
     await waitFor(() => expect(serviceMocks.queue).toHaveBeenCalled());
     expect(serviceMocks.upload).toHaveBeenCalledWith("vehicle-1", expect.any(Array));
@@ -159,9 +160,41 @@ describe("VehicleDocumentsPanel document intelligence", () => {
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
 
     await user.upload(input!, new File(["receipt"], "bon-rovinieta.jpg", { type: "image/jpeg" }));
-    await user.click(screen.getByRole("button", { name: /cite.*automat/i }));
 
     expect(await screen.findByText(/analiza automata nu a pornit/i)).toBeInTheDocument();
     expect(screen.queryByText(/notificarea cu 7 zile/i)).not.toBeInTheDocument();
+  });
+
+  it("reuses an identical existing document instead of uploading a duplicate", async () => {
+    const user = userEvent.setup();
+    const existingDocument: VehicleDocumentItem = {
+      ...document,
+      intelligenceJobId: undefined,
+      intelligenceStatus: undefined,
+      name: "bon-rovinieta.jpg",
+      sizeBytes: 7,
+    };
+    serviceMocks.queue.mockResolvedValue([
+      { ...existingDocument, intelligenceJobId: "rovinieta-job", intelligenceStatus: "queued" },
+    ]);
+    serviceMocks.get.mockResolvedValue({
+      jobId: "rovinieta-job",
+      status: "queued",
+      attempts: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    } satisfies VehicleDocumentIngestionJob);
+    const { container } = render(
+      <VehicleDocumentsPanel vehicleId="vehicle-1" documents={[existingDocument]} isOwner />
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    await user.upload(input!, new File(["receipt"], "bon-rovinieta.jpg", { type: "image/jpeg" }));
+
+    await waitFor(() => expect(serviceMocks.queue).toHaveBeenCalled());
+    expect(serviceMocks.upload).not.toHaveBeenCalled();
+    expect(serviceMocks.save).not.toHaveBeenCalled();
+    expect(serviceMocks.queue).toHaveBeenCalledWith("vehicle-1", [existingDocument]);
+    expect(await screen.findByText("În așteptare")).toBeInTheDocument();
   });
 });

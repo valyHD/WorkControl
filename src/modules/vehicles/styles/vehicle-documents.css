@@ -141,6 +141,15 @@
   line-height: 1.45;
 }
 
+.vehicle-doc-review .vehicle-doc-review__warning {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--wc-red-500, #dc2626) 32%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--wc-red-500, #dc2626) 7%, white);
+  color: var(--wc-red-700, #b91c1c);
+  font-weight: 700;
+}
+
 .vehicle-doc-review__actions {
   display: flex;
   flex-wrap: wrap;

@@ -1898,7 +1898,7 @@ async function getVehicleSimulationStateOnce(
     "simulation-routes",
     options.simulationFromTs || options.simulationToTs
       ? "simulari limitate la intervalul selectat"
-      : "istoric simulare pentru detaliul vehiculului"
+      : "istoric trasee pentru detaliul vehiculului"
   );
   const routes = routesSnap.docs
     .map((routeDoc) => mapVehicleSimulationRoute(vehicleId, routeDoc.id, routeDoc.data()))
@@ -2573,22 +2573,27 @@ export async function saveVehicleDocuments(
     updatedAtServer: serverTimestamp(),
   });
 
-  await addVehicleEvent(
-    vehicleId,
-    "updated",
-    "Documentele vehiculului au fost actualizate."
-  );
-
   const vehicleSnap = await getDoc(doc(db, "vehicles", vehicleId));
   const data = vehicleSnap.exists() ? vehicleSnap.data() : null;
-  await dispatchNotificationEvent({
-    module: "vehicles",
-    eventType: "vehicle_documents_updated",
-    entityId: vehicleId,
-    title: "Documente masina actualizate",
-    message: `Au fost actualizate documentele masinii ${data?.plateNumber ?? vehicleId}.`,
-    directUserId: toSafeString(data?.currentDriverUserId),
-    ownerUserId: toSafeString(data?.ownerUserId),
+  const sideEffects = await Promise.allSettled([
+    addVehicleEvent(vehicleId, "updated", "Documentele vehiculului au fost actualizate."),
+    dispatchNotificationEvent({
+      module: "vehicles",
+      eventType: "vehicle_documents_updated",
+      entityId: vehicleId,
+      title: "Documente masina actualizate",
+      message: `Au fost actualizate documentele masinii ${data?.plateNumber ?? vehicleId}.`,
+      directUserId: toSafeString(data?.currentDriverUserId),
+      ownerUserId: toSafeString(data?.ownerUserId),
+    }),
+  ]);
+  sideEffects.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn(
+        `[saveVehicleDocuments] ${index === 0 ? "vehicle event" : "notification"} failed`,
+        result.reason
+      );
+    }
   });
 
 }

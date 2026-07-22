@@ -19,6 +19,7 @@ type Props = {
   selectedDocuments: VehiclePendingDocument[];
   onDocumentsChange: (documents: VehiclePendingDocument[]) => void;
   onUploadImmediately?: (documents: VehiclePendingDocument[]) => Promise<void>;
+  autoDetectOnly?: boolean;
 };
 
 const categoryLabels: Record<VehicleDocumentCategory, string> = {
@@ -36,6 +37,7 @@ export default function VehicleDocumentUploader({
   selectedDocuments,
   onDocumentsChange,
   onUploadImmediately,
+  autoDetectOnly = false,
 }: Props) {
   const [category, setCategory] = useState<VehicleDocumentCategory>("other");
   const [expiryDate, setExpiryDate] = useState("");
@@ -55,8 +57,8 @@ export default function VehicleDocumentUploader({
     const pending = files.map((file) => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
       file,
-      category,
-      expiryDate,
+      category: autoDetectOnly ? "other" as const : category,
+      expiryDate: autoDetectOnly ? "" : expiryDate,
     }));
 
     setError("");
@@ -107,33 +109,37 @@ export default function VehicleDocumentUploader({
   return (
     <div className="vehicle-doc-uploader">
       <div className="vehicle-doc-uploader__controls">
-        <label className="tool-form-label">Categorie inițială</label>
-        <select
-          className="tool-input"
-          value={category}
-          onChange={(event) => setCategory(event.target.value as VehicleDocumentCategory)}
-        >
-          {VEHICLE_DOCUMENT_CATEGORIES.map((item) => (
-            <option key={item} value={item}>
-              {categoryLabels[item]}
-            </option>
-          ))}
-        </select>
+        {!autoDetectOnly ? (
+          <>
+            <label className="tool-form-label">Categorie inițială</label>
+            <select
+              className="tool-input"
+              value={category}
+              onChange={(event) => setCategory(event.target.value as VehicleDocumentCategory)}
+            >
+              {VEHICLE_DOCUMENT_CATEGORIES.map((item) => (
+                <option key={item} value={item}>
+                  {categoryLabels[item]}
+                </option>
+              ))}
+            </select>
 
-        <label className="tool-form-label">Data expirare</label>
-        <input
-          className="tool-input"
-          type="date"
-          value={expiryDate}
-          onChange={(event) => setExpiryDate(event.target.value)}
-        />
+            <label className="tool-form-label">Data expirare</label>
+            <input
+              className="tool-input"
+              type="date"
+              value={expiryDate}
+              onChange={(event) => setExpiryDate(event.target.value)}
+            />
+          </>
+        ) : null}
 
         <label
           className="secondary-btn"
           style={{ alignSelf: "flex-end", opacity: uploading ? 0.65 : 1 }}
           aria-disabled={uploading}
         >
-          {uploading ? "Se incarca si se citeste..." : "Alege documente"}
+          {uploading ? "Se incarca si se citeste..." : "Alege document"}
           <input
             type="file"
             multiple
@@ -146,8 +152,7 @@ export default function VehicleDocumentUploader({
       </div>
       {error && <p className="form-error">{error}</p>}
       <p className="tools-subtitle" style={{ marginTop: 8 }}>
-        Pentru bonuri de rovinietă poți lăsa „Alte documente”. WorkControl detectează automat
-        tipul și data expirării.
+        WorkControl detectează automat tipul documentului, numărul mașinii și data expirării.
       </p>
 
       {selectedDocuments.length > 0 ? (
@@ -181,13 +186,15 @@ export default function VehicleDocumentUploader({
         </p>
       )}
 
-      <div className="vehicle-doc-counters">
-        {VEHICLE_DOCUMENT_CATEGORIES.map((item) => (
-          <span key={item} className="tool-cover-chip">
-            {categoryLabels[item]}: {countByCategory[item]}
-          </span>
-        ))}
-      </div>
+      {!autoDetectOnly ? (
+        <div className="vehicle-doc-counters">
+          {VEHICLE_DOCUMENT_CATEGORIES.map((item) => (
+            <span key={item} className="tool-cover-chip">
+              {categoryLabels[item]}: {countByCategory[item]}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

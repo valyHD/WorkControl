@@ -614,7 +614,7 @@ export function buildSimulationConfig(
 /**
  * Scrie tot traseul de test pe documentul dedicat positions/_simulation.
  * - Permis numai administratorului global prin Firestore Rules
- * - Vazut instant prin adaptorul de simulare al serviciului de vehicule
+ * - Vazut instant prin adaptorul de traseu al serviciului de vehicule
  * - Ramane dupa oprire (active=false) ca dovada in istoric
  */
 export async function startGpsSimOnFirestore(

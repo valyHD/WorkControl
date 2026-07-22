@@ -11,6 +11,7 @@ import {
   DEFAULT_FIRESTORE_COST_CONTROL,
   type FirestoreCostControlConfig,
 } from "../../../config/firestoreCostControl";
+import { formatLocalConsumerLabel } from "../utils/billingTelemetryLabels";
 
 function formatCount(value: number) {
   return new Intl.NumberFormat("ro-RO").format(value);
@@ -269,7 +270,8 @@ export default function GpsOptimizationPanel({ isAdmin }: { isAdmin: boolean }) 
             <strong>Consumatori locali observați</strong>
             {telemetry.topConsumers.map((item) => (
               <span key={`${item.module}:${item.operation}`}>
-                {item.module} · {item.operation}: {formatCount(item.documents)} documente,{" "}
+                {formatLocalConsumerLabel(item.module)} · {formatLocalConsumerLabel(item.operation)}:{" "}
+                {formatCount(item.documents)} documente,{" "}
                 {formatCount(item.queries)} query-uri, {formatBytes(item.estimatedBytes ?? 0)}
               </span>
             ))}

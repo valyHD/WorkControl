@@ -55,6 +55,7 @@ const DOCUMENT_JOB_POLL_DELAYS_MS = [5_000, 10_000, 20_000, 30_000, 30_000];
 
 type Props = {
   vehicleId: string;
+  vehiclePlateNumber?: string;
   documents: VehicleDocumentItem[];
   isOwner: boolean;
   deletingDocumentId?: string | null;
@@ -91,6 +92,7 @@ function getEffectiveStatus(item: VehicleDocumentItem, job?: VehicleDocumentInge
 
 export default function VehicleDocumentsPanel({
   vehicleId,
+  vehiclePlateNumber = "",
   documents,
   isOwner,
   deletingDocumentId,
@@ -101,17 +103,23 @@ export default function VehicleDocumentsPanel({
   );
   const [busyDocumentId, setBusyDocumentId] = useState("");
   const [actionMessage, setActionMessage] = useState("");
-  const [pendingDocuments, setPendingDocuments] = useState<VehiclePendingDocument[]>([]);
+  const [queuedDocuments, setQueuedDocuments] = useState<VehicleDocumentItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const pollCountRef = useRef(0);
 
+  const displayedDocuments = useMemo(() => {
+    const merged = new Map(documents.map((item) => [item.id, item]));
+    queuedDocuments.forEach((item) => merged.set(item.id, item));
+    return Array.from(merged.values());
+  }, [documents, queuedDocuments]);
+
   const reviewableDocuments = useMemo(
     () =>
-      documents.filter(
+      displayedDocuments.filter(
         (item) =>
           item.intelligenceJobId && !["applied", "rejected"].includes(item.intelligenceStatus || "")
       ),
-    [documents]
+    [displayedDocuments]
   );
 
   useEffect(() => {
@@ -179,17 +187,36 @@ export default function VehicleDocumentsPanel({
     await downloadFileFromUrl({ url: item.url, fileName: item.name });
   }
 
-  async function handleUploadDocuments() {
+  async function handleUploadDocuments(pendingDocuments: VehiclePendingDocument[]) {
     if (!pendingDocuments.length || uploading) return;
     setUploading(true);
     setActionMessage("");
     try {
-      const uploaded = await uploadVehicleDocuments(vehicleId, pendingDocuments);
-      await saveVehicleDocuments(vehicleId, documents, uploaded);
-      await queueVehicleDocumentsForAnalysis(vehicleId, uploaded);
-      setPendingDocuments([]);
+      const existingDocuments: VehicleDocumentItem[] = [];
+      const documentsToUpload = pendingDocuments.filter((pending) => {
+        const existing = documents.find(
+          (item) => item.name === pending.file.name && item.sizeBytes === pending.file.size
+        );
+        if (existing) existingDocuments.push(existing);
+        return !existing;
+      });
+      const uploaded = documentsToUpload.length
+        ? await uploadVehicleDocuments(vehicleId, documentsToUpload)
+        : [];
+      if (uploaded.length) {
+        await saveVehicleDocuments(vehicleId, documents, uploaded);
+      }
+      const queued = await queueVehicleDocumentsForAnalysis(vehicleId, [
+        ...existingDocuments,
+        ...uploaded,
+      ]);
+      setQueuedDocuments((current) => {
+        const merged = new Map(current.map((item) => [item.id, item]));
+        queued.forEach((item) => merged.set(item.id, item));
+        return Array.from(merged.values());
+      });
       setActionMessage(
-        "Documentele au fost încărcate. WorkControl citește automat rovinieta, data expirării și configurează notificarea cu 7 zile înainte."
+        "Documentul a fost încărcat. WorkControl îl citește acum și va completa automat datele sigure."
       );
     } catch (error) {
       setActionMessage(
@@ -261,7 +288,7 @@ export default function VehicleDocumentsPanel({
     }
   }
 
-  const groupedDocuments = documents.reduce<Record<VehicleDocumentCategory, VehicleDocumentItem[]>>(
+  const groupedDocuments = displayedDocuments.reduce<Record<VehicleDocumentCategory, VehicleDocumentItem[]>>(
     (acc, item) => {
       acc[item.category].push(item);
       return acc;
@@ -283,24 +310,18 @@ export default function VehicleDocumentsPanel({
       {isOwner ? (
         <section className="vehicle-doc-upload-card" aria-label="Încarcă document vehicul">
           <div>
-            <h4>Încarcă document sau bon</h4>
+            <h4>Încarcă documente</h4>
             <p>
-              O fotografie cu bonul de rovinietă este citită automat, fără să deschizi editarea
-              kilometrilor.
+              Alege fotografia sau PDF-ul. WorkControl detectează singur documentul și completează
+              datele mașinii.
             </p>
           </div>
           <VehicleDocumentUploader
-            selectedDocuments={pendingDocuments}
-            onDocumentsChange={setPendingDocuments}
+            selectedDocuments={[]}
+            onDocumentsChange={() => undefined}
+            onUploadImmediately={handleUploadDocuments}
+            autoDetectOnly
           />
-          <button
-            className="primary-btn"
-            type="button"
-            disabled={!pendingDocuments.length || uploading}
-            onClick={() => void handleUploadDocuments()}
-          >
-            {uploading ? "Se încarcă și se citește..." : "Încarcă și citește automat"}
-          </button>
         </section>
       ) : null}
       {actionMessage ? (
@@ -308,7 +329,7 @@ export default function VehicleDocumentsPanel({
           {actionMessage}
         </div>
       ) : null}
-      {!documents.length ? (
+      {!displayedDocuments.length ? (
         <div className="empty-state">
           <div className="empty-state-icon">
             <FileText size={20} strokeWidth={1.6} />
@@ -408,7 +429,23 @@ export default function VehicleDocumentsPanel({
                             <strong>{extraction.policyNumber.value || "Nedetectat"}</strong>
                             <small>{confidenceLabel(extraction.policyNumber.confidence)}</small>
                           </div>
+                          <div>
+                            <span>Număr mașină detectat</span>
+                            <strong>{extraction.vehiclePlateNumber.value || "Nedetectat"}</strong>
+                            <small>{confidenceLabel(extraction.vehiclePlateNumber.confidence)}</small>
+                          </div>
                         </div>
+                        {extraction.vehiclePlateNumber.value &&
+                        vehiclePlateNumber &&
+                        extraction.vehiclePlateNumber.value
+                          .replace(/[^A-Z0-9]/gi, "")
+                          .toUpperCase() !==
+                          vehiclePlateNumber.replace(/[^A-Z0-9]/gi, "").toUpperCase() ? (
+                          <p className="vehicle-doc-review__warning">
+                            Numărul din document nu coincide cu mașina selectată. Verifică documentul
+                            înainte să aplici datele.
+                          </p>
+                        ) : null}
                         {extraction.notes ? <p>{extraction.notes}</p> : null}
                         <div className="vehicle-doc-review__actions">
                           <button

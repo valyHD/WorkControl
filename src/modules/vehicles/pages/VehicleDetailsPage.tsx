@@ -616,7 +616,7 @@ export default function VehicleDetailsPage() {
                       data-assistant-action="upload-vehicle-document"
                       onClick={openDocumentUpload}
                     >
-                      <FileText size={14} /> Incarca bon rovinieta
+                      <FileText size={14} /> Incarca documente
                     </button>
                     <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
                       <Pencil size={14} /> Editeaza
@@ -996,6 +996,7 @@ export default function VehicleDetailsPage() {
 
             <VehicleDocumentsPanel
               vehicleId={vehicle.id}
+              vehiclePlateNumber={vehicle.plateNumber}
               documents={vehicle.documents}
               isOwner={canManageVehicle}
               deletingDocumentId={deletingDocumentId}
