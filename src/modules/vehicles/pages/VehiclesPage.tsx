@@ -350,7 +350,7 @@ export default function VehiclesPage() {
                 <Link
                   key={item.id}
                   className="simple-list-item"
-                  to={`/vehicles/${item.vehicleId}`}
+                  to={`/vehicles/${item.vehicleId}?tab=documents&focus=upload`}
                 >
                   <div className="simple-list-text">
                     <span className="simple-list-label">{item.plateNumber} · {item.label}</span>

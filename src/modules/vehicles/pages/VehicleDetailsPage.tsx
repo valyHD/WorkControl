@@ -156,6 +156,7 @@ export default function VehicleDetailsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { role, user } = useAuth();
   const mountedRef = useRef(true);
+  const documentUploadRef = useRef<HTMLDivElement | null>(null);
 
   const [vehicle, setVehicle] = useState<VehicleItem | null>(null);
   const [events, setEvents] = useState<VehicleEventItem[]>([]);
@@ -188,6 +189,21 @@ export default function VehicleDetailsPage() {
     next.set("tab", tab);
     setSearchParams(next, { replace: true });
   }
+
+  function openDocumentUpload() {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "documents");
+    next.set("focus", "upload");
+    setSearchParams(next, { replace: true });
+  }
+
+  useEffect(() => {
+    if (activeTab !== "documents" || searchParams.get("focus") !== "upload") return;
+    const frame = window.requestAnimationFrame(() => {
+      documentUploadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, searchParams]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -594,6 +610,14 @@ export default function VehicleDetailsPage() {
                 </Link>
                 {canManageVehicle && (
                   <>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      data-assistant-action="upload-vehicle-document"
+                      onClick={openDocumentUpload}
+                    >
+                      <FileText size={14} /> Incarca bon rovinieta
+                    </button>
                     <Link to={`/vehicles/${vehicle.id}/edit`} className="primary-btn">
                       <Pencil size={14} /> Editeaza
                     </Link>
@@ -950,34 +974,36 @@ export default function VehicleDetailsPage() {
         </div>
       </VehicleSectionDropdown>
 
-      <VehicleSectionDropdown title="Documente vehicul">
-        <div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 14,
-          }}
-        >
-          <h3 className="panel-title" style={{ margin: 0 }}>
-            <FileText size={15} style={{ verticalAlign: "middle", marginRight: 6 }} />
-            Documente vehicul
-          </h3>
-          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            {vehicle.documents.length} {vehicle.documents.length === 1 ? "document" : "documente"}
-          </span>
-        </div>
+      <div ref={documentUploadRef} id="vehicle-document-upload">
+        <VehicleSectionDropdown title="Documente vehicul">
+          <div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 14,
+              }}
+            >
+              <h3 className="panel-title" style={{ margin: 0 }}>
+                <FileText size={15} style={{ verticalAlign: "middle", marginRight: 6 }} />
+                Documente vehicul
+              </h3>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {vehicle.documents.length} {vehicle.documents.length === 1 ? "document" : "documente"}
+              </span>
+            </div>
 
-        <VehicleDocumentsPanel
-          vehicleId={vehicle.id}
-          documents={vehicle.documents}
-          isOwner={canManageVehicle}
-          deletingDocumentId={deletingDocumentId}
-          onDelete={handleDeleteDocument}
-        />
-        </div>
-      </VehicleSectionDropdown>
+            <VehicleDocumentsPanel
+              vehicleId={vehicle.id}
+              documents={vehicle.documents}
+              isOwner={canManageVehicle}
+              deletingDocumentId={deletingDocumentId}
+              onDelete={handleDeleteDocument}
+            />
+          </div>
+        </VehicleSectionDropdown>
+      </div>
       </div>
 
       <div className="wc-vehicle-tab-panel" hidden={activeTab !== "timeline"}>

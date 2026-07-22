@@ -22,6 +22,7 @@ import ActionBar from "../../../components/ActionBar";
 import PageQuickActions from "../../../components/PageQuickActions";
 import { ASSISTANT_FILL_VEHICLE_FORM_EVENT } from "../../../lib/assistant/runtime/assistantFormFill";
 import { registerAssistantFormDraftAdapter } from "../../../lib/assistant/adapters/assistantFormDraftChannel";
+import { getVehicleDetailsPathAfterSave } from "../utils/vehicleDocumentNavigation";
 
 const emptyValues: VehicleFormValues = {
   plateNumber: "",
@@ -300,7 +301,7 @@ export default function VehicleFormPage() {
           await queueVehicleDocumentsForAnalysis(newVehicleId, uploadedDocs);
         }
 
-        navigate(`/vehicles/${newVehicleId}`);
+        navigate(getVehicleDetailsPathAfterSave(newVehicleId, selectedDocuments.length));
         return;
       }
 
@@ -320,7 +321,7 @@ export default function VehicleFormPage() {
         await queueVehicleDocumentsForAnalysis(vehicleId, uploadedDocs);
       }
 
-      navigate(`/vehicles/${vehicleId}`);
+      navigate(getVehicleDetailsPathAfterSave(vehicleId, selectedDocuments.length));
     } catch (err) {
       console.error(err);
       setError("Nu am putut salva masina.");
