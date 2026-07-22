@@ -59,6 +59,7 @@ const {
   buildScheduleLeasePatch,
   buildScheduleSyncPlan,
   canClaimSchedule,
+  cleanFirestoreDocumentId,
   getScheduleAdvancePatch,
   resolveVehicleAlertRecipients,
   stableHash,
@@ -4093,8 +4094,9 @@ exports.checkVehicleMaintenanceAlerts = onSchedule(
         claimed = await claimVehicleAlertSchedule(scheduleRef, workerId, now);
         if (!claimed) continue;
         claimedCount += 1;
-        if (toSafeString(claimed.entityId)) {
-          const vehicleSnap = await db.collection('vehicles').doc(toSafeString(claimed.entityId)).get();
+        const vehicleDocumentId = cleanFirestoreDocumentId(claimed.entityId);
+        if (vehicleDocumentId) {
+          const vehicleSnap = await db.collection('vehicles').doc(vehicleDocumentId).get();
           if (vehicleSnap.exists) {
             const recipients = resolveVehicleAlertRecipients(claimed, {
               id: vehicleSnap.id,

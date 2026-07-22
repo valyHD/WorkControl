@@ -23,6 +23,12 @@ function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function cleanFirestoreDocumentId(value, maxLength = 160) {
+  if (typeof value !== 'string' || value.length > maxLength || !value.trim()) return '';
+  if (value.includes('/') || value === '.' || value === '..') return '';
+  return value;
+}
+
 function cleanNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -202,7 +208,7 @@ function buildSourceRevision(source) {
 }
 
 function buildVehicleAlertScheduleSources(vehicleId, vehicle, now = Date.now()) {
-  const safeVehicleId = cleanText(vehicleId);
+  const safeVehicleId = cleanFirestoreDocumentId(vehicleId);
   const identity = getVehicleIdentity(vehicle);
   if (!safeVehicleId || !identity.companyId) return [];
   const schedules = [];
@@ -491,6 +497,7 @@ module.exports = {
   getZonedParts,
   isValidDateKey,
   canClaimSchedule,
+  cleanFirestoreDocumentId,
   resolveDocumentDelivery,
   resolveVehicleAlertRecipients,
   selectCurrentMilestone,

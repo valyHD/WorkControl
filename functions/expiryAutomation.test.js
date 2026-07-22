@@ -96,6 +96,18 @@ test('materializes document schedules without touching GPS payloads', () => {
   assert.equal('lng' in rca, false);
 });
 
+test('preserves valid legacy vehicle ids with trailing spaces in expiry schedules', () => {
+  const schedules = buildVehicleAlertScheduleSources(
+    'legacy-vehicle-id ',
+    vehicle({ nextRovinietaDate: '2027-07-30' }),
+    Date.UTC(2026, 6, 22, 8)
+  );
+  const rovinieta = schedules.find((item) => item.targetKey === 'rovinieta');
+
+  assert.equal(rovinieta.entityId, 'legacy-vehicle-id ');
+  assert.equal(rovinieta.sourceId, 'legacy-vehicle-id ');
+});
+
 test('creates service schedule only after entering the 500 km window', () => {
   const now = Date.UTC(2026, 6, 15, 9);
   assert.equal(
