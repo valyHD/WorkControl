@@ -6,11 +6,19 @@ const {
   buildDocumentOperationId,
   buildVehicleRovinietaRuleId,
   buildVehicleDocumentSummary,
+  cleanFirestoreDocumentId,
   createDocumentIntelligenceHandlers,
   isValidIsoDate,
   normalizeExtraction,
   shouldAutoApplyRovinieta,
 } = require("./documentIntelligence");
+
+test("preserves exact legacy Firestore document ids", () => {
+  assert.equal(cleanFirestoreDocumentId("legacy-vehicle "), "legacy-vehicle ");
+  assert.equal(cleanFirestoreDocumentId(" legacy-vehicle"), " legacy-vehicle");
+  assert.equal(cleanFirestoreDocumentId("   "), "");
+  assert.equal(cleanFirestoreDocumentId("vehicle/child"), "");
+});
 
 test("validates ISO dates without JavaScript rollover", () => {
   assert.equal(isValidIsoDate("2028-02-29"), true);

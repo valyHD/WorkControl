@@ -23,6 +23,12 @@ function cleanText(value, maxLength = 500) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 }
 
+function cleanFirestoreDocumentId(value, maxLength = 160) {
+  if (typeof value !== "string" || value.length > maxLength || !value.trim()) return "";
+  if (value.includes("/") || value === "." || value === "..") return "";
+  return value;
+}
+
 function cleanConfidence(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
@@ -147,7 +153,7 @@ function normalizePlateNumber(value) {
 }
 
 function buildVehicleRovinietaRuleId(vehicleId) {
-  return `vehicle_rovinieta_${sha256(cleanText(vehicleId, 160)).slice(0, 32)}`;
+  return `vehicle_rovinieta_${sha256(cleanFirestoreDocumentId(vehicleId)).slice(0, 32)}`;
 }
 
 function shouldAutoApplyRovinieta(extraction, vehicle, now = new Date()) {
@@ -252,8 +258,8 @@ function compactVehicleDocumentMetadata(vehicleId, companyId, document, nowMs, p
   const result = {
     schemaVersion: 1,
     companyId: cleanText(companyId, 120),
-    vehicleId: cleanText(vehicleId, 160),
-    documentId: cleanText(document?.id, 160),
+    vehicleId: cleanFirestoreDocumentId(vehicleId),
+    documentId: cleanFirestoreDocumentId(document?.id),
     name: cleanText(document?.name, 240),
     category: normalizeDocumentType(document?.category) === "unknown"
       ? "other"
@@ -367,8 +373,8 @@ function createDocumentIntelligenceHandlers(dependencies) {
   }
 
   async function createVehicleDocumentIngestionJob(request) {
-    const vehicleId = cleanText(request.data?.vehicleId, 160);
-    const documentId = cleanText(request.data?.documentId, 160);
+    const vehicleId = cleanFirestoreDocumentId(request.data?.vehicleId);
+    const documentId = cleanFirestoreDocumentId(request.data?.documentId);
     const storagePath = cleanText(request.data?.storagePath, 800);
     const fileName = cleanText(request.data?.fileName, 240) || "document";
     if (!vehicleId || !documentId || !validateVehicleDocumentPath(vehicleId, storagePath)) {
@@ -410,7 +416,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
     const jobRef = db.collection("documentIngestionJobs").doc(jobId);
     const now = Date.now();
     const sourceDocument = (Array.isArray(vehicle.documents) ? vehicle.documents : []).find(
-      (item) => cleanText(item?.id, 160) === documentId
+      (item) => cleanFirestoreDocumentId(item?.id) === documentId
     ) || {
       id: documentId,
       name: fileName,
@@ -437,7 +443,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
         ? [...currentVehicle.documents]
         : [];
       const documentIndex = currentDocuments.findIndex(
-        (item) => cleanText(item?.id, 160) === documentId
+        (item) => cleanFirestoreDocumentId(item?.id) === documentId
       );
       const existingData = existingSnap.data() || {};
       const existingUsable = existingSnap.exists && cleanText(existingData.status, 40) !== "failed";
@@ -613,8 +619,8 @@ function createDocumentIntelligenceHandlers(dependencies) {
   }
 
   async function autoApplyRovinieta(jobRef, sourceJob, extraction) {
-    const vehicleId = cleanText(sourceJob.sourceEntityId, 160);
-    const documentId = cleanText(sourceJob.sourceDocumentId, 160);
+    const vehicleId = cleanFirestoreDocumentId(sourceJob.sourceEntityId);
+    const documentId = cleanFirestoreDocumentId(sourceJob.sourceDocumentId);
     if (!vehicleId || !documentId) return false;
     const vehicleRef = db.collection("vehicles").doc(vehicleId);
     const metadataRef = vehicleRef.collection("documents").doc(documentId);
@@ -643,7 +649,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
       }
       const documents = Array.isArray(vehicle.documents) ? [...vehicle.documents] : [];
       const documentIndex = documents.findIndex(
-        (item) => cleanText(item?.id, 160) === documentId
+        (item) => cleanFirestoreDocumentId(item?.id) === documentId
       );
       if (documentIndex < 0) return false;
       const beforeDocument = documents[documentIndex];
@@ -816,8 +822,8 @@ function createDocumentIntelligenceHandlers(dependencies) {
 
   async function loadJobAndVehicleForActor(request, options = {}) {
     const jobId = cleanText(request.data?.jobId, 80);
-    const vehicleId = cleanText(request.data?.vehicleId, 160);
-    const documentId = cleanText(request.data?.documentId, 160);
+    const vehicleId = cleanFirestoreDocumentId(request.data?.vehicleId);
+    const documentId = cleanFirestoreDocumentId(request.data?.documentId);
     if (!jobId || !vehicleId || !documentId) {
       throw new HttpsError("invalid-argument", "Referinta documentului este incompleta.");
     }
@@ -831,7 +837,9 @@ function createDocumentIntelligenceHandlers(dependencies) {
       throw new HttpsError("permission-denied", "Analiza nu apartine firmei vehiculului.");
     }
     const document = Array.isArray(vehicleContext.vehicle.documents)
-      ? vehicleContext.vehicle.documents.find((item) => cleanText(item?.id, 160) === documentId)
+      ? vehicleContext.vehicle.documents.find(
+        (item) => cleanFirestoreDocumentId(item?.id) === documentId
+      )
       : null;
     if (!document || cleanText(document.intelligenceJobId, 80) !== jobId) {
       throw new HttpsError("failed-precondition", "Documentul nu este asociat acestei analize.");
@@ -947,7 +955,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
       const vehicle = vehicleSnap.data() || {};
       const documents = Array.isArray(vehicle.documents) ? [...vehicle.documents] : [];
       const documentIndex = documents.findIndex(
-        (item) => cleanText(item?.id, 160) === context.documentId
+        (item) => cleanFirestoreDocumentId(item?.id) === context.documentId
       );
       if (
         documentIndex < 0 ||
@@ -1085,7 +1093,9 @@ function createDocumentIntelligenceHandlers(dependencies) {
       const vehicleSnap = await tx.get(context.vehicleRef);
       const vehicle = vehicleSnap.data() || {};
       const documents = Array.isArray(vehicle.documents) ? [...vehicle.documents] : [];
-      const index = documents.findIndex((item) => cleanText(item?.id, 160) === context.documentId);
+      const index = documents.findIndex(
+        (item) => cleanFirestoreDocumentId(item?.id) === context.documentId
+      );
       if (index < 0 || cleanText(documents[index]?.intelligenceJobId, 80) !== context.jobId) {
         throw new HttpsError("failed-precondition", "Documentul s-a schimbat intre timp.");
       }
@@ -1170,7 +1180,9 @@ function createDocumentIntelligenceHandlers(dependencies) {
       const vehicle = vehicleSnap.data() || {};
       const operation = operationSnap.data() || {};
       const documents = Array.isArray(vehicle.documents) ? [...vehicle.documents] : [];
-      const index = documents.findIndex((item) => cleanText(item?.id, 160) === context.documentId);
+      const index = documents.findIndex(
+        (item) => cleanFirestoreDocumentId(item?.id) === context.documentId
+      );
       if (index < 0 || cleanText(documents[index]?.intelligenceJobId, 80) !== context.jobId) {
         throw new HttpsError("failed-precondition", "Documentul s-a schimbat dupa aplicare.");
       }
@@ -1266,6 +1278,7 @@ module.exports = {
   buildDocumentOperationId,
   buildVehicleRovinietaRuleId,
   createDocumentIntelligenceHandlers,
+  cleanFirestoreDocumentId,
   isValidIsoDate,
   normalizeExtraction,
   normalizePlateNumber,

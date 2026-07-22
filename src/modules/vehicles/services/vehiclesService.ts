@@ -2462,6 +2462,7 @@ export async function queueVehicleDocumentsForAnalysis(
     VehicleDocumentIngestionJob & { created?: boolean }
   >(functions, "createVehicleDocumentIngestionJob");
   const queued: VehicleDocumentItem[] = [];
+  const failures: string[] = [];
 
   for (const item of documents) {
     try {
@@ -2481,7 +2482,17 @@ export async function queueVehicleDocumentsForAnalysis(
     } catch (error) {
       console.warn("[queueVehicleDocumentsForAnalysis]", item.name, error);
       queued.push(item);
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String((error as { code?: unknown }).code || "")
+          : "";
+      failures.push(code ? `${item.name} (${code.replace("functions/", "")})` : item.name);
     }
+  }
+  if (failures.length) {
+    throw new Error(
+      `Documentul a fost salvat, dar analiza automata nu a pornit pentru: ${failures.join(", ")}. Reincearca analiza din cardul documentului.`
+    );
   }
   return queued;
 }

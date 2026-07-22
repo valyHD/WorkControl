@@ -138,4 +138,30 @@ describe("VehicleDocumentsPanel document intelligence", () => {
       serviceMocks.queue.mock.invocationCallOrder[0]
     );
   });
+
+  it("shows the OCR startup failure instead of a false analysis success", async () => {
+    const user = userEvent.setup();
+    const uploadedDocument: VehicleDocumentItem = {
+      ...document,
+      id: "rovinieta-receipt",
+      name: "bon-rovinieta.jpg",
+      category: "other",
+      intelligenceJobId: undefined,
+      intelligenceStatus: undefined,
+    };
+    serviceMocks.upload.mockResolvedValue([uploadedDocument]);
+    serviceMocks.queue.mockRejectedValue(
+      new Error("Documentul a fost salvat, dar analiza automata nu a pornit.")
+    );
+    const { container } = render(
+      <VehicleDocumentsPanel vehicleId="legacy-vehicle " documents={[]} isOwner />
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    await user.upload(input!, new File(["receipt"], "bon-rovinieta.jpg", { type: "image/jpeg" }));
+    await user.click(screen.getByRole("button", { name: /cite.*automat/i }));
+
+    expect(await screen.findByText(/analiza automata nu a pornit/i)).toBeInTheDocument();
+    expect(screen.queryByText(/notificarea cu 7 zile/i)).not.toBeInTheDocument();
+  });
 });
