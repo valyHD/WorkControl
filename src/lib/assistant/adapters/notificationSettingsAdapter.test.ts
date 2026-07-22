@@ -26,6 +26,7 @@ function rule(id: string, name: string): NotificationRuleItem {
     stopTime: "17:00",
     weekdays: [1, 2, 3, 4, 5],
     reminderDelayHours: 8,
+    reminderDaysBefore: 7,
     reminderRepeatMinutes: 60,
     reminderActiveMinutes: 120,
     soundEnabled: true,

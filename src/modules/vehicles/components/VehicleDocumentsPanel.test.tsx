@@ -180,6 +180,7 @@ describe("VehicleDocumentsPanel document intelligence", () => {
     serviceMocks.get.mockResolvedValue({
       jobId: "rovinieta-job",
       status: "queued",
+      result: null,
       attempts: 0,
       createdAt: 1,
       updatedAt: 1,

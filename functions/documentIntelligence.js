@@ -733,6 +733,7 @@ function createDocumentIntelligenceHandlers(dependencies) {
         stopTime: "",
         weekdays: [1, 2, 3, 4, 5, 6, 7],
         reminderDelayHours: 1,
+        reminderDaysBefore: 7,
         reminderRepeatMinutes: 60,
         reminderActiveMinutes: 0,
         soundEnabled: true,

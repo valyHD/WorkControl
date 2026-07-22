@@ -117,6 +117,7 @@ export interface NotificationRuleItem {
   stopTime: string;
   weekdays: number[];
   reminderDelayHours: number;
+  reminderDaysBefore: number;
   reminderRepeatMinutes: number;
   reminderActiveMinutes: number;
   soundEnabled: boolean;
@@ -136,6 +137,7 @@ export interface NotificationRuleFormValues {
   stopTime: string;
   weekdays: number[];
   reminderDelayHours: number;
+  reminderDaysBefore: number;
   reminderRepeatMinutes: number;
   reminderActiveMinutes: number;
   soundEnabled: boolean;

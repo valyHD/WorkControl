@@ -29,6 +29,7 @@ const emptyValues: NotificationRuleFormValues = {
   stopTime: "17:00",
   weekdays: [1, 2, 3, 4, 5],
   reminderDelayHours: 8,
+  reminderDaysBefore: 7,
   reminderRepeatMinutes: 60,
   reminderActiveMinutes: 120,
   soundEnabled: true,
@@ -54,6 +55,18 @@ const weekdayShortLabels: Record<number, string> = {
 function formatWeekdays(weekdays: number[] | undefined) {
   const selected = weekdays?.length ? weekdays : [1, 2, 3, 4, 5];
   return selected.map((day) => weekdayShortLabels[day] || String(day)).join(", ");
+}
+
+function isVehicleExpiryRule(values: NotificationRuleFormValues) {
+  return values.module === "vehicles" && values.eventType.startsWith("vehicle_document_");
+}
+
+function validateRule(values: NotificationRuleFormValues) {
+  if (!values.name.trim()) return "Completeaza numele regulii.";
+  if (isVehicleExpiryRule(values) && !values.entityId) {
+    return "Selecteaza masina pentru regula de expirare.";
+  }
+  return "";
 }
 
 export default function NotificationRulesPage() {
@@ -146,8 +159,9 @@ export default function NotificationRulesPage() {
     setError("");
 
     try {
-      if (!values.name.trim()) {
-        setError("Completeaza numele regulii.");
+      const validationError = validateRule(values);
+      if (validationError) {
+        setError(validationError);
         return;
       }
 
@@ -170,8 +184,9 @@ export default function NotificationRulesPage() {
     setError("");
 
     try {
-      if (!values.name.trim()) {
-        setError("Completeaza numele regulii.");
+      const validationError = validateRule(values);
+      if (validationError) {
+        setError(validationError);
         return;
       }
 
@@ -330,6 +345,11 @@ export default function NotificationRulesPage() {
                           entitate: {rule.entityLabel || rule.entityId}
                         </div>
                       )}
+                      {rule.module === "vehicles" && rule.eventType.startsWith("vehicle_document_") && (
+                        <div className="simple-list-subtitle">
+                          notificare: cu {rule.reminderDaysBefore ?? 7} zile inainte
+                        </div>
+                      )}
                       <div className="simple-list-subtitle chip-list">
                         <span className="inline-setting-chip">direct: {rule.recipients.notifyDirectUser ? "da" : "nu"}</span>
                         <span className="inline-setting-chip">owner: {rule.recipients.notifyOwner ? "da" : "nu"}</span>
@@ -359,6 +379,7 @@ export default function NotificationRulesPage() {
                             stopTime: rule.stopTime || "17:00",
                             weekdays: rule.weekdays?.length ? [...rule.weekdays] : [1, 2, 3, 4, 5],
                             reminderDelayHours: rule.reminderDelayHours || 8,
+                            reminderDaysBefore: rule.reminderDaysBefore ?? 7,
                             reminderRepeatMinutes: rule.reminderRepeatMinutes || 60,
                             reminderActiveMinutes: rule.reminderActiveMinutes ?? 120,
                             soundEnabled: rule.soundEnabled !== false,

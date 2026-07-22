@@ -64,6 +64,11 @@ const {
   stableHash,
 } = require('./expiryAutomation');
 const {
+  buildVehicleReminderConfiguration,
+  getAffectedVehicleIds,
+  ruleMatchesVehicleReminderDay,
+} = require('./vehicleExpiryNotificationRules');
+const {
   TIMESHEET_REMINDER_WORKER,
   buildTimesheetScheduleSyncPlan,
   getNextTimesheetSchedulePatch,
@@ -359,9 +364,27 @@ exports.syncNotificationRuleSchedules = onDocumentWritten(
       }, { merge: false });
     }));
 
+    const affectedVehicleIds = getAffectedVehicleIds(beforeData, afterData);
+    await Promise.all(affectedVehicleIds.map(async (vehicleId) => {
+      const [vehicleSnap, rulesSnap] = await Promise.all([
+        db.collection('vehicles').doc(vehicleId).get(),
+        db.collection('notificationRules').where('entityId', '==', vehicleId).limit(100).get(),
+      ]);
+      if (!vehicleSnap.exists) return;
+
+      const vehicleRules = rulesSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+      const reminderConfiguration = buildVehicleReminderConfiguration(vehicleRules);
+      await vehicleSnap.ref.update({
+        ...reminderConfiguration,
+        updatedAt: sourceUpdatedAtMs,
+        updatedAtServer: FieldValue.serverTimestamp(),
+      });
+    }));
+
     logger.info('Programari remindere pontaj sincronizate.', {
       ruleId,
       operations: plan.length,
+      expiryVehicles: affectedVehicleIds.length,
     });
   }
 );
@@ -2025,6 +2048,7 @@ function normalizeRule(doc) {
       ? data.weekdays.map((day) => Math.max(1, Math.min(7, Math.round(toSafeNumber(day, 0))))).filter(Boolean)
       : [1, 2, 3, 4, 5],
     reminderDelayHours: Math.max(1, Math.min(16, Math.round(toSafeNumber(data.reminderDelayHours, 8)))),
+    reminderDaysBefore: Math.max(0, Math.min(365, Math.round(toSafeNumber(data.reminderDaysBefore, 7)))),
     reminderRepeatMinutes: Math.max(5, Math.min(720, Math.round(toSafeNumber(data.reminderRepeatMinutes, 60)))),
     reminderActiveMinutes: Math.max(0, Math.min(1440, Math.round(toSafeNumber(data.reminderActiveMinutes, 120)))),
     soundEnabled: data.soundEnabled !== false,
@@ -2155,7 +2179,9 @@ async function dispatchNotificationEvent(input, context) {
   }
 
   const rules = context.rules.filter((rule) =>
-    rule.companyId === companyId && ruleMatches(rule, input.module, input.eventType, input.entityId)
+    rule.companyId === companyId &&
+    ruleMatches(rule, input.module, input.eventType, input.entityId) &&
+    ruleMatchesVehicleReminderDay(rule, input.reminderDaysBefore)
   );
   if (rules.length === 0) return 0;
 

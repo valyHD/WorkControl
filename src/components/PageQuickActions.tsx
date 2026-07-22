@@ -15,6 +15,8 @@ export type PageQuickAction = {
   assistantAction?: string;
   assistantField?: string;
   assistantSection?: string;
+  formId?: string;
+  buttonType?: "button" | "submit";
 };
 
 type Props = {
@@ -64,7 +66,8 @@ function renderQuickAction(action: PageQuickAction) {
     <button
       key={action.id || action.label}
       className={className}
-      type="button"
+      type={action.buttonType ?? "button"}
+      form={action.formId}
       title={action.tooltip}
       onClick={action.onClick}
       disabled={action.disabled}

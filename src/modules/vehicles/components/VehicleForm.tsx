@@ -14,6 +14,7 @@ import SafeImage from "../../../components/SafeImage";
 import { isValidVehicleKm } from "../utils/vehicleValidation";
 
 type Props = {
+  formId?: string;
   initialValues: VehicleFormValues;
   users: AppUser[];
   onSubmit: (
@@ -40,6 +41,7 @@ type VehicleNumberField =
   | "nextOilServiceKm";
 
 export default function VehicleForm({
+  formId,
   initialValues,
   users,
   onSubmit,
@@ -138,7 +140,7 @@ export default function VehicleForm({
   }, [values]);
 
   return (
-    <form className="tool-form" onSubmit={handleSubmit}>
+    <form id={formId} className="tool-form" onSubmit={handleSubmit}>
       <div className="tool-form-grid">
         <div className="tool-form-block">
           <label className="tool-form-label">Numar inmatriculare *</label>

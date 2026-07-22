@@ -210,10 +210,14 @@ function buildVehicleAlertScheduleSources(vehicleId, vehicle, now = Date.now()) 
   DOCUMENT_DEFINITIONS.forEach((definition) => {
     const expiryDate = cleanText(vehicle?.[definition.field]);
     if (!isValidDateKey(expiryDate)) return;
+    const configuredMilestones = vehicle?.vehicleDocumentReminderMilestones?.[definition.key];
+    if (Array.isArray(configuredMilestones) && configuredMilestones.length === 0) return;
     const configuredReminderDay = cleanNumber(vehicle?.vehicleDocumentReminderDays?.[definition.key], -1);
-    const milestones = configuredReminderDay >= 0 && configuredReminderDay <= 365
-      ? [Math.round(configuredReminderDay)]
-      : DOCUMENT_MILESTONES;
+    const milestones = Array.isArray(configuredMilestones)
+      ? normalizeDocumentMilestones(configuredMilestones)
+      : configuredReminderDay >= 0 && configuredReminderDay <= 365
+        ? [Math.round(configuredReminderDay)]
+        : DOCUMENT_MILESTONES;
     const timing = buildDocumentTiming(expiryDate, now, milestones);
     if (!timing) return;
     const sourceIdentity = {
@@ -361,6 +365,7 @@ function buildNotificationForSchedule(schedule, now = Date.now()) {
         notificationPath: `/vehicles/${cleanText(schedule.entityId)}`,
         title,
         message,
+        reminderDaysBefore: delivery.milestone === 'expired' ? null : Number(delivery.milestone),
         directUserId: cleanText(schedule.directUserId),
         ownerUserId: cleanText(schedule.ownerUserId),
         notifyAdminsByDefault: true,

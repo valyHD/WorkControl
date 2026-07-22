@@ -77,6 +77,13 @@ const assistantFieldAliases: Record<string, string[]> = {
   status: ["status"],
 };
 
+const VEHICLE_FORM_ID = "vehicle-edit-form";
+
+function safeVehicleKm(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function normalizeAssistantText(value: string) {
   return value
     .normalize("NFD")
@@ -121,6 +128,7 @@ export default function VehicleFormPage() {
               return;
             }
 
+            const currentKm = safeVehicleKm(vehicle.currentKm);
             setInitialValues({
               plateNumber: vehicle.plateNumber,
               brand: vehicle.brand,
@@ -129,8 +137,8 @@ export default function VehicleFormPage() {
               vin: vehicle.vin,
               fuelType: vehicle.fuelType,
               status: vehicle.status,
-              currentKm: vehicle.currentKm,
-              initialRecordedKm: vehicle.initialRecordedKm,
+              currentKm,
+              initialRecordedKm: safeVehicleKm(vehicle.initialRecordedKm, currentKm),
 
               ownerUserId: vehicle.ownerUserId,
               ownerUserName: vehicle.ownerUserName,
@@ -265,8 +273,8 @@ export default function VehicleFormPage() {
         vin: values.vin.trim(),
         fuelType: values.fuelType.trim(),
         maintenanceNotes: values.maintenanceNotes.trim(),
-        currentKm: Number(values.currentKm || 0),
-        initialRecordedKm: Number(values.initialRecordedKm || values.currentKm || 0),
+        currentKm: Number(values.currentKm),
+        initialRecordedKm: Number(values.initialRecordedKm),
         serviceIntervalKm: Number(values.serviceIntervalKm || 15000),
         nextServiceKm:
           values.serviceStrategy === "interval"
@@ -324,7 +332,7 @@ export default function VehicleFormPage() {
       navigate(getVehicleDetailsPathAfterSave(vehicleId, selectedDocuments.length));
     } catch (err) {
       console.error(err);
-      setError("Nu am putut salva masina.");
+      setError(err instanceof Error ? err.message : "Nu am putut salva masina.");
     } finally {
       setSubmitting(false);
       setSubmitStatus("");
@@ -394,11 +402,12 @@ export default function VehicleFormPage() {
         actions={[
           {
             label: "Salveaza",
-            href: "#vehicle-save",
             icon: <Save size={16} />,
             assistantAction: "save-vehicle",
             tooltip: "Salveaza masina",
             variant: "primary",
+            formId: VEHICLE_FORM_ID,
+            buttonType: "submit",
           },
           {
             label: "Numar",
@@ -429,6 +438,7 @@ export default function VehicleFormPage() {
         {error && <div className="tool-message">{error}</div>}
 
         <VehicleForm
+          formId={VEHICLE_FORM_ID}
           initialValues={initialValues}
           users={users}
           onSubmit={handleSubmit}

@@ -154,6 +154,12 @@ const eventOptionsByModule: Record<
 const START_TIMESHEET_REMINDER_EVENT: NotificationRuleEventType = "timesheet_start_daily_reminder";
 const STOP_TIMESHEET_REMINDER_EVENT: NotificationRuleEventType = "timesheet_stop_after_8h_reminder";
 const WORK_INTERVAL_REMINDER_EVENT: NotificationRuleEventType = "timesheet_work_interval_reminder";
+const VEHICLE_EXPIRY_EVENTS = new Set<NotificationRuleEventType>([
+  "vehicle_document_itp_due_soon",
+  "vehicle_document_rca_due_soon",
+  "vehicle_document_casco_due_soon",
+  "vehicle_document_rovinieta_due_soon",
+]);
 const DEFAULT_TIMESHEET_REMINDER_WEEKDAYS = [1, 2, 3, 4, 5];
 const weekdayOptions = [
   { value: 1, label: "Luni" },
@@ -175,6 +181,16 @@ function isStopReminder(eventType: NotificationRuleEventType) {
 
 function isWorkIntervalReminder(eventType: NotificationRuleEventType) {
   return eventType === WORK_INTERVAL_REMINDER_EVENT;
+}
+
+function isVehicleExpiryReminder(eventType: NotificationRuleEventType) {
+  return VEHICLE_EXPIRY_EVENTS.has(eventType);
+}
+
+function normalizeReminderDaysBefore(value: number | undefined) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 7;
+  return Math.max(0, Math.min(365, Math.round(parsed)));
 }
 
 function getReminderWeekdays(weekdays: number[] | undefined) {
@@ -217,6 +233,7 @@ export default function NotificationRuleForm({
   const stopReminderSelected = isStopReminder(values.eventType);
   const workIntervalSelected = isWorkIntervalReminder(values.eventType);
   const timesheetReminderSelected = startReminderSelected || stopReminderSelected || workIntervalSelected;
+  const vehicleExpiryReminderSelected = isVehicleExpiryReminder(values.eventType);
 
   const canSelectEntity =
     values.module === "vehicles" ||
@@ -310,6 +327,9 @@ export default function NotificationRuleForm({
         reminderActiveMinutes: timesheetReminderSelected
           ? normalizeReminderActiveMinutes(values.reminderActiveMinutes)
           : values.reminderActiveMinutes,
+        reminderDaysBefore: vehicleExpiryReminderSelected
+          ? normalizeReminderDaysBefore(values.reminderDaysBefore)
+          : values.reminderDaysBefore,
       });
     } finally {
       setIsSubmittingNow(false);
@@ -370,6 +390,7 @@ export default function NotificationRuleForm({
             <select
               className="tool-input"
               disabled={submitting || isSubmittingNow}
+              required={vehicleExpiryReminderSelected}
               value={values.entityId}
               onChange={(e) => {
                 const selectedId = e.target.value;
@@ -417,6 +438,9 @@ export default function NotificationRuleForm({
                   isStartReminder(nextEventType) || isStopReminder(nextEventType) || isWorkIntervalReminder(nextEventType)
                     ? normalizeReminderActiveMinutes(prev.reminderActiveMinutes)
                     : prev.reminderActiveMinutes,
+                reminderDaysBefore: isVehicleExpiryReminder(nextEventType)
+                  ? normalizeReminderDaysBefore(prev.reminderDaysBefore)
+                  : prev.reminderDaysBefore,
                 soundEnabled: isStartReminder(nextEventType) || isStopReminder(nextEventType) || isWorkIntervalReminder(nextEventType) ? prev.soundEnabled !== false : prev.soundEnabled,
               }));
             }}
@@ -428,6 +452,37 @@ export default function NotificationRuleForm({
             ))}
           </select>
         </div>
+
+        {vehicleExpiryReminderSelected && (
+          <div className="tool-form-block">
+            <label className="tool-form-label">Notifica inainte cu (zile)</label>
+            <input
+              className="tool-input"
+              type="number"
+              min={0}
+              max={365}
+              step={1}
+              inputMode="numeric"
+              disabled={submitting || isSubmittingNow}
+              value={String(values.reminderDaysBefore ?? 7)}
+              onChange={(e) =>
+                setValues((prev) => ({
+                  ...prev,
+                  reminderDaysBefore: e.target.value === "" ? 7 : Number(e.target.value),
+                }))
+              }
+              onBlur={() =>
+                setValues((prev) => ({
+                  ...prev,
+                  reminderDaysBefore: normalizeReminderDaysBefore(prev.reminderDaysBefore),
+                }))
+              }
+            />
+            <small className="tool-form-hint">
+              User implicat direct inseamna soferul curent al masinii la momentul expirarii.
+            </small>
+          </div>
+        )}
 
         <div className="tool-form-block">
           <label className="tool-form-label">Status regulă</label>

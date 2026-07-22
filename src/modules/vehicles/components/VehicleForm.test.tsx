@@ -92,4 +92,35 @@ describe("VehicleForm", () => {
     );
     expect(screen.getByRole("button", { name: "Salveaza masina" })).toBeDisabled();
   });
+
+  it("allows an external page action to submit plate changes without altering zero initial km", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const { container } = render(
+      <>
+        <button type="submit" form="vehicle-edit-form">Salveaza modificarile</button>
+        <VehicleForm
+          formId="vehicle-edit-form"
+          initialValues={values({ currentKm: 7531, initialRecordedKm: 0 })}
+          users={[]}
+          onSubmit={onSubmit}
+          submitting={false}
+        />
+      </>
+    );
+
+    const plateInput = container.querySelector<HTMLInputElement>(
+      "[data-assistant-field='plateNumber']"
+    );
+    fireEvent.change(plateInput!, { target: { value: "if 844 yra" } });
+    await user.click(screen.getByRole("button", { name: "Salveaza modificarile" }));
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ plateNumber: "IF 844 YRA", currentKm: 7531, initialRecordedKm: 0 }),
+        [],
+        []
+      )
+    );
+  });
 });

@@ -1965,7 +1965,9 @@ export async function createVehicle(values: VehicleFormValues): Promise<string> 
   const savedValues = {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
-    initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
+    initialRecordedKm: Number.isFinite(Number(values.initialRecordedKm))
+      ? Number(values.initialRecordedKm)
+      : Number(values.currentKm) || 0,
   };
   const companyId =
     values.companyId || requirePrimaryCompanyId(await getCurrentCompanyAccessContext());
@@ -2009,8 +2011,6 @@ export async function updateVehicle(
   vehicleId: string,
   values: VehicleFormValues
 ): Promise<void> {
-  assertValidVehicleKm(values.currentKm, "Km curenti");
-  assertValidVehicleKm(values.initialRecordedKm, "Km initiali");
   const existingSnap = await getDoc(doc(db, "vehicles", vehicleId));
   const existingData = existingSnap.exists() ? existingSnap.data() : null;
 
@@ -2019,7 +2019,9 @@ export async function updateVehicle(
   const savedValues = {
     ...values,
     plateNumber: normalizePlateNumber(values.plateNumber),
-    initialRecordedKm: values.initialRecordedKm || values.currentKm || 0,
+    initialRecordedKm: Number.isFinite(Number(values.initialRecordedKm))
+      ? Number(values.initialRecordedKm)
+      : Number(values.currentKm) || 0,
   };
   const changesText = buildAuditChanges(
     existingData as Partial<VehicleFormValues> | null,
@@ -2033,6 +2035,10 @@ export async function updateVehicle(
   const protectedMileageChanged =
     toSafeNumber(existingData?.currentKm, 0) !== savedValues.currentKm ||
     toSafeNumber(existingData?.initialRecordedKm, 0) !== savedValues.initialRecordedKm;
+  if (protectedMileageChanged) {
+    assertValidVehicleKm(savedValues.currentKm, "Km curenti");
+    assertValidVehicleKm(savedValues.initialRecordedKm, "Km initiali");
+  }
   const directValues: Record<string, unknown> = { ...savedValues };
   [
     "currentKm",

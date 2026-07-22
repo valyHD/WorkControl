@@ -40,6 +40,7 @@ function mapRuleDoc(id: string, data: Record<string, any>): NotificationRuleItem
     stopTime: data.stopTime ?? "17:00",
     weekdays: Array.isArray(data.weekdays) && data.weekdays.length > 0 ? data.weekdays : [1, 2, 3, 4, 5],
     reminderDelayHours: Number(data.reminderDelayHours ?? 8),
+    reminderDaysBefore: Math.max(0, Math.min(365, Number(data.reminderDaysBefore ?? 7))),
     reminderRepeatMinutes: Math.max(5, Math.min(720, Number(data.reminderRepeatMinutes ?? 60))),
     reminderActiveMinutes: Math.max(0, Math.min(1440, Number(data.reminderActiveMinutes ?? 120))),
     soundEnabled: data.soundEnabled ?? true,

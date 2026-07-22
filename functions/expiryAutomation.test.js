@@ -186,6 +186,32 @@ test('uses exactly the configured seven-day rovinieta milestone', () => {
   assert.equal(getNextDocumentTiming('2026-08-31', '7', now, schedule.milestones).nextMilestone, 'expired');
 });
 
+test('supports multiple manually configured reminder days', () => {
+  const now = Date.UTC(2026, 6, 22, 9);
+  const schedule = buildVehicleAlertScheduleSources(
+    'vehicle-1',
+    vehicle({
+      nextItpDate: '',
+      nextRcaDate: '2026-08-31',
+      vehicleDocumentReminderMilestones: { rca: [30, 7, 1] },
+    }),
+    now
+  ).find((item) => item.targetKey === 'rca');
+
+  assert.deepEqual(schedule.milestones, [30, 7, 1]);
+  assert.equal(schedule.nextMilestone, '30');
+});
+
+test('does not schedule a document with an explicit empty reminder list', () => {
+  const schedules = buildVehicleAlertScheduleSources(
+    'vehicle-1',
+    vehicle({ vehicleDocumentReminderMilestones: { itp: [] } }),
+    Date.UTC(2026, 6, 22, 9)
+  );
+
+  assert.equal(schedules.some((item) => item.targetKey === 'itp'), false);
+});
+
 test('resolves the driver again when the alert is delivered', () => {
   const schedule = {
     entityId: 'vehicle-1',

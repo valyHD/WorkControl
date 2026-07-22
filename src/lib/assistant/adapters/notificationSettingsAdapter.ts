@@ -143,6 +143,7 @@ function toFormValues(rule: NotificationRuleItem): NotificationRuleFormValues {
     stopTime: rule.stopTime,
     weekdays: [...rule.weekdays],
     reminderDelayHours: rule.reminderDelayHours,
+    reminderDaysBefore: rule.reminderDaysBefore,
     reminderRepeatMinutes: rule.reminderRepeatMinutes,
     reminderActiveMinutes: rule.reminderActiveMinutes,
     soundEnabled: rule.soundEnabled,
