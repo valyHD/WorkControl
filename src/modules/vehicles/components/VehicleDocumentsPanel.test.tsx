@@ -140,6 +140,48 @@ describe("VehicleDocumentsPanel document intelligence", () => {
     );
   });
 
+  it("shows upload and background processing progress while document intelligence runs", async () => {
+    const user = userEvent.setup();
+    const uploadedDocument: VehicleDocumentItem = {
+      ...document,
+      id: "background-rovinieta",
+      name: "rovinieta.jpg",
+      category: "other",
+      intelligenceJobId: undefined,
+      intelligenceStatus: undefined,
+    };
+    let resolveUpload: ((documents: VehicleDocumentItem[]) => void) | undefined;
+    serviceMocks.upload.mockImplementation(
+      () =>
+        new Promise<VehicleDocumentItem[]>((resolve) => {
+          resolveUpload = resolve;
+        })
+    );
+    serviceMocks.queue.mockResolvedValue([
+      { ...uploadedDocument, intelligenceJobId: "background-job", intelligenceStatus: "queued" },
+    ]);
+    serviceMocks.get.mockResolvedValue({
+      jobId: "background-job",
+      status: "processing",
+      result: null,
+      attempts: 1,
+      createdAt: 1,
+      updatedAt: 2,
+    } satisfies VehicleDocumentIngestionJob);
+    const { container } = render(
+      <VehicleDocumentsPanel vehicleId="vehicle-1" documents={[]} isOwner />
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+
+    await user.upload(input!, new File(["receipt"], "rovinieta.jpg", { type: "image/jpeg" }));
+    expect(await screen.findByText("Se încarcă documentul")).toBeInTheDocument();
+
+    resolveUpload?.([uploadedDocument]);
+
+    expect(await screen.findByText(/analiza continuă în siguranță/i)).toBeInTheDocument();
+    await waitFor(() => expect(serviceMocks.queue).toHaveBeenCalled());
+  });
+
   it("shows the OCR startup failure instead of a false analysis success", async () => {
     const user = userEvent.setup();
     const uploadedDocument: VehicleDocumentItem = {

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildDocumentJobId,
   buildDocumentOperationId,
+  buildVehicleRovinietaRule,
   buildVehicleRovinietaRuleId,
   buildVehicleDocumentSummary,
   cleanFirestoreDocumentId,
@@ -117,6 +118,26 @@ test("auto-applies only a high-confidence future rovinieta for the same vehicle"
 test("builds one deterministic notification rule id per vehicle", () => {
   assert.equal(buildVehicleRovinietaRuleId("vehicle-1"), buildVehicleRovinietaRuleId("vehicle-1"));
   assert.notEqual(buildVehicleRovinietaRuleId("vehicle-1"), buildVehicleRovinietaRuleId("vehicle-2"));
+});
+
+test("builds a visible seven-day rovinieta rule for the vehicle current driver", () => {
+  const rule = buildVehicleRovinietaRule({
+    vehicleId: "vehicle-1",
+    vehicle: { companyId: "company-a", plateNumber: "B 33 LGR" },
+    existingRule: { createdAt: 100, createdAtServer: "existing-server-time" },
+    now: 200,
+    serverTimestamp: () => "new-server-time",
+  });
+
+  assert.equal(rule.companyId, "company-a");
+  assert.equal(rule.entityId, "vehicle-1");
+  assert.equal(rule.entityLabel, "B 33 LGR");
+  assert.equal(rule.eventType, "vehicle_document_rovinieta_due_soon");
+  assert.equal(rule.reminderDaysBefore, 7);
+  assert.equal(rule.recipients.notifyDirectUser, true);
+  assert.equal(rule.createdAt, 100);
+  assert.equal(rule.createdAtServer, "existing-server-time");
+  assert.equal(rule.updatedAtServer, "new-server-time");
 });
 
 test("assigned driver cannot queue a privileged document analysis", async () => {

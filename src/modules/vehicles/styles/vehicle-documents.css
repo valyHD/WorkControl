@@ -83,6 +83,53 @@
   font-size: 0.84rem;
 }
 
+.vehicle-doc-progress {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 0.95rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--wc-blue-500, #2563eb) 32%, transparent);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--wc-blue-500, #2563eb) 7%, white);
+}
+
+.vehicle-doc-progress__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.vehicle-doc-progress__row span {
+  color: var(--text-muted, #64748b);
+  font-size: 0.78rem;
+}
+
+.vehicle-doc-progress__track {
+  height: 0.38rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--wc-blue-500, #2563eb) 15%, white);
+}
+
+.vehicle-doc-progress__track span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #14b8a6);
+  animation: vehicle-document-progress 1.25s ease-in-out infinite;
+}
+
+@keyframes vehicle-document-progress {
+  from {
+    transform: translateX(-115%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
 .vehicle-doc-review {
   display: grid;
   gap: 0.75rem;
@@ -184,11 +231,19 @@
     flex: 1 1 9rem;
     min-height: 44px;
   }
+
+  .vehicle-doc-progress__row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .vehicle-doc-review,
-  .vehicle-doc-intelligence-status {
+  .vehicle-doc-intelligence-status,
+  .vehicle-doc-progress__track span {
     transition: none;
+    animation: none;
   }
 }

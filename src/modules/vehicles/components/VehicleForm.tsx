@@ -11,7 +11,7 @@ import VehicleDocumentUploader, {
 } from "./VehicleDocumentUploader";
 import VehicleImageUploader from "./VehicleImageUploader";
 import SafeImage from "../../../components/SafeImage";
-import { isValidVehicleKm } from "../utils/vehicleValidation";
+import { isValidVehicleKm, parseVehicleKm } from "../utils/vehicleValidation";
 
 type Props = {
   formId?: string;
@@ -110,8 +110,8 @@ export default function VehicleForm({
       return;
     }
 
-    const parsed = Number(rawValue);
-    if (Number.isFinite(parsed)) {
+    const parsed = parseVehicleKm(rawValue);
+    if (parsed !== null) {
       updateField(field, parsed);
     }
   }
@@ -239,6 +239,7 @@ export default function VehicleForm({
             data-assistant-field="initialRecordedKm"
             type="number"
             min="0"
+            step="any"
             value={getNumberFieldValue("initialRecordedKm")}
             onChange={(e) => handleNumberFieldChange("initialRecordedKm", e.target.value)}
             onBlur={() => commitNumberField("initialRecordedKm")}
@@ -253,6 +254,7 @@ export default function VehicleForm({
             data-assistant-field="currentKm"
             type="number"
             min="0"
+            step="any"
             value={getNumberFieldValue("currentKm")}
             onChange={(e) => handleNumberFieldChange("currentKm", e.target.value)}
             onBlur={() => commitNumberField("currentKm")}

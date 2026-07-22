@@ -93,6 +93,35 @@ describe("VehicleForm", () => {
     expect(screen.getByRole("button", { name: "Salveaza masina" })).toBeDisabled();
   });
 
+  it("submits an existing decimal mileage without forcing it to an integer", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const { container } = render(
+      <VehicleForm
+        initialValues={values({ currentKm: 270.8, initialRecordedKm: 12.5 })}
+        users={[]}
+        onSubmit={onSubmit}
+        submitting={false}
+      />
+    );
+
+    const kmInput = container.querySelector<HTMLInputElement>(
+      "[data-assistant-field='currentKm']"
+    );
+    expect(kmInput).toHaveAttribute("step", "any");
+    expect(kmInput).toHaveValue(270.8);
+
+    await user.click(screen.getByRole("button", { name: "Salveaza masina" }));
+
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ currentKm: 270.8, initialRecordedKm: 12.5 }),
+        [],
+        []
+      )
+    );
+  });
+
   it("allows an external page action to submit plate changes without altering zero initial km", async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

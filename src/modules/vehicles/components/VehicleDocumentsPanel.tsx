@@ -105,6 +105,7 @@ export default function VehicleDocumentsPanel({
   const [actionMessage, setActionMessage] = useState("");
   const [queuedDocuments, setQueuedDocuments] = useState<VehicleDocumentItem[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<"uploading" | "queueing" | "">("");
   const pollCountRef = useRef(0);
 
   const displayedDocuments = useMemo(() => {
@@ -120,6 +121,15 @@ export default function VehicleDocumentsPanel({
           item.intelligenceJobId && !["applied", "rejected"].includes(item.intelligenceStatus || "")
       ),
     [displayedDocuments]
+  );
+
+  const processingCount = useMemo(
+    () =>
+      displayedDocuments.filter((item) => {
+        const status = jobsByDocument[item.id]?.status || item.intelligenceStatus || "";
+        return status === "queued" || status === "processing";
+      }).length,
+    [displayedDocuments, jobsByDocument]
   );
 
   useEffect(() => {
@@ -190,6 +200,7 @@ export default function VehicleDocumentsPanel({
   async function handleUploadDocuments(pendingDocuments: VehiclePendingDocument[]) {
     if (!pendingDocuments.length || uploading) return;
     setUploading(true);
+    setUploadPhase("uploading");
     setActionMessage("");
     try {
       const existingDocuments: VehicleDocumentItem[] = [];
@@ -206,6 +217,7 @@ export default function VehicleDocumentsPanel({
       if (uploaded.length) {
         await saveVehicleDocuments(vehicleId, documents, uploaded);
       }
+      setUploadPhase("queueing");
       const queued = await queueVehicleDocumentsForAnalysis(vehicleId, [
         ...existingDocuments,
         ...uploaded,
@@ -224,6 +236,7 @@ export default function VehicleDocumentsPanel({
       );
     } finally {
       setUploading(false);
+      setUploadPhase("");
     }
   }
 
@@ -327,6 +340,23 @@ export default function VehicleDocumentsPanel({
       {actionMessage ? (
         <div className="vehicle-doc-action-message" aria-live="polite">
           {actionMessage}
+        </div>
+      ) : null}
+      {uploading || processingCount > 0 ? (
+        <div className="vehicle-doc-progress" role="status" aria-live="polite">
+          <div className="vehicle-doc-progress__row">
+            <strong>
+              {uploadPhase === "uploading"
+                ? "Se încarcă documentul"
+                : uploadPhase === "queueing"
+                  ? "Se pornește citirea automată"
+                  : `Se ${processingCount === 1 ? "citește" : "citesc"} ${processingCount} ${processingCount === 1 ? "document" : "documente"}`}
+            </strong>
+            <span>Analiza continuă în siguranță chiar dacă părăsești pagina.</span>
+          </div>
+          <div className="vehicle-doc-progress__track" aria-hidden="true">
+            <span />
+          </div>
         </div>
       ) : null}
       {!displayedDocuments.length ? (

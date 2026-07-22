@@ -156,6 +156,47 @@ function buildVehicleRovinietaRuleId(vehicleId) {
   return `vehicle_rovinieta_${sha256(cleanFirestoreDocumentId(vehicleId)).slice(0, 32)}`;
 }
 
+function buildVehicleRovinietaRule({
+  vehicleId,
+  vehicle = {},
+  companyId = "",
+  existingRule = {},
+  now = Date.now(),
+  serverTimestamp = () => now,
+}) {
+  const resolvedCompanyId = cleanText(companyId, 120) || cleanText(vehicle.companyId, 120);
+  const plateNumber = cleanText(vehicle.plateNumber, 40);
+  return {
+    companyId: resolvedCompanyId,
+    name: `Rovinieta ${plateNumber || vehicleId} - 7 zile`,
+    module: "vehicles",
+    eventType: "vehicle_document_rovinieta_due_soon",
+    entityId: vehicleId,
+    entityLabel: plateNumber,
+    enabled: true,
+    scheduleTime: "08:00",
+    stopTime: "",
+    weekdays: [1, 2, 3, 4, 5, 6, 7],
+    reminderDelayHours: 1,
+    reminderDaysBefore: 7,
+    reminderRepeatMinutes: 60,
+    reminderActiveMinutes: 0,
+    soundEnabled: true,
+    recipients: {
+      notifyDirectUser: true,
+      notifyOwner: false,
+      notifyAdmins: false,
+      notifyManagers: false,
+      specificUserIds: [],
+    },
+    automationSource: "vehicle_rovinieta_ocr",
+    createdAt: Number(existingRule.createdAt || now),
+    updatedAt: now,
+    createdAtServer: existingRule.createdAtServer || serverTimestamp(),
+    updatedAtServer: serverTimestamp(),
+  };
+}
+
 function shouldAutoApplyRovinieta(extraction, vehicle, now = new Date()) {
   const documentType = normalizeDocumentType(extraction?.documentType?.value);
   const expiryDate = cleanText(extraction?.expiryDate?.value, 10);
@@ -427,16 +468,18 @@ function createDocumentIntelligenceHandlers(dependencies) {
       createdAt: now,
     };
     const metadataRef = db.collection("vehicles").doc(vehicleId).collection("documents").doc(documentId);
+    const ruleRef = db.collection("notificationRules").doc(buildVehicleRovinietaRuleId(vehicleId));
     const rateBucket = new Date().toISOString().slice(0, 13).replace(/[-T:]/g, "");
     const rateRef = db
       .collection("documentIngestionRateLimits")
       .doc(`${request.auth.uid}_${rateBucket}`);
 
     const outcome = await db.runTransaction(async (tx) => {
-      const [existingSnap, rateSnap, vehicleSnap] = await Promise.all([
+      const [existingSnap, rateSnap, vehicleSnap, ruleSnap] = await Promise.all([
         tx.get(jobRef),
         tx.get(rateRef),
         tx.get(vehicleRef),
+        tx.get(ruleRef),
       ]);
       const currentVehicle = vehicleSnap.data() || {};
       const currentDocuments = Array.isArray(currentVehicle.documents)
@@ -451,6 +494,12 @@ function createDocumentIntelligenceHandlers(dependencies) {
       const effectiveStatus = existingUsable
         ? cleanText(existingData.status, 40) || "queued"
         : "queued";
+      const existingDocument = documentIndex >= 0 ? currentDocuments[documentIndex] : sourceDocument;
+      const repairsRovinietaRule =
+        existingUsable &&
+        effectiveStatus === "applied" &&
+        (normalizeDocumentType(existingData.result?.documentType?.value) === "rovinieta" ||
+          cleanText(existingDocument?.category, 40) === "rovinieta");
       if (documentIndex >= 0) {
         currentDocuments[documentIndex] = {
           ...currentDocuments[documentIndex],
@@ -460,12 +509,22 @@ function createDocumentIntelligenceHandlers(dependencies) {
           intelligenceStatus: effectiveStatus,
           updatedAt: now,
         };
-        tx.update(vehicleRef, {
+        const vehicleUpdate = {
           documents: currentDocuments,
           documentSummary: buildVehicleDocumentSummary(currentDocuments, now),
           updatedAt: now,
           updatedAtServer: fieldValue.serverTimestamp(),
-        });
+        };
+        if (repairsRovinietaRule) {
+          vehicleUpdate.vehicleDocumentReminderDays = {
+            ...(currentVehicle.vehicleDocumentReminderDays &&
+            typeof currentVehicle.vehicleDocumentReminderDays === "object"
+              ? currentVehicle.vehicleDocumentReminderDays
+              : {}),
+            rovinieta: 7,
+          };
+        }
+        tx.update(vehicleRef, vehicleUpdate);
       }
       tx.set(
         metadataRef,
@@ -478,6 +537,20 @@ function createDocumentIntelligenceHandlers(dependencies) {
         }),
         { merge: true }
       );
+      if (repairsRovinietaRule) {
+        tx.set(
+          ruleRef,
+          buildVehicleRovinietaRule({
+            vehicleId,
+            vehicle: currentVehicle,
+            companyId: companyId || cleanText(existingData.companyId, 120),
+            existingRule: ruleSnap.data() || {},
+            now,
+            serverTimestamp: () => fieldValue.serverTimestamp(),
+          }),
+          { merge: true }
+        );
+      }
       if (existingUsable) {
         return { created: false, data: existingData };
       }
@@ -637,13 +710,38 @@ function createDocumentIntelligenceHandlers(dependencies) {
         tx.get(operationRef),
         tx.get(ruleRef),
       ]);
+      const vehicle = vehicleSnap.data() || {};
       if (operationSnap.exists && cleanText(operationSnap.data()?.status, 40) === "applied") {
+        if (vehicleSnap.exists) {
+          tx.set(
+            ruleRef,
+            buildVehicleRovinietaRule({
+              vehicleId,
+              vehicle,
+              companyId: cleanText(sourceJob.companyId, 120),
+              existingRule: ruleSnap.data() || {},
+              now,
+              serverTimestamp: () => fieldValue.serverTimestamp(),
+            }),
+            { merge: true }
+          );
+          tx.update(vehicleRef, {
+            vehicleDocumentReminderDays: {
+              ...(vehicle.vehicleDocumentReminderDays &&
+              typeof vehicle.vehicleDocumentReminderDays === "object"
+                ? vehicle.vehicleDocumentReminderDays
+                : {}),
+              rovinieta: 7,
+            },
+            updatedAt: now,
+            updatedAtServer: fieldValue.serverTimestamp(),
+          });
+        }
         return true;
       }
       if (!jobSnap.exists || cleanText(jobSnap.data()?.status, 40) !== "needs_review") {
         return false;
       }
-      const vehicle = vehicleSnap.data() || {};
       if (!vehicleSnap.exists || !shouldAutoApplyRovinieta(extraction, vehicle, new Date(now))) {
         return false;
       }
@@ -721,37 +819,18 @@ function createDocumentIntelligenceHandlers(dependencies) {
         reviewedAt: now,
         reviewedAtServer: fieldValue.serverTimestamp(),
       });
-      tx.set(ruleRef, {
-        companyId: cleanText(vehicle.companyId, 120),
-        name: `Rovinieta ${cleanText(vehicle.plateNumber, 40) || vehicleId} - 7 zile`,
-        module: "vehicles",
-        eventType: "vehicle_document_rovinieta_due_soon",
-        entityId: vehicleId,
-        entityLabel: cleanText(vehicle.plateNumber, 40),
-        enabled: true,
-        scheduleTime: "08:00",
-        stopTime: "",
-        weekdays: [1, 2, 3, 4, 5, 6, 7],
-        reminderDelayHours: 1,
-        reminderDaysBefore: 7,
-        reminderRepeatMinutes: 60,
-        reminderActiveMinutes: 0,
-        soundEnabled: true,
-        recipients: {
-          notifyDirectUser: true,
-          notifyOwner: false,
-          notifyAdmins: false,
-          notifyManagers: false,
-          specificUserIds: [],
-        },
-        automationSource: "vehicle_rovinieta_ocr",
-        createdAt: ruleSnap.exists ? Number(ruleSnap.data()?.createdAt || now) : now,
-        updatedAt: now,
-        createdAtServer: ruleSnap.exists
-          ? ruleSnap.data()?.createdAtServer || fieldValue.serverTimestamp()
-          : fieldValue.serverTimestamp(),
-        updatedAtServer: fieldValue.serverTimestamp(),
-      }, { merge: true });
+      tx.set(
+        ruleRef,
+        buildVehicleRovinietaRule({
+          vehicleId,
+          vehicle,
+          companyId: cleanText(sourceJob.companyId, 120),
+          existingRule: ruleSnap.data() || {},
+          now,
+          serverTimestamp: () => fieldValue.serverTimestamp(),
+        }),
+        { merge: true }
+      );
       tx.update(jobRef, {
         status: "applied",
         lastReviewedAt: now,
@@ -937,23 +1016,53 @@ function createDocumentIntelligenceHandlers(dependencies) {
     const operationRef = db.collection("documentApplyOperations").doc(operationId);
     const decisionRef = db.collection("documentReviewDecisions").doc(operationId);
     const metadataRef = db.collection("vehicles").doc(context.vehicleId).collection("documents").doc(context.documentId);
+    const ruleRef = db
+      .collection("notificationRules")
+      .doc(buildVehicleRovinietaRuleId(context.vehicleId));
     const jobRef = context.jobSnap.ref;
     const now = Date.now();
 
     const result = await db.runTransaction(async (tx) => {
-      const [jobSnap, vehicleSnap, operationSnap] = await Promise.all([
+      const [jobSnap, vehicleSnap, operationSnap, ruleSnap] = await Promise.all([
         tx.get(jobRef),
         tx.get(context.vehicleRef),
         tx.get(operationRef),
+        tx.get(ruleRef),
       ]);
+      const vehicle = vehicleSnap.data() || {};
       if (operationSnap.exists && cleanText(operationSnap.data()?.status, 40) === "applied") {
+        const operation = operationSnap.data() || {};
+        if (cleanText(operation.afterDocument?.category, 40) === "rovinieta") {
+          tx.set(
+            ruleRef,
+            buildVehicleRovinietaRule({
+              vehicleId: context.vehicleId,
+              vehicle,
+              companyId: cleanText(operation.companyId, 120),
+              existingRule: ruleSnap.data() || {},
+              now,
+              serverTimestamp: () => fieldValue.serverTimestamp(),
+            }),
+            { merge: true }
+          );
+          tx.update(context.vehicleRef, {
+            vehicleDocumentReminderDays: {
+              ...(vehicle.vehicleDocumentReminderDays &&
+              typeof vehicle.vehicleDocumentReminderDays === "object"
+                ? vehicle.vehicleDocumentReminderDays
+                : {}),
+              rovinieta: 7,
+            },
+            updatedAt: now,
+            updatedAtServer: fieldValue.serverTimestamp(),
+          });
+        }
         return { duplicate: true };
       }
       const job = jobSnap.data() || {};
       if (cleanText(job.status, 40) !== "needs_review" || !job.result) {
         throw new HttpsError("failed-precondition", "Analiza nu este pregatita pentru verificare.");
       }
-      const vehicle = vehicleSnap.data() || {};
       const documents = Array.isArray(vehicle.documents) ? [...vehicle.documents] : [];
       const documentIndex = documents.findIndex(
         (item) => cleanFirestoreDocumentId(item?.id) === context.documentId
@@ -1009,6 +1118,15 @@ function createDocumentIntelligenceHandlers(dependencies) {
         updatedAtServer: fieldValue.serverTimestamp(),
       };
       if (expiryField && nextExpiry) vehicleUpdate[expiryField] = nextExpiry;
+      if (nextCategory === "rovinieta" && nextExpiry) {
+        vehicleUpdate.vehicleDocumentReminderDays = {
+          ...(vehicle.vehicleDocumentReminderDays &&
+          typeof vehicle.vehicleDocumentReminderDays === "object"
+            ? vehicle.vehicleDocumentReminderDays
+            : {}),
+          rovinieta: 7,
+        };
+      }
       tx.update(context.vehicleRef, vehicleUpdate);
       tx.set(
         metadataRef,
@@ -1021,6 +1139,20 @@ function createDocumentIntelligenceHandlers(dependencies) {
         }),
         { merge: true }
       );
+      if (nextCategory === "rovinieta" && nextExpiry) {
+        tx.set(
+          ruleRef,
+          buildVehicleRovinietaRule({
+            vehicleId: context.vehicleId,
+            vehicle,
+            companyId: cleanText(job.companyId, 120),
+            existingRule: ruleSnap.data() || {},
+            now,
+            serverTimestamp: () => fieldValue.serverTimestamp(),
+          }),
+          { merge: true }
+        );
+      }
       tx.set(operationRef, {
         companyId: cleanText(vehicle.companyId, 120),
         jobId: context.jobId,
@@ -1277,6 +1409,7 @@ module.exports = {
   buildVehicleDocumentSummary,
   buildDocumentJobId,
   buildDocumentOperationId,
+  buildVehicleRovinietaRule,
   buildVehicleRovinietaRuleId,
   createDocumentIntelligenceHandlers,
   cleanFirestoreDocumentId,
